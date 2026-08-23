@@ -70,21 +70,27 @@ The codex `_review_cli`/session timeout is 300s — too short for xhigh reasonin
 ## What to fix (concrete, verified)
 
 ### FIX 1 — metareview-realistic on codex (gpt-5.2) = 0.00 recall [ROOT CAUSE FOUND]
-**Root cause (verified):** `codex exec` has NO `Agent`/subagent tool (no spawn/task/delegate
-flags — confirmed via `codex exec --help`). The realistic prompt (`REALISTIC_PROMPT` in
-`harnesseval/adapters/metareview_realistic.py`) instructs dispatching the 5 lenses via the
-`Agent` tool; codex can't, so it does something unmatchable → 0 TP.
-**Fix options (pick one):**
-  (a) **codex-specific realistic prompt** that runs the 5 lenses *sequentially in-session*
-      (codex's only option) instead of parallel subagents — honest to what a codex user gets
-      (weaker, non-parallel, but real). Add a `_run_codex_session` variant with a codex prompt.
-  (b) **Fall back to api-direct metareview** (`adapters/metareview.py`) for codex/GLM/Kimi —
-      i.e. realistic-dispatch is Claude-only; non-Claude models use the api-direct 5-lens path
-      (recorded `execution_mode=api-fallback`). This is what `metareview_realistic.py` already
-      does for GLM/Kimi (the `else` branch); extend it to codex.
-**Recommended:** (b) — consistent with the GLM/Kimi handling; codex simply can't do Claude-style
-subagent fanout, so api-direct is the honest realistic-codex path. The 0.00 cells will then
-produce real numbers.
+**Root cause (verified 2026-08-23, corrected):** codex CLI 0.149.0 **DOES** support subagents —
+the `multi_agent` feature flag is stable+enabled, and the model has `collaboration.spawn_agent`,
+`collaboration.wait_agent`, `collaboration.list_agents`, `collaboration.send_message` tools
+(ask codex 'list your tools' to see them). **Verified end-to-end:** `codex exec` successfully
+spawns a subagent via `collaboration.spawn_agent` and returns its result.
+
+The bug: the realistic prompt (`REALISTIC_PROMPT` in `harnesseval/adapters/metareview_realistic.py`)
+tells the model to dispatch via the **`Agent` tool** — that's Claude Code's tool name. Codex has
+the same capability but under a DIFFERENT name: **`collaboration.spawn_agent`**. So on codex the
+model can't find the `Agent` tool, does something unmatchable, → 0 TP.
+
+**Fix (the RIGHT one, now that we know codex can spawn subagents):**
+  Make `REALISTIC_PROMPT` **host-agnostic** — say "dispatch the 5 lenses as parallel subagents
+  via your host's subagent-spawn tool (Claude Code: `Agent`; Codex: `collaboration.spawn_agent`)
+  with one call per lens" instead of hardcoding `Agent`. Then codex will fan out the 5 lenses
+  for real, producing real (non-zero) numbers — the honest realistic-codex path.
+  (Keep the GLM/Kimi api-fallback `else` branch in `review_realistic_async` — Lunaroute has no CLI.)
+
+This is strictly better than the api-fallback I recommended before: it tests the REAL codex
+subagent fanout (what a codex user gets), not a stripped API version. The §6.3.1 learning
+(orchestrator vs subagent model split) will then also apply to codex (record per-model usage).
 
 ### FIX 2 — vanilla-engineered codex (gpt-5.2) xhigh times out at 300s
 **File:** `harnesseval/cli_backends.py` lines 38 + 66 (`_claude_cli` + `_codex_cli` default

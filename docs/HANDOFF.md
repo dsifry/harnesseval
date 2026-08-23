@@ -60,10 +60,12 @@ Martian Code Review Bench dataset + a run registry for longitudinal analysis. Re
    `usage.from_claude_cli`/`from_codex_cli`/`from_anthropic_api`/`from_openai_api` and record
    `per_model_usage` on `ReviewRun`.
 
-3. **`claude -p` subagent tool is named `Agent`** (input: `{description, prompt,
-   subagent_type, run_in_background}`), NOT `Task`. The realistic metareview prompt MUST
-   say "Agent tool" or it falls back to in-session (non-adversarial — the weak fallback the
-   skill warns against).
+3. **Subagent tools are HOST-SPECIFIC, not universal.** Claude Code's is `Agent` (input:
+   `{description, prompt, subagent_type, run_in_background}`); **Codex's is
+   `collaboration.spawn_agent`** (codex CLI 0.149.0, `multi_agent` feature stable+enabled —
+   verified 2026-08-23: codex DOES spawn subagents). The realistic metareview prompt MUST be
+   host-agnostic ("via your host's subagent-spawn tool: `Agent` on Claude, `collaboration.spawn_agent`
+   on codex") — hardcoding `Agent` made codex score 0.00 (it couldn't find the tool). NOT `Task`.
 
 4. **`--append-system-prompt` is required** on `claude -p` or it can silently use a different
    model for the work turn in some cases; always pass it.
