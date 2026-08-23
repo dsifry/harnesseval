@@ -65,14 +65,15 @@ async def _codex_cli(model_slug: str, effort: str, prompt: str, system: str | No
     """Run a review via `codex exec` OAuth. Returns (text, input_tokens, output_tokens, resolved_model)."""
     args = ["codex", "exec", "--json", "--sandbox", "read-only", "--skip-git-repo-check",
             "-m", model_slug, "-c", f"model_reasoning_effort={_parse_codex_effort(effort)}"]
-    # codex reads prompt from stdin or arg; use arg
+    # codex reads prompt from arg; use arg
     full = (f"{system}\n\n{prompt}" if system else prompt)
     args += [full]
+    # IMPORTANT: codex exec reads from stdin if no prompt arg -> close stdin (pass input=None via DEVNULL)
     proc = await asyncio.to_thread(subprocess.run, args, capture_output=True, text=True,
-                                   timeout=timeout, input="")
+                                   timeout=timeout, stdin=subprocess.DEVNULL)
     if proc.returncode != 0:
         raise RuntimeError(f"codex exec failed: {proc.stderr.strip()[:300]}")
-    # parse JSONL: last turn.completed has usage
+    # parse JSONL: skip non-JSON lines (e.g. 'Reading additional input from stdin...'), last turn.completed has usage
     text = ""
     usage = {}
     for line in proc.stdout.splitlines():

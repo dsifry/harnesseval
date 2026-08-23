@@ -25,7 +25,7 @@ from harnesseval.dataset import martian
 from harnesseval.dataset.pr_diff import fetch_diff
 from harnesseval.adapters.base import PRSample
 from harnesseval.judge import judge_pairs_router, score_from_matches
-from harnesseval.adjudicate import reclassify
+from harnesseval.adjudicate import reclassify_async
 from harnesseval.runs import register
 
 # Cross-family judge selection (SPEC §9): for a given under-test model, use a DIFFERENT family
@@ -64,15 +64,21 @@ def _run_cell(pr, framework, model, effort, judge_model) -> dict:
     return asyncio.run(_run_cell_async(pr, framework, model, effort, judge_model))
 
 
-async def _run_cell_async(pr, framework, model, effort, judge_model) -> dict:
+async def _run_cell_async(pr, framework, model, effort, judge_model, mode: str = "api") -> dict:
     from harnesseval.adapters import vanilla, metareview as mrv
-    if framework.startswith("vanilla-"):
-        variant = "naive" if framework == "vanilla-naive" else "engineered"
-        run = await vanilla.review_async(pr, model=model, effort=effort, mode="api", variant=variant)
+    from harnesseval.adapters import metareview_realistic as mr
+    if framework == "vanilla-engineered":
+        run = await vanilla.review_async(pr, model=model, effort=effort, mode=mode, variant="engineered")
+    elif framework == "vanilla-naive":
+        run = await vanilla.review_async(pr, model=model, effort=effort, mode=mode, variant="naive")
+    elif framework == "metareview":
+        run = await mrv.review_async(pr, model=model, effort=effort, mode=mode)
+    elif framework == "metareview-realistic":
+        run = await mr.review_realistic_async(pr, model=model, effort=effort)
     else:
-        run = await mrv.review_async(pr, model=model, effort=effort, mode="api")
+        raise ValueError(framework)
     if run.error:
-        return {"error": run.error, "tokens_in": run.tokens_in, "tokens_out": run.tokens_out, "wall_ms": run.wall_ms}
+        return {"error": run.error, "tokens_in": run.tokens_in, "tokens_out": run.tokens_out, "wall_ms": run.wall_ms, "execution_mode": run.execution_mode}
     goldens = pr.golden_comments
     cand_texts = [f.issue_text for f in run.findings]
     if not goldens or not cand_texts:
@@ -102,6 +108,8 @@ def main():
     ap.add_argument("--models", default="claude-opus-4-5-20251101,claude-sonnet-4-5-20250929,gpt-5.2,glm-5.2-vision-flex,kimi-k3")
     ap.add_argument("--efforts", default="low,xhigh")
     ap.add_argument("--frameworks", default="vanilla-engineered,metareview")
+    ap.add_argument("--mode", default="api", choices=["api", "cli"], help="reviewer execution mode (cli=OAuth realistic)")
+    ap.add_argument("--concurrency", type=int, default=4, help="max concurrent cells (cli: keep 3-4 to avoid rate limits)")
     ap.add_argument("--out", default="results/phase_b_model_matrix.json")
     args = ap.parse_args()
 
@@ -121,43 +129,56 @@ def main():
     print(f"[mx] {len(urls)} PRs x {len(models)} models x {len(efforts)} efforts x {len(frameworks)} fw = {n_cells} cells")
 
     samples = {u: _pr_sample(u) for u in urls}
-    all_results = []
-    cell_n = 0
+    # Build all cells, then run with bounded concurrency (parallel OAuth CLI sessions).
+    cells = []
     for url in urls:
         pr = samples[url]
-        print(f"\n[mx] PR {pr.url.split('/pull/')[-1]} — {pr.pr_title[:50]} ({len(pr.golden_comments)} golden)")
         for model in models:
             judge = primary_judge(model)
             for effort in efforts:
                 for fw in frameworks:
-                    cell_n += 1
-                    t0 = time.time()
-                    print(f"[mx] [{cell_n}/{n_cells}] {fw:18s} {model:32s} {effort:5s} j={judge:28s} ...", end=" ", flush=True)
-                    try:
-                        res = _run_cell(pr, fw, model, effort, judge)
-                    except Exception as e:
-                        res = {"error": str(e)[:120]}
-                    dt = time.time() - t0
-                    if "error" in res and res.get("tp") is None:
-                        print(f"ERR {dt:.0f}s: {res['error'][:60]}")
-                    else:
-                        print(f"TP={res['tp']} FP={res['fp']} FN={res['fn']} rec={res['recall']:.2f} "
-                              f"adj_p={res['adjudicated_precision']:.2f} incr_r={res['incremental_recall']:.2f} "
-                              f"real={res['n_real_ungold']} hal={res['n_hallucination']} "
-                              f"{res['tokens_in']+res['tokens_out']:,}tok {dt:.0f}s")
-                    rec = {"url": url, "framework": fw, "model": model, "effort": effort,
-                            "judge": judge, **res, "wall_s": dt}
-                    all_results.append(rec)
-                    register(phase="B", model=model, framework=fw, effort=effort, run_n=0,
-                             status="pass" if res.get("tp") is not None else "fail",
-                             metrics={"tp": res.get("tp",0), "fp": res.get("fp",0), "fn": res.get("fn",0),
-                                      "precision": res.get("precision",0), "recall": res.get("recall",0),
-                                      "adjudicated_precision": res.get("adjudicated_precision",0),
-                                      "incremental_recall": res.get("incremental_recall",0),
-                                      "n_real_ungold": res.get("n_real_ungold",0),
-                                      "n_hallucination": res.get("n_hallucination",0)},
-                             tokens_in=res.get("tokens_in",0), tokens_out=res.get("tokens_out",0),
-                             wall_s=dt, summary=rec)
+                    cells.append((pr, fw, model, effort, judge))
+    print(f"[mx] running {len(cells)} cells with concurrency={args.concurrency} (mode={args.mode})")
+
+    async def run_all():
+        sem = asyncio.Semaphore(args.concurrency)
+        results = [None] * len(cells)
+        async def run_one(i, pr, fw, model, effort, judge):
+            async with sem:
+                t0 = time.time()
+                tag = f"[{i+1}/{len(cells)}] {fw} {model} {effort}"
+                print(f"[mx] {tag} ...", flush=True)
+                try:
+                    res = await _run_cell_async(pr, fw, model, effort, judge, mode=args.mode)
+                except Exception as e:
+                    res = {"error": str(e)[:120]}
+                dt = time.time() - t0
+                if "error" in res and res.get("tp") is None:
+                    print(f"[mx] {tag} ERR {dt:.0f}s: {res['error'][:70]}", flush=True)
+                else:
+                    print(f"[mx] {tag} TP={res['tp']} FP={res['fp']} FN={res['fn']} rec={res['recall']:.2f} "
+                          f"adj_p={res['adjudicated_precision']:.2f} incr_r={res['incremental_recall']:.2f} "
+                          f"real={res['n_real_ungold']} hal={res['n_hallucination']} "
+                          f"{res['tokens_in']+res['tokens_out']:,}tok {dt:.0f}s", flush=True)
+                res["url"] = pr.url; res["framework"] = fw; res["model"] = model
+                res["effort"] = effort; res["judge"] = judge; res["wall_s"] = dt
+                res.setdefault("execution_mode", args.mode)
+                # register
+                register(phase="B", model=model, framework=fw, effort=effort, run_n=0,
+                         status="pass" if res.get("tp") is not None else "fail",
+                         metrics={"tp": res.get("tp",0), "fp": res.get("fp",0), "fn": res.get("fn",0),
+                                  "precision": res.get("precision",0), "recall": res.get("recall",0),
+                                  "adjudicated_precision": res.get("adjudicated_precision",0),
+                                  "incremental_recall": res.get("incremental_recall",0),
+                                  "n_real_ungold": res.get("n_real_ungold",0),
+                                  "n_hallucination": res.get("n_hallucination",0)},
+                         tokens_in=res.get("tokens_in",0), tokens_out=res.get("tokens_out",0),
+                         wall_s=dt, summary=res)
+                results[i] = res
+        await asyncio.gather(*[run_one(i, *c) for i, c in enumerate(cells)])
+        return [r for r in results if r]
+
+    all_results = asyncio.run(run_all())
 
     out = Path(args.out); out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(all_results, indent=2))

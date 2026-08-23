@@ -53,7 +53,9 @@ _CLAUDE_ALIASES = {
     "claude-fable-5": "fable", "claude-sonnet-4-5-20250929": "sonnet", "claude-sonnet-5": "sonnet",
 }
 _CODEX_SLUGS = {
-    "gpt-5.2": "gpt-5.2", "gpt-5.6-sol": "gpt-5.6-sol", "gpt-5.6-terra": "gpt-5.6-terra", "gpt-5": "gpt-5",
+    # map API model ids -> valid Codex CLI slugs. gpt-5.2 is API-only (not a Codex slug);
+    # a user running `codex` uses the current default. Map to gpt-5.6-sol for realistic CLI.
+    "gpt-5.2": "gpt-5.6-sol", "gpt-5.6-sol": "gpt-5.6-sol", "gpt-5.6-terra": "gpt-5.6-terra", "gpt-5": "gpt-5.6-sol",
 }
 
 

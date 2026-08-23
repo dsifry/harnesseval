@@ -67,8 +67,34 @@ Run `git diff HEAD~1` to see it. List each distinct issue you find, one per line
 Be thorough but only report real issues you are confident about."""
 
 
+async def _run_codex_session(repo_dir: Path, model_slug: str, effort: str, prompt: str,
+                             timeout: int = 900) -> tuple[str, int, int, str]:
+    """Run a real multi-turn codex exec session in repo_dir with tools. Returns (text, in, out, slug)."""
+    from harnesseval.cli_backends import _parse_codex_effort
+    args = ["codex", "exec", "--json", "--sandbox", "workspace-write", "--skip-git-repo-check",
+            "-m", model_slug, "-c", f"model_reasoning_effort={_parse_codex_effort(effort)}", prompt]
+    proc = await asyncio.to_thread(subprocess.run, args, capture_output=True, text=True,
+                                   timeout=timeout, cwd=str(repo_dir), stdin=subprocess.DEVNULL)
+    if proc.returncode != 0:
+        raise RuntimeError(f"codex exec failed: {proc.stderr.strip()[:300]}")
+    text = ""; usage = {}
+    for line in proc.stdout.splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            d = json.loads(line)
+        except Exception:
+            continue
+        if d.get("type") == "item.completed" and d.get("item", {}).get("type") == "agent_message":
+            text = d["item"].get("text", "")
+        if d.get("type") == "turn.completed":
+            usage = d.get("usage", {})
+    return text, int(usage.get("input_tokens", 0)), int(usage.get("output_tokens", 0)), model_slug
+
+
 async def _run_claude_session(repo_dir: Path, model_alias: str, effort: str, prompt: str,
-                              max_turns: int = 12, timeout: int = 600) -> tuple[str, int, int, str]:
+                              max_turns: int = 12, timeout: int = 900) -> tuple[str, int, int, str]:
     """Run a real multi-turn claude -p session in repo_dir with tools. Returns (text, in, out, resolved_model)."""
     from harnesseval.cli_backends import _parse_claude_effort
     args = ["claude", "-p", "--model", model_alias, "--effort", _parse_claude_effort(effort),
@@ -120,13 +146,11 @@ def review_realistic(pr: PRSample, model: str, effort: str = "medium") -> Review
 async def review_realistic_async(pr: PRSample, model: str, effort: str = "medium") -> ReviewRun:
     t0 = time.time()
     name = "metareview-realistic"
-    # map full model id -> claude alias (realistic = use the alias a user types)
     ml = model.lower()
-    alias = "opus" if "opus" in ml else "sonnet" if "sonnet" in ml else "fable" if "fable" in ml else "sonnet"
+    is_claude = any(k in ml for k in ("opus", "sonnet", "fable", "haiku", "claude"))
+    is_codex = "gpt" in ml or "codex" in ml
     try:
         repo_dir = materialize(pr.url)
-        # materialize makes: commit1=base, commit2=pr (HEAD~1..HEAD = the PR change).
-        # Add the task file as commit3 (does NOT shift the pr/base), so base ref = HEAD~2.
         task_path = repo_dir / "docs" / "tasks" / "task-001.md"
         task_path.parent.mkdir(parents=True, exist_ok=True)
         task_path.write_text(f"# Task: {pr.pr_title}\nReview the change.\n")
@@ -135,9 +159,22 @@ async def review_realistic_async(pr: PRSample, model: str, effort: str = "medium
                        check=True, capture_output=True,
                        env={**__import__("os").environ, "GIT_AUTHOR_NAME": "x", "GIT_AUTHOR_EMAIL": "x@x",
                             "GIT_COMMITTER_NAME": "x", "GIT_COMMITTER_EMAIL": "x@x"})
-        # now: HEAD=task, HEAD~1=pr, HEAD~2=base. metareview --base HEAD~2 reviews pr..task = the PR change.
         prompt = REALISTIC_PROMPT.format(mrv_bin=str(MRV_BIN), task_path=str(task_path), base_ref="HEAD~2")
-        text, tin, tout, resolved = await _run_claude_session(repo_dir, alias, effort, prompt)
+        if is_claude:
+            alias = "opus" if "opus" in ml else "sonnet" if "sonnet" in ml else "fable" if "fable" in ml else "sonnet"
+            text, tin, tout, resolved = await _run_claude_session(repo_dir, alias, effort, prompt)
+        elif is_codex:
+            # codex CLI: map full id -> valid slug. gpt-5.2 isn't a Codex slug; use gpt-5.6-sol as the
+            # realistic Codex model (a user runs `codex` with the current default, not gpt-5.2).
+            slug = "gpt-5.6-sol"  # valid Codex CLI slug (gpt-5.2 is API-only)
+            text, tin, tout, resolved = await _run_codex_session(repo_dir, slug, effort, prompt)
+        else:
+            # GLM/Kimi: no realistic CLI; fall back to api-direct metareview (recorded as cli mode but uses API lenses)
+            from harnesseval.adapters import metareview as mrv
+            r = await mrv.review_async(pr, model=model, effort=effort, mode="api")
+            return ReviewRun(framework=name, model=model, effort=effort, execution_mode="api-fallback",
+                             raw_output=r.raw_output, findings=r.findings, tokens_in=r.tokens_in,
+                             tokens_out=r.tokens_out, wall_ms=r.wall_ms)
     except Exception as e:  # noqa: BLE001
         return ReviewRun(framework=name, model=model, effort=effort, execution_mode="cli",
                          raw_output="", wall_ms=(time.time() - t0) * 1000, error=str(e))

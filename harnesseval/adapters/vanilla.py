@@ -71,17 +71,11 @@ async def _review_api(pr: PRSample, model: str, prompt_template: str, effort: st
 
 
 async def _review_cli(pr: PRSample, model: str, effort: str, prompt_template: str) -> tuple[str, int, int]:
-    """Claude Code `claude -p` OAuth (free, Phase B). Returns (output_text, in_tokens, out_tokens)."""
+    """Reviewer via OAuth CLI (claude -p or codex exec) through the model_router. Free, realistic."""
+    from harnesseval.model_router import call_model
     prompt = prompt_template.format(pr_title=pr.pr_title, diff=_truncate(pr.diff))
-    # claude -p --model <m> --effort <e> --output-format json --max-turns 1
-    args = ["claude", "-p", "--model", model, "--effort", effort,
-            "--output-format", "json", "--max-turns", "1", prompt]
-    t0 = time.time()
-    r = await asyncio.to_thread(subprocess.run, args, capture_output=True, text=True, timeout=300)
-    if r.returncode != 0:
-        raise RuntimeError(f"claude -p failed: {r.stderr.strip()[:300]}")
-    d = json.loads(r.stdout)
-    return d.get("result", ""), int(d.get("usage", {}).get("input_tokens", 0)), int(d.get("usage", {}).get("output_tokens", 0))
+    return await call_model(model, system="You are an expert code reviewer.",
+                            user=prompt, effort=effort, max_tokens=2048, execution_mode="cli")
 
 
 async def review_async(pr: PRSample, model: str, effort: str, mode: str = "api",
