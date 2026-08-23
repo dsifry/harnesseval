@@ -123,7 +123,10 @@ async def _run_claude_session(repo_dir: Path, model_alias: str, effort: str, pro
 def _extract_findings_from_session(text: str) -> list[Finding]:
     """Parse the consolidated findings list from the session output.
 
-    Lines like: [deterministic/test-reviewer] <issue>  OR  [lens/architecture] <issue>
+    Lines like: [deterministic/test-reviewer] <issue>  OR  [lens/architecture] <issue>.
+    The orchestrator may bundle multiple lenses in one subagent call (e.g.
+    '[lens/feasibility+architecture+scope]'); we keep the verbatim label for provenance but
+    the per-lens decomposition (§6.3) treats a finding as 'lens' (not over-claiming which lens).
     Fallback: also extract numbered/bulleted issues if no bracketed prefix.
     """
     findings = []
@@ -134,12 +137,14 @@ def _extract_findings_from_session(text: str) -> list[Finding]:
         m = re.match(r"^\[(deterministic|lens)/([^\]]+)\]\s*(.+)$", line)
         if m:
             kind, reviewer, issue = m.groups()
-            src = f"metareview-{kind}/{reviewer}"
+            # if the reviewer label bundles multiple lenses (contains '+'), keep it verbatim but
+            # mark as 'lens-mixed' so the decomposition doesn't over-attribute to one lens
+            label = reviewer if '+' not in reviewer and 'all' not in reviewer.lower() else 'lens-mixed'
+            src = f"metareview-{kind}/{label}"
             findings.append(Finding(issue_text=issue.strip(), source=src, raw=line))
             continue
         # fallback: numbered/bulleted issue lines (skip headers/empty)
         if re.match(r"^\d+\.\s+\S", line) or (line and not line.startswith(("#", "Step", "Run ", "Read ", "The diff"))):
-            # only treat as finding if it looks like an issue (heuristic: contains a colon or "issue"/"bug")
             if ":" in line or any(k in line.lower() for k in ("bug", "issue", "error", "missing", "unsafe", "race", "inject")):
                 findings.append(Finding(issue_text=line, source="metareview-session", raw=line))
     return findings

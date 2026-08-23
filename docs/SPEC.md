@@ -190,6 +190,32 @@ that pure-LLM frameworks lack. The scorer MUST decompose metareview's findings i
 (model/effort-dependent). Report both, plus the combined recall. This is a real structural
 finding the eval surfaces — and a fairness point: those catches cost nothing.
 
+### 6.3.1 Realistic subagent routing: opus orchestrator + Haiku lenses (discovered 2026-08-22)
+
+**Key learning from the realistic runs:** when a user runs metareview via the real harness
+in Claude Code (`claude -p --model opus` + the review-artifact skill dispatching the 5 lenses
+via the `Agent` tool), Claude Code routes **subagent dispatches to Haiku by default**,
+regardless of `--model`. So "metareview-realistic @ opus" is in practice **opus orchestrator
+(planning + context reading + cache-heavy) + Haiku 5-lens subagents (cheap)** — NOT 5 opus
+lens reviews. Verified via per-model `modelUsage`: opus ~$3.2 / ~1.8M tok (orchestrator,
+~99.96% of cost), haiku ~$0.0015 / ~1.4k tok (the 5 lenses).
+
+Implications for analysis (do NOT force anything — this IS what users get):
+- The (model × effort) axis for realistic metareview varies the **orchestrator**; lenses stay
+  Haiku unless metareview is later tuned to pin them. Record which model the lenses actually
+  used (per-model usage captures this).
+- Cost is dominated by the orchestrator, not the lens fanout. The 5-lens fanout is cheap.
+- Recall reflects **Haiku-quality lenses**, not the orchestrator's quality. The fair reading
+  of "metareview-realistic @ opus vs vanilla @ opus" is: *does opus planning + Haiku 5-lens
+  fanout beat a bare opus review?* — not *does opus 5-lens beat opus 1-lens*.
+- This is actionable for future metareview tuning: pinning lenses to the orchestrator model
+  (or to a mid-tier like Sonnet) is a knob that could change the quality/cost tradeoff — but
+  that's a metareview design change, not an eval change. The eval reports the realistic default.
+
+The per-model `usage` accounting (§10) is therefore load-bearing: a single total would hide
+that ~99.96% of metareview's cost is orchestrator overhead, and would make "metareview is
+expensive because of 5 lenses" a false conclusion (the lenses are cheap; the orchestrator is).
+
 ## 7. Execution modes and the budget phasing
 
 ### 7.1 Credential handling (no OAuth override)
