@@ -24,6 +24,7 @@ KEY_NAMES = (
     "HARNESS_ANTHROPIC_API_KEY",
     "HARNESS_OPENAI_API_KEY",
     "HARNESS_LUNAROUTE_API_KEY",
+    "HARNESS_MARTIAN_API_KEY",
     "LUNAROUTE_BASE_URL",
 )
 
@@ -83,6 +84,19 @@ def lunaroute_client():
     from openai import OpenAI
     k = load_keys()
     return OpenAI(api_key=k["HARNESS_LUNAROUTE_API_KEY"], base_url=k["LUNAROUTE_BASE_URL"])
+
+
+def martian_client():
+    """Construct an OpenAI-compatible client pointed at the Martian gateway (judge cross-check).
+
+    Martian judged their benchmark via this proxy (api.withmartian.com) with model ids like
+    'anthropic/claude-opus-4-5-20251101' (creator prefix required). Same Opus 4.5 weights as
+    native Anthropic, but the exact path they used — eliminates the path-difference variable.
+    See docs/SPEC.md §8 (Anchor 1 cross-check).
+    """
+    from openai import AsyncOpenAI
+    return AsyncOpenAI(api_key=load_keys()["HARNESS_MARTIAN_API_KEY"],
+                       base_url="https://api.withmartian.com/v1")
 
 
 def clear_cache() -> None:

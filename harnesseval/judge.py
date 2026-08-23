@@ -109,6 +109,55 @@ async def judge_pairs(client, model: str, pairs: list[tuple[str, str]],
     return await asyncio.gather(*(bounded(g, c) for g, c in pairs))
 
 
+# ---- Martian-proxy judge path (cross-check; OpenAI-compat via api.withmartian.com) ----
+
+async def _call_martian(client, model: str, prompt: str, max_retries: int = 3) -> JudgeResult:
+    """Call the Martian gateway judge (same model Martian used, their exact API path).
+
+    client is an AsyncOpenAI instance -> await .create() directly (do NOT use asyncio.to_thread,
+    which is for sync SDKs like anthropic's and would leave the coroutine un-awaited).
+
+    NOTE: the Martian gateway rate-limits concurrent calls heavily (5 conc calls took ~260s
+    with 2 errors). Keep concurrency LOW (2-3) and retries short to avoid huge wall times.
+    """
+    for attempt in range(max_retries):
+        try:
+            resp = await client.chat.completions.create(
+                model=model,
+                temperature=0.0,
+                messages=[{"role": "system", "content": JUDGE_SYSTEM},
+                          {"role": "user", "content": prompt}],
+            )
+            content = resp.choices[0].message.content.strip()
+            content = _strip_fences(content)
+            parsed = json.loads(content)
+            return JudgeResult(match=bool(parsed.get("match", False)),
+                              confidence=float(parsed.get("confidence", 0.0)),
+                              reasoning=str(parsed.get("reasoning", "")), raw=content)
+        except Exception as e:  # noqa: BLE001
+            es = str(e).lower()
+            is_rate = "429" in es or "rate" in es or "too many" in es or "timeout" in es
+            if attempt == max_retries - 1:
+                return JudgeResult(False, 0.0, "", "", error=str(e))
+            await asyncio.sleep(min(5 * (attempt + 1), 15) if is_rate else 2 ** attempt)
+    return JudgeResult(False, 0.0, "", "", error="max retries exceeded")
+
+
+async def martian_judge_match(client, model: str, golden_comment: str, candidate: str) -> JudgeResult:
+    return await _call_martian(client, model, JUDGE_PROMPT.format(golden_comment=golden_comment, candidate=candidate))
+
+
+async def martian_judge_pairs(client, model: str, pairs: list[tuple[str, str]],
+                             concurrency: int = 20) -> list[JudgeResult]:
+    sem = asyncio.Semaphore(concurrency)
+
+    async def bounded(g, c):
+        async with sem:
+            return await martian_judge_match(client, model, g, c)
+
+    return await asyncio.gather(*(bounded(g, c) for g, c in pairs))
+
+
 def score_from_matches(golden_comments: list[dict], candidates: list[str],
                        results: list[JudgeResult],
                        dedup_groups: list[list[int]] | None = None) -> dict:
