@@ -172,12 +172,19 @@ Reference their eval approach (Drill for Superpowers; `skill-eval-cell` for Comp
 they drive real sessions — but our adapter just needs to invoke their review skill on a PR diff
 and capture findings + per-model cost.
 
-### 6.2 When the in-flight 48-cell matrix finishes
+### 6.2 The 48-cell matrix was STOPPED (2026-08-23) — rerun clean
 
-`tail /tmp/mm_out.txt` + check PID. Then `uv run python -m harnesseval.report --phase B` for
-the leaderboard + Pareto. NOTE: that matrix launched BEFORE the per-model-usage propagation
-edit, so its runs lack `per_model_usage` — re-run the matrix (or a subset) after to get
-per-model cost. The report auto-falls back to token-cost when $ is unavailable.
+It was stopped after ~15/48 cells because it launched BEFORE the per-model-usage propagation
+edit (§3 gotcha #2), so its runs lack `per_model_usage` and the cost axis is unusable. Those
+15 cells are registered in runs/registry.jsonl but should be TREATED AS DEBUGGING SIGNAL
+ONLY — they show vanilla-engineered is reliable (opus medium ~0.75 recall) and
+metareview-realistic has bugs to fix FIRST (gpt-5.2 scored 0.00 recall on 3 cells; opus xhigh
+0.11 recall @ 6.5M tok; codex xhigh times out at 300s — bump to 900s).
+
+BEFORE rerunning the matrix, debug metareview-realistic (gpt-5.2 = 0.00 is the loudest signal —
+the codex subagent path isn't producing matchable findings). Then rerun a clean matrix with
+the current code (which propagates per_model_usage + total_cost_usd). A 4-8 cell subset first
+to confirm per-model cost populates, then the full matrix.
 
 ### 6.3 Full matrix (after superpowers/compound built)
 
