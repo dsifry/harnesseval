@@ -51,7 +51,8 @@ async def _extract_via_anthropic(client, model: str, review_text: str) -> list[s
         client.messages.create, model=model, max_tokens=1024, system=EXTRACT_SYSTEM,
         messages=[{"role": "user", "content": prompt}], extra_body={"temperature": 0.0},
     )
-    content = resp.content[0].text.strip()
+    from harnesseval.anthropic_util import text_content
+    content = text_content(resp).strip()
     if content.startswith("```"):
         content = content.split("```")[1]
         if content.startswith("json"):

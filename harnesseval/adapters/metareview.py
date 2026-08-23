@@ -97,38 +97,40 @@ def _extract_verdict(md: str) -> str:
 
 # ---- LLM lenses (API-direct) ----
 
-async def _run_lens(client, model: str, lens: str, prompt_body: str) -> tuple[str, int, int]:
+async def _run_lens(model: str, lens: str, prompt_body: str, effort: str = "medium") -> tuple[str, int, int]:
     prompt = f"{LENS_PROMPTS[lens]}\n\n{prompt_body}"
-    resp = await asyncio.to_thread(
-        client.messages.create, model=model, max_tokens=1024,
-        messages=[{"role": "user", "content": prompt}], extra_body={"temperature": 0.0},
-    )
-    return resp.content[0].text, resp.usage.input_tokens, resp.usage.output_tokens
+    from harnesseval.model_router import call_model
+    max_tok = 4096 if effort == "xhigh" else 2048
+    return await call_model(model, system="You are an expert code reviewer.",
+                            user=prompt, effort=effort, max_tokens=max_tok)
 
 
-async def _run_all_lenses(client, model: str, pr: PRSample) -> tuple[list[Finding], int, int, list[str]]:
+async def _run_all_lenses(model: str, pr: PRSample, effort: str = "medium") -> tuple[list[Finding], int, int, list[str]]:
     body = LENS_HEADER.format(pr_title=pr.pr_title, diff=_truncate(pr.diff))
     sem = asyncio.Semaphore(5)
     async def bounded(l):
         async with sem:
-            return await _run_lens(client, model, l, body)
+            return await _run_lens(model, l, body, effort=effort)
     results = await asyncio.gather(*[bounded(l) for l in LENS_PROMPTS])
     findings: list[Finding] = []
     tin = tout = 0
     raws: list[str] = []
-    from harnesseval.extract import extract_findings_async
+    from harnesseval.model_router import call_model_json
+    from harnesseval.extract import EXTRACT_PROMPT, EXTRACT_SYSTEM
     for (lens, (text, i, o)) in zip(LENS_PROMPTS.keys(), results):
         tin += i; tout += o; raws.append(f"## {lens}\n{text}")
-        # extract atomic issues from each lens output (async-safe)
-        for f in await extract_findings_async(client, model, text, source=f"metareview-lens/{lens}"):
-            findings.append(f)
+        parsed, pi, po = await call_model_json(model, EXTRACT_SYSTEM, EXTRACT_PROMPT.format(comment=text),
+                                               effort=effort, max_tokens=1024)
+        tin += pi; tout += po
+        for issue in parsed.get("issues", []):
+            findings.append(Finding(issue_text=issue, source=f"metareview-lens/{lens}", raw=text[:500]))
     return findings, tin, tout, raws
 
 
 # ---- combined review ----
 
-def review(pr: PRSample, model: str, effort: str = "medium", mode: str = "api") -> ReviewRun:
-    """Combine deterministic gates (real bin/metareview) + 5 LLM lenses (API)."""
+async def review_async(pr: PRSample, model: str, effort: str = "medium", mode: str = "api") -> ReviewRun:
+    """Async core — safe inside a running event loop. Combine deterministic gates + 5 LLM lenses."""
     t0 = time.time()
     name = "metareview"
     try:
@@ -137,8 +139,7 @@ def review(pr: PRSample, model: str, effort: str = "medium", mode: str = "api") 
         return ReviewRun(framework=name, model=model, effort=effort, execution_mode=mode,
                          raw_output="", wall_ms=(time.time() - t0) * 1000, error=f"deterministic: {e}")
     try:
-        client = keys.anthropic_client()
-        lens_findings, tin, tout, lens_raws = asyncio.run(_run_all_lenses(client, model, pr))
+        lens_findings, tin, tout, lens_raws = await _run_all_lenses(model, pr, effort=effort)
     except Exception as e:  # noqa: BLE001
         return ReviewRun(framework=name, model=model, effort=effort, execution_mode=mode,
                          raw_output=det_md, findings=det_findings, wall_ms=(time.time() - t0) * 1000,
@@ -148,3 +149,8 @@ def review(pr: PRSample, model: str, effort: str = "medium", mode: str = "api") 
     return ReviewRun(framework=name, model=model, effort=effort, execution_mode=mode,
                      raw_output=raw, findings=all_findings, tokens_in=tin, tokens_out=tout,
                      wall_ms=(time.time() - t0) * 1000)
+
+
+def review(pr: PRSample, model: str, effort: str = "medium", mode: str = "api") -> ReviewRun:
+    """Sync wrapper (top-level use)."""
+    return asyncio.run(review_async(pr, model, effort, mode))

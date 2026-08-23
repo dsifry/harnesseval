@@ -97,6 +97,31 @@ async def judge_match(client, model: str, golden_comment: str, candidate: str) -
     return await _call_anthropic(client, model, prompt)
 
 
+async def judge_match_router(model: str, golden_comment: str, candidate: str, effort: str = "medium") -> JudgeResult:
+    """Provider-agnostic judge (Anthropic + OpenAI + Lunaroute via model_router). For the
+    calibrated judge trio (claude-opus-4-5 / sonnet-4-5 / gpt-5.2). Judge has NO effort axis
+    (effort is a property of the model under test, not the grader) — effort here only sets
+    the call mechanics, default medium = no extended thinking."""
+    from harnesseval.model_router import call_model_json
+    prompt = JUDGE_PROMPT.format(golden_comment=golden_comment, candidate=candidate)
+    parsed, tin, tout = await call_model_json(model, JUDGE_SYSTEM, prompt, effort=effort, max_tokens=256)
+    if not parsed:
+        return JudgeResult(False, 0.0, "", "", error="json parse failed")
+    return JudgeResult(match=bool(parsed.get("match", False)),
+                      confidence=float(parsed.get("confidence", 0.0)),
+                      reasoning=str(parsed.get("reasoning", "")), raw=json.dumps(parsed))
+
+
+async def judge_pairs_router(model: str, pairs: list[tuple[str, str]],
+                             concurrency: int = 15, effort: str = "medium") -> list[JudgeResult]:
+    """Provider-agnostic batch judge (Anthropic + OpenAI + Lunaroute)."""
+    sem = asyncio.Semaphore(concurrency)
+    async def bounded(g, c):
+        async with sem:
+            return await judge_match_router(model, g, c, effort=effort)
+    return await asyncio.gather(*(bounded(g, c) for g, c in pairs))
+
+
 async def judge_pairs(client, model: str, pairs: list[tuple[str, str]],
                       concurrency: int = 20) -> list[JudgeResult]:
     """Judge many (golden, candidate) pairs with bounded concurrency."""

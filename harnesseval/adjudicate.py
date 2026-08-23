@@ -66,20 +66,43 @@ async def adjudicate_findings(client, model: str, candidates: list[str], diff: s
 
 def reclassify(scored: dict, candidates: list[str], diff: str, model: str = "claude-opus-4-5-20251101",
                real_threshold: float = 0.7) -> dict:
-    """Reclassify a scored result's false_positives into real-but-ungold vs hallucination.
-
-    Returns an augmented scored dict with:
-      - real_but_ungold: candidates judged real in the diff but not in the gold set (incremental recall)
-      - hallucination: candidates judged not real (true false positives)
-      - adjudicated_precision = TP / (TP + len(hallucination))
-      - incremental_recall = (TP + len(real_but_ungold)) / (TP + FN + len(real_but_ungold))
-    """
+    """Reclassify a scored result's false_positives into real-but-ungold vs hallucination (sync top-level)."""
     client = keys.anthropic_client()
     fps = [fp["candidate"] for fp in scored.get("false_positives", [])]
     if not fps:
         return {**scored, "real_but_ungold": [], "hallucination": [], "adjudicated_precision": scored["precision"],
                 "incremental_recall": scored["recall"]}
     results = asyncio.run(adjudicate_findings(client, model, fps, diff))
+    return _split_adjudication(scored, fps, results, real_threshold)
+
+
+async def reclassify_async(scored: dict, candidates: list[str], diff: str, model: str = "claude-opus-4-5-20251101",
+                           real_threshold: float = 0.7) -> dict:
+    """Async variant — safe inside a running event loop (used by run_model_matrix)."""
+    from harnesseval.model_router import call_model_json
+    from harnesseval.judge import _strip_fences
+    fps = [fp["candidate"] for fp in scored.get("false_positives", [])]
+    if not fps:
+        return {**scored, "real_but_ungold": [], "hallucination": [], "adjudicated_precision": scored["precision"],
+                "incremental_recall": scored["recall"]}
+    # adjudicate via the router (cross-family judge)
+    sem = asyncio.Semaphore(15)
+    async def adj(c):
+        async with sem:
+            from harnesseval.adjudicate import ADJUDICATE_PROMPT, ADJUDICATE_SYSTEM
+            parsed, _, _ = await call_model_json(model, ADJUDICATE_SYSTEM,
+                ADJUDICATE_PROMPT.format(diff=diff[:30000], candidate=c), effort="medium", max_tokens=256)
+            from harnesseval.judge import JudgeResult
+            if not parsed:
+                return JudgeResult(False, 0.0, "", "", error="parse")
+            return JudgeResult(match=bool(parsed.get("is_real", False)),
+                              confidence=float(parsed.get("confidence", 0.0)),
+                              reasoning=str(parsed.get("reasoning", "")), raw="")
+    results = await asyncio.gather(*[adj(c) for c in fps])
+    return _split_adjudication(scored, fps, results, real_threshold)
+
+
+def _split_adjudication(scored, fps, results, real_threshold) -> dict:
     real_but_ungold, hallucination = [], []
     for cand, r in zip(fps, results):
         if r.error:
