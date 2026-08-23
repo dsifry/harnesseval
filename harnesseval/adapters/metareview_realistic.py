@@ -68,8 +68,8 @@ Be thorough but only report real issues you are confident about."""
 
 
 async def _run_codex_session(repo_dir: Path, model_slug: str, effort: str, prompt: str,
-                             timeout: int = 900) -> tuple[str, int, int, str]:
-    """Run a real multi-turn codex exec session in repo_dir with tools. Returns (text, in, out, slug)."""
+                             timeout: int = 900) -> tuple[str, dict, str]:
+    """Run a real multi-turn codex exec session in repo_dir with tools. Returns (text, per_model_usage, slug)."""
     from harnesseval.cli_backends import _parse_codex_effort
     args = ["codex", "exec", "--json", "--sandbox", "workspace-write", "--skip-git-repo-check",
             "-m", model_slug, "-c", f"model_reasoning_effort={_parse_codex_effort(effort)}", prompt]
@@ -90,12 +90,13 @@ async def _run_codex_session(repo_dir: Path, model_slug: str, effort: str, promp
             text = d["item"].get("text", "")
         if d.get("type") == "turn.completed":
             usage = d.get("usage", {})
-    return text, int(usage.get("input_tokens", 0)), int(usage.get("output_tokens", 0)), model_slug
+    from harnesseval.usage import from_codex_cli
+    return text, from_codex_cli(usage, model_slug), model_slug
 
 
 async def _run_claude_session(repo_dir: Path, model_alias: str, effort: str, prompt: str,
-                              max_turns: int = 12, timeout: int = 900) -> tuple[str, int, int, str]:
-    """Run a real multi-turn claude -p session in repo_dir with tools. Returns (text, in, out, resolved_model)."""
+                              max_turns: int = 12, timeout: int = 900) -> tuple[str, dict, str]:
+    """Run a real multi-turn claude -p session in repo_dir with tools. Returns (text, per_model_usage, resolved_model)."""
     from harnesseval.cli_backends import _parse_claude_effort
     args = ["claude", "-p", "--model", model_alias, "--effort", _parse_claude_effort(effort),
             "--output-format", "json", "--max-turns", str(max_turns),
@@ -107,10 +108,10 @@ async def _run_claude_session(repo_dir: Path, model_alias: str, effort: str, pro
     if proc.returncode != 0:
         raise RuntimeError(f"claude -p failed: {proc.stderr.strip()[:300]}")
     d = json.loads(proc.stdout)
-    u = d.get("usage", {})
     mu = d.get("modelUsage") or {}
     resolved = ",".join(mu.keys()) if isinstance(mu, dict) and mu else ""
-    return d.get("result", ""), int(u.get("input_tokens", 0)), int(u.get("output_tokens", 0)), resolved
+    from harnesseval.usage import from_claude_cli
+    return d.get("result", ""), from_claude_cli(d), resolved
 
 
 def _extract_findings_from_session(text: str) -> list[Finding]:
@@ -162,12 +163,10 @@ async def review_realistic_async(pr: PRSample, model: str, effort: str = "medium
         prompt = REALISTIC_PROMPT.format(mrv_bin=str(MRV_BIN), task_path=str(task_path), base_ref="HEAD~2")
         if is_claude:
             alias = "opus" if "opus" in ml else "sonnet" if "sonnet" in ml else "fable" if "fable" in ml else "sonnet"
-            text, tin, tout, resolved = await _run_claude_session(repo_dir, alias, effort, prompt)
+            text, per_model, resolved = await _run_claude_session(repo_dir, alias, effort, prompt)
         elif is_codex:
-            # codex CLI: map full id -> valid slug. gpt-5.2 isn't a Codex slug; use gpt-5.6-sol as the
-            # realistic Codex model (a user runs `codex` with the current default, not gpt-5.2).
             slug = "gpt-5.6-sol"  # valid Codex CLI slug (gpt-5.2 is API-only)
-            text, tin, tout, resolved = await _run_codex_session(repo_dir, slug, effort, prompt)
+            text, per_model, resolved = await _run_codex_session(repo_dir, slug, effort, prompt)
         else:
             # GLM/Kimi: no realistic CLI; fall back to api-direct metareview (recorded as cli mode but uses API lenses)
             from harnesseval.adapters import metareview as mrv
@@ -179,10 +178,14 @@ async def review_realistic_async(pr: PRSample, model: str, effort: str = "medium
         return ReviewRun(framework=name, model=model, effort=effort, execution_mode="cli",
                          raw_output="", wall_ms=(time.time() - t0) * 1000, error=str(e))
     findings = _extract_findings_from_session(text)
+    from harnesseval.usage import grand_total
+    gt = grand_total(per_model)
     # Realistic Claude Code behavior: orchestrator on the requested model, but Task-tool subagent
     # dispatch defaults to Haiku for lightweight subtasks even with --model opus (verified
     # 2026-08-22). `resolved` captures the full modelUsage set (e.g. 'claude-haiku-4-5-20251001,
     # claude-opus-5'). We record this honestly rather than fighting the host — it IS what a user gets.
     return ReviewRun(framework=name, model=(resolved or model), effort=effort, execution_mode="cli",
-                     raw_output=text, findings=findings, tokens_in=tin, tokens_out=tout,
-                     wall_ms=(time.time() - t0) * 1000)
+                     raw_output=text, findings=findings, tokens_in=gt["total_tokens"],
+                     tokens_out=sum(u.get("output_tokens",0) for u in per_model.values()),
+                     wall_ms=(time.time() - t0) * 1000, per_model_usage=per_model,
+                     total_cost_usd=gt["total_cost_usd"])

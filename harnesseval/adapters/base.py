@@ -39,6 +39,8 @@ class ReviewRun:
     tokens_out: int = 0
     wall_ms: float = 0.0
     error: str | None = None
+    per_model_usage: dict = field(default_factory=dict)  # {model: {input,cache_read,cache_creation,output,reasoning,cost_usd,total_tokens}}
+    total_cost_usd: float = 0.0
 
 
 @runtime_checkable

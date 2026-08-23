@@ -74,15 +74,15 @@ async def _call_cli(model: str, system: str, user: str, effort: str) -> tuple[st
             for al in ("opus", "sonnet", "fable", "haiku"):
                 if al in ml: alias = al; break
         alias = alias or "sonnet"
-        text, tin, tout, _ = await _claude_cli(alias, effort, user, system=system)
-        return text, tin, tout
+        text, usage, _ = await _claude_cli(alias, effort, user, system=system)
+        return text, usage.get("total_tokens",0)-usage.get("output_tokens",0), usage.get("output_tokens",0)
     slug = None
     for mid, sl in _CODEX_SLUGS.items():
         if ml == mid.lower(): slug = sl; break
     if slug or "gpt" in ml:
         slug = slug or "gpt-5.6-sol"
-        text, tin, tout, _ = await _codex_cli(slug, effort, user, system=system)
-        return text, tin, tout
+        text, usage, _ = await _codex_cli(slug, effort, user, system=system)
+        return text, usage.get("total_tokens",0)-usage.get("output_tokens",0), usage.get("output_tokens",0)
     # GLM/Kimi: no OAuth CLI; fall back to API (Lunaroute, flat-fee)
     return await _call_openai_compat(model, system, user, effort, 2048, 0.0)
 
