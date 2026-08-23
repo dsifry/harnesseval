@@ -65,7 +65,19 @@ def main():
                         total_out += getattr(usage, "output_tokens", 0)
         print(f"[a3] AGREEMENT (Inspect mean metric): {agree:.4f}  ({n_samples} samples)")
         print(f"[a3] Inspect native accounting: input_tokens={total_in:,}  output_tokens={total_out:,}  total={total_in+total_out:,}")
-        print(f"[a3] eval log (audit trail): {args.log_dir}/  (task={name})")
+        # the eval log location (full evidence: transcripts, per-sample usage, scores)
+        log_path = Path(el.location) if hasattr(el, "location") and el.location else None
+        print(f"[a3] eval log (audit trail): {log_path}")
+        # auto-register in the longitudinal registry
+        from harnesseval.runs import register
+        summary = {"agreement": agree, "samples": n_samples, "tokens_in": total_in, "tokens_out": total_out,
+                   "status": s}
+        rid = register(phase="A.3", model=model_id, framework="inspect-runner-judge", effort="n/a",
+                       run_n=0, status="pass" if s == "success" else "fail",
+                       metrics={"agreement": agree or 0, "samples": n_samples, "tokens_total": total_in + total_out},
+                       tokens_in=total_in, tokens_out=total_out, wall_s=0,
+                       summary=summary, inspect_log=log_path)
+        print(f"[a3] registered run {rid} in runs/registry.jsonl")
     print("[a3] DONE — Inspect runner + cost accounting validated on our judge task.")
 
 

@@ -166,6 +166,14 @@ def main():
     out = Path(args.out); out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(summary, indent=2))
     print(f"[pilot] summary written to {out}")
+    # auto-register the run in the longitudinal registry
+    from harnesseval.runs import register
+    rid = register(phase="A.1", model=summary["judge"], framework="martian-judge", effort="n/a",
+                   run_n=0, status="pass" if summary["passed"] else "fail",
+                   metrics={"agreement": summary["agreement"], "max_delta": summary["max_abs_delta"],
+                            "judge_calls": summary["judge_calls"], "errors": summary["errors"]},
+                   wall_s=summary["wall_s"], summary=summary)
+    print(f"[pilot] registered run {rid} in runs/registry.jsonl")
     print("[pilot] If PASS and cost acceptable, expand: --pairs 20, then toward full reproduction.")
     raise SystemExit(0 if summary["passed"] else 1)
 

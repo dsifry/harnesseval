@@ -79,7 +79,26 @@ harnesseval/
     cost.py                   # token/time/$ normalization, Pareto frontier
     report.py                 # tables, plots, failure-mode analysis
     cache.py                  # local API-response cache for Phase B budget protection
-  results/                    # Inspect eval logs + derived tables (gitignored except samples)
+    runs.py                   # run registry: append-only index + per-run manifest, query/compare over time
+    backfill_runs.py          # one-time: register completed Phase-A runs into the registry
+  results/                    # our JSON summaries (gitignored except force-added evidence)
+  logs/                       # Inspect eval logs (gitignored except force-added evidence; full transcripts/usage/scores)
+  runs/                       # run registry (COMMITTED — the established place for longitudinal analysis)
+    registry.jsonl            #   append-only index, one line per run, queryable with jq/python
+    <run-id>/manifest.json    #   dimensions: phase, model, framework, effort, run#, status, cost, metrics
+    <run-id>/summary.json     #   our aggregate output for the run
+    <run-id>/inspect_log.eval  #   symlink to the full-evidence Inspect log (not duplicated)
+```
+
+### 4.1 Run registry (longitudinal analysis)
+
+The registry **complements** Inspect logs (which hold the full evidence — transcripts,
+per-sample token usage, scores) with a queryable index keyed by dimensions
+(phase × model × framework × effort × run#), so we can compare runs over time and across
+the matrix. Evidence is NOT duplicated: each run dir symlinks to the Inspect log.
+`harnesseval/runs.py` provides `register()`, `query()`, `compare()`; `calibrate.py` and
+`run_a3.py` auto-register on completion. Phase B/C runs will auto-register too. Query with
+`query(framework="metareview", model="...")`; diff two runs with `compare(a, b)`.
   third_party/                # git submodules or vendored: martian CRB @ pinned SHA, metareview checkout
 ```
 
