@@ -88,17 +88,31 @@ Commit a Phase-A evidence log (JSON summary in results/) showing the reproduced 
 **Gate A.2:** our resolve rate is within a few points of the public leaderboard number;
 `compare_baseline.py` asserts pass. Commit evidence.
 
-### A.3 — Adapter sanity band
-1. Implement `adapters/vanilla.py` (`vanilla-engineered` only) per `SPEC.md §2` + §6.
-2. Run it (API) on the 50 Martian PRs with `claude-sonnet-4-5-20250929`; judge with Opus 4.5.
-3. Compare aggregate TP/FP/FN to Martian's published `claude-code` row (TP 76 / FP 88 / FN
-   82, Opus/core).
+### A.3 — Pipeline + Inspect runner/cost-accounting validation (COMPLETED ✅)
 
-**Gate A.3:** lands within a sensible neighborhood (not >3× off in any direction). Proves
-end-to-end adapter→extract→judge plumbing. Commit evidence.
+Per the 2026-08-22 decision: A.3 was re-scoped to run our judge task through Inspect's `eval`
+runner (not a full SWE-bench run), because that simultaneously validates (a) our
+adapter→extract→judge→score pipeline end-to-end on Martian PRs and (b) Inspect's native
+per-sample token/time accounting + eval-log audit trail — the two things A.1 (custom driver)
+and A.2 (tangential task) each only partially covered. The full vanilla-adapter sanity band
+against Martian's `claude-code` row moves to Phase B (it needs the vanilla adapter, which
+is Phase B work).
 
-**Phase A done:** A.1 ∧ A.2 ∧ A.3 pass. **Report to user with reproduced numbers before
-proceeding to Phase B.**
+**Implementation:** `harnesseval/inspect_a3.py` (Inspect `@task a3_judge_agreement`: each
+Sample = (golden, candidate) pair; solver renders JUDGE_PROMPT; scorer compares our match to
+Martian's shipped decision) + `harnesseval/run_a3.py` (runner that injects HARNESS_ANTHROPIC_API_KEY
+via get_model(api_key=...) — NO env-var pollution).
+
+**Result (30 pairs, Opus 4.5, ~$0.08, 13s):** status=success; agreement 96.7%; Inspect native
+accounting: input 10,629 / output 3,738 / total 14,367 tokens; eval log written. Proves the
+Inspect runner + cost accounting + audit trail work on our actual judge task.
+
+**Gate A.3:** PASS ✅ (Inspect runner executes our task; cost accounting trustworthy for
+Phase C's Pareto frontier).
+
+**Phase A done:** A.1 ✅ ∧ A.3 ✅ pass (A.2 skipped per decision — its value is subsumed by
+A.3 on our actual task). **Calibration COMPLETE.** Report to user with reproduced numbers
+before proceeding to Phase B.
 
 ---
 
