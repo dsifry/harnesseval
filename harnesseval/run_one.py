@@ -38,7 +38,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--url", required=True, help="golden-comment PR URL")
     ap.add_argument("--framework", default="vanilla-engineered",
-                    choices=["vanilla-naive", "vanilla-engineered"])
+                    choices=["vanilla-naive", "vanilla-engineered", "metareview"])
     ap.add_argument("--model", default="claude-opus-4-5-20251101")
     ap.add_argument("--effort", default="medium")
     ap.add_argument("--mode", default="api", choices=["api", "cli"])
@@ -50,10 +50,15 @@ def main():
     print(f"[run_one] diff: {len(pr.diff)} bytes, {len(pr.files)} files, {len(pr.golden_comments)} golden comments")
 
     # 1. review
-    from harnesseval.adapters import vanilla
-    variant = "naive" if args.framework == "vanilla-naive" else "engineered"
+    run = None
+    if args.framework.startswith("vanilla-"):
+        from harnesseval.adapters import vanilla
+        variant = "naive" if args.framework == "vanilla-naive" else "engineered"
+        run = vanilla.review(pr, model=args.model, effort=args.effort, mode=args.mode, variant=variant)
+    elif args.framework == "metareview":
+        from harnesseval.adapters import metareview as mrv
+        run = mrv.review(pr, model=args.model, effort=args.effort, mode=args.mode)
     t0 = time.time()
-    run = vanilla.review(pr, model=args.model, effort=args.effort, mode=args.mode, variant=variant)
     print(f"[run_one] review ({run.framework}/{run.execution_mode}): {len(run.findings)} findings, "
           f"{run.tokens_in:,}+{run.tokens_out:,} tok, {run.wall_ms:.0f}ms  err={run.error}")
     if run.error:

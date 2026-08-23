@@ -61,9 +61,16 @@ async def _extract_via_anthropic(client, model: str, review_text: str) -> list[s
     return list(parsed.get("issues", []))
 
 
+async def extract_findings_async(client, model: str, review_text: str, source: str = "") -> list[Finding]:
+    """Async variant — safe to call from inside a running event loop (used by adapters that
+    extract per-lens inside asyncio.gather)."""
+    issues = await _extract_via_anthropic(client, model, review_text)
+    return [Finding(issue_text=i, source=source, raw=review_text[:500]) for i in issues if i]
+
+
 def extract_findings(review_text: str, model: str = "claude-opus-4-5-20251101",
                      source: str = "") -> list[Finding]:
-    """Extract atomic Findings from a prose review (sync wrapper). One LLM call."""
+    """Extract atomic Findings from a prose review (sync wrapper, top-level use only)."""
     client = keys.anthropic_client()
     issues = asyncio.run(_extract_via_anthropic(client, model, review_text))
     return [Finding(issue_text=i, source=source, raw=review_text[:500]) for i in issues if i]
