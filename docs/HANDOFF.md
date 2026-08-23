@@ -62,10 +62,15 @@ Martian Code Review Bench dataset + a run registry for longitudinal analysis. Re
 
 3. **Subagent tools are HOST-SPECIFIC, not universal.** Claude Code's is `Agent` (input:
    `{description, prompt, subagent_type, run_in_background}`); **Codex's is
-   `collaboration.spawn_agent`** (codex CLI 0.149.0, `multi_agent` feature stable+enabled —
-   verified 2026-08-23: codex DOES spawn subagents). The realistic metareview prompt MUST be
-   host-agnostic ("via your host's subagent-spawn tool: `Agent` on Claude, `collaboration.spawn_agent`
-   on codex") — hardcoding `Agent` made codex score 0.00 (it couldn't find the tool). NOT `Task`.
+   `collaboration.spawn_agent`** + `collaboration.wait_agent` (codex CLI 0.149.0, `multi_agent`
+   feature stable+enabled — verified 2026-08-23 end-to-end: codex DOES spawn subagents). The
+   realistic metareview prompt MUST be host-agnostic: "dispatch the 5 lenses as parallel
+   subagents via your host's subagent-spawn tool (Claude Code: `Agent`; Codex:
+   `collaboration.spawn_agent` + `collaboration.wait_agent`), one call per lens" — hardcoding
+   `Agent` made codex score 0.00 (it couldn't find the tool). NOT `Task`. Codex usage: in the
+   JSONL output, subagent calls appear as `item.completed` events with `type=collab_tool_call`
+   (tool field 'spawn'/'wait'); the model exposes `collaboration.spawn_agent`/`wait_agent`/
+   `list_agents`/`send_message`/`interrupt_agent` tools when asked to list its tools.
 
 4. **`--append-system-prompt` is required** on `claude -p` or it can silently use a different
    model for the work turn in some cases; always pass it.
