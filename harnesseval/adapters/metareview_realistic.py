@@ -50,17 +50,23 @@ Steps:
    The command prints the path to the generated review markdown; read that file.
 2. Read the review scaffold + context pack it generated.
 3. Per the metareview review-artifact skill, dispatch the 5 required reviewer lenses as
-   PARALLEL SUBAGENTS (Task tool / subagent dispatch): Feasibility, Completeness,
-   Scope-and-Alignment, Architecture, Intent-Preservation. Give each subagent the diff
-   context + its lens focus. Invoking this workflow is explicit authorization to delegate
-   those lenses — do NOT run them in-session unless subagents are unavailable.
+   PARALLEL SUBAGENTS using the Agent tool (one Agent call per lens, with run_in_background=true
+   so they run concurrently; then collect each result). Invoking this workflow is explicit
+   authorization to delegate those lenses — do NOT run them in-session. The 5 lenses:
+   - Feasibility: verify paths/commands/dependencies against the diff reality; block on fabricated paths.
+   - Completeness: map change to intent; block on missing acceptance criteria/edge cases.
+   - Scope-and-Alignment: check for scope drift or unrelated expansion.
+   - Architecture: check boundaries, ownership, duplication, integration shape.
+   - Intent-Preservation: check the change drifts from the PR title/intent.
+   Give each Agent subagent the diff context (run `git diff {base_ref}..HEAD`) + its lens focus.
 4. Collect each lens's findings (distinct issues, one per item, with file:line if identifiable).
-5. Return a consolidated list of ALL findings found (deterministic gates + 5 lenses),
-   one per line, each prefixed with its source, e.g.:
+5. Also include the deterministic-gate findings from the metareview scaffold (step 1).
+6. Return a consolidated list of ALL findings (deterministic gates + 5 lenses), one per line,
+   each prefixed with its source, e.g.:
    [deterministic/test-reviewer] Missing test changes or validation evidence
    [lens/architecture] src/foo.py:42 — boundary issue: ...
 
-The diff under review is HEAD~1..HEAD (the 'pr' commit). Be thorough but only report real issues."""
+The diff under review is {base_ref}..HEAD (the 'pr' commit). Be thorough but only report real issues."""
 
 NAIVE_REALISTIC_PROMPT = """Review the code change in this repository (the diff is HEAD~1..HEAD).
 Run `git diff HEAD~1` to see it. List each distinct issue you find, one per line, with file:line.
