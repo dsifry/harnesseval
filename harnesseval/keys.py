@@ -19,6 +19,17 @@ from pathlib import Path
 
 KEYS_FILE = Path(os.environ.get("HARNESS_KEYS_FILE", Path.home() / ".config/harnesseval/keys.env"))
 
+# Per-request HTTP timeout (seconds) for the SDK clients. Reasoning models (GLM/Kimi via
+# Lunaroute, gpt-5.6-sol) can generate up to 16384 tokens on a long review prompt and legitimately
+# take 60-120s; but a stalled gateway (Lunaroute holding connections open under concurrent
+# load without responding) must fail fast instead of hanging on the SDK's ~600s default read
+# timeout. 180s covers legitimate long completions while ensuring a stalled request errors out
+# (and is then eligible for the retry-on-empty/transient-retry logic in model_router).
+# Without this, a stalled Lunaroute call blocks asyncio.to_thread indefinitely; asyncio.wait_for
+# cancels the coroutine but NOT the blocked thread, so the whole cell hangs unrecoverably.
+# See HANDOFF: the GLM api-fallback validation cell hung here (concurrency=5 lens calls).
+REQUEST_TIMEOUT_S = float(os.environ.get("HARNESS_REQUEST_TIMEOUT_S", "180"))
+
 # File key name -> the SDK constructor argument / Inspect provider it maps to
 KEY_NAMES = (
     "HARNESS_ANTHROPIC_API_KEY",
@@ -70,20 +81,21 @@ def load_keys(path: Path | None = None) -> dict[str, str]:
 def anthropic_client():
     """Construct an Anthropic client with the HARNESS_-prefixed key (never via env var)."""
     from anthropic import Anthropic
-    return Anthropic(api_key=load_keys()["HARNESS_ANTHROPIC_API_KEY"])
+    return Anthropic(api_key=load_keys()["HARNESS_ANTHROPIC_API_KEY"], timeout=REQUEST_TIMEOUT_S)
 
 
 def openai_client():
     """Construct an OpenAI client (api.openai.com) with the HARNESS_-prefixed key."""
     from openai import OpenAI
-    return OpenAI(api_key=load_keys()["HARNESS_OPENAI_API_KEY"])
+    return OpenAI(api_key=load_keys()["HARNESS_OPENAI_API_KEY"], timeout=REQUEST_TIMEOUT_S)
 
 
 def lunaroute_client():
     """Construct an OpenAI-compatible client pointed at the Lunaroute gateway (GLM/Kimi)."""
     from openai import OpenAI
     k = load_keys()
-    return OpenAI(api_key=k["HARNESS_LUNAROUTE_API_KEY"], base_url=k["LUNAROUTE_BASE_URL"])
+    return OpenAI(api_key=k["HARNESS_LUNAROUTE_API_KEY"], base_url=k["LUNAROUTE_BASE_URL"],
+                  timeout=REQUEST_TIMEOUT_S)
 
 
 def martian_client():
@@ -96,7 +108,8 @@ def martian_client():
     """
     from openai import AsyncOpenAI
     return AsyncOpenAI(api_key=load_keys()["HARNESS_MARTIAN_API_KEY"],
-                       base_url="https://api.withmartian.com/v1")
+                       base_url="https://api.withmartian.com/v1",
+                       timeout=REQUEST_TIMEOUT_S)
 
 
 def clear_cache() -> None:
