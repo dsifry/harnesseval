@@ -1,18 +1,25 @@
-"""Realistic metareview adapter — drives the real harness as a user runs it (v0.8.1 slim).
+"""Realistic metareview adapter — drives the real harness as a user runs it (v0.8.2 slim).
 
-v0.8.1 (this branch, mrv-0.8.1-slim-orchestration): orchestration-slim experiment on top of
-the 0.8.0 8-lens adversarial prompt. Four slimming fixes to the REALISTIC_PROMPT, tested
-against the 0.8.0 baseline for token cost + recall/precision impact:
-  1. Embed the diff in the orchestrator prompt; lenses receive it verbatim in their dispatch
-     and do NOT each re-run `git diff` / explore files (cuts per-lens opus exploration turns).
+v0.8.2 (this branch, mrv-0.8.1-slim-orchestration, evolved): orchestration-slim experiment.
+v0.8.1 bundled 4 fixes and showed a token win (opus −35%, codex −24%) but a recall loss
+(0.89→0.78, lost the jsforce stale-token golden — needs surrounding-file context the
+embedded-diff lenses couldn't read). v0.8.2 DROPS fix #1 (revert: lenses can read files again)
+and keeps fixes 2,3,4 (orchestrator: no post-lens re-verification, no skill-ref, be terse).
+Hypothesis: capture most of the token win without the recall loss.
+
+Kept fixes (all orchestrator-side, no lens-recall impact):
   2. After the 8 lenses return, consolidate directly — do NOT re-read files / re-run git diff /
      re-verify lens findings (cuts post-lens orchestrator turns).
-  3. Drop the "Per the metareview review-artifact skill" reference (the skill isn't installed
-     in the throwaway repo; the mention triggered a fruitless skill-search on codex).
+  3. Drop the "Per the metareview review-artifact skill" reference (skill isn't installed in
+     the throwaway repo; the mention triggered a fruitless skill-search on codex).
   4. Be terse — no planning monologue / narration (cuts orchestrator output tokens).
 
-Per docs/SPEC.md §2 (realistic mode): test the harness as a USER uses it — installed in a host
-agent, invoked naturally, with the real agent loop + tools + subagents. The scoring pipeline
+Dropped fix (v0.8.2 reverts this from v0.8.1):
+  1. [REVERTED] Embed the diff / forbid lens file-exploration. Cost the jsforce golden —
+     lenses need to read surrounding files for some findings. Lenses again get the diff
+     context via `git diff {base_ref}..HEAD` and may read surrounding files as needed.
+
+Per docs/SPEC.md §2 (realistic mode): test the harness as a USER uses it. The scoring pipeline
 (extract -> judge -> score -> adjudicate) is identical regardless of how the reviewer arm ran.
 For the api-direct (pure) column, adapters/metareview.py review() still exists unchanged.
 """
@@ -34,11 +41,10 @@ from harnesseval.cli_backends import session_timeout
 
 MRV_BIN = Path(__file__).resolve().parents[2] / "bin" / "metareview"
 
-# v0.8.1 slim-orchestration prompt. The 8-lens adversarial methodology is identical to v0.8.0
+# v0.8.2 slim-orchestration prompt. The 8-lens adversarial methodology is identical to v0.8.0
 # (isolating the orchestration fixes as the only variable); only the orchestration wrapper
-# changed (see module docstring). The <<DIFF>> sentinel is replaced with the truncated diff
-# after .format() (not a {field} so .format() leaves it alone; avoids breakage on { } in code).
-REALISTIC_PROMPT = """You are running metareview's task-done review (v0.8.1) on a local change, as a user would.
+# changed (see module docstring). v0.8.2 = fixes 2,3,4 only (fix #1 reverted — lenses keep file access).
+REALISTIC_PROMPT = """You are running metareview's task-done review (v0.8.2) on a local change, as a user would.
 
 Be terse. Do NOT narrate your plan, reasoning, or progress — just run the commands, dispatch the lenses, and consolidate. No planning monologues.
 
@@ -59,13 +65,7 @@ Steps:
    a confidence anchor (100/75/50/25/0) + severity (P0-P3); SUPPRESS findings below confidence
    50 unless they are P0. Cite file:line + the verbatim code + the failure mode for every finding.
 
-   THE DIFF UNDER REVIEW is provided in full at the end of this prompt between <<<DIFF>>> and
-   <<<END DIFF>>> markers. Include this diff VERBATIM in each lens subagent's dispatch prompt.
-   Each subagent reviews the diff AS PROVIDED — it should NOT run `git diff` itself, and should
-   NOT read surrounding files unless a specific finding requires reading ONE additional file for
-   context. (This keeps each lens a single focused pass over the provided diff.)
-
-   The 8 lenses (each subagent gets the verbatim diff below + its lens focus):
+   The 8 lenses (each subagent gets the diff context — run `git diff {base_ref}..HEAD` — + its lens focus):
    - Feasibility: attack the assumption that paths/commands/dependencies are correct against the
      diff reality; block on fabricated paths, impossible ordering, missing tools, invalid commands.
      Does NOT flag: requirements completeness (Completeness) or architecture soundness (Architecture).
@@ -178,10 +178,6 @@ Steps:
    each prefixed with its source, e.g.:
    [deterministic/test-reviewer] Missing test changes or validation evidence
    [lens/architecture] src/foo.py:42 — boundary issue: ...
-
-<<<DIFF>>>
-{diff}
-<<<END DIFF>>>
 
 Be thorough but only report real issues you are confident about (confidence >= 50, or any P0)."""
 
@@ -329,13 +325,7 @@ async def review_realistic_async(pr: PRSample, model: str, effort: str = "medium
                        check=True, capture_output=True,
                        env={**__import__("os").environ, "GIT_AUTHOR_NAME": "x", "GIT_AUTHOR_EMAIL": "x@x",
                             "GIT_COMMITTER_NAME": "x", "GIT_COMMITTER_EMAIL": "x@x"})
-        # v0.8.1 fix #1: embed the diff in the prompt so lens subagents don't each re-run git diff.
-        # {diff} is filled by .format(); the <<<DIFF>>> sentinel is a redundant marker for the model.
-        diff_text = pr.diff or ""
-        if len(diff_text) > 60000:
-            diff_text = diff_text[:60000] + f"\n\n[... diff truncated: {len(pr.diff) - 60000} more chars ...]"
-        prompt = REALISTIC_PROMPT.format(mrv_bin=str(MRV_BIN), task_path=str(task_path),
-                                         base_ref="HEAD~2", diff=diff_text)
+        prompt = REALISTIC_PROMPT.format(mrv_bin=str(MRV_BIN), task_path=str(task_path), base_ref="HEAD~2")
         if is_claude:
             alias = "opus" if "opus" in ml else "sonnet" if "sonnet" in ml else "fable" if "fable" in ml else "sonnet"
             text, per_model, resolved = await _run_claude_session(repo_dir, alias, effort, prompt,
