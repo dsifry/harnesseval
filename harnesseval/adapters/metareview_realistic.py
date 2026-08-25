@@ -1,27 +1,19 @@
-"""Realistic metareview adapter — drives the real harness as a user runs it (v0.8.0).
+"""Realistic metareview adapter — drives the real harness as a user runs it (v0.8.1 slim).
+
+v0.8.1 (this branch, mrv-0.8.1-slim-orchestration): orchestration-slim experiment on top of
+the 0.8.0 8-lens adversarial prompt. Four slimming fixes to the REALISTIC_PROMPT, tested
+against the 0.8.0 baseline for token cost + recall/precision impact:
+  1. Embed the diff in the orchestrator prompt; lenses receive it verbatim in their dispatch
+     and do NOT each re-run `git diff` / explore files (cuts per-lens opus exploration turns).
+  2. After the 8 lenses return, consolidate directly — do NOT re-read files / re-run git diff /
+     re-verify lens findings (cuts post-lens orchestrator turns).
+  3. Drop the "Per the metareview review-artifact skill" reference (the skill isn't installed
+     in the throwaway repo; the mention triggered a fruitless skill-search on codex).
+  4. Be terse — no planning monologue / narration (cuts orchestrator output tokens).
 
 Per docs/SPEC.md §2 (realistic mode): test the harness as a USER uses it — installed in a host
-agent, invoked naturally, with the real agent loop + tools + subagents — NOT a stripped-down
-"methodology extracted to a bare API prompt" (that's the api-direct secondary column).
-
-Realistic flow (matches skills/review-task-done + skills/review-artifact SKILL.md):
-  1. Materialize the PR diff into a throwaway git repo (dataset/materialize.py) — unchanged.
-  2. Run a real `claude -p` agentic session (multi-turn, with tools) that:
-     a. runs `bin/metareview review task-done <task> --base <ref>` (the real deterministic
-        Go gates — free, model-independent; identical to the api-direct adapter);
-     b. reads the generated context pack + review scaffold;
-     c. dispatches the 8 required lenses (Feasibility, Completeness, Scope, Architecture,
-        Intent, Security, Testing-quality, Data-migration) as PARALLEL SUBAGENTS via the host's
-        subagent-spawn tool — "Invoking this artifact-review workflow is explicit authorization
-        to delegate those lenses" (SKILL.md); all lenses take the adversarial stance (v0.8.0);
-     d. aggregates the lens findings + the deterministic-gate findings into the review output.
-  3. Capture the real transcript + real token/time cost (incl. subagent overhead) — this is
-     what a user actually pays, not an idealized 8×API-call cost.
-
-The scoring pipeline (extract -> judge -> score -> adjudicate) is identical regardless of how
-the reviewer arm ran, so A.1/A.3 calibration still holds. Only the reviewer-arm execution
-changed: api-direct -> realistic host-driven.
-
+agent, invoked naturally, with the real agent loop + tools + subagents. The scoring pipeline
+(extract -> judge -> score -> adjudicate) is identical regardless of how the reviewer arm ran.
 For the api-direct (pure) column, adapters/metareview.py review() still exists unchanged.
 """
 
@@ -42,31 +34,38 @@ from harnesseval.cli_backends import session_timeout
 
 MRV_BIN = Path(__file__).resolve().parents[2] / "bin" / "metareview"
 
-# The realistic orchestration prompt — instructs the host agent to run the real binary +
-# dispatch the 8 lenses (adversarial stance, v0.8.0) as parallel subagents, exactly as the
-# skill authorizes. Mirrors rubrics/artifact-review-rubric.md + the per-lens rubric files.
-REALISTIC_PROMPT = """You are running metareview's task-done review (v0.8.0) on a local change, as a user would.
+# v0.8.1 slim-orchestration prompt. The 8-lens adversarial methodology is identical to v0.8.0
+# (isolating the orchestration fixes as the only variable); only the orchestration wrapper
+# changed (see module docstring). The <<DIFF>> sentinel is replaced with the truncated diff
+# after .format() (not a {field} so .format() leaves it alone; avoids breakage on { } in code).
+REALISTIC_PROMPT = """You are running metareview's task-done review (v0.8.1) on a local change, as a user would.
+
+Be terse. Do NOT narrate your plan, reasoning, or progress — just run the commands, dispatch the lenses, and consolidate. No planning monologues.
 
 Steps:
 1. Run this command and read its output (it writes a review scaffold + context pack):
    {mrv_bin} review task-done {task_path} --base {base_ref}
    The command prints the path to the generated review markdown; read that file.
 2. Read the review scaffold + context pack it generated.
-3. Per the metareview review-artifact skill, dispatch the 8 required reviewer lenses as
-   PARALLEL SUBAGENTS via your host's subagent-spawn tool — in Claude Code that is the `Agent`
-   tool (one `Agent` call per lens, with run_in_background=true so they run concurrently; then
-   collect each result); in Codex that is `collaboration.spawn_agent` (one spawn per lens) then
-   `collaboration.wait_agent` to collect each result. Invoking this workflow is explicit
-   authorization to delegate those lenses — do NOT run them in-session, and do NOT fall back to a
-   single in-session pass.
+3. Dispatch the 8 required reviewer lenses as PARALLEL SUBAGENTS via your host's subagent-spawn
+   tool — in Claude Code that is the `Agent` tool (one `Agent` call per lens, run in
+   background; then collect each result); in Codex that is `collaboration.spawn_agent` (one
+   spawn per lens) then `collaboration.wait_agent` to collect each result. Do NOT run the
+   lenses in-session; do NOT fall back to a single in-session pass.
 
    ADVERSARIAL STANCE (applies to ALL 8 lenses): assume the creator's intent is GOOD but be
-   hostile to unexamined assumptions — assume there may be a fundamental mistake hiding in this
-   design and find it. Do NOT confirm the artifact is well-shaped. Each finding carries a
-   confidence anchor (100/75/50/25/0) + severity (P0-P3); SUPPRESS findings below confidence 50
-   unless they are P0. Cite file:line + the verbatim code + the failure mode for every finding.
+   hostile to unexamined assumptions — assume there may be a fundamental mistake hiding in
+   this design and find it. Do NOT confirm the artifact is well-shaped. Each finding carries
+   a confidence anchor (100/75/50/25/0) + severity (P0-P3); SUPPRESS findings below confidence
+   50 unless they are P0. Cite file:line + the verbatim code + the failure mode for every finding.
 
-   The 8 lenses (each subagent gets the diff context — run `git diff {base_ref}..HEAD` — + its lens focus):
+   THE DIFF UNDER REVIEW is provided in full at the end of this prompt between <<<DIFF>>> and
+   <<<END DIFF>>> markers. Include this diff VERBATIM in each lens subagent's dispatch prompt.
+   Each subagent reviews the diff AS PROVIDED — it should NOT run `git diff` itself, and should
+   NOT read surrounding files unless a specific finding requires reading ONE additional file for
+   context. (This keeps each lens a single focused pass over the provided diff.)
+
+   The 8 lenses (each subagent gets the verbatim diff below + its lens focus):
    - Feasibility: attack the assumption that paths/commands/dependencies are correct against the
      diff reality; block on fabricated paths, impossible ordering, missing tools, invalid commands.
      Does NOT flag: requirements completeness (Completeness) or architecture soundness (Architecture).
@@ -171,16 +170,20 @@ Steps:
      silent data loss, or orphaned refs. Does NOT flag: security (Security), test quality
      (Testing-quality), architecture soundness beyond migration safety (Architecture — this lens
      judges only whether the transition from old to new schema is safe and reversible).
-4. Collect each lens's findings (distinct issues, one per item, with file:line + the failure mode).
-   In Codex, use `collaboration.wait_agent` for each spawned lens job until all 8 have returned.
+4. Collect each lens's findings. After the 8 lenses return, CONSOLIDATE their findings directly
+   into the output list. Do NOT re-read files, re-run git diff, or re-verify lens findings — trust
+   the lenses and consolidate what they returned.
 5. Also include the deterministic-gate findings from the metareview scaffold (step 1).
 6. Return a consolidated list of ALL findings (deterministic gates + 8 lenses), one per line,
    each prefixed with its source, e.g.:
    [deterministic/test-reviewer] Missing test changes or validation evidence
    [lens/architecture] src/foo.py:42 — boundary issue: ...
 
-The diff under review is {base_ref}..HEAD (the 'pr' commit). Be thorough but only report real
-issues you are confident about (confidence >= 50, or any P0)."""
+<<<DIFF>>>
+{diff}
+<<<END DIFF>>>
+
+Be thorough but only report real issues you are confident about (confidence >= 50, or any P0)."""
 
 NAIVE_REALISTIC_PROMPT = """Review the code change in this repository (the diff is HEAD~1..HEAD).
 Run `git diff HEAD~1` to see it. List each distinct issue you find, one per line, with file:line.
@@ -326,7 +329,13 @@ async def review_realistic_async(pr: PRSample, model: str, effort: str = "medium
                        check=True, capture_output=True,
                        env={**__import__("os").environ, "GIT_AUTHOR_NAME": "x", "GIT_AUTHOR_EMAIL": "x@x",
                             "GIT_COMMITTER_NAME": "x", "GIT_COMMITTER_EMAIL": "x@x"})
-        prompt = REALISTIC_PROMPT.format(mrv_bin=str(MRV_BIN), task_path=str(task_path), base_ref="HEAD~2")
+        # v0.8.1 fix #1: embed the diff in the prompt so lens subagents don't each re-run git diff.
+        # {diff} is filled by .format(); the <<<DIFF>>> sentinel is a redundant marker for the model.
+        diff_text = pr.diff or ""
+        if len(diff_text) > 60000:
+            diff_text = diff_text[:60000] + f"\n\n[... diff truncated: {len(pr.diff) - 60000} more chars ...]"
+        prompt = REALISTIC_PROMPT.format(mrv_bin=str(MRV_BIN), task_path=str(task_path),
+                                         base_ref="HEAD~2", diff=diff_text)
         if is_claude:
             alias = "opus" if "opus" in ml else "sonnet" if "sonnet" in ml else "fable" if "fable" in ml else "sonnet"
             text, per_model, resolved = await _run_claude_session(repo_dir, alias, effort, prompt,
