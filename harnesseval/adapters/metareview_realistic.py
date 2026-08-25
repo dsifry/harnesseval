@@ -286,11 +286,33 @@ def _extract_findings_from_session(text: str) -> list[Finding]:
     findings = []
     for line in text.splitlines():
         line = line.strip().lstrip("-*").strip()
+        # also strip markdown wrappers the orchestrator non-deterministically adds around the
+        # [lens/...] / [deterministic/...] tag: backticks (`[lens/...]`), bold (**[lens/...]**),
+        # and a leading '**' on the issue text. Without this, a line like
+        #   `- `[lens/architecture]` **src/foo.py:42 — bug**`
+        # fails the ^\[ regex (starts with a backtick) -> 0 findings -> 0.00 recall cell.
+        # (Seen in the 0.8.2 batch: opus mrv cells intermittently emit this wrapped format.)
+        line = line.strip("`")
+        if line.startswith("**"):
+            line = line[2:].lstrip()
         if not line:
             continue
-        m = re.match(r"^\[(deterministic|lens)/([^\]]+)\]\s*(.+)$", line)
+        m = re.match(r"^\[(deterministic|lens)/([^\]]+)\]`?\s*(.+)$", line)
         if m:
             kind, reviewer, issue = m.groups()
+            # strip markdown wrappers the orchestrator adds to the issue text. The orchestrator
+            # non-deterministically wraps the file:line in ** (bold) and/or backticks, e.g.
+            #   `**src/foo.py:42** — the issue text`
+            # Strip leading backticks, then a leading **...** wrapper around the file:line
+            # (find the closing ** and drop both), plus stray backticks. Leaves file:line + issue.
+            issue = issue.strip()
+            while issue.startswith("`"):
+                issue = issue[1:].strip()
+            if issue.startswith("**"):
+                end = issue.find("**", 2)
+                if end != -1:
+                    issue = (issue[2:end] + issue[end+2:]).strip()
+            issue = issue.strip("`").strip()
             # if the reviewer label bundles multiple lenses (contains '+'), keep it verbatim but
             # mark as 'lens-mixed' so the decomposition doesn't over-attribute to one lens
             label = reviewer if '+' not in reviewer and 'all' not in reviewer.lower() else 'lens-mixed'
