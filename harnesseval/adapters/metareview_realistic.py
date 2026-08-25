@@ -1,4 +1,4 @@
-"""Realistic metareview adapter — drives the real harness as a user runs it.
+"""Realistic metareview adapter — drives the real harness as a user runs it (v0.8.0).
 
 Per docs/SPEC.md §2 (realistic mode): test the harness as a USER uses it — installed in a host
 agent, invoked naturally, with the real agent loop + tools + subagents — NOT a stripped-down
@@ -10,12 +10,13 @@ Realistic flow (matches skills/review-task-done + skills/review-artifact SKILL.m
      a. runs `bin/metareview review task-done <task> --base <ref>` (the real deterministic
         Go gates — free, model-independent; identical to the api-direct adapter);
      b. reads the generated context pack + review scaffold;
-     c. dispatches the 6 required lenses (Feasibility, Completeness, Scope, Architecture,
-        Intent, Security) as PARALLEL SUBAGENTS via Claude Code's subagent/Task tool — "Invoking this
-        artifact-review workflow is explicit authorization to delegate those lenses" (SKILL.md);
+     c. dispatches the 8 required lenses (Feasibility, Completeness, Scope, Architecture,
+        Intent, Security, Testing-quality, Data-migration) as PARALLEL SUBAGENTS via the host's
+        subagent-spawn tool — "Invoking this artifact-review workflow is explicit authorization
+        to delegate those lenses" (SKILL.md); all lenses take the adversarial stance (v0.8.0);
      d. aggregates the lens findings + the deterministic-gate findings into the review output.
   3. Capture the real transcript + real token/time cost (incl. subagent overhead) — this is
-     what a user actually pays, not an idealized 5×API-call cost.
+     what a user actually pays, not an idealized 8×API-call cost.
 
 The scoring pipeline (extract -> judge -> score -> adjudicate) is identical regardless of how
 the reviewer arm ran, so A.1/A.3 calibration still holds. Only the reviewer-arm execution
@@ -42,78 +43,144 @@ from harnesseval.cli_backends import session_timeout
 MRV_BIN = Path(__file__).resolve().parents[2] / "bin" / "metareview"
 
 # The realistic orchestration prompt — instructs the host agent to run the real binary +
-# dispatch the 6 lenses as parallel subagents, exactly as the skill authorizes.
-REALISTIC_PROMPT = """You are running metareview's task-done review on a local change, as a user would.
+# dispatch the 8 lenses (adversarial stance, v0.8.0) as parallel subagents, exactly as the
+# skill authorizes. Mirrors rubrics/artifact-review-rubric.md + the per-lens rubric files.
+REALISTIC_PROMPT = """You are running metareview's task-done review (v0.8.0) on a local change, as a user would.
 
 Steps:
 1. Run this command and read its output (it writes a review scaffold + context pack):
    {mrv_bin} review task-done {task_path} --base {base_ref}
    The command prints the path to the generated review markdown; read that file.
 2. Read the review scaffold + context pack it generated.
-3. Per the metareview review-artifact skill, dispatch the 6 required reviewer lenses as
+3. Per the metareview review-artifact skill, dispatch the 8 required reviewer lenses as
    PARALLEL SUBAGENTS via your host's subagent-spawn tool — in Claude Code that is the `Agent`
    tool (one `Agent` call per lens, with run_in_background=true so they run concurrently; then
    collect each result); in Codex that is `collaboration.spawn_agent` (one spawn per lens) then
    `collaboration.wait_agent` to collect each result. Invoking this workflow is explicit
    authorization to delegate those lenses — do NOT run them in-session, and do NOT fall back to a
-   single in-session pass. The 6 lenses:
-   - Feasibility: verify paths/commands/dependencies against the diff reality; block on fabricated paths.
-   - Completeness: map change to intent; block on missing acceptance criteria/edge cases.
-   - Scope-and-Alignment: check for scope drift or unrelated expansion.
-   - Architecture: check boundaries, ownership, duplication, integration shape. ALSO check the
-     data model & data-structure design/efficiency: wrong structure for the operation (list for
-     membership where a set/map is O(1); nested loops -> O(n^2); repeated linear scans; unbounded
-     materialization with no LIMIT/streaming; N+1 queries in a loop); schema invariants (missing
-     FK/index/NOT NULL/UNIQUE/CHECK; lists in one column instead of a join table; polymorphic
-     entity_type/entity_id); scalability (hot paths that don't paginate or assume small N; new
-     types requiring a migration when a lookup table would be data-driven); redundancy (derivable
-     data stored with no invalidation; duplicated values across two tables; god-tables); query
-     efficiency (SELECT *, non-sargable predicates, queries in loops); type clarity (magic
-     strings or bare ints as discriminators like status=\"open\" or kind:1 scattered around instead
-     of a named enum/typed constant so a new variant is compile-checked; untyped dict/object
-     where a named typed struct would make the shape explicit; stringly-typed data a typed enum
-     would prevent drifting); and data-structure Big-O (list for membership/lookup where a
-     set/map is O(1); nested loops O(n^2); structure whose access pattern doesn't match the op).
-     ALSO run the principal-engineer pass: semantic correctness (does each constraint enforce
-     the REAL business invariant or a weaker/wrong one — under-scoped uniqueness like
-     UNIQUE(email) on a multi-tenant table that should be UNIQUE(org_id,email); a status field
-     conflating orthogonal facts so a legal combo is unrepresentable; a model that can
-     represent an illegal state the schema doesn't forbid, e.g. shipped_at AND cancelled_at both
-     set with no CHECK; soft-delete defeating uniqueness); data lifecycle & state transitions
-     (a state machine enforced only in one app method a second caller bypasses — UPDATE SET
-     status='active' with no WHERE status IN (...) guard; terminal states reachable again;
-     effective-dated rows with no exclusion constraint preventing overlap/gaps; soft-delete not
-     filtered in every read path; audit tables written out-of-transaction); concurrency at the
-     data layer (mutable shared records without optimistic-concurrency version/etag;
-     read-modify-write on a balance without FOR UPDATE or an atomic SET x=x-$1; check-then-insert
-     backed only by a SELECT (TOCTOU) not a unique index; money/quantity as float/REAL not
-     NUMERIC/Decimal; non-idempotent handlers with no idempotency key); coupling/evolvability (a
-     business rule baked into schema shape so the next change forces a migration, e.g. roles as
-     is_admin/is_editor booleans; an internal repr leaked into an API contract so a rename is a
-     public break; a destructive migration in one step with rolling deploy in flight); and
-     LLM-specific failure modes (be most suspicious where the code looks most idiomatic: a
-     cached/derived column *_count/*_total maintained by nothing — no trigger, no transactional
-     increment; indexes that don't match the queries IN THIS diff; typed data hidden in JSONB then
-     filtered/joined; an invented relationship plausible from training but absent in the domain;
-     docstrings describing behavior the code doesn't implement).
-   - Intent-Preservation: check the change drifts from the PR title/intent.
-   - Security: hunt for vulnerabilities the change introduces or fails to prevent — broken access
-     control/IDOR (unscoped user-supplied-id lookups), injection (SQL/NoSQL/command string
-     interpolation, exec/spawn with user input), hardcoded secrets/PII in logs, SSRF (server-side
-     fetch of unvalidated user URLs), XSS/unescaped user input to HTML/JS, weakened token
-     entropy/integrity, insecure deserialization, debug-mode/default-creds. Do not double-report
-     bare eval() (a deterministic gate covers that). Give file:line + the vulnerable code + the
-     failure mode. Use the metareview security-review-rubric.md (OWASP A01-A10, diff-scoped).
-   Give each subagent the diff context (run `git diff {base_ref}..HEAD`) + its lens focus.
-4. Collect each lens's findings (distinct issues, one per item, with file:line if identifiable).
-   In Codex, use `collaboration.wait_agent` for each spawned lens job until all 6 have returned.
+   single in-session pass.
+
+   ADVERSARIAL STANCE (applies to ALL 8 lenses): assume the creator's intent is GOOD but be
+   hostile to unexamined assumptions — assume there may be a fundamental mistake hiding in this
+   design and find it. Do NOT confirm the artifact is well-shaped. Each finding carries a
+   confidence anchor (100/75/50/25/0) + severity (P0-P3); SUPPRESS findings below confidence 50
+   unless they are P0. Cite file:line + the verbatim code + the failure mode for every finding.
+
+   The 8 lenses (each subagent gets the diff context — run `git diff {base_ref}..HEAD` — + its lens focus):
+   - Feasibility: attack the assumption that paths/commands/dependencies are correct against the
+     diff reality; block on fabricated paths, impossible ordering, missing tools, invalid commands.
+     Does NOT flag: requirements completeness (Completeness) or architecture soundness (Architecture).
+   - Completeness: attack the assumption the artifact covers every requirement; block on missing
+     acceptance criteria, missing verification, unhandled obvious edge cases. Does NOT flag:
+     feasibility (Feasibility), scope drift (Scope), architecture soundness (Architecture).
+   - Scope-and-Alignment: attack the assumption the artifact solves only the stated intent without
+     unrelated expansion; block on scope drift, under-scoping, work not traceable to requirements.
+     Does NOT flag: completeness (Completeness) or architecture soundness (Architecture).
+   - Architecture: attack the assumption that boundaries, ownership, data model, and integration
+     shape are correct; find the fundamental mistake hiding in the design. Hunt for: wrong data
+     structure for the operation (list for membership where set/map is O(1); nested loops -> O(n^2);
+     repeated linear scans); unbounded materialization (all rows in memory, no LIMIT/streaming on a
+     hot path); N+1 query patterns (query inside a loop over earlier results); missing schema
+     invariants (missing FK/index/NOT NULL/UNIQUE/CHECK; lists in one text/JSON column instead of a
+     join/child table; polymorphic entity_type/entity_id pairs that can't enforce a real FK);
+     scalability cliffs (hot paths that don't paginate or assume small N; new type/category
+     requiring a migration when a lookup table would be data-driven); type-clarity traps (magic
+     strings/bare ints as discriminators like status="open"/kind:1 scattered across the diff
+     instead of a named enum/typed constant; untyped dict/object where a named typed struct would
+     make the shape explicit; stringly-typed data a typed enum would prevent drifting); redundant
+     derived data (a derived column with no invalidation that can drift; duplicated values across
+     two tables; god-tables); query/write inefficiency (SELECT *; non-sargable predicates
+     DATE(col)/LOWER(col)/leading-wildcard LIKE '%x'; queries inside loops instead of batched IN/join);
+     semantic-correctness failures (does each constraint enforce the REAL business invariant or a
+     weaker/wrong one — under-scoped uniqueness UNIQUE(email) on a multi-tenant table that should
+     be UNIQUE(org_id,email); a status conflating orthogonal facts so a legal combo is
+     unrepresentable; a model that can represent an illegal state the schema doesn't forbid, e.g.
+     shipped_at AND cancelled_at both set with no CHECK; soft-delete defeating uniqueness); unguarded
+     state transitions (a state machine enforced only in one app method a second caller bypasses —
+     UPDATE SET status='active' with no WHERE status IN (...) guard; terminal states reachable
+     again; effective-dated rows with no exclusion constraint preventing overlap/gaps; soft-delete not
+     filtered in every read path; audit tables out-of-transaction); concurrency at the data layer
+     (mutable shared records without optimistic-concurrency version/etag; read-modify-write on a
+     balance without FOR UPDATE or atomic SET x=x-$1; check-then-insert backed only by SELECT (TOCTOU)
+     not a unique index; money/quantity as float/REAL not NUMERIC/Decimal; non-idempotent handlers
+     with no idempotency key); coupling/evolvability (a business rule baked into schema shape so the
+     next change forces a migration, e.g. roles as is_admin/is_editor booleans; an internal repr
+     leaked into an API contract so a rename is a public break); LLM-specific failure modes (be most
+     suspicious where the code looks most idiomatic: a cached/derived column *_count/*_total
+     maintained by nothing — no trigger, no increment; indexes that don't match the queries IN THIS
+     diff; typed data hidden in JSONB then filtered/joined; an invented relationship plausible from
+     training but absent in the domain; docstrings describing behavior the code doesn't implement);
+     SENTINEL-MEANING-CHANGE (a return value that changed meaning in this diff — null/empty/[] that
+     meant 'nothing here' now meaning 'not yet loaded' or 'error suppressed'; a status sentinel whose
+     semantics shifted so existing callers misbehave); CASCADING-FAILURE (trace failure propagation —
+     when one dependency fails does it degrade gracefully or cascade? a sync call chain with no
+     timeout/circuit-breaker/fallback; a queue consumer whose failure poisons the batch; a shared
+     resource whose exhaustion takes down all tenants); STAND-IN-GUARD-FIDELITY (a CI gate/check/test
+     that can go green while production is red — tests a proxy/mock instead of the real code path;
+     a check that passes because the prod-only branch is #ifdef/feature-flagged away; a 'green' build
+     that never exercised the changed code); API-CONTRACT-BREAKING-CHANGES (renamed/removed fields,
+     narrowed inputs, widened returns, missing versioning on breaking changes; a response shape
+     existing callers depend on but the diff silently changes; a field re-typed int->string with no
+     version bump). Does NOT flag: security (Security), test quality (Testing-quality), migration
+     safety (Data-migration).
+   - Intent-Preservation: attack the assumption the final artifact still matches the original intent;
+     block when review iterations changed the objective without explicit human acceptance. Does
+     NOT flag: feasibility/completeness/scope/architecture soundness.
+   - Security: hunt for vulnerabilities the change introduces or fails to prevent, across the OWASP
+     classes a diff-review can see. Hunt for IDOR/ownership scoping (DB lookups using a user-supplied
+     id without an ownership/org/tenant scope check); injection variants beyond SQL (command
+     injection exec/spawn with user input, NoSQL injection, deserialization injection of untrusted
+     pickle/yaml.load/unserialize, SQL string interpolation); SSRF protocol-bypass (server-side fetch
+     of unvalidated user URLs where a naive localhost string check is defeated by file://, gopher://,
+     127.0.0.1 in decimal/IPv6, or DNS rebinding); secrets in logs (PII/tokens/credentials written to
+     log output/error messages/telemetry — distinct from hardcoded secrets in code); hardcoded
+     secrets; XSS/unescaped user input to HTML/JS; weakened token entropy/integrity; insecure
+     design; auth/session failures; security misconfiguration (debug mode, default creds). Do not
+     double-report bare eval() (a deterministic gate covers that). Give file:line + the vulnerable
+     code + the failure mode. Does NOT flag: code style, architecture correctness (Architecture),
+     test quality (Testing-quality), migration safety (Data-migration).
+   - Testing-quality: attack the assumption the tests verify the behavior they claim to — tests can
+     lie. Diff-scoped: judge whether test changes in THIS diff verify the behavior changes in THIS
+     diff. Hunt for false-confidence assertions (toBeTruthy()/toBeDefined()/bare assert(x) that
+     assert nothing); behavioral-change-in-the-diff with ZERO test modifications (stale tests);
+     tests verifying mocks not real logic (asserts the mock was called but never the real return
+     value/side effect; a mock that replaces the unit under test); untested new branches/lifecycle
+     paths (new if/switch/error path/lifecycle hook with no test triggering it); sentinel-semantics
+     reuse in mocks (a mock returning null/[] that no longer matches the real code's new semantics);
+     mirror-tests-that-miss-the-machine (tests mirroring the implementation so closely they pass
+     even when both are wrong). Block on a behavioral change with no test modification, a
+     false-confidence assertion, or a test exercising only a mock. Missing-test ownership: the
+     deterministic missing-test gate owns the boolean 'source changed, test file unchanged';
+     Completeness owns missing verification when no test code is in the diff; THIS lens owns tests
+     that EXIST but don't cover the new behavior. Do not double-report eval()/missing-test issues the
+     deterministic gates catch. Does NOT flag: security (Security), architecture soundness
+     (Architecture), migration safety (Data-migration), or whether tests exist at all when no test
+     code is in the diff (Completeness).
+   - Data-migration: attack the assumption the migration is safe and reversible; find the failure
+     that loses data or can't be rolled back. Diff-scoped: judge whether migration changes in THIS
+     diff are safe against the review-base schema. Hunt for schema drift (migration schema vs the
+     code that reads it disagree); irreversible migrations (DROP COLUMN/TABLE/destructive ALTER
+     without backfill or rollback); missing backfills for new NOT NULL columns (no DEFAULT/backfill
+     -> deploy breaks mid-rollout); deploy-window breaks / expand+contract violations (a contract
+     change in one step breaking rolling deploys — column rename in the same PR, column dropped
+     before readers updated); dual-write gaps (should dual-write old+new but only writes one side);
+     orphaned refs (FK pointing at nonexistent rows, or FK dropped without cleanup); silent data
+     loss (drops/overwrites/truncates without backup; DELETE with broader WHERE than intended;
+     column repurposed same-name-new-meaning; ALTER COLUMN TYPE that narrows/truncates). Block on
+     irreversible migrations without rollback, missing backfills, expand+contract violations,
+     silent data loss, or orphaned refs. Does NOT flag: security (Security), test quality
+     (Testing-quality), architecture soundness beyond migration safety (Architecture — this lens
+     judges only whether the transition from old to new schema is safe and reversible).
+4. Collect each lens's findings (distinct issues, one per item, with file:line + the failure mode).
+   In Codex, use `collaboration.wait_agent` for each spawned lens job until all 8 have returned.
 5. Also include the deterministic-gate findings from the metareview scaffold (step 1).
-6. Return a consolidated list of ALL findings (deterministic gates + 6 lenses), one per line,
+6. Return a consolidated list of ALL findings (deterministic gates + 8 lenses), one per line,
    each prefixed with its source, e.g.:
    [deterministic/test-reviewer] Missing test changes or validation evidence
    [lens/architecture] src/foo.py:42 — boundary issue: ...
 
-The diff under review is {base_ref}..HEAD (the 'pr' commit). Be thorough but only report real issues."""
+The diff under review is {base_ref}..HEAD (the 'pr' commit). Be thorough but only report real
+issues you are confident about (confidence >= 50, or any P0)."""
 
 NAIVE_REALISTIC_PROMPT = """Review the code change in this repository (the diff is HEAD~1..HEAD).
 Run `git diff HEAD~1` to see it. List each distinct issue you find, one per line, with file:line.
