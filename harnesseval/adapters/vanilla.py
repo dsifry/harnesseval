@@ -62,8 +62,8 @@ def _truncate(diff: str, max_chars: int = 60000) -> str:
 
 
 async def _review_api(pr: PRSample, model: str, prompt_template: str, effort: str = "medium",
-                      execution_mode: str = "api") -> tuple[str, int, int]:
-    """Any-provider via model_router (api or cli OAuth). Returns (output_text, input_tokens, output_tokens)."""
+                      execution_mode: str = "api") -> tuple[str, int, int, dict]:
+    """Any-provider via model_router (api or cli OAuth). Returns (output_text, input_tokens, output_tokens, per_model_usage)."""
     from harnesseval.model_router import call_model
     prompt = prompt_template.format(pr_title=pr.pr_title, diff=_truncate(pr.diff))
     return await call_model(model, system="You are an expert code reviewer.",
@@ -87,7 +87,7 @@ async def review_async(pr: PRSample, model: str, effort: str, mode: str = "api",
     t0 = time.time()
     try:
         if mode in ("api", "cli"):
-            out, tin, tout = await _review_api(pr, model, tmpl, effort=effort, execution_mode=mode)
+            out, tin, tout, pmu = await _review_api(pr, model, tmpl, effort=effort, execution_mode=mode)
         else:
             raise ValueError(f"unknown mode: {mode}")
     except Exception as e:  # noqa: BLE001
@@ -96,12 +96,17 @@ async def review_async(pr: PRSample, model: str, effort: str, mode: str = "api",
                          error=str(e))
     from harnesseval.model_router import call_model_json
     from harnesseval.extract import EXTRACT_PROMPT, EXTRACT_SYSTEM
-    parsed, pi, po = await call_model_json(model, EXTRACT_SYSTEM, EXTRACT_PROMPT.format(comment=out),
+    from harnesseval.usage import merge
+    parsed, pi, po, pmu_ext = await call_model_json(model, EXTRACT_SYSTEM, EXTRACT_PROMPT.format(comment=out),
                                            effort=effort, max_tokens=1024, execution_mode=mode)
     findings = [Finding(issue_text=i, source=name, raw=out[:500]) for i in parsed.get("issues", []) if i]
+    per_model = merge(dict(pmu), pmu_ext)
+    from harnesseval.usage import grand_total
+    gt = grand_total(per_model)
     return ReviewRun(framework=name, model=model, effort=effort, execution_mode=mode,
                      raw_output=out, findings=findings, tokens_in=tin + pi, tokens_out=tout + po,
-                     wall_ms=(time.time() - t0) * 1000)
+                     wall_ms=(time.time() - t0) * 1000, per_model_usage=per_model,
+                     total_cost_usd=gt["total_cost_usd"])
 
 
 def review(pr: PRSample, model: str, effort: str, mode: str = "api",

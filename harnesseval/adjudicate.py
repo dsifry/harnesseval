@@ -85,13 +85,16 @@ async def reclassify_async(scored: dict, candidates: list[str], diff: str, model
     if not fps:
         return {**scored, "real_but_ungold": [], "hallucination": [], "adjudicated_precision": scored["precision"],
                 "incremental_recall": scored["recall"]}
-    # adjudicate via the router (cross-family judge)
+    # adjudicate via the router (cross-family judge). max_tokens MUST be large enough that
+    # reasoning models (gpt-5.2 with reasoning_effort) can emit reasoning tokens AND still have
+    # room for the JSON content — at 256 the reasoning eats the whole budget -> empty content
+    # -> parse error -> everything mis-ruled hallucination (the H4 "all-hallucination" red flag).
     sem = asyncio.Semaphore(15)
     async def adj(c):
         async with sem:
             from harnesseval.adjudicate import ADJUDICATE_PROMPT, ADJUDICATE_SYSTEM
-            parsed, _, _ = await call_model_json(model, ADJUDICATE_SYSTEM,
-                ADJUDICATE_PROMPT.format(diff=diff[:30000], candidate=c), effort="medium", max_tokens=256)
+            parsed, _, _, _ = await call_model_json(model, ADJUDICATE_SYSTEM,
+                ADJUDICATE_PROMPT.format(diff=diff[:30000], candidate=c), effort="medium", max_tokens=1024)
             from harnesseval.judge import JudgeResult
             if not parsed:
                 return JudgeResult(False, 0.0, "", "", error="parse")

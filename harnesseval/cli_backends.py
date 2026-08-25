@@ -34,8 +34,51 @@ def _parse_codex_effort(effort: str) -> str:
     return {"low": "low", "medium": "medium", "xhigh": "xhigh"}.get(effort, "medium")
 
 
+def session_timeout(effort: str, base: int = 900) -> int:
+    """Scale a host-session subprocess timeout by effort.
+
+    Realistic adapters drive multi-turn agent sessions with subagent fanout (one subagent per
+    lens/persona + synthesis). xhigh reasoning makes each turn much slower than medium, so a
+    fixed 900s ceiling kills xhigh cells (the stopped matrix's codex xhigh timed out at 300s;
+    opus xhigh took 514s). xhigh gets 2x the base; low/medium keep the base. Callers pass the
+    result as the `timeout=` to their `_run_claude_session`/`_run_codex_session` subprocess call.
+    """
+    return base * 2 if effort == "xhigh" else base
+
+
+def is_transient_claude_error(returncode: int, stdout: str, stderr: str) -> bool:
+    """Detect a transient Claude API error surfaced by `claude -p`.
+
+    `claude -p` handles transient API errors (529 Overloaded, 500, rate limits) inconsistently:
+    sometimes it exits non-zero with the error in stderr; sometimes it exits 0 but writes the
+    error as the `result` string (e.g. result="API Error: 529 Overloaded. This is a server-side
+    issue..."). The latter is the silent failure mode: the adapter sees returncode 0, treats the
+    error string as the review output, and extracts 0 findings — so a transient overload looks
+    like a 0-recall cell. xhigh cells are more exposed (longer sessions, more reasoning, wider
+    overload window). Both modes are transient (a retry usually succeeds), so callers should
+    retry the session when this returns True. NOT a timeout, NOT a token overflow, NOT the
+    adapter logic.
+    """
+    if returncode != 0:
+        # non-zero exit: overload/rate-limit if stderr mentions it; anything else is a real bug
+        s = (stderr or "").lower()
+        return any(k in s for k in ("overload", "529", "rate", "503", "server-side", "temporarily"))
+    # returncode 0 but the result string IS an API error (the silent mode). claude -p puts it
+    # in the JSON "result" field; check both the raw stdout (cheap) and a parsed result.
+    r = (stdout or "").strip()
+    if not r:
+        return False
+    if r.startswith("API Error: 5"):
+        return True
+    try:
+        result = json.loads(r).get("result", "")
+        return isinstance(result, str) and result.strip().startswith("API Error: 5")
+    except Exception:
+        return False
+
+
 async def _claude_cli(model_alias: str, effort: str, prompt: str, system: str | None = None,
-                     max_turns: int = 1, timeout: int = 300) -> tuple[str, dict, str]:
+                     max_turns: int = 1, timeout: int = 900) -> tuple[str, dict, str]:
     """Run a review via `claude -p` OAuth. Returns (text, usage_dict, resolved_model).
 
     usage_dict has the FULL token accounting: input_tokens + cache_creation_input_tokens +
@@ -63,7 +106,7 @@ async def _claude_cli(model_alias: str, effort: str, prompt: str, system: str | 
 
 
 async def _codex_cli(model_slug: str, effort: str, prompt: str, system: str | None = None,
-                    timeout: int = 300) -> tuple[str, dict, str]:
+                    timeout: int = 900) -> tuple[str, dict, str]:
     """Run a review via `codex exec` OAuth. Returns (text, usage_dict, resolved_model).
     usage_dict: input_tokens + cached_input_tokens + output_tokens + reasoning_output_tokens.
     """

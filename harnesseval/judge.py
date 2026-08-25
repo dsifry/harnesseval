@@ -104,7 +104,7 @@ async def judge_match_router(model: str, golden_comment: str, candidate: str, ef
     the call mechanics, default medium = no extended thinking."""
     from harnesseval.model_router import call_model_json
     prompt = JUDGE_PROMPT.format(golden_comment=golden_comment, candidate=candidate)
-    parsed, tin, tout = await call_model_json(model, JUDGE_SYSTEM, prompt, effort=effort, max_tokens=256)
+    parsed, tin, tout, _ = await call_model_json(model, JUDGE_SYSTEM, prompt, effort=effort, max_tokens=256)
     if not parsed:
         return JudgeResult(False, 0.0, "", "", error="json parse failed")
     return JudgeResult(match=bool(parsed.get("match", False)),

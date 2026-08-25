@@ -59,6 +59,74 @@ def _decompose(scored, findings) -> dict:
             "llm_lens_recall": lens_tp / total_golden if total_golden else 0.0}
 
 
+def _diff_context_hash(diff: str) -> str:
+    """SHA1 of the diff context the adjudicator saw (diff[:30000], matching adjudicate.py).
+    Re-adjudication can verify it's re-judging the same context."""
+    import hashlib
+    return hashlib.sha1(diff[:30000].encode("utf-8", "replace")).hexdigest()
+
+
+def _build_finding_records(run, scored, adjudicated, judge_model: str, diff: str) -> dict:
+    """Per-finding adjudication records + per-golden match decisions (docs/METAREVIEW_IMPROVEMENTS.md
+    Cross-cutting data needs #1-3). Lets stored findings be re-adjudicated later with a frontier
+    panel WITHOUT re-running the framework: each finding carries its source-lens, matched-golden,
+    primary-judge verdict, and adjudication verdict/confidence/rationale + the diff-context hash.
+    """
+    # candidate -> matched golden(s) + primary-judge confidence/reasoning (from the greedy match)
+    cand_to_goldens: dict[str, list[dict]] = {}
+    for tp in scored.get("true_positives", []):
+        c = tp.get("matched_candidate")
+        if c is None:
+            continue
+        cand_to_goldens.setdefault(c, []).append(
+            {"golden_comment": tp.get("golden_comment"), "confidence": tp.get("confidence"),
+             "reasoning": tp.get("reasoning")})
+    # candidate -> adjudication verdict record
+    ru_map = {r["candidate"]: r for r in adjudicated.get("real_but_ungold", [])}
+    hal_map = {r["candidate"]: r for r in adjudicated.get("hallucination", [])}
+    dch = _diff_context_hash(diff)
+    records = []
+    for f in run.findings:
+        issue = f.issue_text
+        matched = cand_to_goldens.get(issue)
+        if matched:
+            verdict = "matched"; adj = {"adjudicating_judge": None, "confidence": None, "rationale": None}
+            matched_goldens = [m["golden_comment"] for m in matched]
+            primary_conf = max((m["confidence"] for m in matched), default=None)
+            primary_reason = next((m["reasoning"] for m in matched if m["reasoning"]), None)
+        elif issue in ru_map:
+            r = ru_map[issue]
+            verdict = "real_but_ungold"
+            adj = {"adjudicating_judge": judge_model, "confidence": r.get("confidence"),
+                   "rationale": r.get("reasoning")}
+            matched_goldens = None
+            primary_conf = primary_reason = None
+        elif issue in hal_map:
+            r = hal_map[issue]
+            verdict = "hallucination"
+            adj = {"adjudicating_judge": judge_model, "confidence": r.get("confidence"),
+                   "rationale": r.get("reasoning")}
+            matched_goldens = None
+            primary_conf = primary_reason = None
+        else:
+            verdict = "unjudged"  # shouldn't happen; every candidate is matched/ru/hal
+            adj = {"adjudicating_judge": None, "confidence": None, "rationale": None}
+            matched_goldens = None
+            primary_conf = primary_reason = None
+        records.append({
+            "issue_text": issue, "source_lens": f.source, "file": f.file, "line": f.line,
+            "severity": f.severity, "category": f.category,
+            "matched_golden_ids": matched_goldens, "primary_judge_verdict": verdict,
+            "primary_judge": judge_model if matched else None,
+            "primary_judge_confidence": primary_conf, "primary_judge_reasoning": primary_reason,
+            "adjudication": {"verdict": verdict, **adj, "diff_context_hash": dch},
+        })
+    per_golden_matches = list(scored.get("true_positives", [])) + list(scored.get("false_negatives", []))
+    return {"adjudication_records": records, "per_golden_matches": per_golden_matches,
+            "diff_context_hash": dch, "primary_judge": judge_model,
+            "adjudicating_judge": judge_model}
+
+
 def _run_cell(pr, framework, model, effort, judge_model) -> dict:
     """One cell, run in its own event loop (adapters + judge are async internally)."""
     return asyncio.run(_run_cell_async(pr, framework, model, effort, judge_model))
@@ -67,6 +135,8 @@ def _run_cell(pr, framework, model, effort, judge_model) -> dict:
 async def _run_cell_async(pr, framework, model, effort, judge_model, mode: str = "api") -> dict:
     from harnesseval.adapters import vanilla, metareview as mrv
     from harnesseval.adapters import metareview_realistic as mr
+    from harnesseval.adapters import superpowers as sp, superpowers_realistic as spr
+    from harnesseval.adapters import compound as cp, compound_realistic as cpr
     if framework == "vanilla-engineered":
         run = await vanilla.review_async(pr, model=model, effort=effort, mode=mode, variant="engineered")
     elif framework == "vanilla-naive":
@@ -75,6 +145,14 @@ async def _run_cell_async(pr, framework, model, effort, judge_model, mode: str =
         run = await mrv.review_async(pr, model=model, effort=effort, mode=mode)
     elif framework == "metareview-realistic":
         run = await mr.review_realistic_async(pr, model=model, effort=effort)
+    elif framework == "superpowers":
+        run = await sp.review_async(pr, model=model, effort=effort, mode=mode)
+    elif framework == "superpowers-realistic":
+        run = await spr.review_realistic_async(pr, model=model, effort=effort)
+    elif framework == "compound":
+        run = await cp.review_async(pr, model=model, effort=effort, mode=mode)
+    elif framework == "compound-realistic":
+        run = await cpr.review_realistic_async(pr, model=model, effort=effort)
     else:
         raise ValueError(framework)
     if run.error:
@@ -85,12 +163,19 @@ async def _run_cell_async(pr, framework, model, effort, judge_model, mode: str =
         return {"tp": 0, "fp": 0, "fn": len(goldens), "precision": 0, "recall": 0,
                 "tokens_in": run.tokens_in, "tokens_out": run.tokens_out, "n_findings": len(run.findings),
                 "adjudicated_precision": 0.0, "incremental_recall": 0.0,
-                "n_real_ungold": 0, "n_hallucination": 0, "decomposition": {}}
+                "n_real_ungold": 0, "n_hallucination": 0, "decomposition": {},
+                "findings": [{"issue_text": f.issue_text, "source_lens": f.source} for f in run.findings],
+                "goldens": [{"comment": g["comment"], "severity": g.get("severity"),
+                             "category": g.get("category")} for g in goldens],
+                "per_golden_matches": [], "adjudication_records": [],
+                "diff_context_hash": _diff_context_hash(pr.diff),
+                "primary_judge": judge_model, "adjudicating_judge": judge_model}
     pairs = [(g["comment"], c) for g in goldens for c in cand_texts]
     results = await judge_pairs_router(judge_model, pairs, concurrency=15)
     scored = score_from_matches(goldens, cand_texts, results)
     adjudicated = await reclassify_async(scored, cand_texts, pr.diff, model=judge_model)
     decomp = _decompose(adjudicated, run.findings)
+    fr = _build_finding_records(run, scored, adjudicated, judge_model, pr.diff)
     return {"tp": scored["tp"], "fp": scored["fp"], "fn": scored["fn"],
             "precision": scored["precision"], "recall": scored["recall"],
             "n_findings": len(run.findings), "n_golden": len(goldens),
@@ -101,18 +186,35 @@ async def _run_cell_async(pr, framework, model, effort, judge_model, mode: str =
             "incremental_recall": adjudicated.get("incremental_recall", 0.0),
             "n_real_ungold": len(adjudicated.get("real_but_ungold", [])),
             "n_hallucination": len(adjudicated.get("hallucination", [])),
-            "decomposition": decomp}
+            "decomposition": decomp,
+            # Per-finding adjudication records + per-golden match decisions + goldens, so stored
+            # findings can be re-adjudicated with a frontier panel (opus-5/gpt-5.6-sol/Fable)
+            # WITHOUT re-running the framework (docs/METAREVIEW_IMPROVEMENTS.md Cross-cutting #1-3).
+            "findings": [{"issue_text": f.issue_text, "source_lens": f.source,
+                          "file": f.file, "line": f.line, "severity": f.severity,
+                          "category": f.category} for f in run.findings],
+            "goldens": [{"comment": g["comment"], "severity": g.get("severity"),
+                         "category": g.get("category")} for g in goldens],
+            "per_golden_matches": fr["per_golden_matches"],
+            "adjudication_records": fr["adjudication_records"],
+            "diff_context_hash": fr["diff_context_hash"],
+            "primary_judge": fr["primary_judge"], "adjudicating_judge": fr["adjudicating_judge"]}
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--prs", type=int, default=6)
-    ap.add_argument("--models", default="claude-opus-4-5-20251101,claude-sonnet-4-5-20250929,gpt-5.2,glm-5.2-vision-flex,kimi-k3")
+    ap.add_argument("--models", default="claude-opus-5,gpt-5.6-sol,glm-5.2-vision-flex")
+    # NOTE: models-UNDER-TEST are the NEWER set (SPEC §14.1): opus-5, codex 5.6-sol, glm. The OLD
+    # trio (opus-4.5, sonnet-4.5, gpt-5.2) are JUDGE-only (calibrated, SPEC §9) - pass them via
+    # --models only if deliberately re-running an anchor; primary_judge() routes them as judges.
     ap.add_argument("--efforts", default="low,xhigh")
     ap.add_argument("--frameworks", default="vanilla-engineered,metareview")
     ap.add_argument("--mode", default="api", choices=["api", "cli"], help="reviewer execution mode (cli=OAuth realistic)")
     ap.add_argument("--concurrency", type=int, default=4, help="max concurrent cells (cli: keep 3-4 to avoid rate limits)")
     ap.add_argument("--out", default="results/phase_b_model_matrix.json")
+    ap.add_argument("--run-batch", default=None, help="reuse an existing run_batch id (for fill-ins of errored cells); default generates a new one")
+    ap.add_argument("--fill", default=None, help="comma-sep list of fw/model/effort[/url-suffix] to run ONLY those cells (fill-in mode); adding the url-suffix (a substring of the PR url) targets one specific PR. e.g. compound-realistic/claude-opus-5/xhigh/11059")
     args = ap.parse_args()
 
     import glob
@@ -133,14 +235,39 @@ def main():
     samples = {u: _pr_sample(u) for u in urls}
     # Build all cells, then run with bounded concurrency (parallel OAuth CLI sessions).
     cells = []
+    fill = set()
+    if args.fill:
+        # each spec: fw/model/effort OR fw/model/effort/url-suffix (the url-suffix is a substring of the PR url)
+        for x in args.fill.split(","):
+            parts = x.split("/", 3)
+            fill.add(tuple(parts))  # (fw, model, effort) or (fw, model, effort, url-suffix)
     for url in urls:
         pr = samples[url]
         for model in models:
             judge = primary_judge(model)
             for effort in efforts:
                 for fw in frameworks:
+                    if fill:
+                        matched = False
+                        pr_num = url.rstrip("/").rsplit("/", 1)[-1]
+                        for spec in fill:
+                            if len(spec) == 3 and (fw, model, effort) == spec:
+                                matched = True; break
+                            if len(spec) == 4 and (fw, model, effort) == spec[:3] and spec[3] == pr_num:
+                                matched = True; break
+                        if not matched:
+                            continue
                     cells.append((pr, fw, model, effort, judge))
     print(f"[mx] running {len(cells)} cells with concurrency={args.concurrency} (mode={args.mode})")
+
+    # one batch id for this whole matrix run — every cell registers with it so the run is
+    # cleanly queryable later (runs.query(run_batch=...)) and failed cells can be targeted for rerun.
+    import time as _t
+    if args.run_batch:
+        batch_id = args.run_batch
+    else:
+        batch_id = _t.strftime("%Y%m%d-%H%M%S", _t.gmtime()) + f"-{args.mode}-{len(cells)}cells"
+    print(f"[mx] run_batch={batch_id}")
 
     async def run_all():
         sem = asyncio.Semaphore(args.concurrency)
@@ -165,6 +292,7 @@ def main():
                 res["url"] = pr.url; res["framework"] = fw; res["model"] = model
                 res["effort"] = effort; res["judge"] = judge; res["wall_s"] = dt
                 res.setdefault("execution_mode", args.mode)
+                res["run_batch"] = batch_id
                 # register
                 register(phase="B", model=model, framework=fw, effort=effort, run_n=0,
                          status="pass" if res.get("tp") is not None else "fail",
@@ -175,7 +303,7 @@ def main():
                                   "n_real_ungold": res.get("n_real_ungold",0),
                                   "n_hallucination": res.get("n_hallucination",0)},
                          tokens_in=res.get("tokens_in",0), tokens_out=res.get("tokens_out",0),
-                         wall_s=dt, summary=res)
+                         wall_s=dt, summary=res, run_batch=batch_id)
                 results[i] = res
         await asyncio.gather(*[run_one(i, *c) for i, c in enumerate(cells)])
         return [r for r in results if r]

@@ -41,11 +41,22 @@ def _fetch_file_content(org: str, repo: str, path: str, ref: str) -> bytes:
 
 
 def materialize(url: str, *, force: bool = False) -> Path:
-    """Materialize a PR into a throwaway git repo with base + pr commits. Returns repo path. Cached."""
+    """Materialize a PR into a throwaway git repo with base + pr commits. Returns repo path. Cached.
+
+    The repo is left in a CLEAN state with HEAD at the `pr` commit (tagged `mrv-pr`):
+    [base][pr] <- HEAD. Callers (the metareview adapters) add a `task` commit on top so
+    `HEAD~2` == base and `HEAD~1` == pr. Because callers mutate the cached repo (add a task
+    commit; metareview writes generated files), this function is IDEMPOTOTENT: on cache hit it
+    resets hard to `mrv-pr` and cleans untracked files, so every call returns the same clean
+    [base][pr] state and the `HEAD~2` base-ref contract always holds (gotcha: without this,
+    commits accumulate across runs and `HEAD~2` drifts onto a task/generated commit, so the
+    lenses review generated files instead of the real PR code).
+    """
     REPO_CACHE.mkdir(parents=True, exist_ok=True)
     h = hashlib.sha1(url.encode()).hexdigest()[:16]
     repo_dir = REPO_CACHE / h
     if repo_dir.exists() and not force:
+        _reset_clean(repo_dir)
         return repo_dir
 
     if repo_dir.exists():
@@ -90,4 +101,22 @@ def materialize(url: str, *, force: bool = False) -> Path:
             # file deleted in head
             if fp.exists(): fp.unlink()
     git("add", "-A"); git("commit", "--quiet", "--allow-empty", "-m", "pr")
+    git("tag", "-f", "mrv-pr")  # mark the clean pr commit so cache hits can reset back to it
     return repo_dir
+
+
+def _reset_clean(repo_dir: Path) -> None:
+    """Restore a cached repo to the clean [base][pr] state (HEAD at mrv-pr), discarding any
+    task/generated commits + untracked files a prior run left behind."""
+    env = {**os.environ, "GIT_AUTHOR_NAME": "x", "GIT_AUTHOR_EMAIL": "x@x",
+           "GIT_COMMITTER_NAME": "x", "GIT_COMMITTER_EMAIL": "x@x"}
+    # if the tag is missing (old cache), force a rebuild by removing the repo
+    rt = subprocess.run(["git", "-C", str(repo_dir), "rev-parse", "--verify", "mrv-pr"],
+                        capture_output=True, text=True, env=env)
+    if rt.returncode != 0:
+        shutil.rmtree(repo_dir)
+        return
+    subprocess.run(["git", "-C", str(repo_dir), "reset", "--hard", "mrv-pr"],
+                   check=True, env=env, capture_output=True, text=True)
+    subprocess.run(["git", "-C", str(repo_dir), "clean", "-fdx"],
+                   check=False, env=env, capture_output=True, text=True)

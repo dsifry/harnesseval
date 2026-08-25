@@ -1,13 +1,13 @@
-"""metareview adapter — real bin/metareview deterministic gates + 5 LLM lenses (API).
+"""metareview adapter — real bin/metareview deterministic gates + 6 LLM lenses (API).
 
 The structurally interesting adapter (docs/SPEC.md §2, §6.3):
   1. DETERMINISTIC GATES (free, model-independent, zero tokens): run the real
      `bin/metareview review task-done` on a materialized throwaway git repo. Gates:
      eval-injection, TODO/FIXME, missing-test-changes, duplicate-path, truncated-diff,
      context-risk. These fire identically across the whole (model x effort) matrix.
-  2. LLM LENSES (paid, model-dependent): the 5 required artifact-review lenses run
+  2. LLM LENSES (paid, model-dependent): the 6 required artifact-review lenses run
      API-direct — Feasibility, Completeness, Scope&Alignment, Architecture, Intent
-     Preservation (per skills/review-artifact/SKILL.md + rubrics/artifact-review-rubric.md).
+     Preservation, Security (per skills/review-artifact/SKILL.md + rubrics/artifact-review-rubric.md).
   Combined findings -> extract.py -> judge vs golden. Score decomposes into
   deterministic_gate_recall + llm_lens_recall (SPEC §6.3).
 """
@@ -28,14 +28,18 @@ from harnesseval.finding import Finding
 
 MRV_BIN = Path(__file__).resolve().parents[2] / "bin" / "metareview"
 
-# The 5 required artifact-review lenses (skills/review-artifact/SKILL.md) — each is a focused
-# reviewer prompt; we run them API-direct and aggregate findings.
+# The 6 required artifact-review lenses (skills/review-artifact/SKILL.md +
+# rubrics/artifact-review-rubric.md + rubrics/security-review-rubric.md) — each is a focused
+# reviewer prompt; we run them API-direct and aggregate findings. The Security lens is the H1
+# addition (docs/METAREVIEW_IMPROVEMENTS.md): metareview's first 5 lenses were all artifact-shape
+# checks with no vulnerability coverage, so it under-recalled on security goldens vs vanilla.
 LENS_PROMPTS = {
     "feasibility": "You are a Feasibility reviewer. Given the PR diff below, verify paths, commands, dependencies, and stated changes against the diff reality. Block on fabricated paths, impossible ordering, or invalid commands. List each distinct issue found, one per item.",
     "completeness": "You are a Completeness reviewer. Given the PR diff below, map the change to its stated intent and check for missing acceptance criteria, missing verification, or unhandled obvious edge cases. List each distinct issue found, one per item.",
     "scope": "You are a Scope-and-Alignment reviewer. Given the PR diff below, check whether it solves its stated intent without unrelated expansion, scope drift, or under-scoping. List each distinct issue found, one per item.",
-    "architecture": "You are an Architecture reviewer. Given the PR diff below, check boundaries, ownership, duplication risk, and integration shape. List each distinct issue found, one per item.",
+    "architecture": "You are an Architecture reviewer. Given the PR diff below, check boundaries, ownership, duplication risk, and integration shape. ALSO check the data model and data-structure design and efficiency: wrong structure for the operation (list for membership where a set/map gives O(1); nested loops over the same collection -> O(n^2); repeated linear scans; unbounded materialization loading all rows with no LIMIT/streaming; N+1 query patterns inside a loop); schema invariants (missing FK/index/NOT NULL/UNIQUE/CHECK; lists in one text/JSON column instead of a join table; polymorphic entity_type/entity_id pairs that can't enforce a real FK); scalability (hot paths that don't paginate or assume small N; hardcoded limits masking unbounded queries; adding a type/category requiring a migration when a lookup table would be data-driven); redundancy (derivable data stored as a column with no invalidation that can drift; a value duplicated across two tables with no single source of truth; god-tables mixing concerns); query/write efficiency (SELECT * when few columns read; non-sargable predicates like DATE(col)/LOWER(col)/leading-wildcard LIKE '%x'; queries inside loops instead of a batched IN/join); type clarity (magic strings or bare ints used as discriminators like status=\"open\" or kind:1 scattered across the diff instead of a named enum/typed constant so adding a variant is compile-checked; untyped dict/object containers where a named typed struct would make the shape explicit; stringly-typed data a typed enum would prevent drifting); and data-structure Big-O (a list for membership/lookup where a set/map is O(1); nested loops O(n^2); a structure whose access pattern doesn't match the operation). ALSO run the principal-engineer pass: semantic correctness (does each constraint enforce the REAL business invariant or a weaker/wrong one — under-scoped uniqueness like UNIQUE(email) on a multi-tenant table that should be UNIQUE(org_id,email); a status field conflating orthogonal facts so a legal combo is unrepresentable; a model that can represent an illegal state the schema doesn't forbid, e.g. shipped_at AND cancelled_at both set with no CHECK; soft-delete defeating uniqueness); data lifecycle & state transitions (a state machine enforced only in one app method a second caller bypasses — an UPDATE SET status='active' with no WHERE status IN (...) guard; terminal states reachable again; effective-dated rows with no exclusion constraint preventing overlap/gaps; soft-delete not filtered in every read path; audit tables written out-of-transaction); concurrency at the data layer (mutable shared records without optimistic-concurrency version/etag; read-modify-write on a balance without FOR UPDATE or an atomic SET x=x-$1; check-then-insert backed only by a SELECT (TOCTOU) not a unique index; money/quantity as float/REAL not NUMERIC/Decimal; non-idempotent handlers with no idempotency key); coupling/evolvability (a business rule baked into schema shape so the next change forces a migration, e.g. roles as is_admin/is_editor booleans; an internal repr leaked into an API contract so a rename is a public break; a destructive migration in one step with rolling deploy in flight); and LLM-specific failure modes (be most suspicious where the code looks most idiomatic: a cached/derived column *_count/*_total maintained by nothing — no trigger, no transactional increment; indexes that don't match the queries IN THIS diff; typed data hidden in JSONB then filtered/joined; an invented relationship plausible from training but absent in the domain; docstrings describing behavior the code doesn't implement). List each distinct issue found, one per item, with file:line.",
     "intent": "You are an Intent-Preservation reviewer. Given the PR diff below, compare the change direction against the PR title/intent and check whether it drifts from the stated goal. List each distinct issue found, one per item.",
+    "security": "You are a Security reviewer. Given the PR diff below, hunt for security vulnerabilities the change introduces or fails to prevent, across the OWASP classes a diff-review can see: broken access control / IDOR (user-supplied-id lookups without ownership/org/tenant scope), injection (SQL/NoSQL/command — string interpolation into queries, exec/spawn with user input), cryptographic failures / hardcoded secrets / PII in logs, SSRF (server-side fetch of unvalidated user URLs), XSS / unescaped user input to HTML/JS output, insecure design (trust-the-client authz), auth/session failures (weakened token entropy/integrity, removed expiry), deserialization of untrusted input, security misconfiguration (debug mode, default creds). For each issue give file:line, the vulnerable code, and the failure mode (what an attacker gains / what breaks). Only report issues you are confident are real vulnerabilities in THIS diff, not generic hardening advice. Do not double-report bare eval() injection (a deterministic gate covers that). List each distinct issue found, one per item.",
 }
 
 LENS_HEADER = "PR: {pr_title}\n\n```diff\n{diff}\n```\n\nList each distinct real issue you find (one per item, with file:line if identifiable). Only report issues you are confident about."
@@ -97,7 +101,7 @@ def _extract_verdict(md: str) -> str:
 
 # ---- LLM lenses (API-direct) ----
 
-async def _run_lens(model: str, lens: str, prompt_body: str, effort: str = "medium") -> tuple[str, int, int]:
+async def _run_lens(model: str, lens: str, prompt_body: str, effort: str = "medium") -> tuple[str, int, int, dict]:
     prompt = f"{LENS_PROMPTS[lens]}\n\n{prompt_body}"
     from harnesseval.model_router import call_model
     max_tok = 4096 if effort == "xhigh" else 2048
@@ -105,7 +109,8 @@ async def _run_lens(model: str, lens: str, prompt_body: str, effort: str = "medi
                             user=prompt, effort=effort, max_tokens=max_tok)
 
 
-async def _run_all_lenses(model: str, pr: PRSample, effort: str = "medium") -> tuple[list[Finding], int, int, list[str]]:
+async def _run_all_lenses(model: str, pr: PRSample, effort: str = "medium") -> tuple[list[Finding], int, int, list[str], dict]:
+    from harnesseval.usage import merge
     body = LENS_HEADER.format(pr_title=pr.pr_title, diff=_truncate(pr.diff))
     sem = asyncio.Semaphore(5)
     async def bounded(l):
@@ -115,22 +120,24 @@ async def _run_all_lenses(model: str, pr: PRSample, effort: str = "medium") -> t
     findings: list[Finding] = []
     tin = tout = 0
     raws: list[str] = []
+    per_model: dict = {}
     from harnesseval.model_router import call_model_json
     from harnesseval.extract import EXTRACT_PROMPT, EXTRACT_SYSTEM
-    for (lens, (text, i, o)) in zip(LENS_PROMPTS.keys(), results):
+    for (lens, (text, i, o, pmu)) in zip(LENS_PROMPTS.keys(), results):
         tin += i; tout += o; raws.append(f"## {lens}\n{text}")
-        parsed, pi, po = await call_model_json(model, EXTRACT_SYSTEM, EXTRACT_PROMPT.format(comment=text),
+        per_model = merge(per_model, pmu)
+        parsed, pi, po, pmu_ext = await call_model_json(model, EXTRACT_SYSTEM, EXTRACT_PROMPT.format(comment=text),
                                                effort=effort, max_tokens=1024)
-        tin += pi; tout += po
+        tin += pi; tout += po; per_model = merge(per_model, pmu_ext)
         for issue in parsed.get("issues", []):
             findings.append(Finding(issue_text=issue, source=f"metareview-lens/{lens}", raw=text[:500]))
-    return findings, tin, tout, raws
+    return findings, tin, tout, raws, per_model
 
 
 # ---- combined review ----
 
 async def review_async(pr: PRSample, model: str, effort: str = "medium", mode: str = "api") -> ReviewRun:
-    """Async core — safe inside a running event loop. Combine deterministic gates + 5 LLM lenses."""
+    """Async core — safe inside a running event loop. Combine deterministic gates + 6 LLM lenses."""
     t0 = time.time()
     name = "metareview"
     try:
@@ -139,16 +146,19 @@ async def review_async(pr: PRSample, model: str, effort: str = "medium", mode: s
         return ReviewRun(framework=name, model=model, effort=effort, execution_mode=mode,
                          raw_output="", wall_ms=(time.time() - t0) * 1000, error=f"deterministic: {e}")
     try:
-        lens_findings, tin, tout, lens_raws = await _run_all_lenses(model, pr, effort=effort)
+        lens_findings, tin, tout, lens_raws, per_model = await _run_all_lenses(model, pr, effort=effort)
     except Exception as e:  # noqa: BLE001
         return ReviewRun(framework=name, model=model, effort=effort, execution_mode=mode,
                          raw_output=det_md, findings=det_findings, wall_ms=(time.time() - t0) * 1000,
                          error=f"lenses: {e}")
     all_findings = det_findings + lens_findings
     raw = f"# Deterministic gates (bin/metareview)\n{det_md}\n\n# LLM lenses ({model})\n" + "\n\n".join(lens_raws)
+    from harnesseval.usage import grand_total
+    gt = grand_total(per_model)
     return ReviewRun(framework=name, model=model, effort=effort, execution_mode=mode,
                      raw_output=raw, findings=all_findings, tokens_in=tin, tokens_out=tout,
-                     wall_ms=(time.time() - t0) * 1000)
+                     wall_ms=(time.time() - t0) * 1000, per_model_usage=per_model,
+                     total_cost_usd=gt["total_cost_usd"])
 
 
 def review(pr: PRSample, model: str, effort: str = "medium", mode: str = "api") -> ReviewRun:

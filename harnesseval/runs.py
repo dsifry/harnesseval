@@ -52,6 +52,7 @@ class RunManifest:
     inspect_log: str           # path/symlink target to the full-evidence .eval log ("" if none)
     summary_path: str         # path to our aggregate summary.json ("" if none)
     registered_at: str         # ISO timestamp
+    run_batch: str = ""        # groups all cells of one matrix run (timestamp slug); query/compare a whole run, rerun its failed cells
 
 
 def _run_id(phase: str, model: str, framework: str, effort: str, run_n: int) -> str:
@@ -62,7 +63,8 @@ def _run_id(phase: str, model: str, framework: str, effort: str, run_n: int) -> 
 def register(phase: str, model: str, framework: str, effort: str, run_n: int,
              status: str, metrics: dict, *, cost_usd: float = 0.0,
              tokens_in: int = 0, tokens_out: int = 0, wall_s: float = 0.0,
-             summary: dict | None = None, inspect_log: Path | None = None) -> str:
+             summary: dict | None = None, inspect_log: Path | None = None,
+             run_batch: str = "") -> str:
     """Register a run. Writes manifest + summary (if given) + appends to registry. Returns run_id."""
     RUNS_DIR.mkdir(parents=True, exist_ok=True)
     rid = _run_id(phase, model, framework, effort, run_n)
@@ -91,7 +93,8 @@ def register(phase: str, model: str, framework: str, effort: str, run_n: int,
                     run_n=run_n, status=status, cost_usd=cost_usd, tokens_in=tokens_in,
                     tokens_out=tokens_out, wall_s=wall_s, metrics=metrics,
                     inspect_log=inspect_log_path, summary_path=summary_path,
-                    registered_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+                    registered_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                    run_batch=run_batch)
     (run_dir / "manifest.json").write_text(json.dumps(asdict(m), indent=2))
     with REGISTRY.open("a") as f:
         f.write(json.dumps(asdict(m)) + "\n")
