@@ -19,16 +19,20 @@ from pathlib import Path
 
 KEYS_FILE = Path(os.environ.get("HARNESS_KEYS_FILE", Path.home() / ".config/harnesseval/keys.env"))
 
-# Per-request HTTP timeout (seconds) for the SDK clients. Reasoning models (GLM/Kimi via
-# Lunaroute, gpt-5.6-sol) can generate up to 16384 tokens on a long review prompt and legitimately
-# take 60-120s; but a stalled gateway (Lunaroute holding connections open under concurrent
-# load without responding) must fail fast instead of hanging on the SDK's ~600s default read
-# timeout. 180s covers legitimate long completions while ensuring a stalled request errors out
-# (and is then eligible for the retry-on-empty/transient-retry logic in model_router).
-# Without this, a stalled Lunaroute call blocks asyncio.to_thread indefinitely; asyncio.wait_for
-# cancels the coroutine but NOT the blocked thread, so the whole cell hangs unrecoverably.
-# See HANDOFF: the GLM api-fallback validation cell hung here (concurrency=5 lens calls).
+# Per-request HTTP timeout (seconds) for the SDK clients. Reasoning models can legitimately
+# take a long time: GLM/Kimi via Lunaroute spend ~5k-10k hidden reasoning tokens before emitting
+# visible content on a long review prompt, and under Lunaroute's concurrency limits a call can
+# queue for minutes before even starting. 180s covers native OpenAI/Anthropic reasoning
+# (gpt-5.6-sol, opus-5) which have separately-budgeted reasoning; but Lunaroute needs much longer
+# (a stalled/queued GLM call can take 300-500s to complete, not an error — just slow). The
+# default below gives Lunaroute 600s and everyone else 180s; both are env-overridable.
+# Without ANY timeout, a stalled gateway hangs the SDK on its ~600s default and asyncio.wait_for
+# can't cancel the blocked asyncio.to_thread worker -> the whole cell hangs unrecoverably (the
+# GLM api-fallback validation cell hit this before this fix). With a too-SHORT timeout, legit
+# slow GLM reasoning gets killed -> 0 findings. The retry-on-timeout in model_router handles
+# the residual stalls. See HANDOFF.
 REQUEST_TIMEOUT_S = float(os.environ.get("HARNESS_REQUEST_TIMEOUT_S", "180"))
+LUNAROUTE_TIMEOUT_S = float(os.environ.get("HARNESS_LUNAROUTE_TIMEOUT_S", "600"))
 
 # File key name -> the SDK constructor argument / Inspect provider it maps to
 KEY_NAMES = (
@@ -91,11 +95,15 @@ def openai_client():
 
 
 def lunaroute_client():
-    """Construct an OpenAI-compatible client pointed at the Lunaroute gateway (GLM/Kimi)."""
+    """Construct an OpenAI-compatible client pointed at the Lunaroute gateway (GLM/Kimi).
+
+    Uses a longer timeout (LUNAROUTE_TIMEOUT_S, default 600s) than the native clients: GLM/Kimi
+    reasoning + Lunaroute's concurrency queueing can legitimately take several minutes per call.
+    """
     from openai import OpenAI
     k = load_keys()
     return OpenAI(api_key=k["HARNESS_LUNAROUTE_API_KEY"], base_url=k["LUNAROUTE_BASE_URL"],
-                  timeout=REQUEST_TIMEOUT_S)
+                  timeout=LUNAROUTE_TIMEOUT_S)
 
 
 def martian_client():

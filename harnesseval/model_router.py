@@ -150,12 +150,22 @@ async def _call_openai_compat(model, system, user, effort, max_tokens, temperatu
                                               {"role": "user", "content": user}],
                        max_completion_tokens=max_tokens, temperature=temperature if not kwargs else 1)
     call_kwargs.update(kwargs)
-    resp = await asyncio.to_thread(client.chat.completions.create, **call_kwargs)
+    from openai import APITimeoutError
+    # Lunaroute GLM/Kimi: retry once on APITimeoutError (the gateway intermittently stalls/queues
+    # a call past the per-request timeout — a flat-fee plan's concurrency limit). One retry,
+    # bounded. Native OpenAI (gpt) doesn't stall this way (no concurrency-queue), so only Lunaroute.
+    if is_lunaroute:
+        try:
+            resp = await asyncio.to_thread(client.chat.completions.create, **call_kwargs)
+        except APITimeoutError:
+            resp = await asyncio.to_thread(client.chat.completions.create, **call_kwargs)
+    else:
+        resp = await asyncio.to_thread(client.chat.completions.create, **call_kwargs)
     text = resp.choices[0].message.content or ""
-    # Lunaroute GLM/Kimi can non-deterministically return empty content even at the 16384 floor
-    # (reasoning finished but content not emitted, or a transient finish=length). Retry once —
-    # empty content means 0 findings downstream, so the retry is cheap insurance. Native OpenAI
-    # (gpt) doesn't hit this (separately-budgeted reasoning), so retry only for Lunaroute.
+    # Lunaroute GLM/Kimi can also non-deterministically return empty content even at the 16384
+    # floor (reasoning finished but content not emitted, or a transient finish=length). Retry
+    # once — empty content means 0 findings downstream. Native OpenAI doesn't hit this
+    # (separately-budgeted reasoning), so retry only for Lunaroute.
     if is_lunaroute and not text.strip():
         resp = await asyncio.to_thread(client.chat.completions.create, **call_kwargs)
         text = resp.choices[0].message.content or ""
@@ -183,8 +193,14 @@ async def call_model_json(model: str, system: str, user: str, *, effort: str = "
     parsed = _try_parse(text)
     is_lunaroute = "glm" in model.lower() or "kimi" in model.lower()
     if is_lunaroute and not parsed:
-        # empty or unparseable under load -> retry once
-        text2, tin2, tout2, per_model2 = await call_model(model, system, user, effort=effort, max_tokens=max_tokens, execution_mode=execution_mode)
+        # empty or unparseable under load -> retry once. Also retry once if the first call
+        # raised APITimeoutError (a Lunaroute concurrency-queue stall); _call_openai_compat
+        # already retries once internally, but a double-timeout would otherwise propagate and
+        # fail the whole cell, so catch it here and give it one more attempt.
+        try:
+            text2, tin2, tout2, per_model2 = await call_model(model, system, user, effort=effort, max_tokens=max_tokens, execution_mode=execution_mode)
+        except Exception:
+            text2, tin2, tout2, per_model2 = "", 0, 0, {}
         tin += tin2; tout += tout2
         from harnesseval.usage import merge
         per_model = merge(per_model, per_model2)
