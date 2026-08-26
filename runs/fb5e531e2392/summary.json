@@ -1,0 +1,103 @@
+{
+  "framework": "vanilla-engineered",
+  "url": "https://github.com/calcom/cal.com/pull/11059",
+  "pr_title": "OAuth credential sync and app integration enhancements",
+  "tp": 4,
+  "fp": 6,
+  "fn": 5,
+  "precision": 0.4,
+  "recall": 0.4444444444444444,
+  "n_findings": 10,
+  "n_golden": 9,
+  "tokens_in": 16187,
+  "tokens_out": 781,
+  "wall_ms": 20693.16029548645,
+  "raw_review": "1. [Critical/security] apps/web/pages/api/webhook/app-credential.ts:23-27 \u2014 Webhook secret comparison is vulnerable to timing attacks. Using `!==` for secret comparison allows timing-based side-channel attacks. Should use a constant-time comparison function like `crypto.timingSafeEqual()`.\n\n2. [High/security] apps/web/pages/api/webhook/app-credential.ts:54-56 \u2014 Decryption with empty key fallback. If `CALCOM_APP_CREDENTIAL_ENCRYPTION_KEY` is not set, an empty string is used for decryption, which could lead to cryptographic failures or unexpected behavior rather than a clear error.\n\n3. [High/bug] packages/app-store/_utils/oauth/parseRefreshTokenResponse.ts:7-10 \u2014 Invalid Zod schema definition. Using `[z.string().toString()]` and `[z.string().optional().toString()]` as object keys does not create dynamic key validation in Zod; this creates literal string keys like \"ZodString\" rather than allowing arbitrary string keys.\n\n4. [Medium/bug] packages/app-store/_utils/oauth/parseRefreshTokenResponse.ts:24-26 \u2014 Mutating a placeholder refresh_token value. Setting `refresh_token` to the literal string \"refresh_token\" when missing could cause issues if this value is later used for actual token refresh operations.\n\n5. [High/bug] packages/app-store/googlecalendar/lib/CalendarService.ts:95-96 \u2014 Incorrect parsing of credentials. `parseRefreshTokenResponse` returns a SafeParseResult object with `.success` and `.data` properties, but the code assigns the entire result to `key` instead of extracting `.data` after checking `.success`.\n\n6. [Medium/bug] packages/app-store/office365calendar/lib/CalendarService.ts:260 \u2014 Incorrect handling of parseRefreshTokenResponse result. The code spreads `tokenResponse.data` conditionally on `tokenResponse.success`, but `parseRefreshTokenResponse` throws on failure, so this check is inconsistent with the function's behavior.\n\n7. [Medium/api] packages/app-store/_utils/oauth/refreshOAuthTokens.ts:6-16 \u2014 Missing error handling for credential sync endpoint. The fetch call to `CALCOM_CREDENTIAL_SYNC_ENDPOINT` has no error handling for network failures, non-2xx responses, or invalid response formats.\n\n8. [Medium/bug] packages/app-store/zoho-bigin/lib/CalendarService.ts:93 \u2014 Wrong parameter passed to refreshOAuthTokens. Passing `credentialId` (a number representing the credential's ID) instead of `credential.userId` which the function expects for the userId parameter.\n\n9. [Low/bug] apps/web/pages/api/webhook/app-credential.ts:30 \u2014 Missing validation for HTTP method. The endpoint accepts any HTTP method (GET, POST, DELETE, etc.) but should only accept POST requests for a webhook that creates/updates credentials.\n\n10. [Medium/security] packages/app-store/_utils/oauth/refreshOAuthTokens.ts:9-14 \u2014 Sensitive data sent without encryption or authentication. The credential sync endpoint request sends `calcomUserId` and `appSlug` without any authentication headers or encryption, potentially exposing user data.",
+  "real_but_ungold": [
+    {
+      "candidate": "Webhook secret comparison is vulnerable to timing attacks. Using `!==` for secret comparison allows timing-based side-channel attacks. Should use a constant-time comparison function like `crypto.timingSafeEqual()`.",
+      "confidence": 0.85,
+      "reasoning": "The diff shows webhook secret comparison using `!==` operator at line 23-26 in app-credential.ts: `req.headers[process.env.CALCOM_WEBHOOK_HEADER_NAME || 'calcom-webhook-secret'] !== process.env.CALCOM_WEBHOOK_SECRET`. This is indeed vulnerable to timing attacks because string comparison with `!==` can leak information about how many characters match before a mismatch is found. For security-sensitive secret comparisons, crypto.timingSafeEqual() should be used to prevent timing-based side-channel attacks. This is a real security concern for webhook authentication."
+    },
+    {
+      "candidate": "Decryption with empty key fallback. If `CALCOM_APP_CREDENTIAL_ENCRYPTION_KEY` is not set, an empty string is used for decryption, which could lead to cryptographic failures or unexpected behavior rather than a clear error.",
+      "confidence": 0.92,
+      "reasoning": "Looking at line 53-54 in apps/web/pages/api/webhook/app-credential.ts: `symmetricDecrypt(reqBody.keys, process.env.CALCOM_APP_CREDENTIAL_ENCRYPTION_KEY || \"\")`. If the environment variable is not set, an empty string is passed to the decryption function. This is a real security/correctness issue - cryptographic operations with an empty key will either fail silently, produce garbage output, or throw unclear errors. The code should validate that the key exists before attempting decryption, similar to how it checks APP_CREDENTIAL_SHARING_ENABLED at the start of the handler."
+    },
+    {
+      "candidate": "Missing error handling for credential sync endpoint. The fetch call to `CALCOM_CREDENTIAL_SYNC_ENDPOINT` has no error handling for network failures, non-2xx responses, or invalid response formats.",
+      "confidence": 0.85,
+      "reasoning": "Looking at the refreshOAuthTokens function in packages/app-store/_utils/oauth/refreshOAuthTokens.ts, when APP_CREDENTIAL_SHARING_ENABLED is true and CALCOM_CREDENTIAL_SYNC_ENDPOINT is set, it makes a fetch call and returns the response directly without any error handling. There's no try-catch, no check for response.ok, and no validation of the response format. If the endpoint fails, returns a non-2xx status, or returns invalid data, this will propagate errors in unexpected ways to the callers. This is a real missing error handling issue."
+    },
+    {
+      "candidate": "Missing validation for HTTP method. The endpoint accepts any HTTP method (GET, POST, DELETE, etc.) but should only accept POST requests for a webhook that creates/updates credentials.",
+      "confidence": 0.85,
+      "reasoning": "Looking at the webhook handler in apps/web/pages/api/webhook/app-credential.ts, the code checks for APP_CREDENTIAL_SHARING_ENABLED and validates the webhook secret header, but there is no validation of req.method to ensure only POST requests are accepted. The handler processes req.body which implies it expects POST data, but a GET request would still pass the initial checks (if headers match) and then fail at req.body parsing. While the Zod schema would likely reject malformed input, explicitly checking for POST method is a security best practice for webhook endpoints that modify data. This is a real, albeit minor, security/correctness issue."
+    },
+    {
+      "candidate": "Sensitive data sent without encryption or authentication. The credential sync endpoint request sends `calcomUserId` and `appSlug` without any authentication headers or encryption, potentially exposing user data.",
+      "confidence": 0.85,
+      "reasoning": "Looking at refreshOAuthTokens.ts, the fetch to CALCOM_CREDENTIAL_SYNC_ENDPOINT sends calcomUserId and appSlug in the body without any authentication headers. However, examining the webhook receiver in app-credential.ts, it validates requests using CALCOM_WEBHOOK_SECRET header. The issue is that refreshOAuthTokens.ts (the client making requests TO the sync endpoint) doesn't include this authentication header when calling the endpoint. This is a real security concern - the outgoing request to sync credentials lacks the webhook secret header that the receiving endpoint expects."
+    }
+  ],
+  "hallucination": [
+    {
+      "candidate": "Incorrect handling of parseRefreshTokenResponse result. The code spreads `tokenResponse.data` conditionally on `tokenResponse.success`, but `parseRefreshTokenResponse` throws on failure, so this check is inconsistent with the function's behavior.",
+      "is_real": false,
+      "confidence": 0.85,
+      "reasoning": "Looking at the diff, parseRefreshTokenResponse in packages/app-store/_utils/oauth/parseRefreshTokenResponse.ts throws an error if parsing fails ('throw new Error(\"Invalid refreshed tokens were returned\")'), but returns the safeParse result object (with .success and .data properties) if successful. In office365calendar/lib/CalendarService.ts, the code does 'const tokenResponse = parseRefreshTokenResponse(responseJson, refreshTokenResponseSchema)' and then 'o365AuthCredentials = { ...o365AuthCredentials, ...(tokenResponse.success && tokenResponse.data) }'. Since parseRefreshTokenResponse throws on failure, tokenResponse.success will always be true when this line is reached, making the conditional check redundant but not incorrect. The code still works correctly - it's just that the success check is unnecessary since the function throws on failure. This is not a bug, just slightly inconsistent code style."
+    }
+  ],
+  "adjudicated_precision": 0.8,
+  "incremental_recall": 0.6428571428571429,
+  "decomposition": {
+    "deterministic_tp": 0,
+    "llm_lens_tp": 0,
+    "deterministic_gate_recall": 0.0,
+    "llm_lens_recall": 0.0,
+    "n_det_findings": 0,
+    "n_lens_findings": 0
+  },
+  "findings": [
+    {
+      "issue_text": "Webhook secret comparison is vulnerable to timing attacks. Using `!==` for secret comparison allows timing-based side-channel attacks. Should use a constant-time comparison function like `crypto.timingSafeEqual()`.",
+      "source": "vanilla-engineered"
+    },
+    {
+      "issue_text": "Decryption with empty key fallback. If `CALCOM_APP_CREDENTIAL_ENCRYPTION_KEY` is not set, an empty string is used for decryption, which could lead to cryptographic failures or unexpected behavior rather than a clear error.",
+      "source": "vanilla-engineered"
+    },
+    {
+      "issue_text": "Invalid Zod schema definition. Using `[z.string().toString()]` and `[z.string().optional().toString()]` as object keys does not create dynamic key validation in Zod; this creates literal string keys like \"ZodString\" rather than allowing arbitrary string keys.",
+      "source": "vanilla-engineered"
+    },
+    {
+      "issue_text": "Mutating a placeholder refresh_token value. Setting `refresh_token` to the literal string \"refresh_token\" when missing could cause issues if this value is later used for actual token refresh operations.",
+      "source": "vanilla-engineered"
+    },
+    {
+      "issue_text": "Incorrect parsing of credentials. `parseRefreshTokenResponse` returns a SafeParseResult object with `.success` and `.data` properties, but the code assigns the entire result to `key` instead of extracting `.data` after checking `.success`.",
+      "source": "vanilla-engineered"
+    },
+    {
+      "issue_text": "Incorrect handling of parseRefreshTokenResponse result. The code spreads `tokenResponse.data` conditionally on `tokenResponse.success`, but `parseRefreshTokenResponse` throws on failure, so this check is inconsistent with the function's behavior.",
+      "source": "vanilla-engineered"
+    },
+    {
+      "issue_text": "Missing error handling for credential sync endpoint. The fetch call to `CALCOM_CREDENTIAL_SYNC_ENDPOINT` has no error handling for network failures, non-2xx responses, or invalid response formats.",
+      "source": "vanilla-engineered"
+    },
+    {
+      "issue_text": "Wrong parameter passed to refreshOAuthTokens. Passing `credentialId` (a number representing the credential's ID) instead of `credential.userId` which the function expects for the userId parameter.",
+      "source": "vanilla-engineered"
+    },
+    {
+      "issue_text": "Missing validation for HTTP method. The endpoint accepts any HTTP method (GET, POST, DELETE, etc.) but should only accept POST requests for a webhook that creates/updates credentials.",
+      "source": "vanilla-engineered"
+    },
+    {
+      "issue_text": "Sensitive data sent without encryption or authentication. The credential sync endpoint request sends `calcomUserId` and `appSlug` without any authentication headers or encryption, potentially exposing user data.",
+      "source": "vanilla-engineered"
+    }
+  ]
+}

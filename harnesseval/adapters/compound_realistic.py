@@ -49,7 +49,7 @@ from pathlib import Path
 from harnesseval.adapters.base import PRSample, ReviewRun
 from harnesseval.dataset.materialize import materialize
 from harnesseval.finding import Finding
-from harnesseval.cli_backends import session_timeout, is_transient_claude_error
+from harnesseval.cli_backends import session_timeout, is_transient_claude_error, codex_slug_for
 
 COMPOUND_ROOT = Path(__file__).resolve().parents[2] / "third_party" / "compound-engineering-plugin"
 
@@ -101,12 +101,16 @@ change without test work.
 partial-failure/ordering bugs; race conditions.
    Each persona returns findings as: severity P0/P1/P2/P3, file:line, what's wrong, why it matters, \
 confidence anchor (0/25/50/75/100).
-5. Collect every persona's findings.
-6. Synthesize the report: group findings by severity (### P0 -- Critical / P1 -- High / P2 -- \
-Moderate / P3 -- Low), one line per finding with `# | file:line | issue | reviewer | confidence`, \
-plus a Coverage section (residual risks, testing gaps) and a Verdict blockquote.
-7. Return the full synthesized report verbatim. Do NOT omit findings. Keep the severity-grouped \
-sections and the stable finding numbers."""
+5. Each persona subagent must WRITE its own findings directly to a per-persona file \
+   {findings_path}.<persona> (e.g. {findings_path}.correctness) as it finishes — one finding per \
+   line in this exact format: `| P{{sev}} | file:line | issue (one short sentence) | <persona> | <confidence> |`. \
+   Do NOT return findings to the orchestrator in-message — write them to the file. This keeps each \
+   message small (the combined report can exceed the model output limit).
+6. After all persona subagents finish, concatenate their per-persona files into {findings_path} \
+   yourself by running: `cat {findings_path}.* > {findings_path}`. Do NOT read or synthesize the \
+   findings in-session — just concatenate the files.
+7. Return ONLY this one line as your reply: "Wrote N findings to {findings_path}". Do NOT repeat \
+   the findings in your reply message — they live in the file. This keeps your final message small."""
 
 
 def _claude_plugins_dir() -> Path:
@@ -215,6 +219,18 @@ def _extract_findings_from_session(text: str) -> list[Finding]:
         stripped = raw.strip()
         if not stripped:
             continue
+        # flat per-persona format (output-cap fix): `| P0 | file:line | issue | persona | confidence |`
+        # one line per finding, severity inline — no section headers needed.
+        m_flat = re.match(r"^\|\s*P([0-3])\s*\|\s*(`?[\w/ .\-]+(?::\d+)?`?)\s*\|\s*(.+?)\s*\|\s*([\w-]+)\s*\|\s*(0|25|50|75|100)\s*\|$",
+                          stripped)
+        if m_flat:
+            sev = f"p{m_flat.group(1)}"; file_cell = m_flat.group(2).strip("` ")
+            issue = m_flat.group(3).strip().strip("` ").strip(); reviewer = m_flat.group(4)
+            if issue and len(issue) > 3:
+                issue = f"{file_cell} — {issue}" if file_cell else issue
+                src = f"compound-realistic/{sev}/{reviewer}"
+                findings.append(Finding(issue_text=issue, source=src, severity=sev, category="bug", raw=raw))
+            continue
         # severity section headers: "### P0 -- Critical" etc.
         m_sev = re.match(r"^#+\s*P([0-3])\b.*?(Critical|High|Moderate|Low)?", stripped, re.I)
         if m_sev:
@@ -294,13 +310,18 @@ async def review_realistic_async(pr: PRSample, model: str, effort: str = "medium
     is_codex = "gpt" in ml or "codex" in ml
     try:
         repo_dir = materialize(pr.url)
-        prompt = REALISTIC_PROMPT.format(pr_title=pr.pr_title)
+        # §output-cap fix: write findings to a file (unbounded) instead of returning in the final
+        # message (which overflows the model's per-message output cap on hard PRs).
+        findings_path = repo_dir / "findings.md"
+        try: findings_path.unlink()
+        except FileNotFoundError: pass
+        prompt = REALISTIC_PROMPT.format(pr_title=pr.pr_title, findings_path=str(findings_path))
         if is_claude:
             alias = "opus" if "opus" in ml else "sonnet" if "sonnet" in ml else "fable" if "fable" in ml else "sonnet"
             text, per_model, resolved = await _run_claude_session(repo_dir, alias, effort, prompt,
                                                                  timeout=session_timeout(effort, base=1200))
         elif is_codex:
-            slug = "gpt-5.6-sol"  # valid Codex CLI slug (gpt-5.2 is API-only)
+            slug = codex_slug_for(model)  # gpt-5.6-* pass through; gpt-5.2/gpt-5 fall back to gpt-5.6-sol
             text, per_model, resolved = await _run_codex_session(repo_dir, slug, effort, prompt,
                                                                 timeout=session_timeout(effort, base=1200))
         else:
@@ -313,7 +334,21 @@ async def review_realistic_async(pr: PRSample, model: str, effort: str = "medium
     except Exception as e:  # noqa: BLE001
         return ReviewRun(framework=name, model=model, effort=effort, execution_mode="cli",
                          raw_output="", wall_ms=(time.time() - t0) * 1000, error=str(e))
-    findings = _extract_findings_from_session(text)
+    # §output-cap fix: prefer findings written to the file; fall back to session text if absent.
+    # Each persona writes to {findings_path}.<persona>; the orchestrator concatenates them via
+    # `cat {findings_path}.* > {findings_path}`. If the orchestrator didn't run that, do it here.
+    file_text = ""
+    try:
+        if findings_path.exists():
+            file_text = findings_path.read_text()
+        if not file_text.strip():
+            # orchestrator may not have concatenated — gather per-persona files ourselves
+            per_persona = sorted(findings_path.parent.glob(f"{findings_path.name}.*"))
+            if per_persona:
+                file_text = "\n".join(p.read_text() for p in per_persona)
+    except Exception:
+        file_text = ""
+    findings = _extract_findings_from_session(file_text if file_text.strip() else text)
     from harnesseval.usage import grand_total
     gt = grand_total(per_model)
     # Realistic Claude Code behavior: orchestrator on the requested model, persona subagent

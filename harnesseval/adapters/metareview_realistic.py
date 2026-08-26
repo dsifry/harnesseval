@@ -37,7 +37,7 @@ from harnesseval import keys
 from harnesseval.adapters.base import PRSample, ReviewRun
 from harnesseval.dataset.materialize import materialize
 from harnesseval.finding import Finding
-from harnesseval.cli_backends import session_timeout
+from harnesseval.cli_backends import session_timeout, codex_slug_for
 
 MRV_BIN = Path(__file__).resolve().parents[2] / "bin" / "metareview"
 
@@ -170,16 +170,21 @@ Steps:
      silent data loss, or orphaned refs. Does NOT flag: security (Security), test quality
      (Testing-quality), architecture soundness beyond migration safety (Architecture — this lens
      judges only whether the transition from old to new schema is safe and reversible).
-4. Collect each lens's findings. After the 8 lenses return, CONSOLIDATE their findings directly
-   into the output list. Do NOT re-read files, re-run git diff, or re-verify lens findings — trust
-   the lenses and consolidate what they returned.
-5. Also include the deterministic-gate findings from the metareview scaffold (step 1).
-6. Return a consolidated list of ALL findings (deterministic gates + 8 lenses), one per line,
-   each prefixed with its source, e.g.:
-   [deterministic/test-reviewer] Missing test changes or validation evidence
-   [lens/architecture] src/foo.py:42 — boundary issue: ...
-
-Be thorough but only report real issues you are confident about (confidence >= 50, or any P0)."""
+4. Each lens subagent must WRITE its own findings directly to a per-lens file
+   {findings_path}.<lens-name> (e.g. {findings_path}.architecture) as it finishes — ONE finding per
+   line in this exact format: `[lens/<lens-name>] file:line — one-sentence failure mode`. Do NOT return
+   findings to the orchestrator in-message — write them to the file. This keeps each message small
+   (the combined 8-lens output can exceed the model output limit on large diffs).
+5. The deterministic-gate findings from the metareview scaffold (step 1) are already written to a
+   file by the scaffold command; you do not need to re-collect them. (If they are printed to stdout
+   in step 1, append them to {findings_path}.deterministic yourself, one per line in the format
+   `[deterministic/<gate-name>] <issue>`.)
+6. After all 8 lens subagents finish, concatenate ALL the per-lens/per-gate files into {findings_path}
+   yourself by running: `cat {findings_path}.* > {findings_path}`. Do NOT read, re-verify, or
+   synthesize the findings in-session — just concatenate the files. Do NOT re-read files, re-run git
+   diff, or re-verify lens findings — trust the lenses.
+7. Return ONLY this one line as your reply: "Wrote N findings to {findings_path}". Do NOT repeat
+   the findings in your reply message — they live in the file. This keeps your final message small."""
 
 NAIVE_REALISTIC_PROMPT = """Review the code change in this repository (the diff is HEAD~1..HEAD).
 Run `git diff HEAD~1` to see it. List each distinct issue you find, one per line, with file:line.
@@ -342,18 +347,27 @@ async def review_realistic_async(pr: PRSample, model: str, effort: str = "medium
         task_path = repo_dir / "docs" / "tasks" / "task-001.md"
         task_path.parent.mkdir(parents=True, exist_ok=True)
         task_path.write_text(f"# Task: {pr.pr_title}\nReview the change.\n")
+        # §output-cap fix: the orchestrator writes consolidated findings to this file instead of
+        # returning them in its final message (which overflows the model's per-message output cap
+        # on hard PRs — the 3 v2 failures were all '400 max_tokens / output limit reached' on the
+        # final consolidation). The file is unbounded; the final message becomes a one-line ack.
+        findings_path = repo_dir / "docs" / "tasks" / "findings.md"
+        # clear any stale findings file so we never parse a previous run's output
+        try: findings_path.unlink()
+        except FileNotFoundError: pass
         subprocess.run(["git", "-C", str(repo_dir), "add", "-A"], check=True, capture_output=True)
         subprocess.run(["git", "-C", str(repo_dir), "commit", "--quiet", "--allow-empty", "-m", "task"],
                        check=True, capture_output=True,
                        env={**__import__("os").environ, "GIT_AUTHOR_NAME": "x", "GIT_AUTHOR_EMAIL": "x@x",
                             "GIT_COMMITTER_NAME": "x", "GIT_COMMITTER_EMAIL": "x@x"})
-        prompt = REALISTIC_PROMPT.format(mrv_bin=str(MRV_BIN), task_path=str(task_path), base_ref="HEAD~2")
+        prompt = REALISTIC_PROMPT.format(mrv_bin=str(MRV_BIN), task_path=str(task_path),
+                                         findings_path=str(findings_path), base_ref="HEAD~2")
         if is_claude:
             alias = "opus" if "opus" in ml else "sonnet" if "sonnet" in ml else "fable" if "fable" in ml else "sonnet"
             text, per_model, resolved = await _run_claude_session(repo_dir, alias, effort, prompt,
                                                                  timeout=session_timeout(effort, base=900))
         elif is_codex:
-            slug = "gpt-5.6-sol"  # valid Codex CLI slug (gpt-5.2 is API-only)
+            slug = codex_slug_for(model)  # gpt-5.6-* pass through; gpt-5.2/gpt-5 fall back to gpt-5.6-sol
             text, per_model, resolved = await _run_codex_session(repo_dir, slug, effort, prompt,
                                                                 timeout=session_timeout(effort, base=900))
         else:
@@ -369,7 +383,21 @@ async def review_realistic_async(pr: PRSample, model: str, effort: str = "medium
     except Exception as e:  # noqa: BLE001
         return ReviewRun(framework=name, model=model, effort=effort, execution_mode="cli",
                          raw_output="", wall_ms=(time.time() - t0) * 1000, error=str(e))
-    findings = _extract_findings_from_session(text)
+    # §output-cap fix: each lens writes to {findings_path}.<lens>; the orchestrator concatenates via
+    # `cat {findings_path}.* > {findings_path}`. If the orchestrator didn't run that, gather here.
+    file_text = ""
+    try:
+        if findings_path.exists():
+            file_text = findings_path.read_text()
+        if not file_text.strip():
+            # orchestrator may not have concatenated — gather per-lens files ourselves
+            per_lens = sorted(findings_path.parent.glob(f"{findings_path.name}.*"))
+            if per_lens:
+                file_text = "\n".join(p.read_text() for p in per_lens)
+    except Exception:
+        file_text = ""
+    src_text = file_text if file_text.strip() else text
+    findings = _extract_findings_from_session(src_text)
     from harnesseval.usage import grand_total
     gt = grand_total(per_model)
     # Realistic Claude Code behavior: orchestrator on the requested model, but Task-tool subagent

@@ -215,6 +215,7 @@ def main():
     ap.add_argument("--out", default="results/phase_b_model_matrix.json")
     ap.add_argument("--run-batch", default=None, help="reuse an existing run_batch id (for fill-ins of errored cells); default generates a new one")
     ap.add_argument("--fill", default=None, help="comma-sep list of fw/model/effort[/url-suffix] to run ONLY those cells (fill-in mode); adding the url-suffix (a substring of the PR url) targets one specific PR. e.g. compound-realistic/claude-opus-5/xhigh/11059")
+    ap.add_argument("--skip-batch", default=None, help="skip cells that already have a pass run in this existing run_batch (avoid redoing already-completed cells from a prior batch)")
     args = ap.parse_args()
 
     import glob
@@ -233,6 +234,31 @@ def main():
     print(f"[mx] {len(urls)} PRs x {len(models)} models x {len(efforts)} efforts x {len(frameworks)} fw = {n_cells} cells")
 
     samples = {u: _pr_sample(u) for u in urls}
+    # Build the set of already-completed cells to skip (if --skip-batch given).
+    # A cell is (framework, model, effort, url); skip if a pass run exists for it in ANY skip-batch.
+    # --skip-batch accepts comma-separated batch ids (skip cells from multiple prior batches).
+    skip_keys = set()
+    if args.skip_batch:
+        from harnesseval import runs as _runs
+        for sb in args.skip_batch.split(","):
+            sb = sb.strip()
+            if not sb:
+                continue
+            n_before = len(skip_keys)
+            for r in _runs.query(run_batch=sb):
+                if r.get("status") != "pass":
+                    continue
+                sp = r.get("summary_path")
+                if not sp:
+                    continue
+                try:
+                    s = json.load(open(sp))
+                except Exception:
+                    continue
+                url = s.get("url", "")
+                skip_keys.add((r["framework"], r["model"], r["effort"], url))
+            print(f"[mx] --skip-batch {sb}: +{len(skip_keys)-n_before} already-pass cells")
+        print(f"[mx] total skip set: {len(skip_keys)} already-pass cells will be skipped")
     # Build all cells, then run with bounded concurrency (parallel OAuth CLI sessions).
     cells = []
     fill = set()
@@ -247,6 +273,8 @@ def main():
             judge = primary_judge(model)
             for effort in efforts:
                 for fw in frameworks:
+                    if skip_keys and (fw, model, effort, url) in skip_keys:
+                        continue
                     if fill:
                         matched = False
                         pr_num = url.rstrip("/").rsplit("/", 1)[-1]

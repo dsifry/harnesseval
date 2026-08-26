@@ -44,7 +44,7 @@ from pathlib import Path
 from harnesseval.adapters.base import PRSample, ReviewRun
 from harnesseval.dataset.materialize import materialize
 from harnesseval.finding import Finding
-from harnesseval.cli_backends import session_timeout, is_transient_claude_error
+from harnesseval.cli_backends import session_timeout, is_transient_claude_error, codex_slug_for
 
 SUPERPOWERS_ROOT = Path(__file__).resolve().parents[2] / "third_party" / "superpowers"
 
@@ -119,15 +119,19 @@ well before listing issues.
    **Reasoning:** [1-2 sentence technical assessment]
    ----
 
+   IMPORTANT: Write your full review report directly to the file {findings_path} yourself (using
+   your file-writing tool). Do NOT return the report as your reply message — the report can be
+   too long for a single message. After writing the file, return ONLY: "Wrote report to
+   {findings_path}" as your reply.
+
 3. Fill the placeholders from the repo:
    - [DESCRIPTION]: a one-line summary of the PR: {pr_title}
    - [PLAN_OR_REQUIREMENTS]: "The PR title states the intent: {pr_title}. Review against that intent and production-readiness standards."
    - [BASE_SHA]: the BASE_SHA from step 1
    - [HEAD_SHA]: the HEAD_SHA from step 1
-4. Collect the subagent's review report. In Codex, use `collaboration.wait_agent` to wait for \
-the spawned reviewer job to finish and return its result.
-5. Return the subagent's review report verbatim (Strengths, Issues by severity, Assessment). Do \
-not summarize or omit findings — return the full list of issues with file:line references."""
+4. The subagent writes its report directly to {findings_path} (instructed in its prompt above).
+   Collect only the subagent's one-line ack — do NOT collect a full report in-message.
+5. Return ONLY: "Done. Report at {findings_path}". Do NOT repeat the findings."""
 
 NAIVE_REALISTIC_PROMPT = """Review the code change in this repository (the diff is HEAD~1..HEAD).
 Run `git diff HEAD~1` to see it. List each distinct issue you find, one per line, with file:line.
@@ -293,13 +297,18 @@ async def review_realistic_async(pr: PRSample, model: str, effort: str = "medium
     is_codex = "gpt" in ml or "codex" in ml
     try:
         repo_dir = materialize(pr.url)
-        prompt = REALISTIC_PROMPT.format(pr_title=pr.pr_title)
+        # §output-cap fix: write findings to a file (unbounded) instead of returning in the final
+        # message (which overflows the model's per-message output cap on hard PRs).
+        findings_path = repo_dir / "findings.md"
+        try: findings_path.unlink()
+        except FileNotFoundError: pass
+        prompt = REALISTIC_PROMPT.format(pr_title=pr.pr_title, findings_path=str(findings_path))
         if is_claude:
             alias = "opus" if "opus" in ml else "sonnet" if "sonnet" in ml else "fable" if "fable" in ml else "sonnet"
             text, per_model, resolved = await _run_claude_session(repo_dir, alias, effort, prompt,
                                                                  timeout=session_timeout(effort, base=900))
         elif is_codex:
-            slug = "gpt-5.6-sol"  # valid Codex CLI slug (gpt-5.2 is API-only)
+            slug = codex_slug_for(model)  # gpt-5.6-* pass through; gpt-5.2/gpt-5 fall back to gpt-5.6-sol
             text, per_model, resolved = await _run_codex_session(repo_dir, slug, effort, prompt,
                                                                 timeout=session_timeout(effort, base=900))
         else:
@@ -312,7 +321,13 @@ async def review_realistic_async(pr: PRSample, model: str, effort: str = "medium
     except Exception as e:  # noqa: BLE001
         return ReviewRun(framework=name, model=model, effort=effort, execution_mode="cli",
                          raw_output="", wall_ms=(time.time() - t0) * 1000, error=str(e))
-    findings = _extract_findings_from_session(text)
+    # §output-cap fix: prefer findings written to the file; fall back to session text if absent.
+    file_text = ""
+    try:
+        if findings_path.exists(): file_text = findings_path.read_text()
+    except Exception:
+        file_text = ""
+    findings = _extract_findings_from_session(file_text if file_text.strip() else text)
     from harnesseval.usage import grand_total
     gt = grand_total(per_model)
     # Realistic Claude Code behavior: coordinator on the requested model, but `general-purpose`

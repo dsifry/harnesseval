@@ -1,0 +1,88 @@
+{
+  "framework": "vanilla-engineered",
+  "url": "https://github.com/calcom/cal.com/pull/14740",
+  "pr_title": "Add guest management functionality to existing bookings",
+  "tp": 3,
+  "fp": 5,
+  "fn": 3,
+  "precision": 0.375,
+  "recall": 0.5,
+  "n_findings": 8,
+  "n_golden": 6,
+  "tokens_in": 9657,
+  "tokens_out": 554,
+  "wall_ms": 14857.584238052368,
+  "raw_review": "1. [High/bug] packages/trpc/server/routers/viewer/bookings/addGuests.handler.ts:49-51 \u2014 Permission check logic is incorrect: uses `&&` instead of `||`, requiring user to be BOTH team admin AND team owner, when it should allow either role.\n\n2. [Medium/bug] packages/trpc/server/routers/viewer/bookings/addGuests.handler.ts:170 \u2014 Sends emails using original `guests` array instead of `uniqueGuests`, potentially sending emails for guests that were filtered out as duplicates or blacklisted.\n\n3. [Medium/security] packages/trpc/server/routers/viewer/bookings/addGuests.handler.ts:73-76 \u2014 Blacklist check is case-sensitive for input but lowercases blacklist entries, allowing bypass by using mixed-case email addresses (e.g., \"Blocked@example.com\" bypasses \"blocked@example.com\").\n\n4. [Medium/bug] apps/web/components/dialog/AddGuestsDialog.tsx:50-51 \u2014 The `handleAdd` function doesn't filter out empty strings from `multiEmailValue`, which is initialized with `[\"\"]` and could submit empty emails if user clicks Add without entering anything.\n\n5. [Low/bug] apps/web/components/dialog/AddGuestsDialog.tsx:34 \u2014 The `isInvalidEmail` state is never reset to `false` when the user corrects the input and successfully submits, only when canceling the dialog.\n\n6. [Medium/data] packages/trpc/server/routers/viewer/bookings/addGuests.handler.ts:85-97 \u2014 Guest attendees are created with empty `name` field, which may cause display issues or validation problems in downstream systems expecting non-empty names.\n\n7. [Low/bug] packages/trpc/server/routers/viewer/bookings/addGuests.handler.ts:37-46 \u2014 No check for booking status (e.g., cancelled, completed) before allowing guests to be added, potentially allowing modification of past or cancelled bookings.\n\n8. [Medium/api] packages/trpc/server/routers/viewer/bookings/addGuests.schema.ts:5 \u2014 Schema allows empty `guests` array which will pass validation but cause a misleading error later in the handler when `uniqueGuests.length === 0`.",
+  "real_but_ungold": [
+    {
+      "candidate": "Sends emails using original `guests` array instead of `uniqueGuests`, potentially sending emails for guests that were filtered out as duplicates or blacklisted",
+      "confidence": 0.75,
+      "reasoning": "Looking at the addGuests.handler.ts file, the code filters guests to create `uniqueGuests` (removing duplicates and blacklisted emails), then creates attendees in the database using `guestsFullDetails` (derived from `uniqueGuests`). However, at the end of the handler, `sendAddGuestsEmails(evt, guests)` is called with the original `guests` array, not `uniqueGuests`. This means the email function receives the unfiltered list. Looking at sendAddGuestsEmails in email-manager.ts, it uses `newGuests` to determine which attendees get the 'new guest' email vs the 'guests added notification' email. If a duplicate/blacklisted email is in `guests` but not actually added to the booking, the logic `if (newGuests.includes(attendee.email))` would still try to match against those filtered-out emails. However, since those emails weren't actually added as attendees (they're not in `calendarEvent.attendees`), they won't receive emails anyway - the iteration is over `calendarEvent.attendees`. So the practical impact is minimal, but it's still semantically incorrect to pass the unfiltered array when the intent is clearly to only notify about successfully added guests."
+    },
+    {
+      "candidate": "The `isInvalidEmail` state is never reset to `false` when the user corrects the input and successfully submits, only when canceling the dialog",
+      "confidence": 0.85,
+      "reasoning": "Looking at the AddGuestsDialog.tsx code, the `isInvalidEmail` state is set to `true` when validation fails in `handleAdd()`. However, when the mutation succeeds in `onSuccess`, only `setMultiEmailValue([''])` is called - `setIsInvalidEmail(false)` is NOT called. This means if a user first enters invalid emails (triggering the error), then corrects them and successfully submits, the error message would still be visible briefly before the dialog closes. More importantly, if they reopen the dialog, the state persists. The cancel button does reset it with `setIsInvalidEmail(false)`, but successful submission does not. This is a real bug - the error state should be cleared on successful submission."
+    },
+    {
+      "candidate": "Guest attendees are created with empty `name` field, which may cause display issues or validation problems in downstream systems expecting non-empty names",
+      "confidence": 0.85,
+      "reasoning": "Looking at the addGuests.handler.ts file, lines 75-82 show that guestsFullDetails is created with empty name fields: `name: \"\"`. This is then used to create attendee records in the database (lines 84-96). The attendees are created with empty names, which could cause display issues in emails, calendar events, and UI components that expect attendee names. This is a real issue - when guests are added, they have no name associated with them, which differs from normal booking flow where attendees provide their names."
+    },
+    {
+      "candidate": "No check for booking status (e.g., cancelled, completed) before allowing guests to be added, potentially allowing modification of past or cancelled bookings",
+      "confidence": 0.92,
+      "reasoning": "Looking at the addGuests.handler.ts file, the code fetches the booking and checks permissions (isTeamAdminOrOwner, isOrganizer, isAttendee), but there is no validation of the booking's status field. The booking could be cancelled, completed, or in the past, and the code would still allow adding guests. This is a real correctness/business logic issue - users should not be able to add guests to cancelled or past bookings. The code only checks 'if (!booking)' for existence but never validates booking.status or compares booking.startTime against the current time."
+    },
+    {
+      "candidate": "Schema allows empty `guests` array which will pass validation but cause a misleading error later in the handler when `uniqueGuests.length === 0`",
+      "confidence": 0.82,
+      "reasoning": "Looking at the schema in addGuests.schema.ts, it defines `guests: z.array(z.string().email())` which allows an empty array. In the handler (addGuests.handler.ts), after filtering for unique guests, if `uniqueGuests.length === 0`, it throws an error with message 'emails_must_be_unique_valid'. However, this same error would be thrown whether the user passed an empty array initially OR if all passed emails were duplicates of existing attendees. The finding is correct that an empty array passes schema validation but fails later with a potentially misleading error message. This is a real validation gap - the schema should require at least one email with `.min(1)` to provide a clearer error message upfront rather than the confusing 'emails_must_be_unique_valid' error."
+    }
+  ],
+  "hallucination": [],
+  "adjudicated_precision": 1.0,
+  "incremental_recall": 0.7272727272727273,
+  "decomposition": {
+    "deterministic_tp": 0,
+    "llm_lens_tp": 0,
+    "deterministic_gate_recall": 0.0,
+    "llm_lens_recall": 0.0,
+    "n_det_findings": 0,
+    "n_lens_findings": 0
+  },
+  "findings": [
+    {
+      "issue_text": "Permission check logic is incorrect: uses `&&` instead of `||`, requiring user to be BOTH team admin AND team owner, when it should allow either role",
+      "source": "vanilla-engineered"
+    },
+    {
+      "issue_text": "Sends emails using original `guests` array instead of `uniqueGuests`, potentially sending emails for guests that were filtered out as duplicates or blacklisted",
+      "source": "vanilla-engineered"
+    },
+    {
+      "issue_text": "Blacklist check is case-sensitive for input but lowercases blacklist entries, allowing bypass by using mixed-case email addresses",
+      "source": "vanilla-engineered"
+    },
+    {
+      "issue_text": "The `handleAdd` function doesn't filter out empty strings from `multiEmailValue`, which is initialized with `[\"\"]` and could submit empty emails if user clicks Add without entering anything",
+      "source": "vanilla-engineered"
+    },
+    {
+      "issue_text": "The `isInvalidEmail` state is never reset to `false` when the user corrects the input and successfully submits, only when canceling the dialog",
+      "source": "vanilla-engineered"
+    },
+    {
+      "issue_text": "Guest attendees are created with empty `name` field, which may cause display issues or validation problems in downstream systems expecting non-empty names",
+      "source": "vanilla-engineered"
+    },
+    {
+      "issue_text": "No check for booking status (e.g., cancelled, completed) before allowing guests to be added, potentially allowing modification of past or cancelled bookings",
+      "source": "vanilla-engineered"
+    },
+    {
+      "issue_text": "Schema allows empty `guests` array which will pass validation but cause a misleading error later in the handler when `uniqueGuests.length === 0`",
+      "source": "vanilla-engineered"
+    }
+  ]
+}

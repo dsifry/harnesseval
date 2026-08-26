@@ -1,0 +1,887 @@
+{
+  "tp": 7,
+  "fp": 19,
+  "fn": 2,
+  "precision": 0.2692307692307692,
+  "recall": 0.7777777777777778,
+  "n_findings": 25,
+  "n_golden": 9,
+  "tokens_in": 4472341,
+  "tokens_out": 91698,
+  "wall_ms": 536481.8122386932,
+  "per_model_usage": {
+    "claude-haiku-4-5-20251001": {
+      "input_tokens": 1987,
+      "cache_read_input_tokens": 0,
+      "cache_creation_input_tokens": 0,
+      "output_tokens": 14,
+      "reasoning_output_tokens": 0,
+      "cost_usd": 0.0020570000000000002,
+      "total_tokens": 2001
+    },
+    "claude-opus-5": {
+      "input_tokens": 252,
+      "cache_read_input_tokens": 3982661,
+      "cache_creation_input_tokens": 395743,
+      "output_tokens": 91684,
+      "reasoning_output_tokens": 0,
+      "cost_usd": 7.001267999999999,
+      "total_tokens": 4470340
+    }
+  },
+  "total_cost_usd": 7.0033249999999985,
+  "resolved_model": "claude-haiku-4-5-20251001,claude-opus-5",
+  "adjudicated_precision": 0.3684210526315789,
+  "incremental_recall": 0.875,
+  "n_real_ungold": 7,
+  "n_hallucination": 12,
+  "decomposition": {
+    "deterministic_tp": 0,
+    "llm_lens_tp": 0,
+    "deterministic_gate_recall": 0.0,
+    "llm_lens_recall": 0.0
+  },
+  "findings": [
+    {
+      "issue_text": "1 | `packages/app-store/googlecalendar/lib/CalendarService.ts:97` | `parseRefreshTokenResponse` returns the zod **safeParse wrapper** (`{success, data}`), but the call site assigns it straight to `key` and persists `data: { key }`. Previously this was `googleCredentialSchema.parse(...)`, which returned the credential object itself. Every Google token refresh therefore writes `{\"success\":true,\"data\":{\u2026}}` into `Credential.key`; the next `googleCredentialSchema.parse(credential.key)` throws and the connection is permanently broken until re-linked. **This is on the default path \u2014 no feature flag required, affects all deployments.** Contrast `office365calendar/lib/CalendarService.ts:263`, which correctly unwraps `.data`. | correctness, api-contract, reliability, adversarial | 100",
+      "source_lens": "compound-realistic/p0",
+      "file": null,
+      "line": null,
+      "severity": "p0",
+      "category": "bug"
+    },
+    {
+      "issue_text": "2 | `packages/app-store/salesforce/lib/CalendarService.ts:96` | `await prisma.credential.update(...)` is called but `prisma` is never imported in this file (imports at lines 1\u201320 contain no `@calcom/prisma`). The refresh block is unconditional, so every `getClient()` \u2014 i.e. every Salesforce calendar operation \u2014 hits `ReferenceError: prisma is not defined`. This is also a compile error, which suggests the path was never built or exercised. | correctness, reliability, adversarial | 100",
+      "source_lens": "compound-realistic/p0",
+      "file": null,
+      "line": null,
+      "severity": "p0",
+      "category": "bug"
+    },
+    {
+      "issue_text": "3 | `packages/app-store/_utils/oauth/parseRefreshTokenResponse.ts:5-11` | **Silent-pass validation gate.** `minimumTokenResponseSchema` uses computed keys `[z.string().toString()]` and `[z.string().optional().toString()]`. Zod types have no `toString()` override, so both evaluate to the literal `\"[object Object]\"` \u2014 the same key, second wins. The effective schema is `{ access_token: string, \"[object Object]\": unknown }`. The commented intent (\"assume any numeric property is the expiry\", \"allow other properties\") is not expressed at all, and because zod strips unknown keys by default, the returned `data` contains **only** `access_token` \u2014 `expiry_date` / `expires_in` / `refresh_token` / `instance_url` are silently discarded before being persisted. The code reads as if it validates when it does not. | adversarial (P0), correctness, api-contract, reliability, security, testing, maintainability | 100",
+      "source_lens": "compound-realistic/p1",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug"
+    },
+    {
+      "issue_text": "4 | `packages/app-store/_utils/oauth/parseRefreshTokenResponse.ts:25-27` | When the parsed data lacks a refresh token, the helper injects the **literal placeholder string** `\"refresh_token\"`. In `office365calendar/lib/CalendarService.ts:263-271` the schema declares `refresh_token: z.string().optional()` and the parsed data is spread over the existing credential before `prisma.credential.update` \u2014 so any response omitting a refresh token overwrites the user's real refresh token with the placeholder, unrecoverably. Downstream `!refreshToken` short-circuit guards (e.g. `larkcalendar/lib/CalendarService.ts:61`) also stop firing, converting a clean \"no refresh token\" state into a provider `invalid_grant`. `z.ZodTypeAny` types `.data` as `any`, so TS never flags the mutation. | adversarial (P0), correctness, reliability, testing, security | 90",
+      "source_lens": "compound-realistic/p1",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug"
+    },
+    {
+      "issue_text": "5 | `packages/app-store/_utils/oauth/refreshOAuthTokens.ts:3-15` | **Feature-flag-dependent return type with no type safety.** The credential-sync branch returns a raw `fetch` `Response`; the fallback branch returns whatever the app's own refresh function returns. `refreshFunction: () => any` and no declared return type erase the mismatch. Callers split into two incompatible groups: office365calendar (:262), office365video (:77), webex (:80), larkcalendar (:84) pass it to `handleErrorsJson`/`handleWebexResponse`/`handleLarkError` and need a `Response`; googlecalendar (:94) reads `res?.data` and hubspot (:177) annotates it `HubspotToken` and reads `.expiresIn`/`.accessToken`. With sync on: Google gets `undefined` \u2192 `TypeError` swallowed by the surrounding `catch` (refresh silently no-ops, stale token returned), HubSpot persists a `Response` as `Credential.key` with `expiryDate: NaN`. An explicit return type or a generic would have caught this at compile time; instead CI and typecheck stay green. | api-contract, correctness, reliability (P0), adversarial, testing, maintainability | 90",
+      "source_lens": "compound-realistic/p1",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug"
+    },
+    {
+      "issue_text": "6 | `packages/app-store/_utils/oauth/createOAuthAppCredential.ts:30-59` | **Dead authorization guard / privilege escalation.** The `if (state?.teamId)` branch verifies only *accepted membership* (`members.some({ userId, accepted: true })`) and then `return`s at line 56 \u2014 so `throwIfNotHaveAdminAccessToTeam` at line 59 is only ever reached with `teamId: null` and can never guard a team install. Any ordinary team member can complete an OAuth flow with a crafted `state={\"teamId\":T}` and write a team-wide `Credential` (Stripe, Salesforce, HubSpot, Office365, Webex, Tandem) for the whole team. Two competing authorization mechanisms now live in one 50-line function; the selected `members` field is never read. | security, adversarial, correctness, maintainability | 90",
+      "source_lens": "compound-realistic/p1",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug"
+    },
+    {
+      "issue_text": "7 | `apps/web/pages/api/webhook/app-credential.ts:24-29` | Shared-secret check is a plain `!==` between `req.headers[...]` and `process.env.CALCOM_WEBHOOK_SECRET`. If the secret env var is unset, a request that simply omits the header yields `undefined !== undefined` \u2192 **the check passes**. This endpoint writes arbitrary decrypted `key` JSON into any `userId`'s `Credential` with no session, ownership, or admin check \u2014 the header is its only authentication. The comparison is also non-constant-time (prefix/length timing oracle) and there is no `req.method` guard. Reachability depends on how `APP_CREDENTIAL_SHARING_ENABLED` is derived; that constant is outside this checkout, so neither reviewer could confirm it independently requires the secret. If it does not, this is unauthenticated credential injection for every user. Fix: fail closed on a missing secret plus `crypto.timingSafeEqual`. | security, adversarial | 65",
+      "source_lens": "compound-realistic/p1",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug"
+    },
+    {
+      "issue_text": "8 | `apps/web/pages/api/webhook/app-credential.ts:31,57-59` | Three unguarded throw sites with no try/catch: `appCredentialWebhookRequestBodySchema.parse(req.body)`, `symmetricDecrypt(...)` (throws on wrong/short key or tampered ciphertext), and `JSON.parse` of the plaintext. A malformed body, a key mismatch between Cal.com and the parent app, or a stray GET produces an unhandled rejection \u2192 opaque 500 with a stack trace instead of a 400/422. Third-party senders cannot distinguish \"your payload is wrong\" (don't retry) from \"Cal.com is broken\" (do retry). The decrypt failure is the first thing an operator will hit when the two sides' encryption keys drift, and it gives no actionable signal. | reliability, adversarial, api-contract, correctness, testing | 95",
+      "source_lens": "compound-realistic/p1",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug"
+    },
+    {
+      "issue_text": "9 | `packages/app-store/salesforce/lib/CalendarService.ts:103-107` | The newly added refresh fetches and persists new tokens into `accessTokenParsed.data`, but the returned `jsforce.Connection` is still built from the stale `credentialKey.access_token` / `credentialKey.instance_url`. The refresh has no effect on the connection actually used \u2014 when the old token is expired every Salesforce call still fails, so the bug this block was meant to fix persists. State applied to the DB but not to the in-memory client. | correctness, api-contract, reliability, adversarial | 85",
+      "source_lens": "compound-realistic/p1",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug"
+    },
+    {
+      "issue_text": "11 | `packages/app-store/salesforce/lib/CalendarService.ts:86` | Success is gated on `response.statusText !== \"OK\"` instead of `response.ok` / `response.status`. `statusText` is not part of the HTTP/2 response contract and undici commonly returns `\"\"`, so a successful 200 throws `HttpError(400, \"\")` \u2014 an opaque, empty-message failure. Conversely a non-2xx whose reason phrase is \"OK\" slips through. | api-contract, correctness, reliability, adversarial | 80",
+      "source_lens": "compound-realistic/p2",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "12 | `packages/app-store/salesforce/lib/CalendarService.ts:74-99` | `getClient` now performs an **unconditional** refresh-token grant on every instantiation with no expiry check, and does it via a hand-rolled `fetch` rather than `refreshOAuthTokens` \u2014 so Salesforce silently opts out of the very credential-sync feature this PR adds. There is also no timeout on the call to `login.salesforce.com`. Every Salesforce calendar operation now costs an extra network round-trip plus a credential write (rate-limit risk), and two concurrent bookings race on the same `credential.update` (last write wins). | reliability, adversarial, testing, maintainability | 85",
+      "source_lens": "compound-realistic/p2",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "13 | `apps/web/pages/api/webhook/app-credential.ts:61-89` | Read-then-write with no uniqueness constraint and no transaction: `findFirst({userId, appId})` followed by `create`. Two concurrent syncs for the same user+app both see `null` and both create, producing duplicate credentials; later syncs then update a nondeterministic one (`findFirst` has no `orderBy`), so half the app's calls use stale keys. The same `findFirst` also means a user with two legitimate accounts for one app (e.g. two Google Calendars) has one silently clobbered at random. | adversarial, correctness | 75",
+      "source_lens": "compound-realistic/p2",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "14 | `packages/app-store/_utils/oauth/decodeOAuthState.ts:9` | `JSON.parse(req.query.state)` on a raw, attacker-controlled query param with no try/catch and no schema validation; the result is cast to `IntegrationOAuthCallbackState` and `state.teamId` flows straight into a Prisma `where.id` and into the `teamId` written on `Credential`. Malformed JSON throws an uncaught `SyntaxError` in every OAuth callback \u2014 and it throws *after* the authorization code has been exchanged, so the provider-side grant is consumed and the user is left with a half-completed install. State is never bound to the session (no CSRF nonce), so a crafted install link can plant an attacker's OAuth credential into a victim's account or team. The pre-change files had the same shape, but routing this through `createOAuthAppCredential` widens the blast radius to the credential-write path across ~10 integrations. | security, reliability, adversarial, testing | 85",
+      "source_lens": "compound-realistic/p2",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "15 | `packages/app-store/_utils/oauth/parseRefreshTokenResponse.ts:21-27` | Contract confusion: the helper **throws** on parse failure yet **returns a safeParse result**, so `success: false` is structurally unreachable. Call sites kept their old defensive branches against the previous contract \u2014 `salesforce/lib/CalendarService.ts:92` (`if (!accessTokenParsed.success)`) is dead code, and `office365calendar/lib/CalendarService.ts:264` still evaluates `tokenResponse.success && tokenResponse.data` where `success` is now always true. Worse, the o365 diff *deleted* its previous \"log the zod error and continue with the existing credentials\" fallback, so refresh failures that used to degrade gracefully now throw out of `refreshAccessToken`. Either return safeParse without throwing, or return `.data` directly and drop the unwrapping everywhere. | api-contract, maintainability, correctness | 85",
+      "source_lens": "compound-realistic/p2",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "16 | `packages/app-store/office365calendar/lib/CalendarService.ts:264` | The diff removes the `console.error` that logged the zod error and the raw Microsoft response on refresh failure, replacing it with a generic `Error(\"Invalid refreshed tokens were returned\")` carrying no context. This is the single most failure-prone path in the PR, and on-call now cannot distinguish credential-sync misconfiguration from a Microsoft-side error. | reliability, testing | 85",
+      "source_lens": "compound-realistic/p2",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "17 | `packages/app-store/_utils/oauth/refreshOAuthTokens.ts:8-15` | The outbound POST to `CALCOM_CREDENTIAL_SYNC_ENDPOINT` carries **no authentication** (no `CALCOM_WEBHOOK_SECRET` header, no signature), no `Content-Type`, no `response.ok` check, and no timeout/`AbortSignal`. The endpoint hands out live access tokens keyed only by the unauthenticated body params `calcomUserId` + `appSlug`, so anyone who learns the URL can enumerate user IDs and harvest tokens. The asymmetry with the *inbound* webhook \u2014 which does require a shared secret \u2014 looks unintended. Operationally, a slow endpoint hangs the booking flow (Node `fetch` has no default timeout) and a 500 HTML body is passed straight into the app's token parser, where per findings 3\u20135 it can be persisted over a working credential. | adversarial, security, reliability, testing | 75",
+      "source_lens": "compound-realistic/p2",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "18 | `packages/app-store/_utils/oauth/encodeOAuthState.ts:5-11` | `encodeOAuthState` does `JSON.parse(req.query.state)` then immediately `JSON.stringify(state)` and returns it \u2014 a round-trip yielding the same string it was given. It is a no-op wrapper over `req.query.state`, and it is not the inverse of its sibling `decodeOAuthState` (which returns the parsed object) despite the paired naming. Seven `api/add.ts` files now import a helper whose name promises encoding and delivers nothing; its only real effect is throwing on malformed JSON, which is undocumented. | maintainability | 100",
+      "source_lens": "compound-realistic/p2",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "19 | `packages/app-store/salesforce/lib/CalendarService.ts:75` *(pattern)* | The new abstraction is applied half-and-half with no stated rule: Salesforce hand-rolls its refresh `fetch` and never calls `refreshOAuthTokens` (credential sync is silently inert for it), while hubspot, larkcalendar, webex and office365video call `refreshOAuthTokens` but never `parseRefreshTokenResponse` (the \"minimum token response\" contract is unenforced for them). Only googlecalendar and office365calendar use both. Anyone adding an 11th integration has no consistent pattern to copy. | maintainability | 95",
+      "source_lens": "compound-realistic/p2",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "20 | `apps/web/pages/api/webhook/app-credential.ts:57-59` | `symmetricDecrypt(reqBody.keys, process.env.CALCOM_APP_CREDENTIAL_ENCRYPTION_KEY || \"\")` silently falls back to an empty encryption key rather than failing closed. A deployment with the key unset either decrypts under a degenerate key or crashes, with no signal to the operator that credential sync is misconfigured. Validate presence and 32-byte length at module load. | security | 80",
+      "source_lens": "compound-realistic/p2",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "21 | `packages/app-store/_utils/oauth/decodeOAuthState.ts:5` | `decodeOAuthState(req: NextApiRequest)` takes an entire Next.js request object solely to read `req.query.state`, and `createOAuthAppCredential(appData, key, req)` takes the whole request to read `req.session?.user.id` plus that same field. This binds pure OAuth-state logic to the pages-router request type, so neither helper is reusable from the app router or tRPC, or unit-testable without fabricating a `NextApiRequest`. `decodeOAuthState(state?: string)` / `createOAuthAppCredential(appData, key, { userId, teamId })` carry the same information. | maintainability | 85",
+      "source_lens": "compound-realistic/p3",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "bug"
+    },
+    {
+      "issue_text": "22 | `packages/app-store/_utils/oauth/refreshOAuthTokens.ts:5` | The gate `APP_CREDENTIAL_SHARING_ENABLED && process.env.CALCOM_CREDENTIAL_SYNC_ENDPOINT` is duplicated verbatim in `parseRefreshTokenResponse.ts:15` (minus the `userId` term), with a third variant in `app-credential.ts:19`. Four env vars drive behavior across three modules with no single derived constant. The two refresh helpers can drift out of agreement about whether sync is active \u2014 exactly the case where `refreshOAuthTokens` takes the sync branch but `parseRefreshTokenResponse` does not. | maintainability | 80",
+      "source_lens": "compound-realistic/p3",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "bug"
+    },
+    {
+      "issue_text": "23 | `packages/app-store/zoho-bigin/api/add.ts:17` | `redirectUri` was changed from `` `/api/integrations/${appConfig.slug}/callback` `` to a hardcoded `` `/api/integrations/zoho-bigin/callback` `` while line 12 still uses `appConfig.slug` for `getAppKeysFromSlug`. This undoes an existing single source of truth for no stated reason and is unrelated to the PR's concern. | maintainability, correctness | 90",
+      "source_lens": "compound-realistic/p3",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "bug"
+    },
+    {
+      "issue_text": "24 | `packages/app-store/_utils/oauth/createOAuthAppCredential.ts:13` | JSDoc documents both `appData.type` and `appData.appId` as \"the app slug\"; `type` is the credential type (e.g. `salesforce_other_calendar`), not the slug. `key` is typed `unknown` with no schema, giving callers no compile-time guidance. `app-credential.ts:15` carries an empty `/** */` block. | maintainability | 85",
+      "source_lens": "compound-realistic/p3",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "bug"
+    },
+    {
+      "issue_text": "25 | `apps/web/pages/api/webhook/app-credential.ts:24` | If `CALCOM_WEBHOOK_HEADER_NAME` is configured with any uppercase character, Node's lowercased incoming header keys make the lookup permanently `undefined`. The endpoint then fails closed but silently \u2014 the operator gets a 403 with no hint that their header-name casing is the cause. The `.env.example` comment mentions lowercase, but nothing enforces or warns. | adversarial | 60",
+      "source_lens": "compound-realistic/p3",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "bug"
+    },
+    {
+      "issue_text": "26 | `apps/web/pages/api/webhook/app-credential.ts:82,89` | The create path returns 200 rather than 201, so an integrating caller cannot distinguish create from update except by string-matching the English message body. Minor contract wart on a new public endpoint. | api-contract | 90",
+      "source_lens": "compound-realistic/p3",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "bug"
+    }
+  ],
+  "goldens": [
+    {
+      "comment": "The parseRefreshTokenResponse function incorrectly sets refresh_token to the hardcoded string 'refresh_token' when it's missing from the OAuth refresh token response. This invalidates the token, breaking subsequent token refreshes and causing authentication failures.",
+      "severity": "High",
+      "category": "bug"
+    },
+    {
+      "comment": "The Zod schema in parseRefreshTokenResponse uses computed property keys [z.string().toString()] and [z.string().optional().toString()] in minimumTokenResponseSchema, which is invalid Zod syntax and will throw a runtime error.",
+      "severity": "High",
+      "category": "bug"
+    },
+    {
+      "comment": "parseRefreshTokenResponse returns a Zod safeParse result ({ success, data, error }), not the credential key object. Persisting that as key stores the wrapper instead of the token payload; we should store the parsed data or use schema parse.",
+      "severity": "High",
+      "category": "data"
+    },
+    {
+      "comment": "When APP_CREDENTIAL_SHARING_ENABLED and CALCOM_CREDENTIAL_SYNC_ENDPOINT are set, the refreshFunction helper returns the fetch Response, but several callers (for example GoogleCalendarService.refreshAccessToken expecting res.data, and HubspotCalendarService.refreshAccessToken expecting a HubspotToken) assume it returns the integration-specific token object. That mismatch will cause runtime errors in the sync-enabled path unless the return type or those call sites are adjusted.",
+      "severity": "High",
+      "category": "api"
+    },
+    {
+      "comment": "When the sync endpoint path is used, res is a fetch Response and has no .data; res?.data will be undefined and token.access_token will throw at runtime. This relies on a consistent return shape from refreshOAuthTokens, which isn\u2019t guaranteed currently.",
+      "severity": "High",
+      "category": "bug"
+    },
+    {
+      "comment": "The `refreshOAuthTokens` function is passed `credentialId` instead of `userId`, which breaks the credential sync functionality by causing incorrect user lookups. This issue can lead to failures in syncing user credentials, impacting user experience.",
+      "severity": "High",
+      "category": "bug"
+    },
+    {
+      "comment": "The Salesforce integration checks `response.statusText` instead of `response.ok` when handling OAuth token refresh responses. This can lead to unreliable behavior, as a successful response may not be correctly identified, resulting in the use of stale credentials and potential authentication failures.",
+      "severity": "High",
+      "category": "bug"
+    },
+    {
+      "comment": "The `jsforce.Connection` is created using stale `credentialKey.access_token` and `credentialKey.instance_url` after a token refresh, which can lead to authentication failures and incorrect data access. Ensure that the connection is established using the refreshed token values instead.",
+      "severity": "High",
+      "category": "bug"
+    },
+    {
+      "comment": "The `appCredentialWebhookRequestBodySchema.parse` function can throw on invalid payloads, resulting in 500 Internal Server Errors instead of the expected 400 Bad Request responses. This can lead to confusion for clients and hinder proper error handling.",
+      "severity": "Medium",
+      "category": "api"
+    }
+  ],
+  "per_golden_matches": [
+    {
+      "golden_comment": "The parseRefreshTokenResponse function incorrectly sets refresh_token to the hardcoded string 'refresh_token' when it's missing from the OAuth refresh token response. This invalidates the token, breaking subsequent token refreshes and causing authentication failures.",
+      "severity": "High",
+      "category": "bug",
+      "matched_candidate": "4 | `packages/app-store/_utils/oauth/parseRefreshTokenResponse.ts:25-27` | When the parsed data lacks a refresh token, the helper injects the **literal placeholder string** `\"refresh_token\"`. In `office365calendar/lib/CalendarService.ts:263-271` the schema declares `refresh_token: z.string().optional()` and the parsed data is spread over the existing credential before `prisma.credential.update` \u2014 so any response omitting a refresh token overwrites the user's real refresh token with the placeholder, unrecoverably. Downstream `!refreshToken` short-circuit guards (e.g. `larkcalendar/lib/CalendarService.ts:61`) also stop firing, converting a clean \"no refresh token\" state into a provider `invalid_grant`. `z.ZodTypeAny` types `.data` as `any`, so TS never flags the mutation. | adversarial (P0), correctness, reliability, testing, security | 90",
+      "confidence": 0.97,
+      "reasoning": "The candidate describes the same root bug: parseRefreshTokenResponse injects the literal string \"refresh_token\" when the provider response omits a refresh token, which can overwrite a valid stored refresh token and lead to invalid/failed future refreshes (auth failures/invalid_grant)."
+    },
+    {
+      "golden_comment": "parseRefreshTokenResponse returns a Zod safeParse result ({ success, data, error }), not the credential key object. Persisting that as key stores the wrapper instead of the token payload; we should store the parsed data or use schema parse.",
+      "severity": "High",
+      "category": "data",
+      "matched_candidate": "1 | `packages/app-store/googlecalendar/lib/CalendarService.ts:97` | `parseRefreshTokenResponse` returns the zod **safeParse wrapper** (`{success, data}`), but the call site assigns it straight to `key` and persists `data: { key }`. Previously this was `googleCredentialSchema.parse(...)`, which returned the credential object itself. Every Google token refresh therefore writes `{\"success\":true,\"data\":{\u2026}}` into `Credential.key`; the next `googleCredentialSchema.parse(credential.key)` throws and the connection is permanently broken until re-linked. **This is on the default path \u2014 no feature flag required, affects all deployments.** Contrast `office365calendar/lib/CalendarService.ts:263`, which correctly unwraps `.data`. | correctness, api-contract, reliability, adversarial | 100",
+      "confidence": 0.98,
+      "reasoning": "The candidate identifies that `parseRefreshTokenResponse` returns a Zod `safeParse` wrapper ({success, data, error}) and that the call site incorrectly persists this wrapper as `Credential.key` instead of persisting the parsed credential payload (or using `.parse`). This is the same underlying issue described in the golden comment."
+    },
+    {
+      "golden_comment": "When APP_CREDENTIAL_SHARING_ENABLED and CALCOM_CREDENTIAL_SYNC_ENDPOINT are set, the refreshFunction helper returns the fetch Response, but several callers (for example GoogleCalendarService.refreshAccessToken expecting res.data, and HubspotCalendarService.refreshAccessToken expecting a HubspotToken) assume it returns the integration-specific token object. That mismatch will cause runtime errors in the sync-enabled path unless the return type or those call sites are adjusted.",
+      "severity": "High",
+      "category": "api",
+      "matched_candidate": "5 | `packages/app-store/_utils/oauth/refreshOAuthTokens.ts:3-15` | **Feature-flag-dependent return type with no type safety.** The credential-sync branch returns a raw `fetch` `Response`; the fallback branch returns whatever the app's own refresh function returns. `refreshFunction: () => any` and no declared return type erase the mismatch. Callers split into two incompatible groups: office365calendar (:262), office365video (:77), webex (:80), larkcalendar (:84) pass it to `handleErrorsJson`/`handleWebexResponse`/`handleLarkError` and need a `Response`; googlecalendar (:94) reads `res?.data` and hubspot (:177) annotates it `HubspotToken` and reads `.expiresIn`/`.accessToken`. With sync on: Google gets `undefined` \u2192 `TypeError` swallowed by the surrounding `catch` (refresh silently no-ops, stale token returned), HubSpot persists a `Response` as `Credential.key` with `expiryDate: NaN`. An explicit return type or a generic would have caught this at compile time; instead CI and typecheck stay green. | api-contract, correctness, reliability (P0), adversarial, testing, maintainability | 90",
+      "confidence": 0.96,
+      "reasoning": "The candidate issue describes the same feature-flag-dependent return type mismatch: in the credential-sync (APP_CREDENTIAL_SHARING_ENABLED + CALCOM_CREDENTIAL_SYNC_ENDPOINT) branch, the helper returns a raw fetch Response, while callers like GoogleCalendarService and HubspotCalendarService assume an integration-specific token object (res.data / HubspotToken). It notes resulting runtime errors in the sync-enabled path and suggests fixing return typing or call sites, matching the golden comment."
+    },
+    {
+      "golden_comment": "When the sync endpoint path is used, res is a fetch Response and has no .data; res?.data will be undefined and token.access_token will throw at runtime. This relies on a consistent return shape from refreshOAuthTokens, which isn\u2019t guaranteed currently.",
+      "severity": "High",
+      "category": "bug",
+      "matched_candidate": "5 | `packages/app-store/_utils/oauth/refreshOAuthTokens.ts:3-15` | **Feature-flag-dependent return type with no type safety.** The credential-sync branch returns a raw `fetch` `Response`; the fallback branch returns whatever the app's own refresh function returns. `refreshFunction: () => any` and no declared return type erase the mismatch. Callers split into two incompatible groups: office365calendar (:262), office365video (:77), webex (:80), larkcalendar (:84) pass it to `handleErrorsJson`/`handleWebexResponse`/`handleLarkError` and need a `Response`; googlecalendar (:94) reads `res?.data` and hubspot (:177) annotates it `HubspotToken` and reads `.expiresIn`/`.accessToken`. With sync on: Google gets `undefined` \u2192 `TypeError` swallowed by the surrounding `catch` (refresh silently no-ops, stale token returned), HubSpot persists a `Response` as `Credential.key` with `expiryDate: NaN`. An explicit return type or a generic would have caught this at compile time; instead CI and typecheck stay green. | api-contract, correctness, reliability (P0), adversarial, testing, maintainability | 90",
+      "confidence": 0.93,
+      "reasoning": "Yes. The candidate flags that the sync/credential-sync branch returns a raw fetch Response while other branches return app-specific token objects, leading callers like googlecalendar that read `res?.data` to get `undefined` and then crash when accessing token fields. This is the same underlying inconsistency in return shape highlighted by the golden comment."
+    },
+    {
+      "golden_comment": "The Salesforce integration checks `response.statusText` instead of `response.ok` when handling OAuth token refresh responses. This can lead to unreliable behavior, as a successful response may not be correctly identified, resulting in the use of stale credentials and potential authentication failures.",
+      "severity": "High",
+      "category": "bug",
+      "matched_candidate": "11 | `packages/app-store/salesforce/lib/CalendarService.ts:86` | Success is gated on `response.statusText !== \"OK\"` instead of `response.ok` / `response.status`. `statusText` is not part of the HTTP/2 response contract and undici commonly returns `\"\"`, so a successful 200 throws `HttpError(400, \"\")` \u2014 an opaque, empty-message failure. Conversely a non-2xx whose reason phrase is \"OK\" slips through. | api-contract, correctness, reliability, adversarial | 80",
+      "confidence": 0.93,
+      "reasoning": "Candidate flags the same core bug: success/failure is determined via `response.statusText` rather than `response.ok`/status code, which is unreliable (can be empty or misleading) and can mis-handle successful vs non-2xx responses. This aligns with the golden issue in the Salesforce OAuth token refresh handling, even if the candidate doesn\u2019t explicitly mention stale credentials."
+    },
+    {
+      "golden_comment": "The `jsforce.Connection` is created using stale `credentialKey.access_token` and `credentialKey.instance_url` after a token refresh, which can lead to authentication failures and incorrect data access. Ensure that the connection is established using the refreshed token values instead.",
+      "severity": "High",
+      "category": "bug",
+      "matched_candidate": "9 | `packages/app-store/salesforce/lib/CalendarService.ts:103-107` | The newly added refresh fetches and persists new tokens into `accessTokenParsed.data`, but the returned `jsforce.Connection` is still built from the stale `credentialKey.access_token` / `credentialKey.instance_url`. The refresh has no effect on the connection actually used \u2014 when the old token is expired every Salesforce call still fails, so the bug this block was meant to fix persists. State applied to the DB but not to the in-memory client. | correctness, api-contract, reliability, adversarial | 85",
+      "confidence": 0.97,
+      "reasoning": "The candidate explicitly notes that after refreshing and persisting new tokens, the code still constructs `jsforce.Connection` using the stale `credentialKey.access_token` and `credentialKey.instance_url`, meaning the refresh does not affect the active connection. This is the same underlying issue described in the golden comment."
+    },
+    {
+      "golden_comment": "The `appCredentialWebhookRequestBodySchema.parse` function can throw on invalid payloads, resulting in 500 Internal Server Errors instead of the expected 400 Bad Request responses. This can lead to confusion for clients and hinder proper error handling.",
+      "severity": "Medium",
+      "category": "api",
+      "matched_candidate": "8 | `apps/web/pages/api/webhook/app-credential.ts:31,57-59` | Three unguarded throw sites with no try/catch: `appCredentialWebhookRequestBodySchema.parse(req.body)`, `symmetricDecrypt(...)` (throws on wrong/short key or tampered ciphertext), and `JSON.parse` of the plaintext. A malformed body, a key mismatch between Cal.com and the parent app, or a stray GET produces an unhandled rejection \u2192 opaque 500 with a stack trace instead of a 400/422. Third-party senders cannot distinguish \"your payload is wrong\" (don't retry) from \"Cal.com is broken\" (do retry). The decrypt failure is the first thing an operator will hit when the two sides' encryption keys drift, and it gives no actionable signal. | reliability, adversarial, api-contract, correctness, testing | 95",
+      "confidence": 0.94,
+      "reasoning": "The candidate explicitly calls out `appCredentialWebhookRequestBodySchema.parse(req.body)` as an unguarded throw that can turn malformed requests into unhandled errors, producing opaque 500 responses instead of proper 400/422 client errors\u2014matching the golden issue. It also mentions additional throw sites, but the core problem aligns."
+    },
+    {
+      "golden_comment": "The Zod schema in parseRefreshTokenResponse uses computed property keys [z.string().toString()] and [z.string().optional().toString()] in minimumTokenResponseSchema, which is invalid Zod syntax and will throw a runtime error.",
+      "severity": "High",
+      "category": "bug"
+    },
+    {
+      "golden_comment": "The `refreshOAuthTokens` function is passed `credentialId` instead of `userId`, which breaks the credential sync functionality by causing incorrect user lookups. This issue can lead to failures in syncing user credentials, impacting user experience.",
+      "severity": "High",
+      "category": "bug"
+    }
+  ],
+  "adjudication_records": [
+    {
+      "issue_text": "1 | `packages/app-store/googlecalendar/lib/CalendarService.ts:97` | `parseRefreshTokenResponse` returns the zod **safeParse wrapper** (`{success, data}`), but the call site assigns it straight to `key` and persists `data: { key }`. Previously this was `googleCredentialSchema.parse(...)`, which returned the credential object itself. Every Google token refresh therefore writes `{\"success\":true,\"data\":{\u2026}}` into `Credential.key`; the next `googleCredentialSchema.parse(credential.key)` throws and the connection is permanently broken until re-linked. **This is on the default path \u2014 no feature flag required, affects all deployments.** Contrast `office365calendar/lib/CalendarService.ts:263`, which correctly unwraps `.data`. | correctness, api-contract, reliability, adversarial | 100",
+      "source_lens": "compound-realistic/p0",
+      "file": null,
+      "line": null,
+      "severity": "p0",
+      "category": "bug",
+      "matched_golden_ids": [
+        "parseRefreshTokenResponse returns a Zod safeParse result ({ success, data, error }), not the credential key object. Persisting that as key stores the wrapper instead of the token payload; we should store the parsed data or use schema parse."
+      ],
+      "primary_judge_verdict": "matched",
+      "primary_judge": "gpt-5.2",
+      "primary_judge_confidence": 0.98,
+      "primary_judge_reasoning": "The candidate identifies that `parseRefreshTokenResponse` returns a Zod `safeParse` wrapper ({success, data, error}) and that the call site incorrectly persists this wrapper as `Credential.key` instead of persisting the parsed credential payload (or using `.parse`). This is the same underlying issue described in the golden comment.",
+      "adjudication": {
+        "verdict": "matched",
+        "adjudicating_judge": null,
+        "confidence": null,
+        "rationale": null,
+        "diff_context_hash": "22212e034b8a979d88e554686550a92065457a8d"
+      }
+    },
+    {
+      "issue_text": "2 | `packages/app-store/salesforce/lib/CalendarService.ts:96` | `await prisma.credential.update(...)` is called but `prisma` is never imported in this file (imports at lines 1\u201320 contain no `@calcom/prisma`). The refresh block is unconditional, so every `getClient()` \u2014 i.e. every Salesforce calendar operation \u2014 hits `ReferenceError: prisma is not defined`. This is also a compile error, which suggests the path was never built or exercised. | correctness, reliability, adversarial | 100",
+      "source_lens": "compound-realistic/p0",
+      "file": null,
+      "line": null,
+      "severity": "p0",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "hallucination",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "hallucination",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": null,
+        "rationale": null,
+        "diff_context_hash": "22212e034b8a979d88e554686550a92065457a8d"
+      }
+    },
+    {
+      "issue_text": "3 | `packages/app-store/_utils/oauth/parseRefreshTokenResponse.ts:5-11` | **Silent-pass validation gate.** `minimumTokenResponseSchema` uses computed keys `[z.string().toString()]` and `[z.string().optional().toString()]`. Zod types have no `toString()` override, so both evaluate to the literal `\"[object Object]\"` \u2014 the same key, second wins. The effective schema is `{ access_token: string, \"[object Object]\": unknown }`. The commented intent (\"assume any numeric property is the expiry\", \"allow other properties\") is not expressed at all, and because zod strips unknown keys by default, the returned `data` contains **only** `access_token` \u2014 `expiry_date` / `expires_in` / `refresh_token` / `instance_url` are silently discarded before being persisted. The code reads as if it validates when it does not. | adversarial (P0), correctness, api-contract, reliability, security, testing, maintainability | 100",
+      "source_lens": "compound-realistic/p1",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "hallucination",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "hallucination",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": null,
+        "rationale": null,
+        "diff_context_hash": "22212e034b8a979d88e554686550a92065457a8d"
+      }
+    },
+    {
+      "issue_text": "4 | `packages/app-store/_utils/oauth/parseRefreshTokenResponse.ts:25-27` | When the parsed data lacks a refresh token, the helper injects the **literal placeholder string** `\"refresh_token\"`. In `office365calendar/lib/CalendarService.ts:263-271` the schema declares `refresh_token: z.string().optional()` and the parsed data is spread over the existing credential before `prisma.credential.update` \u2014 so any response omitting a refresh token overwrites the user's real refresh token with the placeholder, unrecoverably. Downstream `!refreshToken` short-circuit guards (e.g. `larkcalendar/lib/CalendarService.ts:61`) also stop firing, converting a clean \"no refresh token\" state into a provider `invalid_grant`. `z.ZodTypeAny` types `.data` as `any`, so TS never flags the mutation. | adversarial (P0), correctness, reliability, testing, security | 90",
+      "source_lens": "compound-realistic/p1",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug",
+      "matched_golden_ids": [
+        "The parseRefreshTokenResponse function incorrectly sets refresh_token to the hardcoded string 'refresh_token' when it's missing from the OAuth refresh token response. This invalidates the token, breaking subsequent token refreshes and causing authentication failures."
+      ],
+      "primary_judge_verdict": "matched",
+      "primary_judge": "gpt-5.2",
+      "primary_judge_confidence": 0.97,
+      "primary_judge_reasoning": "The candidate describes the same root bug: parseRefreshTokenResponse injects the literal string \"refresh_token\" when the provider response omits a refresh token, which can overwrite a valid stored refresh token and lead to invalid/failed future refreshes (auth failures/invalid_grant).",
+      "adjudication": {
+        "verdict": "matched",
+        "adjudicating_judge": null,
+        "confidence": null,
+        "rationale": null,
+        "diff_context_hash": "22212e034b8a979d88e554686550a92065457a8d"
+      }
+    },
+    {
+      "issue_text": "5 | `packages/app-store/_utils/oauth/refreshOAuthTokens.ts:3-15` | **Feature-flag-dependent return type with no type safety.** The credential-sync branch returns a raw `fetch` `Response`; the fallback branch returns whatever the app's own refresh function returns. `refreshFunction: () => any` and no declared return type erase the mismatch. Callers split into two incompatible groups: office365calendar (:262), office365video (:77), webex (:80), larkcalendar (:84) pass it to `handleErrorsJson`/`handleWebexResponse`/`handleLarkError` and need a `Response`; googlecalendar (:94) reads `res?.data` and hubspot (:177) annotates it `HubspotToken` and reads `.expiresIn`/`.accessToken`. With sync on: Google gets `undefined` \u2192 `TypeError` swallowed by the surrounding `catch` (refresh silently no-ops, stale token returned), HubSpot persists a `Response` as `Credential.key` with `expiryDate: NaN`. An explicit return type or a generic would have caught this at compile time; instead CI and typecheck stay green. | api-contract, correctness, reliability (P0), adversarial, testing, maintainability | 90",
+      "source_lens": "compound-realistic/p1",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug",
+      "matched_golden_ids": [
+        "When APP_CREDENTIAL_SHARING_ENABLED and CALCOM_CREDENTIAL_SYNC_ENDPOINT are set, the refreshFunction helper returns the fetch Response, but several callers (for example GoogleCalendarService.refreshAccessToken expecting res.data, and HubspotCalendarService.refreshAccessToken expecting a HubspotToken) assume it returns the integration-specific token object. That mismatch will cause runtime errors in the sync-enabled path unless the return type or those call sites are adjusted.",
+        "When the sync endpoint path is used, res is a fetch Response and has no .data; res?.data will be undefined and token.access_token will throw at runtime. This relies on a consistent return shape from refreshOAuthTokens, which isn\u2019t guaranteed currently."
+      ],
+      "primary_judge_verdict": "matched",
+      "primary_judge": "gpt-5.2",
+      "primary_judge_confidence": 0.96,
+      "primary_judge_reasoning": "The candidate issue describes the same feature-flag-dependent return type mismatch: in the credential-sync (APP_CREDENTIAL_SHARING_ENABLED + CALCOM_CREDENTIAL_SYNC_ENDPOINT) branch, the helper returns a raw fetch Response, while callers like GoogleCalendarService and HubspotCalendarService assume an integration-specific token object (res.data / HubspotToken). It notes resulting runtime errors in the sync-enabled path and suggests fixing return typing or call sites, matching the golden comment.",
+      "adjudication": {
+        "verdict": "matched",
+        "adjudicating_judge": null,
+        "confidence": null,
+        "rationale": null,
+        "diff_context_hash": "22212e034b8a979d88e554686550a92065457a8d"
+      }
+    },
+    {
+      "issue_text": "6 | `packages/app-store/_utils/oauth/createOAuthAppCredential.ts:30-59` | **Dead authorization guard / privilege escalation.** The `if (state?.teamId)` branch verifies only *accepted membership* (`members.some({ userId, accepted: true })`) and then `return`s at line 56 \u2014 so `throwIfNotHaveAdminAccessToTeam` at line 59 is only ever reached with `teamId: null` and can never guard a team install. Any ordinary team member can complete an OAuth flow with a crafted `state={\"teamId\":T}` and write a team-wide `Credential` (Stripe, Salesforce, HubSpot, Office365, Webex, Tandem) for the whole team. Two competing authorization mechanisms now live in one 50-line function; the selected `members` field is never read. | security, adversarial, correctness, maintainability | 90",
+      "source_lens": "compound-realistic/p1",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "hallucination",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "hallucination",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.86,
+        "rationale": "The diff does not show the body/logic of `createOAuthAppCredential` at all\u2014only a rename and import path changes at the top of the file. The proposed finding cites specific control-flow/authorization behavior in `packages/app-store/_utils/oauth/createOAuthAppCredential.ts:30-59`, but those lines are not present in the provided diff, so the claimed dead guard/privilege escalation cannot be verified from this change set.",
+        "diff_context_hash": "22212e034b8a979d88e554686550a92065457a8d"
+      }
+    },
+    {
+      "issue_text": "7 | `apps/web/pages/api/webhook/app-credential.ts:24-29` | Shared-secret check is a plain `!==` between `req.headers[...]` and `process.env.CALCOM_WEBHOOK_SECRET`. If the secret env var is unset, a request that simply omits the header yields `undefined !== undefined` \u2192 **the check passes**. This endpoint writes arbitrary decrypted `key` JSON into any `userId`'s `Credential` with no session, ownership, or admin check \u2014 the header is its only authentication. The comparison is also non-constant-time (prefix/length timing oracle) and there is no `req.method` guard. Reachability depends on how `APP_CREDENTIAL_SHARING_ENABLED` is derived; that constant is outside this checkout, so neither reviewer could confirm it independently requires the secret. If it does not, this is unauthenticated credential injection for every user. Fix: fail closed on a missing secret plus `crypto.timingSafeEqual`. | security, adversarial | 65",
+      "source_lens": "compound-realistic/p1",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.78,
+        "rationale": "The diff adds `apps/web/pages/api/webhook/app-credential.ts` with an auth check:\n\n```ts\nif (req.headers[process.env.CALCOM_WEBHOOK_HEADER_NAME || \"calcom-webhook-secret\"] !== process.env.CALCOM_WEBHOOK_SECRET) {\n  return res.status(403)\n}\n```\n\nIf `process.env.CALCOM_WEBHOOK_SECRET` is **unset** (i.e., `undefined`), and the request also omits that header (so `req.headers[...]` is `undefined`), the condition becomes `undefined !== undefined` which is `false`, so the request is **not rejected**. That is a fail-open authentication bug that is directly verifiable from the code.\n\nAdditionally, the handler has no `req.method` guard, and after passing the above check it performs DB writes (`credential.update/create`) based solely on `userId` and `appSlug` from the request body (no session/ownership check). The timing-safe comparison point is accurate (plain `!==`). The only speculative part is whether `APP_CREDENTIAL_SHARING_ENABLED` is always false in practice; that constant\u2019s value isn\u2019t in the diff, but the fail-open logic itself is a real defect when the endpoint is reachable.",
+        "diff_context_hash": "22212e034b8a979d88e554686550a92065457a8d"
+      }
+    },
+    {
+      "issue_text": "8 | `apps/web/pages/api/webhook/app-credential.ts:31,57-59` | Three unguarded throw sites with no try/catch: `appCredentialWebhookRequestBodySchema.parse(req.body)`, `symmetricDecrypt(...)` (throws on wrong/short key or tampered ciphertext), and `JSON.parse` of the plaintext. A malformed body, a key mismatch between Cal.com and the parent app, or a stray GET produces an unhandled rejection \u2192 opaque 500 with a stack trace instead of a 400/422. Third-party senders cannot distinguish \"your payload is wrong\" (don't retry) from \"Cal.com is broken\" (do retry). The decrypt failure is the first thing an operator will hit when the two sides' encryption keys drift, and it gives no actionable signal. | reliability, adversarial, api-contract, correctness, testing | 95",
+      "source_lens": "compound-realistic/p1",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug",
+      "matched_golden_ids": [
+        "The `appCredentialWebhookRequestBodySchema.parse` function can throw on invalid payloads, resulting in 500 Internal Server Errors instead of the expected 400 Bad Request responses. This can lead to confusion for clients and hinder proper error handling."
+      ],
+      "primary_judge_verdict": "matched",
+      "primary_judge": "gpt-5.2",
+      "primary_judge_confidence": 0.94,
+      "primary_judge_reasoning": "The candidate explicitly calls out `appCredentialWebhookRequestBodySchema.parse(req.body)` as an unguarded throw that can turn malformed requests into unhandled errors, producing opaque 500 responses instead of proper 400/422 client errors\u2014matching the golden issue. It also mentions additional throw sites, but the core problem aligns.",
+      "adjudication": {
+        "verdict": "matched",
+        "adjudicating_judge": null,
+        "confidence": null,
+        "rationale": null,
+        "diff_context_hash": "22212e034b8a979d88e554686550a92065457a8d"
+      }
+    },
+    {
+      "issue_text": "9 | `packages/app-store/salesforce/lib/CalendarService.ts:103-107` | The newly added refresh fetches and persists new tokens into `accessTokenParsed.data`, but the returned `jsforce.Connection` is still built from the stale `credentialKey.access_token` / `credentialKey.instance_url`. The refresh has no effect on the connection actually used \u2014 when the old token is expired every Salesforce call still fails, so the bug this block was meant to fix persists. State applied to the DB but not to the in-memory client. | correctness, api-contract, reliability, adversarial | 85",
+      "source_lens": "compound-realistic/p1",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug",
+      "matched_golden_ids": [
+        "The `jsforce.Connection` is created using stale `credentialKey.access_token` and `credentialKey.instance_url` after a token refresh, which can lead to authentication failures and incorrect data access. Ensure that the connection is established using the refreshed token values instead."
+      ],
+      "primary_judge_verdict": "matched",
+      "primary_judge": "gpt-5.2",
+      "primary_judge_confidence": 0.97,
+      "primary_judge_reasoning": "The candidate explicitly notes that after refreshing and persisting new tokens, the code still constructs `jsforce.Connection` using the stale `credentialKey.access_token` and `credentialKey.instance_url`, meaning the refresh does not affect the active connection. This is the same underlying issue described in the golden comment.",
+      "adjudication": {
+        "verdict": "matched",
+        "adjudicating_judge": null,
+        "confidence": null,
+        "rationale": null,
+        "diff_context_hash": "22212e034b8a979d88e554686550a92065457a8d"
+      }
+    },
+    {
+      "issue_text": "11 | `packages/app-store/salesforce/lib/CalendarService.ts:86` | Success is gated on `response.statusText !== \"OK\"` instead of `response.ok` / `response.status`. `statusText` is not part of the HTTP/2 response contract and undici commonly returns `\"\"`, so a successful 200 throws `HttpError(400, \"\")` \u2014 an opaque, empty-message failure. Conversely a non-2xx whose reason phrase is \"OK\" slips through. | api-contract, correctness, reliability, adversarial | 80",
+      "source_lens": "compound-realistic/p2",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": [
+        "The Salesforce integration checks `response.statusText` instead of `response.ok` when handling OAuth token refresh responses. This can lead to unreliable behavior, as a successful response may not be correctly identified, resulting in the use of stale credentials and potential authentication failures."
+      ],
+      "primary_judge_verdict": "matched",
+      "primary_judge": "gpt-5.2",
+      "primary_judge_confidence": 0.93,
+      "primary_judge_reasoning": "Candidate flags the same core bug: success/failure is determined via `response.statusText` rather than `response.ok`/status code, which is unreliable (can be empty or misleading) and can mis-handle successful vs non-2xx responses. This aligns with the golden issue in the Salesforce OAuth token refresh handling, even if the candidate doesn\u2019t explicitly mention stale credentials.",
+      "adjudication": {
+        "verdict": "matched",
+        "adjudicating_judge": null,
+        "confidence": null,
+        "rationale": null,
+        "diff_context_hash": "22212e034b8a979d88e554686550a92065457a8d"
+      }
+    },
+    {
+      "issue_text": "12 | `packages/app-store/salesforce/lib/CalendarService.ts:74-99` | `getClient` now performs an **unconditional** refresh-token grant on every instantiation with no expiry check, and does it via a hand-rolled `fetch` rather than `refreshOAuthTokens` \u2014 so Salesforce silently opts out of the very credential-sync feature this PR adds. There is also no timeout on the call to `login.salesforce.com`. Every Salesforce calendar operation now costs an extra network round-trip plus a credential write (rate-limit risk), and two concurrent bookings race on the same `credential.update` (last write wins). | reliability, adversarial, testing, maintainability | 85",
+      "source_lens": "compound-realistic/p2",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "hallucination",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "hallucination",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.78,
+        "rationale": "The diff snippet for `packages/app-store/salesforce/lib/CalendarService.ts` only shows new imports (`z`, `parseRefreshTokenResponse`) and the addition of a `salesforceTokenSchema`, then it truncates before any `getClient`/token-refresh logic is shown. There is no visible code demonstrating an unconditional refresh-token grant, use of a hand-rolled `fetch` to `login.salesforce.com`, lack of expiry checks, lack of timeout, or a concurrent `credential.update` race. Since the claimed behavior is not present in the provided diff context, the finding is not verifiable from this diff.",
+        "diff_context_hash": "22212e034b8a979d88e554686550a92065457a8d"
+      }
+    },
+    {
+      "issue_text": "13 | `apps/web/pages/api/webhook/app-credential.ts:61-89` | Read-then-write with no uniqueness constraint and no transaction: `findFirst({userId, appId})` followed by `create`. Two concurrent syncs for the same user+app both see `null` and both create, producing duplicate credentials; later syncs then update a nondeterministic one (`findFirst` has no `orderBy`), so half the app's calls use stale keys. The same `findFirst` also means a user with two legitimate accounts for one app (e.g. two Google Calendars) has one silently clobbered at random. | adversarial, correctness | 75",
+      "source_lens": "compound-realistic/p2",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.72,
+        "rationale": "The new webhook handler implements a non-atomic \u201ccheck then insert\u201d pattern: it does `prisma.credential.findFirst({ where: { userId, appId } })` and, if null, does `prisma.credential.create(...)` (apps/web/pages/api/webhook/app-credential.ts around the described lines). This is susceptible to a race between concurrent requests for the same (userId, appId): both can observe no row and then both attempt to create. Whether that results in duplicate rows or a unique-constraint error depends on the DB schema (not shown in the diff), but the lack of a transaction/upsert is verifiably present. Additionally, using `findFirst` with no `orderBy` means that if duplicates do exist for any reason, updates will be nondeterministic. The claim about \u201ctwo legitimate accounts for one app\u201d is more speculative (depends on intended data model), but the concurrency/`findFirst` nondeterminism concern is real in the diff.",
+        "diff_context_hash": "22212e034b8a979d88e554686550a92065457a8d"
+      }
+    },
+    {
+      "issue_text": "14 | `packages/app-store/_utils/oauth/decodeOAuthState.ts:9` | `JSON.parse(req.query.state)` on a raw, attacker-controlled query param with no try/catch and no schema validation; the result is cast to `IntegrationOAuthCallbackState` and `state.teamId` flows straight into a Prisma `where.id` and into the `teamId` written on `Credential`. Malformed JSON throws an uncaught `SyntaxError` in every OAuth callback \u2014 and it throws *after* the authorization code has been exchanged, so the provider-side grant is consumed and the user is left with a half-completed install. State is never bound to the session (no CSRF nonce), so a crafted install link can plant an attacker's OAuth credential into a victim's account or team. The pre-change files had the same shape, but routing this through `createOAuthAppCredential` widens the blast radius to the credential-write path across ~10 integrations. | security, reliability, adversarial, testing | 85",
+      "source_lens": "compound-realistic/p2",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "hallucination",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "hallucination",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.83,
+        "rationale": "The diff only shows `decodeOAuthState` being moved and its import path adjusted (`IntegrationOAuthCallbackState` import changed). It does not show the body of `decodeOAuthState` (no `JSON.parse(req.query.state)` is visible), nor does it show `createOAuthAppCredential`\u2019s implementation or any Prisma `where.id` / `Credential` write that allegedly consumes `state.teamId`. Since the claimed unsafe parse, missing try/catch/schema validation, CSRF/session binding, and downstream Prisma usage are not present in the provided diff hunks, the finding is not verifiable from this diff and also does not clearly describe a newly introduced defect (it even states the \u201cpre-change files had the same shape\u201d).",
+        "diff_context_hash": "22212e034b8a979d88e554686550a92065457a8d"
+      }
+    },
+    {
+      "issue_text": "15 | `packages/app-store/_utils/oauth/parseRefreshTokenResponse.ts:21-27` | Contract confusion: the helper **throws** on parse failure yet **returns a safeParse result**, so `success: false` is structurally unreachable. Call sites kept their old defensive branches against the previous contract \u2014 `salesforce/lib/CalendarService.ts:92` (`if (!accessTokenParsed.success)`) is dead code, and `office365calendar/lib/CalendarService.ts:264` still evaluates `tokenResponse.success && tokenResponse.data` where `success` is now always true. Worse, the o365 diff *deleted* its previous \"log the zod error and continue with the existing credentials\" fallback, so refresh failures that used to degrade gracefully now throw out of `refreshAccessToken`. Either return safeParse without throwing, or return `.data` directly and drop the unwrapping everywhere. | api-contract, maintainability, correctness | 85",
+      "source_lens": "compound-realistic/p2",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "hallucination",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "hallucination",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": null,
+        "rationale": null,
+        "diff_context_hash": "22212e034b8a979d88e554686550a92065457a8d"
+      }
+    },
+    {
+      "issue_text": "16 | `packages/app-store/office365calendar/lib/CalendarService.ts:264` | The diff removes the `console.error` that logged the zod error and the raw Microsoft response on refresh failure, replacing it with a generic `Error(\"Invalid refreshed tokens were returned\")` carrying no context. This is the single most failure-prone path in the PR, and on-call now cannot distinguish credential-sync misconfiguration from a Microsoft-side error. | reliability, testing | 85",
+      "source_lens": "compound-realistic/p2",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.86,
+        "rationale": "In `packages/app-store/office365calendar/lib/CalendarService.ts`, the previous code did `refreshTokenResponseSchema.safeParse(responseJson)` and, on failure, logged `tokenResponse.error` and the raw `responseJson` via `console.error(...)`. The diff replaces this with `parseRefreshTokenResponse(responseJson, refreshTokenResponseSchema)`, and that helper throws `new Error(\"Invalid refreshed tokens were returned\")` when parsing fails, without logging/including the zod error or the provider response. No other logging/context is added in the shown changes, so observability/debuggability on refresh failures is reduced by this diff.",
+        "diff_context_hash": "22212e034b8a979d88e554686550a92065457a8d"
+      }
+    },
+    {
+      "issue_text": "17 | `packages/app-store/_utils/oauth/refreshOAuthTokens.ts:8-15` | The outbound POST to `CALCOM_CREDENTIAL_SYNC_ENDPOINT` carries **no authentication** (no `CALCOM_WEBHOOK_SECRET` header, no signature), no `Content-Type`, no `response.ok` check, and no timeout/`AbortSignal`. The endpoint hands out live access tokens keyed only by the unauthenticated body params `calcomUserId` + `appSlug`, so anyone who learns the URL can enumerate user IDs and harvest tokens. The asymmetry with the *inbound* webhook \u2014 which does require a shared secret \u2014 looks unintended. Operationally, a slow endpoint hangs the booking flow (Node `fetch` has no default timeout) and a 500 HTML body is passed straight into the app's token parser, where per findings 3\u20135 it can be persisted over a working credential. | adversarial, security, reliability, testing | 75",
+      "source_lens": "compound-realistic/p2",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.8,
+        "rationale": "Yes. In `packages/app-store/_utils/oauth/refreshOAuthTokens.ts`, when `APP_CREDENTIAL_SHARING_ENABLED && CALCOM_CREDENTIAL_SYNC_ENDPOINT && userId` it performs `fetch(process.env.CALCOM_CREDENTIAL_SYNC_ENDPOINT, { method: \"POST\", body: new URLSearchParams({ calcomUserId, appSlug }) })` and sends no authentication material (no shared-secret header like `CALCOM_WEBHOOK_SECRET`, no signature), and does not check `response.ok` or otherwise validate the response before returning it. There is also no timeout/`AbortSignal`, so a slow/hung endpoint can block the token refresh path. The claim about missing `Content-Type` is weaker because `fetch` typically sets `application/x-www-form-urlencoded` automatically for `URLSearchParams`, but the rest of the security/reliability concerns are directly supported by the diff.",
+        "diff_context_hash": "22212e034b8a979d88e554686550a92065457a8d"
+      }
+    },
+    {
+      "issue_text": "18 | `packages/app-store/_utils/oauth/encodeOAuthState.ts:5-11` | `encodeOAuthState` does `JSON.parse(req.query.state)` then immediately `JSON.stringify(state)` and returns it \u2014 a round-trip yielding the same string it was given. It is a no-op wrapper over `req.query.state`, and it is not the inverse of its sibling `decodeOAuthState` (which returns the parsed object) despite the paired naming. Seven `api/add.ts` files now import a helper whose name promises encoding and delivers nothing; its only real effect is throwing on malformed JSON, which is undocumented. | maintainability | 100",
+      "source_lens": "compound-realistic/p2",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "hallucination",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "hallucination",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.74,
+        "rationale": "The diff does not show the implementation of `packages/app-store/_utils/oauth/encodeOAuthState.ts` (only a rename and an import-path change for `IntegrationOAuthCallbackState`). Because the body of `encodeOAuthState` is not present in the provided diff hunks, the claim that it does `JSON.parse(req.query.state)` and then immediately `JSON.stringify(state)` (and is therefore a no-op) is not directly verifiable from this diff alone.",
+        "diff_context_hash": "22212e034b8a979d88e554686550a92065457a8d"
+      }
+    },
+    {
+      "issue_text": "19 | `packages/app-store/salesforce/lib/CalendarService.ts:75` *(pattern)* | The new abstraction is applied half-and-half with no stated rule: Salesforce hand-rolls its refresh `fetch` and never calls `refreshOAuthTokens` (credential sync is silently inert for it), while hubspot, larkcalendar, webex and office365video call `refreshOAuthTokens` but never `parseRefreshTokenResponse` (the \"minimum token response\" contract is unenforced for them). Only googlecalendar and office365calendar use both. Anyone adding an 11th integration has no consistent pattern to copy. | maintainability | 95",
+      "source_lens": "compound-realistic/p2",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "hallucination",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "hallucination",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.71,
+        "rationale": "The finding is primarily a maintainability/general-consistency critique and is not fully verifiable from the provided diff. In the diff, some integrations (googlecalendar, office365calendar) do use both `refreshOAuthTokens` and `parseRefreshTokenResponse`, while others (hubspot, larkcalendar, office365video) only use `refreshOAuthTokens`\u2014that part is observable. However, the claim that Salesforce \u201cnever calls `refreshOAuthTokens`\u201d cannot be confirmed from the shown Salesforce diff hunk (it only shows new imports/schema starting around the top of the file; the refresh logic isn\u2019t included). The mention of \u201cwebex\u201d is also not supported by this diff. Additionally, whether omitting `parseRefreshTokenResponse` is a defect is speculative: several integrations don\u2019t use zod parsing at all and may not need that helper. Overall, it does not describe a clear, concrete defect introduced by the diff that a reviewer could definitively validate here.",
+        "diff_context_hash": "22212e034b8a979d88e554686550a92065457a8d"
+      }
+    },
+    {
+      "issue_text": "20 | `apps/web/pages/api/webhook/app-credential.ts:57-59` | `symmetricDecrypt(reqBody.keys, process.env.CALCOM_APP_CREDENTIAL_ENCRYPTION_KEY || \"\")` silently falls back to an empty encryption key rather than failing closed. A deployment with the key unset either decrypts under a degenerate key or crashes, with no signal to the operator that credential sync is misconfigured. Validate presence and 32-byte length at module load. | security | 80",
+      "source_lens": "compound-realistic/p2",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.78,
+        "rationale": "In the newly added webhook handler, the decryption key is taken as `process.env.CALCOM_APP_CREDENTIAL_ENCRYPTION_KEY || \"\"` and passed into `symmetricDecrypt(...)`. This is a concrete, verifiable behavior in the diff: if the env var is unset (or empty), the code will still attempt to decrypt using an empty-string key rather than rejecting the request/configuration up front. That can lead to (a) runtime exceptions/500s during `symmetricDecrypt`/`JSON.parse`, and/or (b) decryption under an unintended/weak key depending on the crypto implementation. There is no explicit validation of presence/length before use, despite comments indicating a required 32-byte key.",
+        "diff_context_hash": "22212e034b8a979d88e554686550a92065457a8d"
+      }
+    },
+    {
+      "issue_text": "21 | `packages/app-store/_utils/oauth/decodeOAuthState.ts:5` | `decodeOAuthState(req: NextApiRequest)` takes an entire Next.js request object solely to read `req.query.state`, and `createOAuthAppCredential(appData, key, req)` takes the whole request to read `req.session?.user.id` plus that same field. This binds pure OAuth-state logic to the pages-router request type, so neither helper is reusable from the app router or tRPC, or unit-testable without fabricating a `NextApiRequest`. `decodeOAuthState(state?: string)` / `createOAuthAppCredential(appData, key, { userId, teamId })` carry the same information. | maintainability | 85",
+      "source_lens": "compound-realistic/p3",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "hallucination",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "hallucination",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.86,
+        "rationale": "The diff shows `decodeOAuthState` still takes `NextApiRequest` (now at `packages/app-store/_utils/oauth/decodeOAuthState.ts`) and reads `req.query.state`, but this was already the case before the rename/move; the change does not introduce a new correctness/security bug. The finding also asserts details about `createOAuthAppCredential(..., req)` reading `req.session?.user.id`, but the diff does not include that function\u2019s signature/body, so that part is not verifiable from the provided changes. Overall, this is an architectural/refactor suggestion rather than a clear defect introduced by the diff.",
+        "diff_context_hash": "22212e034b8a979d88e554686550a92065457a8d"
+      }
+    },
+    {
+      "issue_text": "22 | `packages/app-store/_utils/oauth/refreshOAuthTokens.ts:5` | The gate `APP_CREDENTIAL_SHARING_ENABLED && process.env.CALCOM_CREDENTIAL_SYNC_ENDPOINT` is duplicated verbatim in `parseRefreshTokenResponse.ts:15` (minus the `userId` term), with a third variant in `app-credential.ts:19`. Four env vars drive behavior across three modules with no single derived constant. The two refresh helpers can drift out of agreement about whether sync is active \u2014 exactly the case where `refreshOAuthTokens` takes the sync branch but `parseRefreshTokenResponse` does not. | maintainability | 80",
+      "source_lens": "compound-realistic/p3",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "hallucination",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "hallucination",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.78,
+        "rationale": "The diff does show duplicated \u201csync enabled\u201d checks: `refreshOAuthTokens` gates on `APP_CREDENTIAL_SHARING_ENABLED && CALCOM_CREDENTIAL_SYNC_ENDPOINT && userId`, while `parseRefreshTokenResponse` gates on `APP_CREDENTIAL_SHARING_ENABLED && CALCOM_CREDENTIAL_SYNC_ENDPOINT` (no `userId`), and `app-credential.ts` uses different env vars (`CALCOM_WEBHOOK_*`, `CALCOM_APP_CREDENTIAL_ENCRYPTION_KEY`). However, the specific claimed mismatch (\u201c`refreshOAuthTokens` takes the sync branch but `parseRefreshTokenResponse` does not\u201d) is not actually possible given the conditions: if `refreshOAuthTokens` takes the sync branch, then both `APP_CREDENTIAL_SHARING_ENABLED` and `CALCOM_CREDENTIAL_SYNC_ENDPOINT` are truthy, which means `parseRefreshTokenResponse` will also take its sync branch. The only mismatch the diff enables is the opposite (parse takes sync branch while refresh does not when `userId` is null/falsey). The rest is a maintainability/design observation about duplication/drift, which is speculative rather than a concrete defect introduced by the diff.",
+        "diff_context_hash": "22212e034b8a979d88e554686550a92065457a8d"
+      }
+    },
+    {
+      "issue_text": "23 | `packages/app-store/zoho-bigin/api/add.ts:17` | `redirectUri` was changed from `` `/api/integrations/${appConfig.slug}/callback` `` to a hardcoded `` `/api/integrations/zoho-bigin/callback` `` while line 12 still uses `appConfig.slug` for `getAppKeysFromSlug`. This undoes an existing single source of truth for no stated reason and is unrelated to the PR's concern. | maintainability, correctness | 90",
+      "source_lens": "compound-realistic/p3",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "hallucination",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "hallucination",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.93,
+        "rationale": "The proposed finding refers to a change in `packages/app-store/zoho-bigin/api/add.ts` (redirectUri hardcoded vs using `appConfig.slug`). However, the provided diff does not include any `zoho-bigin` files or any change to that path/line. Since the alleged modification is not present in the diff, the issue is not verifiable from the shown changes.",
+        "diff_context_hash": "22212e034b8a979d88e554686550a92065457a8d"
+      }
+    },
+    {
+      "issue_text": "24 | `packages/app-store/_utils/oauth/createOAuthAppCredential.ts:13` | JSDoc documents both `appData.type` and `appData.appId` as \"the app slug\"; `type` is the credential type (e.g. `salesforce_other_calendar`), not the slug. `key` is typed `unknown` with no schema, giving callers no compile-time guidance. `app-credential.ts:15` carries an empty `/** */` block. | maintainability | 85",
+      "source_lens": "compound-realistic/p3",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "hallucination",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "hallucination",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.78,
+        "rationale": "The diff does show an empty JSDoc block (`/** */`) in `apps/web/pages/api/webhook/app-credential.ts`, which is a minor cleanup item. However, the finding\u2019s main claims about `packages/app-store/_utils/oauth/createOAuthAppCredential.ts` having incorrect JSDoc documenting `appData.type`/`appData.appId` and `key` being typed `unknown` are not verifiable from this diff: that file is only shown with import path changes and no JSDoc/type definitions are included. Since the finding bundles unverified assertions with a trivial nit, it does not identify a clear, verifiable defect introduced/shown in the diff.",
+        "diff_context_hash": "22212e034b8a979d88e554686550a92065457a8d"
+      }
+    },
+    {
+      "issue_text": "25 | `apps/web/pages/api/webhook/app-credential.ts:24` | If `CALCOM_WEBHOOK_HEADER_NAME` is configured with any uppercase character, Node's lowercased incoming header keys make the lookup permanently `undefined`. The endpoint then fails closed but silently \u2014 the operator gets a 403 with no hint that their header-name casing is the cause. The `.env.example` comment mentions lowercase, but nothing enforces or warns. | adversarial | 60",
+      "source_lens": "compound-realistic/p3",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.85,
+        "rationale": "In `apps/web/pages/api/webhook/app-credential.ts`, the secret check indexes `req.headers[...]` using `process.env.CALCOM_WEBHOOK_HEADER_NAME` verbatim (line shown in diff). In Node/Next, incoming header names are normalized to lowercase in `req.headers`, so if the env var contains any uppercase characters (e.g. `Calcom-Webhook-Secret`), `req.headers[thatString]` will be `undefined` even when the client sends the header. This makes the comparison fail and the endpoint return 403 `{ message: \"Invalid webhook secret\" }` with no indication that header-name casing is the cause. The `.env.example` comment recommends lowercase but the code does not enforce/normalize it.",
+        "diff_context_hash": "22212e034b8a979d88e554686550a92065457a8d"
+      }
+    },
+    {
+      "issue_text": "26 | `apps/web/pages/api/webhook/app-credential.ts:82,89` | The create path returns 200 rather than 201, so an integrating caller cannot distinguish create from update except by string-matching the English message body. Minor contract wart on a new public endpoint. | api-contract | 90",
+      "source_lens": "compound-realistic/p3",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.74,
+        "rationale": "In `apps/web/pages/api/webhook/app-credential.ts`, both the update branch (`if (appCredential)`) and the create branch (`else`) end with `return res.status(200).json(...)`. That means a caller cannot distinguish create vs update via HTTP status code (both are 200) and must instead inspect the response body message string (\"Credentials updated...\" vs \"Credentials created...\"). Using 201 Created on the create path is a conventional and clearer API contract for a newly-created resource.",
+        "diff_context_hash": "22212e034b8a979d88e554686550a92065457a8d"
+      }
+    }
+  ],
+  "diff_context_hash": "22212e034b8a979d88e554686550a92065457a8d",
+  "primary_judge": "gpt-5.2",
+  "adjudicating_judge": "gpt-5.2",
+  "url": "https://github.com/calcom/cal.com/pull/11059",
+  "framework": "compound-realistic",
+  "model": "claude-opus-5",
+  "effort": "medium",
+  "judge": "gpt-5.2",
+  "wall_s": 608.9845991134644,
+  "execution_mode": "cli",
+  "run_batch": "20260825-batch-083-fullmatrix"
+}

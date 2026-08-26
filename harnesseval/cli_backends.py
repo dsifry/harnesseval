@@ -26,12 +26,24 @@ from pathlib import Path
 
 def _parse_claude_effort(effort: str) -> str:
     # Claude --effort: low, medium, high, xhigh, max. xhigh is our "Extra High".
-    return {"low": "low", "medium": "medium", "xhigh": "xhigh"}.get(effort, "medium")
+    return {"low": "low", "medium": "medium", "high": "high", "xhigh": "xhigh"}.get(effort, "medium")
 
 
 def _parse_codex_effort(effort: str) -> str:
     # Codex model_reasoning_effort: low, medium, high, xhigh, max, ultra
-    return {"low": "low", "medium": "medium", "xhigh": "xhigh"}.get(effort, "medium")
+    return {"low": "low", "medium": "medium", "high": "high", "xhigh": "xhigh"}.get(effort, "medium")
+
+
+def codex_slug_for(model: str) -> str:
+    """Map a model-under-test to a valid Codex CLI slug.
+
+    gpt-5.6-* variants (gpt-5.6-sol, gpt-5.6-terra) are valid Codex CLI slugs — pass through.
+    gpt-5.2 / gpt-5 are API-only (not valid Codex slugs) — fall back to gpt-5.6-sol.
+    """
+    ml = model.lower()
+    if ml.startswith("gpt-5.6"):
+        return ml
+    return "gpt-5.6-sol"
 
 
 def session_timeout(effort: str, base: int = 900) -> int:
@@ -40,10 +52,11 @@ def session_timeout(effort: str, base: int = 900) -> int:
     Realistic adapters drive multi-turn agent sessions with subagent fanout (one subagent per
     lens/persona + synthesis). xhigh reasoning makes each turn much slower than medium, so a
     fixed 900s ceiling kills xhigh cells (the stopped matrix's codex xhigh timed out at 300s;
-    opus xhigh took 514s). xhigh gets 2x the base; low/medium keep the base. Callers pass the
-    result as the `timeout=` to their `_run_claude_session`/`_run_codex_session` subprocess call.
+    opus xhigh took 514s). xhigh gets 2x the base; high gets 1.5x; low/medium keep the base.
     """
-    return base * 2 if effort == "xhigh" else base
+    if effort == "xhigh": return base * 2
+    if effort == "high":  return int(base * 1.5)
+    return base
 
 
 def is_transient_claude_error(returncode: int, stdout: str, stderr: str) -> bool:
