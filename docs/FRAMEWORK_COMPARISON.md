@@ -321,7 +321,7 @@ GLM vanilla (and the others) from `20260824-101905-cli-144cells`, pass cells, 6 
 
 ## 6. Why the factories cost what they cost (structural findings)
 
-These come from the 0.7.0 deep-dive in `results/ANALYSIS.md` and `docs/METAREVIEW_IMPROVEMENTS.md`; the cost structure carries to 0.8.2.
+These come from the 0.7.0 deep-dive in `results/ANALYSIS.md`; the cost structure carries to 0.8.2.
 
 ### 6.1 The orchestrator, not the subagents, dominates cost (H3 — confirmed)
 
@@ -505,7 +505,6 @@ uv run python -m harnesseval.report          # -> results/leaderboard_*.json + p
 - `runs/<id>/summary.json` — per-run metrics + `per_model_usage` + per-finding adjudication + per-golden matches
 - `results/batch_083_ANALYSIS.md` — the rolling analysis this doc cites (refresh with the command above)
 - `results/ANALYSIS.md` — the 0.7.0 deep-dive (per-lens, adjudication split, failure-mode)
-- `docs/METAREVIEW_IMPROVEMENTS.md` — hypotheses H1–H5b with evidence + confirming experiments
-- `docs/SPEC.md`, `docs/PLAN.md`, `docs/HANDOFF.md`, `docs/PARTIAL_RUN_REPORT.md` — design + operational log
+- `docs/SPEC.md`, `docs/PLAN.md` — design spec + execution plan
 
 **Authors of follow-ups:** re-run `bin/analyze_batch_083.py` after each claude-code fill, then update §4 tables and the "pending" checklist in §9. Do not pool batch_083 with earlier batches without re-checking the cross-batch delta.
