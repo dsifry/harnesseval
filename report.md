@@ -52,17 +52,22 @@ more thinking, more cost. **Hidden gold** = real bugs the human reviewers missed
 - **Routine / low-stakes review on any model → vanilla, low or medium effort.** Highest
   precision (0.71), cheapest (~$0.31/review), fewest false alarms (1.8/review). The only
   framework that works well on Claude, Codex, *and* GLM. → §3.1, §6, §7 #2
-- **High-stakes / security-critical diff on Claude opus → metareview or Compound, low or high
-  effort (not xhigh).** Both find 92–97% of all real bugs (incl. ones the humans missed) and
-  surface 2–3× more hidden gold than vanilla — at 7–9× the cost. metareview is ~30% cheaper
-  than Compound on opus. → §3.1, §3.3, §3.4, §6, §7 #1
+- **High-stakes / security-critical diff on Claude opus → metareview, low or high effort
+  (not xhigh).** On opus, metareview is the more token-efficient factory — its single-pass
+  synthesis beats Compound's two-pass (dispatch + synthesis), which doubles the high-effort
+  cost: metareview $33 vs Compound $46 per review at high effort (~30% cheaper on opus
+  overall; the gap widens at higher effort). Both find 92–97% of all real bugs (incl. ones the
+  humans missed) and surface 2–3× more hidden gold than vanilla — at 7–9× the cost of vanilla.
+  → §3.1, §3.3, §5.4, §6, §7 #1
 - **Maximum bug discovery, cost secondary → Compound (Claude).** Most real bugs found per
   review (14.3 hidden-gold). On Codex, Compound/gpt-5.6-terra/xhigh is the one factory cell that
   beats vanilla on raw recall. → §3.1, §3.3, §6
-- **On Codex (gpt-5.6) → vanilla for precision/cost; metareview or Compound when you want more
-  total bugs.** vanilla starts high-precision (0.74–0.94). The factories still find more *total*
-  bugs on gpt (metareview 7/8 cells, Compound 6/8), but the precision drop is steeper there. →
-  §3.2, §3.3, §3.4, §6, §7 #1
+- **On Codex (gpt-5.6) → vanilla for precision/cost; Compound (not metareview) when you want
+  more total bugs.** vanilla starts high-precision (0.74–0.94). The factories still find more
+  *total* bugs on gpt (metareview 7/8 cells, Compound 6/8) — but the factory-efficiency picture
+  flips vs opus: on Codex, **Compound is the more efficient factory** (more findings per token;
+  metareview's xhigh is wasted spend on Codex). The precision drop is steeper on Codex either
+  way. → §3.2, §3.3, §3.4, §5.4, §6, §7 #1
 - **Triage-constrained team → vanilla as the baseline gate; adjudicate the factories' output
   before filing.** Use a precision model (gpt-5.6-terra) or a cross-family judge as the
   second-pass filter to kill the 40–54% hallucinations. → §5.3, §6, §7 #4 / #8
