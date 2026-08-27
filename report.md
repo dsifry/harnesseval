@@ -16,7 +16,7 @@
 ## 1. Executive summary — which should a developer pick?
 
 The central question is not *"which framework is best"* but *"which gives the best review
-quality per unit of cost and triage effort."*
+quality and finds and fixes the most bugs per unit of cost and triage effort."*
 
 | If your situation is… | Use this | Why (empirical) |
 |---|---|---|

@@ -6,7 +6,8 @@ matrix, reporting **review quality** (recall, precision, incremental recall, hal
 rate) **and cost** (tokens, wall-time, real and implied $) together.
 
 The central question is not *"which framework is best"* but *"which gives the best review
-quality per unit of cost and triage effort"* — the **recall-vs-cost Pareto frontier**.
+quality and finds and fixes the most bugs per unit of cost and triage effort"* — the
+**quality-vs-cost Pareto frontier**.
 
 > **Status:** the **384/384 pass-cell matrix is complete** (batch_083, 2026-08-26). N is small
 > (6 PRs per cell); treat the numbers as a **directional, reproducible read — not a published
