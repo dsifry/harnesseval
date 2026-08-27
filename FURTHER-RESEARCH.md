@@ -1,14 +1,16 @@
 # Further Research
 
-The 384/384 matrix (see [`report.md`](report.md)) answered the single-pass question — *"which
-framework gives the best review quality per unit of cost"* — but it raised more questions than
-it closed. This page lists the open directions, in priority order, with the empirical
-motivation for each.
+The 384/384 matrix (see [`report.md`](report.md)) answered the single-pass question — *which
+framework gives the best review quality and finds the most bugs per unit of cost* — but it
+raised more questions than it closed. This page lists the open directions, in priority order,
+with the empirical motivation for each.
 
-The **centerpiece** is the SDLC-loop validation: the eval's single-pass data pointed to a
-*loop* (discover → adjudicate → fix → repeat), but never measured a loop. The active experiment
-tests whether that loop — opinionated metareview with deterministic hard gates — actually beats
-the unstructured vanilla `/goal` control.
+The **centerpiece** is the SDLC-loop validation: the central question asks which framework
+*finds and fixes* the most bugs, but the matrix measured only the *finding* (single-pass
+review). The eval's single-pass data pointed to a *loop* (discover → adjudicate → fix →
+repeat), but never measured a loop. The active experiment tests whether that loop — opinionated
+metareview with deterministic hard gates — actually beats the unstructured vanilla `/goal`
+control (and isolates the gate from the loop *structure* via a structured-vanilla ablation).
 
 ---
 

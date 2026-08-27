@@ -31,7 +31,7 @@ open-source projects and write only the novel glue (framework adapters + normali
 | Framework adapters | Render each framework's *review capability* against a model, tested as a user actually invokes it (`adapters/`) |
 | Normalized finding schema + extractors | Turn each framework's prose output into atomic candidate issues the Martian judge can score (`finding.py`, `extract.py`) |
 | Cross-family judge + adjudication | Judge that avoids same-model bias; reclassify unmatched findings into real-but-ungold vs hallucination (`judge.py`, `adjudicate.py`) |
-| Cost + Pareto reporting | The recall-vs-cost frontier, the actual decision output (`analysis.py`, `report.py`) |
+| Cost + Pareto reporting | The quality-vs-cost frontier, the actual decision output (`analysis.py`, `report.py`) |
 
 ## What we are evaluating
 

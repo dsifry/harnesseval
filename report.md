@@ -16,7 +16,10 @@
 ## 1. Executive summary — which should a developer pick?
 
 The central question is not *"which framework is best"* but *"which gives the best review
-quality and finds and fixes the most bugs per unit of cost and triage effort."*
+quality and finds and fixes the most bugs per unit of cost and triage effort."* The 384-cell
+matrix below measures the **review** component (single-pass discovery — the *finding* of bugs);
+the **fix** component (the discover → adjudicate → fix loop) is the active research direction
+([`FURTHER-RESEARCH.md`](FURTHER-RESEARCH.md) §1).
 
 | If your situation is… | Use this | Why (empirical) |
 |---|---|---|
@@ -202,11 +205,11 @@ metareview at effort E beats vanilla at E+1 in 6/24 cases; compound in 4/24 — 
 almost entirely in opus-5. "Often" is overstated; it's really "opus-5 + harness at lower effort
 beats opus-5 + vanilla cranked higher."
 
-**H1 — the wins are cheap-model + harness + low-effort: REFUTED on cost-efficiency.** The most
-surprising result:
+**H1 — the wins are cheap-model + harness + low-effort: REFUTED on cost-efficiency** (this test
+uses *recall* as the quality proxy against cost). The most surprising result:
 - **Top 15 cells by recall-per-million-tokens are ALL vanilla.** Every one.
 - **Pareto frontier (recall vs cost):** 3 vanilla cells + 1 metareview/opus-5/low cell. The
-  harnesses are off the recall-vs-cost frontier.
+  harnesses are off this recall-vs-cost frontier.
 - **Direct matchup:** none of the 12 "cheap+harness+low/medium" cells beats
   `vanilla/opus-5/high` (recall 0.69, 0.7M tok) on recall at lower cost. The cheapest comparable
   harness cell costs 11× more for *lower* recall.
@@ -431,8 +434,10 @@ A single framework/model for the whole workflow is suboptimal — the loop is wh
 - **Model provenance:** API 'opus' = `claude-opus-4-5` (pinned); CLI realistic 'opus' resolved to
   `claude-opus-5`. API and CLI are never compared head-to-head.
 - **The SDLC loop (§7) is a recommendation derived from review data, not a measured workflow.**
-  The eval measures single-pass review quality, not the iterative discover→adjudicate→fix
-  cycle. Validating the loop is the active research direction.
+  The 384-cell matrix measures single-pass review quality — the *finding* (discovery) component
+  of the central question — not the iterative discover→adjudicate→*fix* cycle (the *fixing*
+  component). Validating the loop is the active research direction
+  ([`FURTHER-RESEARCH.md`](FURTHER-RESEARCH.md) §1).
 
 ---
 
