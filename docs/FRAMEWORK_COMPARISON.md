@@ -64,7 +64,7 @@ Each framework's *review capability* is tested as a user actually invokes it (th
 | **Compound Engineering** | The `ce-code-review` skill | Orchestrator selects a risk-driven persona roster (correctness always-on + conditionals), dispatches each persona as a **parallel** subagent, then a **separate synthesis** pass; P0–P3 + confidence anchors | `adapters/compound_realistic.py` |
 | **Superpowers** | The `requesting-code-review` skill | Coordinator resolves SHAs, dispatches **one** `general-purpose` code-reviewer subagent with the `code-reviewer.md` template; returns Strengths/Issues/Assessment | `adapters/superpowers_realistic.py` |
 
-Reproducibility pins: Superpowers plugin `third_party/superpowers` @ `b36e0829…` (v6.3.0); Compound plugin `third_party/compound-engineering-plugin` @ `a32c9474…`. metareview Go binary = `0.8.0` gates; the 0.8.2 change is the LLM-lens orchestration in the adapter (commit `8567d40`, "feat(metareview-realistic): v0.8.2 — revert fix #1, keep fixes 2,3,4").
+Reproducibility pins: Superpowers plugin `third_party/superpowers` @ `b36e0829…` (v6.3.0); Compound plugin `third_party/compound-engineering-plugin` @ `a32c9474…`. metareview Go binary = `0.8.0` gates; the 0.8.2 change is the LLM-lens orchestration in the adapter (repro pin: tag `0.8.2-eval` = commit `1847f7d`; `8567d40` was the 0.8.2 prompt commit, and `1847f7d` adds the load-bearing output-cap pattern + extractor markdown-strip that the 384/384 matrix actually ran on).
 
 **Per `docs/SPEC.md` §6.3.1, Claude Code routes `general-purpose` subagent dispatches to Haiku by default regardless of `--model`.** So "framework-X @ opus" realistically = opus orchestrator + Haiku reviewer/persona/lens subagents. This is recorded honestly in `per_model_usage` and is the single biggest driver of the cost structure (see §6).
 
@@ -497,7 +497,7 @@ uv run python -m harnesseval.report          # -> results/leaderboard_*.json + p
 - Martian Code Review Bench (dataset + grader): `third_party/code-review-benchmark` @ `2b092b670f`
 - Superpowers plugin: `third_party/superpowers` @ `b36e0829…` (v6.3.0)
 - Compound Engineering plugin: `third_party/compound-engineering-plugin` @ `a32c9474…`
-- metareview Go binary: `0.8.0` gates; metareview 0.8.2 slim-orchestration adapter (harnesseval commit `8567d40`)
+- metareview Go binary: `0.8.0` gates; metareview 0.8.2 slim-orchestration adapter (harnesseval tag `0.8.2-eval` = commit `1847f7d`)
 - Inspect AI: see `pyproject.toml` / `uv.lock`
 
 **Key artifacts:**
