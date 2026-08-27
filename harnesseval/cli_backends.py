@@ -73,8 +73,12 @@ def is_transient_claude_error(returncode: int, stdout: str, stderr: str) -> bool
     adapter logic.
     """
     if returncode != 0:
-        # non-zero exit: overload/rate-limit if stderr mentions it; anything else is a real bug
+        # non-zero exit: overload/rate-limit if stderr mentions it; anything else is a real bug.
+        # An EMPTY stderr with non-zero exit is also treated as transient — `claude -p` sometimes
+        # dies on a quota spike / connection drop with no stderr output; a retry usually succeeds.
         s = (stderr or "").lower()
+        if not s:
+            return True  # empty-stderr non-zero exit: likely transient (quota/drop), retry
         return any(k in s for k in ("overload", "529", "rate", "503", "server-side", "temporarily"))
     # returncode 0 but the result string IS an API error (the silent mode). claude -p puts it
     # in the JSON "result" field; check both the raw stdout (cheap) and a parsed result.

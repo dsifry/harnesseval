@@ -97,14 +97,16 @@ async def judge_match(client, model: str, golden_comment: str, candidate: str) -
     return await _call_anthropic(client, model, prompt)
 
 
-async def judge_match_router(model: str, golden_comment: str, candidate: str, effort: str = "medium") -> JudgeResult:
+async def judge_match_router(model: str, golden_comment: str, candidate: str, effort: str = "medium",
+                             max_tokens: int = 256) -> JudgeResult:
     """Provider-agnostic judge (Anthropic + OpenAI + Lunaroute via model_router). For the
     calibrated judge trio (claude-opus-4-5 / sonnet-4-5 / gpt-5.2). Judge has NO effort axis
     (effort is a property of the model under test, not the grader) — effort here only sets
-    the call mechanics, default medium = no extended thinking."""
+    the call mechanics, default medium = no extended thinking. max_tokens defaults to 256
+    (the eval value); raise to 1024+ for reasoning models on long candidates."""
     from harnesseval.model_router import call_model_json
     prompt = JUDGE_PROMPT.format(golden_comment=golden_comment, candidate=candidate)
-    parsed, tin, tout, _ = await call_model_json(model, JUDGE_SYSTEM, prompt, effort=effort, max_tokens=256)
+    parsed, tin, tout, _ = await call_model_json(model, JUDGE_SYSTEM, prompt, effort=effort, max_tokens=max_tokens)
     if not parsed:
         return JudgeResult(False, 0.0, "", "", error="json parse failed")
     return JudgeResult(match=bool(parsed.get("match", False)),
@@ -113,12 +115,13 @@ async def judge_match_router(model: str, golden_comment: str, candidate: str, ef
 
 
 async def judge_pairs_router(model: str, pairs: list[tuple[str, str]],
-                             concurrency: int = 15, effort: str = "medium") -> list[JudgeResult]:
+                             concurrency: int = 15, effort: str = "medium",
+                             max_tokens: int = 256) -> list[JudgeResult]:
     """Provider-agnostic batch judge (Anthropic + OpenAI + Lunaroute)."""
     sem = asyncio.Semaphore(concurrency)
     async def bounded(g, c):
         async with sem:
-            return await judge_match_router(model, g, c, effort=effort)
+            return await judge_match_router(model, g, c, effort=effort, max_tokens=max_tokens)
     return await asyncio.gather(*(bounded(g, c) for g, c in pairs))
 
 

@@ -94,7 +94,7 @@ async def reclassify_async(scored: dict, candidates: list[str], diff: str, model
         async with sem:
             from harnesseval.adjudicate import ADJUDICATE_PROMPT, ADJUDICATE_SYSTEM
             parsed, _, _, _ = await call_model_json(model, ADJUDICATE_SYSTEM,
-                ADJUDICATE_PROMPT.format(diff=diff[:30000], candidate=c), effort="medium", max_tokens=1024)
+                ADJUDICATE_PROMPT.format(diff=diff[:30000], candidate=c), effort="medium", max_tokens=2048)
             from harnesseval.judge import JudgeResult
             if not parsed:
                 return JudgeResult(False, 0.0, "", "", error="parse")
