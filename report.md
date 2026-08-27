@@ -23,41 +23,57 @@ the **fix** component (the discover → adjudicate → fix loop) is the active r
 
 ### TL;DR — practitioner recommendations
 
-Pick the framework **together with** your model and your stakes. The harnesses find more total
-bugs on *every* model (not just opus); what changes by model is the cost and the precision hit.
-(Evidence: §3.1, §3.4.)
+**The shorthand.** Four *frameworks* are compared: **vanilla** — a single well-engineered
+review prompt, no subagents (the baseline); **metareview 0.8.2** — free deterministic gates + 8
+adversarial "lens" subagents; **Compound Engineering** — risk-driven "persona" subagents + a
+synthesis pass; **Superpowers** — one code-reviewer subagent. The "factories"/"harnesses" = the
+latter three. Two *model families*: **Claude opus/sonnet** (Anthropic) and **Codex gpt-5.6**
+(OpenAI); GLM is a sidebar. **Effort** = a model's reasoning-depth knob (low/medium/high/xhigh) —
+more thinking, more cost. **Hidden gold** = real bugs the human reviewers missed;
+**hallucination** = a reported "bug" that isn't real (the triage tax).
 
-- **Routine / low-stakes review on any model → `vanilla-engineered`, low or medium effort.**
-  Highest adjudicated precision (0.71), cheapest (~$0.31/cell), fewest hallucinations (1.8/cell).
-  The only framework that works well on Claude, Codex, *and* GLM. → §3.1, §6 (vanilla verdict),
-  §7 #2.
-- **High-stakes / security-critical diff on Claude opus → `metareview 0.8.2` or `Compound`,
-  low or high effort (not xhigh).** Incremental recall 0.92–0.97; 2–3× more hidden gold than
-  vanilla. metareview is ~30% cheaper than compound on opus. → §3.1, §3.3, §3.4 (hidden gold
-  16/16), §6 (metareview/compound verdicts), §7 #1.
-- **Maximum bug discovery, cost secondary → `Compound` (Claude).** Most findings per cell (14.3
-  hidden-gold). On Codex, `compound/gpt-5.6-terra/xhigh` is the one factory cell that beats
-  vanilla on raw recall (0.55, incr 0.84). → §3.1, §3.3, §6 (compound verdict).
-- **On Codex (gpt-5.6) → `vanilla` for precision/cost; `metareview` or `compound` when you want
-  more total bugs.** vanilla starts high-precision (adj 0.74–0.94). The harnesses still find more
-  *total* bugs on gpt (incr_recall: metareview 7/8, compound 6/8), but the precision drop is
-  steeper there. → §3.2, §3.3, §3.4, §6, §7 #1.
-- **Triage-constrained team → `vanilla` as the baseline gate; adjudicate the factories' output
-  before filing.** ~40–54% of the factories' *unmatched* findings are hallucinations; vanilla's
-  are 67% real. Use `gpt-5.6-terra` or a cross-family judge as the second-pass filter. → §5.3,
-  §6, §7 #4 / #8.
-- **For the full loop (discover → adjudicate → fix → repeat) → harness discovers, precision
-  model adjudicates, fix, iterate.** The matrix measures single-pass *finding*; the *fixing*
-  loop is the active experiment. → §7, [`FURTHER-RESEARCH.md`](FURTHER-RESEARCH.md) §1.
-- **Effort: low/medium for the factories; reserve `xhigh` for opus + critical diffs.** Recall
-  rises only modestly low→xhigh while cost explodes (compound opus xhigh ≈ $48/cell). → §3.3,
-  §7 #3.
-- **Cost per real bug → `vanilla` is the most efficient (~$0.042/bug); the factories cost ~3.5×
-  more per bug but find ~3.5× more.** The factory premium buys *coverage*, not *efficiency*. →
-  §3.1.
+**Four counterintuitive findings the data shows:**
 
-The table below expands the first four use cases; §6 gives the per-framework verdicts; §7 gives
-the SDLC loop + the ten tactical points these are drawn from.
+1. **The expensive review frameworks are NOT the best value — vanilla is.** A single
+   well-built prompt dominates recall-per-dollar; the factories are 10–40× more expensive for the
+   recall they deliver. The factory premium buys *coverage*, not *efficiency*. → §3.4 (H1)
+2. **The factories find more total bugs on *every* model, not just Claude opus.** The
+   harness-vs-vanilla tradeoff points the same way on Codex too — what changes by model is the
+   cost and the precision hit, not whether the harness helps. → §3.4
+3. **When vanilla reports a bug the humans missed, it's real 67% of the time; when a factory
+   does, it's a coin flip (40–54%).** The factories flood you with candidates — ~40–54% of their
+   unmatched findings are hallucinations. → §5.3
+4. **Cranking effort to "xhigh" mostly wastes money.** Recall rises only modestly low→xhigh
+   while cost explodes (e.g. Compound on opus xhigh ≈ $48/review). low/medium captures most of
+   the value. → §3.3
+
+**What to actually use** (pick the framework together with your model + stakes):
+
+- **Routine / low-stakes review on any model → vanilla, low or medium effort.** Highest
+  precision (0.71), cheapest (~$0.31/review), fewest false alarms (1.8/review). The only
+  framework that works well on Claude, Codex, *and* GLM. → §3.1, §6, §7 #2
+- **High-stakes / security-critical diff on Claude opus → metareview or Compound, low or high
+  effort (not xhigh).** Both find 92–97% of all real bugs (incl. ones the humans missed) and
+  surface 2–3× more hidden gold than vanilla — at 7–9× the cost. metareview is ~30% cheaper
+  than Compound on opus. → §3.1, §3.3, §3.4, §6, §7 #1
+- **Maximum bug discovery, cost secondary → Compound (Claude).** Most real bugs found per
+  review (14.3 hidden-gold). On Codex, Compound/gpt-5.6-terra/xhigh is the one factory cell that
+  beats vanilla on raw recall. → §3.1, §3.3, §6
+- **On Codex (gpt-5.6) → vanilla for precision/cost; metareview or Compound when you want more
+  total bugs.** vanilla starts high-precision (0.74–0.94). The factories still find more *total*
+  bugs on gpt (metareview 7/8 cells, Compound 6/8), but the precision drop is steeper there. →
+  §3.2, §3.3, §3.4, §6, §7 #1
+- **Triage-constrained team → vanilla as the baseline gate; adjudicate the factories' output
+  before filing.** Use a precision model (gpt-5.6-terra) or a cross-family judge as the
+  second-pass filter to kill the 40–54% hallucinations. → §5.3, §6, §7 #4 / #8
+- **The full loop (discover → adjudicate → fix → repeat) → harness discovers, precision model
+  adjudicates, fix, iterate.** The matrix measures single-pass *finding*; the *fixing* loop is
+  the active experiment. → §7, [`FURTHER-RESEARCH.md`](FURTHER-RESEARCH.md) §1
+- **Cost per real bug → vanilla ~$0.04/bug (most efficient); factories ~3.5× more per bug but
+  find ~3.5× more.** → §3.1
+
+The table below expands the first four use cases; §6 gives per-framework verdicts; §7 gives the
+SDLC loop + the ten tactical points these are drawn from.
 
 | If your situation is… | Use this | Why (empirical) |
 |---|---|---|
