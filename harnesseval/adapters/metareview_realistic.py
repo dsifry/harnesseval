@@ -369,7 +369,7 @@ async def review_realistic_async(pr: PRSample, model: str, effort: str = "medium
         _lock_path = Path(__file__).resolve().parents[2] / ".cache" / "mrv_repos" / f"{_h}.lock"
         _lock_path.parent.mkdir(parents=True, exist_ok=True)
         with open(_lock_path, "w") as _lf:
-            fcntl.flock(_lf := _lock_path, fcntl.LOCK_EX)
+            fcntl.flock(_lf, fcntl.LOCK_EX)
             _cache_dir = materialize(pr.url)
             work_root = Path(tempfile.mkdtemp(prefix="mrvwork-"))
             work_dir = work_root / "repo"
