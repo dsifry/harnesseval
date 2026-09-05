@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 import subprocess
 import time
@@ -39,7 +40,12 @@ from harnesseval.dataset.materialize import materialize
 from harnesseval.finding import Finding
 from harnesseval.cli_backends import session_timeout, codex_slug_for
 
-MRV_BIN = Path(__file__).resolve().parents[2] / "bin" / "metareview"
+_DEFAULT_MRV_BIN = Path(__file__).resolve().parents[2] / "bin" / "metareview"
+# HARNESS_MRV_BIN: point the SAME adapter at a different metareview binary without swapping
+# the vendored 0.8.0-gates binary that batch_083 ran on. Used for version-comparison arms
+# (e.g. a 0.10.1 build) -- the LLM-lens prompt stays byte-identical, so only the deterministic
+# gate/scaffold binary differs between arms.
+MRV_BIN = Path(os.environ.get("HARNESS_MRV_BIN") or _DEFAULT_MRV_BIN)
 
 # v0.8.2 slim-orchestration prompt. The 8-lens adversarial methodology is identical to v0.8.0
 # (isolating the orchestration fixes as the only variable); only the orchestration wrapper

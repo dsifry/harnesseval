@@ -145,6 +145,11 @@ async def _run_cell_async(pr, framework, model, effort, judge_model, mode: str =
         run = await mrv.review_async(pr, model=model, effort=effort, mode=mode)
     elif framework == "metareview-realistic":
         run = await mr.review_realistic_async(pr, model=model, effort=effort)
+    elif framework == "metareview-realistic-0101":
+        # Version-comparison arm: SAME adapter + prompt as metareview-realistic, but the
+        # binary is selected via HARNESS_MRV_BIN (a 0.10.1 build). Registered under its own
+        # framework name so registry queries + analysis separate the arms.
+        run = await mr.review_realistic_async(pr, model=model, effort=effort)
     elif framework == "superpowers":
         run = await sp.review_async(pr, model=model, effort=effort, mode=mode)
     elif framework == "superpowers-realistic":
