@@ -27,6 +27,8 @@ For the api-direct (pure) column, adapters/metareview.py review() still exists u
 from __future__ import annotations
 
 import asyncio
+import fcntl
+import hashlib
 import json
 import os
 import re
@@ -350,9 +352,9 @@ async def review_realistic_async(pr: PRSample, model: str, effort: str = "medium
     ml = model.lower()
     is_claude = any(k in ml for k in ("opus", "sonnet", "fable", "haiku", "claude"))
     is_codex = "gpt" in ml or "codex" in ml
-    work_dir: Path | None = None
+    work_dir: Path | None = None   # the repo copy inside the unique work root
+    work_root: Path | None = None  # the unique temp dir (cleanup target)
     try:
-        repo_dir = materialize(pr.url)
         # Per-run isolated work copy (CRITICAL for concurrent cells): materialize() returns a
         # SHARED per-PR cache dir that this adapter then mutates (task commit, per-lens
         # findings files, metareview-generated files, plus the session's own git ops). Two
@@ -360,9 +362,19 @@ async def review_realistic_async(pr: PRSample, model: str, effort: str = "medium
         # interleaved git state -- which silently corrupts results (observed: two different
         # models reporting byte-identical TP/FP/FN because both parsed the same findings.md).
         # Copy the clean [base][pr] repo into a unique temp dir per run; disposed before return.
-        _cache_dir = repo_dir
-        work_dir = Path(tempfile.mkdtemp(prefix="mrvwork-"))
-        shutil.copytree(_cache_dir, work_dir, symlinks=True)
+        # The materialize+copy pair is serialized per PR with a cross-process file lock, so
+        # concurrent arms materializing the SAME PR cannot race inside the shared cache dir
+        # (reset-vs-copy and git index.lock collisions observed live at concurrency >= 2 arms).
+        _h = hashlib.sha1(pr.url.encode()).hexdigest()[:16]
+        _lock_path = Path(__file__).resolve().parents[2] / ".cache" / "mrv_repos" / f"{_h}.lock"
+        _lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(_lock_path, "w") as _lf:
+            fcntl.flock(_lf := _lock_path, fcntl.LOCK_EX)
+            _cache_dir = materialize(pr.url)
+            work_root = Path(tempfile.mkdtemp(prefix="mrvwork-"))
+            work_dir = work_root / "repo"
+            shutil.copytree(_cache_dir, work_dir, symlinks=True)
+            fcntl.flock(_lf, fcntl.LOCK_UN)
         repo_dir = work_dir
         task_path = repo_dir / "docs" / "tasks" / "task-001.md"
         task_path.parent.mkdir(parents=True, exist_ok=True)
@@ -397,14 +409,14 @@ async def review_realistic_async(pr: PRSample, model: str, effort: str = "medium
             # §4.2: the api adapter returns deterministic gates + lens findings; drop the gates
             # (100% hallucination) so the GLM realistic path gets the same precision fix as the
             # claude/codex extractor path.
-            if work_dir is not None:
-                shutil.rmtree(work_dir, ignore_errors=True)
+            if work_root is not None:
+                shutil.rmtree(work_root, ignore_errors=True)
             return ReviewRun(framework=name, model=model, effort=effort, execution_mode="api-fallback",
                              raw_output=r.raw_output, findings=_skip_gate_session_findings(r.findings),
                              tokens_in=r.tokens_in, tokens_out=r.tokens_out, wall_ms=r.wall_ms)
     except Exception as e:  # noqa: BLE001
-        if work_dir is not None:
-            shutil.rmtree(work_dir, ignore_errors=True)
+        if work_root is not None:
+            shutil.rmtree(work_root, ignore_errors=True)
         return ReviewRun(framework=name, model=model, effort=effort, execution_mode="cli",
                          raw_output="", wall_ms=(time.time() - t0) * 1000, error=str(e))
     # §output-cap fix: each lens writes to {findings_path}.<lens>; the orchestrator concatenates via
@@ -422,8 +434,8 @@ async def review_realistic_async(pr: PRSample, model: str, effort: str = "medium
         file_text = ""
     src_text = file_text if file_text.strip() else text
     findings = _extract_findings_from_session(src_text)
-    if work_dir is not None:
-        shutil.rmtree(work_dir, ignore_errors=True)
+    if work_root is not None:
+        shutil.rmtree(work_root, ignore_errors=True)
     from harnesseval.usage import grand_total
     gt = grand_total(per_model)
     # Realistic Claude Code behavior: orchestrator on the requested model, but Task-tool subagent
