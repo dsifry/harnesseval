@@ -234,6 +234,10 @@ strongly with the framework choice (§3.3).
 | vanilla | claude-fable-5-1 | low | 0.74 | 0.47 | 0.89 | 52 | 37 | $6.41 |
 | vanilla | claude-fable-5-1 | medium | 0.68 | 0.56 | 0.85 | 47 | 23 | $7.75 |
 | vanilla | claude-fable-5-1 | high | 0.71 | 0.60 | 0.88 | 53 | 21 | $8.87 |
+| metareview 0.8.2 | claude-fable-5-1 | low | 0.77 | 0.14 | 0.96 | 205 | 195 | $44.87 |
+| compound | claude-fable-5-1 | low | 0.75 | 0.27 | 0.93 | 174 | 136 | $40.16 |
+| metareview 0.8.2 | gpt-6-astra | low | 0.51 | 0.62 | 0.74 | 35 | 17 | $46.48 |
+| compound | gpt-6-astra | low | 0.49 | 0.36 | 0.79 | 58 | 39 | $74.81 |
 
 **New column (added 2026-09-06): vanilla × gpt-6-astra × low** (codex-cli 0.153.4; same 6 PRs,
 same pipeline, mode=cli). Runs single-prompt vanilla at ~47K tokens/PR — the leanest runs in the
@@ -265,6 +269,20 @@ astra adj_p 0.85 → 0.93 with 0.3 hal/cell at high — but high *doubles* astra
 $5.95, 47K → 99K tok/PR) for zero recall gain, degrading $/bug from $0.104 to $0.180. Fable low
 is its sweet spot; astra high is its worst deal. This replicates the report's effort-knob
 finding (§3.1) on two brand-new models: more thinking, not more finding.
+
+**Factory columns on the new models (added 2026-09-06):** metareview + compound ×
+{claude-fable-5-1, gpt-6-astra} × low, same 6 PRs (batch `20260906-mrv-ce-newmodels-low`).
+The harness-beats-vanilla pattern **extends to both new models**: on fable, the factories reach
+**incr. 0.93–0.96 vs vanilla's 0.89** with ~3.5× the hidden gold (29–34/PR vs 8.7) — at 36×
+vanilla's tokens ($40–45 vs $6.41/cell). On astra the gap is bigger: **incr. 0.74–0.79 vs
+vanilla's 0.52** — and `metareview/astra/low` is the standout: **adj. precision 0.62 with only
+2.8 hallucinations/PR at 774K tok/PR** — the cleanest, cheapest factory cell in the matrix
+(astra's review ability shows up inside a harness, not in single-prompt mode, where it was
+Pareto-dominated). Astra's factory cells are expensive in implied-$ at its current standard
+rates ($46–75/cell, $0.82–0.95/real-bug) — the newest-model premium again buys no efficiency.
+superpowers is **excluded** from the new-model factory comparison (single-subagent wrapper —
+not architecturally comparable to the two multi-agent factories). Two transient 400s
+("Could not finish the message") hit one mrv/fable cell; both fill-in retries passed.
 
 **Full-suite extension (added 2026-09-06):** both columns were extended to all **50
 golden-labeled PRs** (Phase C template, first two columns measured on the full suite):
