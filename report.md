@@ -86,7 +86,7 @@ SDLC loop + the ten tactical points these are drawn from.
 | If your situation is… | Use this | Why (empirical) |
 |---|---|---|
 | Routine review of low-stakes diffs on **any** model | **vanilla-engineered** | Highest adjudicated precision (**0.71**), cheapest (**~$0.31/cell**), competitive recall (0.48). Model-agnostic — works on Claude, Codex, and GLM. |
-| High-stakes / security-critical diffs on **Claude Code** (opus) | **metareview 0.8.2** *or* **Compound Engineering** | Both reach **incremental recall ~0.92–0.97** on opus and surface **2–3× more hidden gold** (real bugs the human reviewers missed) than vanilla. metareview is ~30% cheaper than compound on opus. |
+| High-stakes / security-critical diffs on **Claude Code** (opus) | **metareview 0.8.2** *or* **Compound Engineering** | Both reach **incremental recall ~0.92–0.97** on opus and surface **3–5× more hidden gold** (real bugs the human reviewers missed) than vanilla. At high effort they cost about the same ($57 vs $56/cell); metareview/low runs $31.13 vs Compound/low $20.01. |
 | You want the broadest coverage and can afford triage | **Compound Engineering** (Claude) | Most findings per cell (14.9 hidden-gold/cell, highest absolute), but **lowest adjudicated precision (0.33)** — you will triage a lot of noise. |
 | You are on **Codex** (gpt-5.6) | **vanilla-engineered** for precision/cost; **metareview or compound** when you want more total bugs | The harnesses still find more *total* bugs on Codex (incr_recall: metareview 4/6, compound 5/6 comparable cells vs vanilla; hidden gold 8/8), but vanilla starts high-precision there (adj_p 0.74–0.96) so the harness's precision drop is steeper. All three harnesses degrade Claude→Codex (recall drop 0.32–0.37). superpowers is the weakest on Codex (recall 0.02–0.17) but still produces real findings (19–73/cell) — it is not "broken." |
 | You want a deterministic, free "floor" before LLM review | **metareview's deterministic gates** — *but* | On this PR subset the gates contributed **0 recall** (all gate findings were hallucinated against the gold set). They are free, but don't rely on them to catch bugs here. |
@@ -340,9 +340,10 @@ bang-per-buck play — vanilla is. The factory premium buys *coverage*, not *eff
    On gpt the harnesses still find more total bugs: metareview beats vanilla on incr_recall in
    4/6 comparable gpt cells, compound in 5/6, and both beat vanilla on hidden gold 8/8. What differs by
    model is the *magnitude and cost*, not the direction.
-3. **The one universal harness win is *hidden gold*** (16/16 metareview, 15/16 compound —
-   including 8/8 on gpt). If you care about *discovery* (bugs beyond the benchmark), the
-   harnesses consistently deliver — you just pay for it in tokens + hallucinations to triage.
+3. **The one universal harness win is *hidden gold*** (16/16 metareview, 14/16 compound —
+   including 8/8 on gpt; compound's only losses are two sonnet-5 cells). If you care about
+   *discovery* (bugs beyond the benchmark), the harnesses consistently deliver — you just pay
+   for it in tokens + hallucinations to triage.
 
 ### 3.5 Data integrity: the shared-repo collision bug and the batch_083 remediation
 
@@ -522,7 +523,7 @@ move is to **use them in sequence** — each where it is strongest — rather th
 - **(a) Write code** — strongest reasoner; effort = high, not xhigh (high and xhigh are nearly
   identical on recall but xhigh costs ~25% more).
 - **(b) Discover** — run a harness to find maximum bugs including hidden gold (works on every
-  model, not just opus). Default: `metareview/opus-5/low` (recall 0.86, 174 hidden gold, $13);
+  model, not just opus). Default: `metareview/opus-5/low` (recall 0.86, 174 hidden gold, $31.13);
   on Codex, `metareview/gpt-5.6-sol/medium` or `compound/gpt-5.6-terra/xhigh`. Expect ~4–7× more
   candidates than vanilla, ~40–54% hallucinations. **Do not skip the harness on gpt** — it finds
   more total bugs (incr_recall) on gpt in 4/6 (metareview) / 5/6 (compound) comparable cells.

@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
-"""Rolling analysis for batch 20260825-batch-083-fullmatrix (the definitive 4x4x4 matrix).
+"""Rolling analysis for batch 20260825-batch-083-fullmatrix (the definitive matrix).
 
-4 frameworks x 4 models x 4 efforts x 6 PRs = 384 cells (331 new + 53 skipped).
+Designed matrix: 56 (framework x model x effort) combinations x 6 PRs = 336 cells
+(premium models claude-opus-5 / gpt-5.6-sol run {low, high} only; sonnet-5 /
+gpt-5.6-terra and all frameworks run the full effort ladder). The nominal 4x4x4
+full factorial (384) over-counts 48 unrun cells.
 Fuses the run registry (completed cells) + live stdout log (in-flight) + per-run
 summary.json (accurate per-model token & $ breakdown).
 
@@ -24,8 +27,8 @@ OUT_LOG = Path("/tmp/batch_083_out.txt")
 PID_FILE = Path("/tmp/batch_083_pid.txt")
 ANALYSIS_MD = ROOT / "results" / "batch_083_ANALYSIS.md"
 HISTORY = ROOT / "results" / "batch_083_analysis_history.jsonl"
-TOTAL_CELLS = 384
-NEW_CELLS = 331
+TOTAL_CELLS = 336   # designed matrix: 56 (fw x model x effort) combos x 6 PRs
+NEW_CELLS = 336     # all cells were new runs in this batch (no skip-prefix)
 CONCURRENCY = 3
 FRAMEWORKS = ["vanilla-engineered", "metareview-realistic", "compound-realistic", "superpowers-realistic"]
 MODELS = ["claude-opus-5", "gpt-5.6-sol", "claude-sonnet-5", "gpt-5.6-terra"]
@@ -258,8 +261,8 @@ def main():
     if ps['running']:
         pidpart = ' · pid=' + str(ps['pid']) + ' · etime=' + str(ps['etime'])
     L.append('**Batch:** `' + BATCH + '` · status: **' + status + '**' + pidpart)
-    L.append(f"Matrix: **6 PRs × 4 models × 4 efforts × 4 frameworks = {TOTAL_CELLS} cells** "
-             f"({NEW_CELLS} new + {TOTAL_CELLS-NEW_CELLS} skipped) · concurrency={CONCURRENCY} · mode=cli (OAuth)")
+    L.append(f"Matrix: **56 (fw × model × effort) combos × 6 PRs = {TOTAL_CELLS} designed cells** "
+             f"(premium models run {{low, high}} only) · concurrency={CONCURRENCY} · mode=cli (OAuth)")
     L.append(f"Models: {', '.join(MODELS)} · Efforts: {', '.join(EFFORTS)} · Frameworks: {', '.join(FRAMEWORKS)}")
     L.append("")
     L.append("## Progress")
@@ -420,7 +423,7 @@ def main():
     L.append("")
 
     # ---- extrapolation ----
-    L.append("## Spend extrapolation (linear, to full 384-cell matrix)")
+    L.append("## Spend extrapolation (linear, to the full 336-cell designed matrix)")
     L.append("")
     if tot and eff_cells > 0:
         frac = eff_cells / TOTAL_CELLS
