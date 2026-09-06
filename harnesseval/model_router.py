@@ -60,7 +60,7 @@ async def call_model(model: str, system: str, user: str, *, effort: str = "mediu
 # model id -> (host, alias/slug) for CLI execution
 _CLAUDE_ALIASES = {
     "claude-opus-4-5-20251101": "opus", "claude-opus-4-8": "opus", "claude-opus-5": "opus",
-    "claude-fable-5": "fable", "claude-sonnet-4-5-20250929": "sonnet", "claude-sonnet-5": "sonnet",
+    "claude-fable-5": "fable", "claude-fable-5-1": "fable", "claude-sonnet-4-5-20250929": "sonnet", "claude-sonnet-5": "sonnet",
 }
 _CODEX_SLUGS = {
     # map API model ids -> valid Codex CLI slugs. gpt-5.2 is API-only (not a Codex slug);
