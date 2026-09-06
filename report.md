@@ -212,6 +212,7 @@ strongly with the framework choice (§3.3).
 | vanilla | sonnet-5 | high | 0.50 | 0.82 | 0.67 | 22 | 6 | $1.61 |
 | vanilla | gpt-5.6-terra | low | 0.40 | 0.94 | 0.56 | 15 | 1 | $0.81 |
 | vanilla | gpt-6-astra | low | 0.40 | 0.85 | 0.52 | 10 | 4 | $2.80 |
+| vanilla | claude-fable-5-1 | low | 0.74 | 0.47 | 0.89 | 52 | 37 | $6.41 |
 
 **New column (added 2026-09-06): vanilla × gpt-6-astra × low** (codex-cli 0.153.4; same 6 PRs,
 same pipeline, mode=cli). Runs single-prompt vanilla at ~47K tokens/PR — the leanest runs in the
@@ -222,8 +223,19 @@ vanilla/opus-5/low (0.67) — a mid-pack vanilla cell, not a step change. Its to
 fetched 2026-09-06; sol standard is now $4.00/$5.00 — the eval's older sol/terra pins of
 $1.25/$10 and $2.50/$20 no longer match the current page), so despite the smallest token count
 of any cell (~47K/PR) its implied $2.80/cell makes it the *most expensive vanilla cell in
-implied-$* — cheap in absolute terms, but not the bargain the token count suggests. Judged
-cross-family (claude-opus-4-5) like every other column; single run per PR, n=6, same caveats.
+implied-$* — cheap in absolute terms, but not the bargain the token count suggests. **New column (added 2026-09-06): vanilla × claude-fable-5-1 × low** (Claude Code 2.1.263, alias
+`fable` → `claude-fable-5-1`; same 6 PRs, same pipeline, mode=cli). Results: **recall 0.74,
+adjudicated precision 0.47, incr. 0.89, 8.7 real/cell, 6.2 hallucinations/cell, ~85K tok/PR,
+$6.41/cell actual billing** — the strongest recall of any vanilla cell and the best
+real-bug-per-dollar among premium vanilla cells ($0.077/bug), at ~1/5 the cost and ~1/5 the
+hallucination triage of mrv/opus-5/low (recall 0.85). Precision (0.47) is its weak spot.
+Pricing: fable 5.1 bills at $10.00 in / $12.50 out / $0.25 cache-read per 1M (fetched from
+docs.claude.com pricing 2026-09-06; cache hit = 0.025× base input — the discounted tier).
+Cost basis is Anthropic's ACTUAL reported billing, like every other Anthropic cell. Model
+identity: the Claude Code alias `fable` resolves to `claude-fable-5-1` (verified via modelUsage);
+the explicit slug `fable-5-1` silently falls back to Haiku — do not use it directly. Same
+scope caveat as the astra column: these two new columns cover the top-6 golden-labeled PR
+subset (the designed matrix), not the full 50-PR suite — extending them is Phase C.
 | metareview 0.8.2 | opus-5 | low | **0.86** | 0.16 | **0.97** | 174 | 207 | $31.13 |
 | metareview 0.8.2 | opus-5 | high | 0.79 | 0.12 | 0.97 | 222 | 241 | $33.28 |
 | metareview 0.8.2 | gpt-5.6-sol | low | 0.50 | 0.41 | 0.75 | 43 | 31 | $0.59 |

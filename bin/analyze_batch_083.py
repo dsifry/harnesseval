@@ -60,7 +60,13 @@ GPT_EST_RATE = {  # per 1M tokens, ESTIMATED, pinned 2026-08-22
 }
 ANTHRO_MODELS = {"claude-opus-5", "claude-sonnet-5", "claude-opus-4-5-20251101",
                  "claude-haiku-4-5-20251001", "claude-opus-4-8", "claude-fable-5",
-                 "claude-sonnet-4-5-20250929"}
+                 "claude-fable-5-1", "claude-sonnet-4-5-20250929"}
+
+# Anthropic pricing reference (pinned 2026-09-06, docs.claude.com/en/docs/about-claude/pricing):
+# claude-fable-5-1: $10.00 in / $12.50 out / $0.25 cache-read per 1M (cache hit = 0.025x base input).
+# Cost basis for Anthropic models is the ACTUAL reported cost_usd (see above); this pin is for
+# validation only. Reported fable-5.1 billing ran ~1.8x the naive rate table (cache-write
+# multipliers + the CLI's haiku scaffolding entry), consistent with the other Anthropic cells.
 
 def gpt_implied_cost(pmu: dict) -> float:
     """Implied $ for GPT models from per_model_usage tokens at ESTIMATED rates."""
