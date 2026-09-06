@@ -211,6 +211,19 @@ strongly with the framework choice (§3.3).
 | vanilla | gpt-5.6-sol | high | 0.55 | 0.89 | 0.67 | 15 | 5 | $1.36 |
 | vanilla | sonnet-5 | high | 0.50 | 0.82 | 0.67 | 22 | 6 | $1.61 |
 | vanilla | gpt-5.6-terra | low | 0.40 | 0.94 | 0.56 | 15 | 1 | $0.81 |
+| vanilla | gpt-6-astra | low | 0.40 | 0.85 | 0.52 | 10 | 4 | $2.80 |
+
+**New column (added 2026-09-06): vanilla × gpt-6-astra × low** (codex-cli 0.153.4; same 6 PRs,
+same pipeline, mode=cli). Runs single-prompt vanilla at ~47K tokens/PR — the leanest runs in the
+matrix. Results: **recall 0.40, adjudicated precision 0.85, incr. 0.52, 0.7 hallucinations/cell**.
+Read: astra's precision is strong but recall lands *below* vanilla/gpt-5.6-sol/low (0.52) and
+vanilla/opus-5/low (0.67) — a mid-pack vanilla cell, not a step change. Its tokens are
+**~2.5× sol's per token** at OpenAI's current standard tier ($10.00 in / $12.50 out per 1M,
+fetched 2026-09-06; sol standard is now $4.00/$5.00 — the eval's older sol/terra pins of
+$1.25/$10 and $2.50/$20 no longer match the current page), so despite the smallest token count
+of any cell (~47K/PR) its implied $2.80/cell makes it the *most expensive vanilla cell in
+implied-$* — cheap in absolute terms, but not the bargain the token count suggests. Judged
+cross-family (claude-opus-4-5) like every other column; single run per PR, n=6, same caveats.
 | metareview 0.8.2 | opus-5 | low | **0.86** | 0.16 | **0.97** | 174 | 207 | $31.13 |
 | metareview 0.8.2 | opus-5 | high | 0.79 | 0.12 | 0.97 | 222 | 241 | $33.28 |
 | metareview 0.8.2 | gpt-5.6-sol | low | 0.50 | 0.41 | 0.75 | 43 | 31 | $0.59 |

@@ -66,6 +66,7 @@ _CODEX_SLUGS = {
     # map API model ids -> valid Codex CLI slugs. gpt-5.2 is API-only (not a Codex slug);
     # a user running `codex` uses the current default. Map to gpt-5.6-sol for realistic CLI.
     "gpt-5.2": "gpt-5.6-sol", "gpt-5.6-sol": "gpt-5.6-sol", "gpt-5.6-terra": "gpt-5.6-terra", "gpt-5": "gpt-5.6-sol",
+    "gpt-6-astra": "gpt-6-astra",
 }
 
 

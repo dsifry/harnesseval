@@ -38,10 +38,11 @@ def codex_slug_for(model: str) -> str:
     """Map a model-under-test to a valid Codex CLI slug.
 
     gpt-5.6-* variants (gpt-5.6-sol, gpt-5.6-terra) are valid Codex CLI slugs — pass through.
+    gpt-6-astra is a valid Codex CLI slug (codex-cli >= 0.153.4) — pass through.
     gpt-5.2 / gpt-5 are API-only (not valid Codex slugs) — fall back to gpt-5.6-sol.
     """
     ml = model.lower()
-    if ml.startswith("gpt-5.6"):
+    if ml.startswith("gpt-5.6") or ml.startswith("gpt-6"):
         return ml
     return "gpt-5.6-sol"
 
