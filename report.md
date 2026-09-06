@@ -6,17 +6,19 @@
 > [`docs/FRAMEWORK_COMPARISON.md`](docs/FRAMEWORK_COMPARISON.md); every number below is
 > reproducible from the committed run records via the commands in [`REPRODUCE.md`](REPRODUCE.md).
 >
-> **Status:** complete (384/384 pass cells, batch_083, 2026-08-26T05:30Z). **N is small** (6 PRs
-> per cell; bootstrap CIs wide or undefined). Treat this as a **directional, reproducible read
-> — not a published ranking**. Phase C (50 PRs + confidence intervals) remains the bar before
-> any final claim.
+> **Status:** complete (336/336 designed pass cells, batch_083 post-remediation, refreshed
+> 2026-09-06 — see §3.5 for the collision-bug audit that triggered the refresh). **N is small**
+> (6 PRs per cell; bootstrap CIs wide or undefined). Treat this as a **directional, reproducible
+> read — not a published ranking**. Phase C (50 PRs + confidence intervals) remains the bar
+> before any final claim — the two vanilla columns added 2026-09-06 (gpt-6-astra,
+> claude-fable-5-1) already cover the full 50-PR suite; see §3.3.
 
 ---
 
 ## 1. Executive summary — which should a developer pick?
 
 The central question is not *"which framework is best"* but *"which gives the best review
-quality and finds and fixes the most bugs per unit of cost and triage effort."* The 384-cell
+quality and finds and fixes the most bugs per unit of cost and triage effort."* The 336-cell
 matrix below measures the **review** component (single-pass discovery — the *finding* of bugs);
 the **fix** component (the discover → adjudicate → fix loop) is the active research direction
 ([`FURTHER-RESEARCH.md`](FURTHER-RESEARCH.md) §1).
@@ -44,8 +46,9 @@ more thinking, more cost. **Hidden gold** = real bugs the human reviewers missed
    does, it's a coin flip (40–54%).** The factories flood you with candidates — ~40–54% of their
    unmatched findings are hallucinations. → §5.3
 4. **Cranking effort to "xhigh" mostly wastes money.** Recall rises only modestly low→xhigh
-   while cost explodes (e.g. Compound on opus xhigh ≈ $48/review). low/medium captures most of
-   the value. → §3.3
+   while cost explodes (e.g. Compound on opus xhigh ≈ $67/review). low/medium captures most of
+   the value — and the two new 2026-09-06 model columns confirm it: recall is flat across
+   low/medium/high for both gpt-6-astra and claude-fable-5-1 in vanilla mode. → §3.3
 
 **What to actually use** (pick the framework together with your model + stakes):
 
@@ -53,21 +56,21 @@ more thinking, more cost. **Hidden gold** = real bugs the human reviewers missed
   precision (0.71), cheapest (~$0.31/review), fewest false alarms (1.8/review). The only
   framework that works well on Claude, Codex, *and* GLM. → §3.1, §6, §7 #2
 - **High-stakes / security-critical diff on Claude opus → metareview, low or high effort
-  (not xhigh).** On opus, metareview is the more token-efficient factory — its single-pass
-  synthesis beats Compound's two-pass (dispatch + synthesis), which doubles the high-effort
-  cost: metareview $33 vs Compound $46 per review at high effort (~30% cheaper on opus
-  overall; the gap widens at higher effort). Both find 92–97% of all real bugs (incl. ones the
-  humans missed) and surface 2–3× more hidden gold than vanilla — at 7–9× the cost of vanilla.
-  → §3.1, §3.3, §5.4, §6, §7 #1
+  (not xhigh).** On opus, both factories reach the same ceiling — single-pass metareview and
+  two-pass Compound find 92–97% of all real bugs (incl. ones the humans missed) and surface
+  3–5× more hidden gold than vanilla. At low effort metareview costs more ($31 vs $20/cell —
+  Compound's two-pass is cheaper there); at high effort they converge ($57 vs $56) — the old
+  "metareview ~30% cheaper on opus" claim did not survive the post-remediation data. Both at
+  7–9× the cost of vanilla. → §3.1, §3.3, §5.4, §6, §7 #1
 - **Maximum bug discovery, cost secondary → Compound (Claude).** Most real bugs found per
-  review (14.3 hidden-gold). On Codex, Compound/gpt-5.6-terra/xhigh is the one factory cell that
+  review (14.9 hidden-gold). On Codex, Compound/gpt-5.6-terra/xhigh is the one factory cell that
   beats vanilla on raw recall. → §3.1, §3.3, §6
 - **On Codex (gpt-5.6) → vanilla for precision/cost; Compound (not metareview) when you want
   more total bugs.** vanilla starts high-precision (0.74–0.94). The factories still find more
-  *total* bugs on gpt (metareview 7/8 cells, Compound 6/8) — but the factory-efficiency picture
-  flips vs opus: on Codex, **Compound is the more efficient factory** (more findings per token;
-  metareview's xhigh is wasted spend on Codex). The precision drop is steeper on Codex either
-  way. → §3.2, §3.3, §3.4, §5.4, §6, §7 #1
+  *total* bugs on gpt (metareview 4/6 comparable cells, Compound 5/6; hidden gold 8/8 for
+  both) — but the factory-efficiency picture flips vs opus: on Codex, **Compound is the more
+  efficient factory** (more findings per token; metareview's xhigh is wasted spend on Codex).
+  The precision drop is steeper on Codex either way. → §3.2, §3.3, §3.4, §5.4, §6, §7 #1
 - **Triage-constrained team → vanilla as the baseline gate; adjudicate the factories' output
   before filing.** Use a precision model (gpt-5.6-terra) or a cross-family judge as the
   second-pass filter to kill the 40–54% hallucinations. → §5.3, §6, §7 #4 / #8
@@ -84,21 +87,21 @@ SDLC loop + the ten tactical points these are drawn from.
 |---|---|---|
 | Routine review of low-stakes diffs on **any** model | **vanilla-engineered** | Highest adjudicated precision (**0.71**), cheapest (**~$0.31/cell**), competitive recall (0.48). Model-agnostic — works on Claude, Codex, and GLM. |
 | High-stakes / security-critical diffs on **Claude Code** (opus) | **metareview 0.8.2** *or* **Compound Engineering** | Both reach **incremental recall ~0.92–0.97** on opus and surface **2–3× more hidden gold** (real bugs the human reviewers missed) than vanilla. metareview is ~30% cheaper than compound on opus. |
-| You want the broadest coverage and can afford triage | **Compound Engineering** (Claude) | Most findings per cell (14.3 hidden-gold/cell, highest absolute), but **lowest raw precision (0.33)** — you will triage a lot of noise. |
-| You are on **Codex** (gpt-5.6) | **vanilla-engineered** for precision/cost; **metareview or compound** when you want more total bugs | The harnesses still find more *total* bugs on Codex (incr_recall: metareview 7/8, compound 6/8 vs vanilla; hidden gold 8/8), but vanilla starts high-precision there (adj_p 0.74–0.96) so the harness's precision drop is steeper. All three harnesses degrade Claude→Codex (recall drop 0.32–0.37). superpowers is the weakest on Codex (recall 0.02–0.17) but still produces real findings (38–73/cell) — it is not "broken." |
+| You want the broadest coverage and can afford triage | **Compound Engineering** (Claude) | Most findings per cell (14.9 hidden-gold/cell, highest absolute), but **lowest adjudicated precision (0.33)** — you will triage a lot of noise. |
+| You are on **Codex** (gpt-5.6) | **vanilla-engineered** for precision/cost; **metareview or compound** when you want more total bugs | The harnesses still find more *total* bugs on Codex (incr_recall: metareview 4/6, compound 5/6 comparable cells vs vanilla; hidden gold 8/8), but vanilla starts high-precision there (adj_p 0.74–0.96) so the harness's precision drop is steeper. All three harnesses degrade Claude→Codex (recall drop 0.32–0.37). superpowers is the weakest on Codex (recall 0.02–0.17) but still produces real findings (19–73/cell) — it is not "broken." |
 | You want a deterministic, free "floor" before LLM review | **metareview's deterministic gates** — *but* | On this PR subset the gates contributed **0 recall** (all gate findings were hallucinated against the gold set). They are free, but don't rely on them to catch bugs here. |
 
 **The single most important finding: the factory frameworks trade precision for coverage on
 *every* model, not just opus.** Their value is *largest* on Claude opus (recall 0.79–0.86,
-incr_recall 0.97), but on Codex gpt they still find more total bugs (incr_recall 7/8 for
-metareview, 6/8 for compound) and more hidden gold (8/8). What changes by model is the
+incr_recall 0.97), but on Codex gpt they still find more total bugs (incr_recall 4/6 for
+metareview, 5/6 for compound on comparable cells) and more hidden gold (8/8). What changes by model is the
 tradeoff *shape*, not the *direction*. Pick your framework *together with* your model, but
 don't assume the harnesses only help on opus.
 
 **The second finding: the factories trade precision for coverage.** They find substantially
-more real bugs (incremental recall 0.82–0.83 vs vanilla 0.67; 12.0–14.3 hidden-gold/cell vs
-vanilla 3.8) but at 7–9× the cost and **far lower precision** (0.27–0.33 vs vanilla 0.71) —
-meaning a human must triage 4–7× more candidate findings. The net win depends on whether the
+more real bugs (incremental recall 0.83–0.85 vs vanilla 0.67; 13.4–14.9 hidden-gold/cell vs
+vanilla 3.8) but at 7–9× the cost and **far lower precision** (0.29–0.33 vs vanilla 0.71) —
+meaning a human must triage 6–8× more candidate findings. The net win depends on whether the
 extra real bugs are High/Critical and whether your team can absorb the triage cost.
 
 ---
@@ -159,30 +162,32 @@ gpt-5.6-sol $1.25 in / $10 out per 1M; gpt-5.6-terra $2.5 in / $20 out per 1M.
 
 ---
 
-## 3. Primary results — batch_083 (metareview 0.8.2), 384/384 cells
+## 3. Primary results — batch_083 (metareview 0.8.2), 336/336 designed cells
 
-Snapshot 2026-08-26T05:30Z. Source: `results/batch_083_ANALYSIS.md`,
-`bin/analyze_083_interactions.py`. Re-run either for the latest.
+Refreshed 2026-09-06 from the post-remediation registry (see §3.5). Source:
+`results/batch_083_ANALYSIS.md` (regenerate with `bin/analyze_batch_083.py`),
+`bin/analyze_083_interactions.py`.
 
 ### 3.1 Per framework (the headline)
 
 | framework | n | recall | adj. precision | incr. recall | hidden /cell | hal /cell | tok /cell | imp$ /cell |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | **vanilla-engineered** | 72 | 0.48 | **0.71** | 0.67 | 3.8 | **1.8** | 149K | **$0.31** |
-| **metareview 0.8.2** | 72 | 0.52 | 0.27 | **0.82** | 12.2 | 13.2 | 3.17M | $2.30 |
-| **compound** | 96 | 0.47 | 0.33 | **0.83** | **14.3** | 11.8 | 3.24M | $2.94 |
-| **superpowers** | 96 | 0.28 | 0.21 | 0.63 | 6.4 | 7.1 | 503K | $0.56 |
+| **metareview 0.8.2** | 72 | **0.55** | 0.29 | **0.85** | 13.4 | 13.9 | 3.24M | $2.36 |
+| **compound** | 96 | 0.48 | 0.33 | 0.83 | **14.9** | 11.6 | 2.98M | $2.72 |
+| **superpowers** | 96 | 0.29 | 0.22 | 0.63 | 6.5 | 7.3 | 495K | $0.60 |
 
 **Read:** vanilla finds ~half the known bugs with high precision and almost no noise, cheaply.
-The two big factories find a comparable-or-higher fraction of known bugs (recall 0.47–0.52) and
-surface **~3.5× more hidden gold**, reaching incr. recall 0.82–0.83 — at 7–9× the cost and with
-4–7× more hallucinations to triage. superpowers is cheap but finds the fewest bugs (recall 0.28).
+The two big factories find a comparable-or-higher fraction of known bugs (recall 0.48–0.55) and
+surface **~3.5–4× more hidden gold**, reaching incr. recall 0.83–0.85 — at 8–9× the cost and
+with 6–8× more hallucinations to triage. superpowers is cheap but finds the fewest bugs
+(recall 0.29).
 
 **Cost per real bug found** (imp$ / (TP + hidden gold)):
-- vanilla: **$0.042/bug** — the most efficient per real bug
-- superpowers: $0.067/bug
-- metareview: $0.144/bug
-- compound: $0.164/bug
+- vanilla: **$0.043/bug** — the most efficient per real bug
+- superpowers: $0.070/bug
+- metareview: $0.138/bug
+- compound: $0.149/bug
 
 The factories cost ~3.5× more per real bug but find ~3.5× more bugs in total. The choice is
 whether the extra bugs are worth the cost + triage.
@@ -191,14 +196,14 @@ whether the extra bugs are worth the cost + triage.
 
 | model | n | recall | adj. prec | incr. recall | hidden /cell | hal /cell | tok /cell | imp$ /cell |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| `claude-opus-5` | 72 | **0.67** | 0.24 | **0.92** | **23.5** | 22.3 | 2.87M | $4.57 |
-| `claude-sonnet-5` | 96 | 0.42 | 0.36 | 0.70 | 6.5 | 7.0 | 3.31M | $1.76 |
-| `gpt-5.6-sol` (Codex) | 72 | 0.36 | 0.37 | 0.66 | 6.2 | 4.8 | 494K | $0.11 |
-| `gpt-5.6-terra` (Codex) | 96 | 0.32 | **0.45** | 0.57 | 4.1 | **2.8** | 399K | $0.19 |
+| `claude-opus-5` | 72 | **0.68** | 0.24 | **0.93** | **24.5** | 22.5 | 2.56M | $4.33 |
+| `claude-sonnet-5` | 96 | 0.42 | 0.36 | 0.71 | 6.7 | 7.2 | 3.28M | $1.78 |
+| `gpt-5.6-sol` (Codex) | 72 | 0.37 | 0.39 | 0.67 | 6.3 | 4.8 | 523K | $0.11 |
+| `gpt-5.6-terra` (Codex) | 96 | 0.33 | **0.46** | 0.59 | 4.5 | **3.1** | 418K | $0.20 |
 
-**opus-5 is the recall/coverage engine** (recall 0.67, incr. 0.92, 23.5 hidden-gold/cell) but
-the most expensive ($4.57/cell) and noisiest. **Codex is the precision/value engine** (adj. prec
-0.37–0.45, cheapest, fewest hallucinations) but finds fewer bugs. This model effect interacts
+**opus-5 is the recall/coverage engine** (recall 0.68, incr. 0.93, 24.5 hidden-gold/cell) but
+the most expensive ($4.33/cell) and noisiest. **Codex is the precision/value engine** (adj. prec
+0.39–0.46, cheapest, fewest hallucinations) but finds fewer bugs. This model effect interacts
 strongly with the framework choice (§3.3).
 
 ### 3.3 Per framework × model × effort (where the recommendations live)
@@ -260,61 +265,63 @@ real-but-ungold issues, e.g. grafana #106778 incr 0.83). Judged cross-family lik
 column; single run per PR. Scope note: the factory columns (mrv/ce/sp) remain measured on the
 top-6 subset only — suite-level cross-framework comparison is still open Phase C work.
 | metareview 0.8.2 | opus-5 | low | **0.86** | 0.16 | **0.97** | 174 | 207 | $31.13 |
-| metareview 0.8.2 | opus-5 | high | 0.79 | 0.12 | 0.97 | 222 | 241 | $33.28 |
+| metareview 0.8.2 | opus-5 | high | 0.79 | 0.12 | 0.97 | 222 | 241 | $56.65 |
 | metareview 0.8.2 | gpt-5.6-sol | low | 0.50 | 0.41 | 0.75 | 43 | 31 | $0.59 |
-| metareview 0.8.2 | sonnet-5 | med | 0.57 | 0.19 | 0.84 | 72 | 103 | $13.40 |
+| metareview 0.8.2 | sonnet-5 | med | 0.57 | 0.19 | 0.84 | 72 | 103 | $15.73 |
 | metareview 0.8.2 | gpt-5.6-terra | high | 0.40 | 0.36 | 0.70 | 41 | 30 | $1.33 |
-| compound | opus-5 | xhigh | **0.83** | 0.14 | **0.98** | 276 | 264 | $47.77 |
-| compound | opus-5 | high | 0.79 | 0.19 | 0.97 | 268 | 214 | $45.75 |
+| compound | opus-5 | xhigh | **0.83** | 0.13 | **0.98** | 314 | 277 | $66.58 |
+| compound | opus-5 | high | 0.79 | 0.21 | 0.97 | 260 | 176 | $55.96 |
 | compound | gpt-5.6-terra | xhigh | 0.55 | 0.41 | 0.84 | 75 | 36 | $1.59 |
-| superpowers | opus-5 | xhigh | 0.55 | 0.19 | 0.89 | 130 | 103 | $7.66 |
+| superpowers | opus-5 | xhigh | 0.67 | 0.22 | 0.92 | 140 | 121 | $14.32 |
 | superpowers | gpt-5.6-sol | xhigh | **0.02** | 0.02 | 0.29 | 16 | 39 | $0.50 |
-| superpowers | sonnet-5 | high | 0.52 | 0.46 | 0.75 | 37 | 29 | $3.11 |
+| superpowers | sonnet-5 | high | 0.52 | 0.46 | 0.75 | 37 | 29 | $3.90 |
 
 *(Representative rows; the full 64-row table is in `docs/FRAMEWORK_COMPARISON.md` §4.3.)*
 
 **The model-conditional story:**
-- **On opus-5:** the factories pull ahead on coverage. metareview reaches **recall 0.82–0.88,
+- **On opus-5:** the factories pull ahead on coverage. metareview reaches **recall 0.79–0.86,
   incr. 0.97** (the highest in the matrix); compound reaches recall 0.67–0.83, incr. 0.92–0.98.
-  vanilla on opus is recall 0.67, incr. 0.82–0.86. **On opus you pay the factory cost to go from
-  ~0.85 to ~0.97 incremental recall and 2–3× the hidden gold.**
+  vanilla on opus is recall 0.67–0.69, incr. 0.82–0.86. **On opus you pay the factory cost to go
+  from ~0.85 to ~0.97 incremental recall and 3–5× the hidden gold.**
 - **On Codex (gpt-5.6):** the factory advantage on pure recall mostly evaporates. vanilla is
   competitive on recall (0.33–0.55) and **dominates precision** (adj. 0.70–0.94). metareview
-  on Codex is modest (recall 0.29–0.50). The one factory bright spot on Codex is **compound
+  on Codex is modest (recall 0.31–0.64). The one factory bright spot on Codex is **compound
   xhigh on terra (recall 0.55, incr. 0.84)**. superpowers on Codex is the weakest harness
-  (recall 0.02–0.17) but still produces real findings (38–73/cell with file:line refs), so the
-  earlier "broken subagent dispatch" suspicion is **not supported** by the 384-cell data.
-- **On effort:** recall rises only modestly low→xhigh (0.40→0.42; incr. 0.69→0.75) while cost
+  (recall 0.02–0.17) but still produces real findings (19–73/cell with file:line refs), so the
+  earlier "broken subagent dispatch" suspicion is **not supported** by the 336-cell data.
+- **On effort:** recall rises only modestly low→xhigh (0.43→0.44; incr. 0.73→0.80) while cost
   rises steeply. **low/medium capture most of the value; xhigh is diminishing returns** for the
-  factories (compound opus xhigh = $48/cell).
+  factories (compound opus xhigh = $67/cell).
 
 ### 3.4 The interaction analyses (the tests that answer the practitioner questions)
 
-Two hypotheses were posed and tested on the complete 384-cell matrix
-(`bin/analyze_083_interactions.py`):
+Two hypotheses were posed and tested on the complete 336-cell matrix
+(`bin/analyze_083_interactions.py`, re-run post-remediation 2026-09-06):
 
 **H2a — the harnesses always beat vanilla at equal effort: SPLIT DECISION, model-dependent.**
 
 | metric | metareview beats vanilla | compound beats vanilla | verdict |
 |---|---|---|---|
-| recall | 9/16 | 4/16 | ❌ not "always" — model-dependent |
-| **hidden gold** | **16/16** | **15/16** | ✅ **always** — strong |
-| incr_recall | **15/16** | 11/16 | ✅ strong |
-| PR-paired (harness TP ≥ vanilla TP) | 68/96 (71%) | 53/96 (55%) | partial |
+| recall | 11/16 | 5/16 | ❌ not "always" — model-dependent |
+| **hidden gold** | **16/16** | **14/16** | ✅ **near-always** — strong (mrv 16/16; compound loses only 2 sonnet-5 cells) |
+| incr_recall | 10/16 | 7/16 | ⚠️ model-dependent (weaker than the pre-remediation read) |
+| PR-paired (harness TP ≥ vanilla TP) | 72/96 (75%) | 53/96 (55%) | partial |
 
-"Always beat" is **true for hidden gold, false for recall.** The harnesses *always* surface more
-real bugs beyond the gold set — but on narrow recall they only beat vanilla with opus-5 and
-sometimes sonnet-5; with gpt they often lose on recall, because candidate-flooding hurts precise
-models.
+"Always beat" is **true for hidden gold, false for recall — and weaker than the
+pre-remediation snapshot suggested on incremental recall.** The harnesses *nearly always*
+surface more real bugs beyond the gold set (metareview 16/16, compound 14/16 — compound loses
+only two sonnet-5 cells) — but on narrow recall they beat vanilla mainly with opus-5 and
+sonnet-5; with gpt they often lose on recall, because candidate-flooding hurts precise models.
 
 **H2b — harness at lower effort beats vanilla cranked higher: WEAK, opus-5 only.**
-metareview at effort E beats vanilla at E+1 in 6/24 cases; compound in 4/24 — concentrated
+metareview at effort E beats vanilla at E+1 in 8/24 cases; compound in 3/24 — concentrated
 almost entirely in opus-5. "Often" is overstated; it's really "opus-5 + harness at lower effort
 beats opus-5 + vanilla cranked higher."
 
 **H1 — the wins are cheap-model + harness + low-effort: REFUTED on cost-efficiency** (this test
 uses *recall* as the quality proxy against cost). The most surprising result:
-- **Top 15 cells by recall-per-million-tokens are ALL vanilla.** Every one.
+- **14 of the top 15 cells by recall-per-million-tokens are vanilla** (one superpowers cell
+  sneaks in at #14).
 - **Pareto frontier (recall vs cost):** 3 vanilla cells + 1 metareview/opus-5/low cell. The
   harnesses are off this recall-vs-cost frontier.
 - **Direct matchup:** none of the 12 "cheap+harness+low/medium" cells beats
@@ -331,11 +338,41 @@ bang-per-buck play — vanilla is. The factory premium buys *coverage*, not *eff
    *bugs-per-dollar*, vanilla.
 2. **The harness-vs-vanilla tradeoff is the *same direction* on every model — it is NOT opus-only.**
    On gpt the harnesses still find more total bugs: metareview beats vanilla on incr_recall in
-   7/8 gpt cells, compound in 6/8, and both beat vanilla on hidden gold 8/8. What differs by
+   4/6 comparable gpt cells, compound in 5/6, and both beat vanilla on hidden gold 8/8. What differs by
    model is the *magnitude and cost*, not the direction.
 3. **The one universal harness win is *hidden gold*** (16/16 metareview, 15/16 compound —
    including 8/8 on gpt). If you care about *discovery* (bugs beyond the benchmark), the
    harnesses consistently deliver — you just pay for it in tokens + hallucinations to triage.
+
+### 3.5 Data integrity: the shared-repo collision bug and the batch_083 remediation
+
+**The bug.** The batch_083 matrix ran with a shared materialize-repo cache: `materialize()`
+kept ONE working repo directory per PR, and the realistic adapters mutate that directory
+in-place. Two concurrent runs on the same PR clobbered each other — `git reset --hard` +
+`git clean -fdx` in one run deleted the other's in-flight findings file, and both runs then
+could extract the same (wrong or empty) findings file.
+
+**Detection.** Signature: two runs on the same PR with overlapping time windows whose extracted
+findings are near-identical across DIFFERENT (framework, model, effort) cells — impossible
+legitimately, since different cells use different prompts/models. Same-cell rerun overlap is
+expected-similar and excluded. Tool: `uv run python audit_batch_083.py` (committed).
+
+**Audit result (2026-09-06):** 599 runs scanned, 595 same-PR overlap pairs — **16 confirmed
+corruption pairs** (jaccard ≥ 0.5 across different cells, incl. jac = 1.00 across models),
+1 suspect, **25 runs implicated** (compound 18, metareview 5, superpowers 2; vanilla 0).
+All **20 tainted published data points were re-run on the fixed adapters** (per-run `mkdtemp`
+work copies + per-PR flock) and registered under the original batch id, so the latest-pass
+selection used throughout this report is clean: **0 published-selection points sit on
+confirmed-implicated runs**. The only remaining flag is one benign post-fix pair (jaccard 0.37,
+two runs of the same model on PR 8 at different efforts — expected similarity on isolated
+work dirs, below the 0.5 corruption bar).
+
+**What the bug explains.** The original snapshot's 10 "degenerate" (0-finding) runs were
+mostly collision artifacts, not framework failures: 7 of 10 had an overlapping same-PR run,
+and every cell re-run cleanly produces findings (e.g. metareview/gpt-5.6-sol/high went
+0-finding → recall 0.64, incr. 0.87). The §3.1–3.4 numbers above reflect the clean
+selections; §5's structural analyses (which depend on within-run attribution, not
+cross-cell comparisons) are unchanged in their conclusions.
 
 ---
 
@@ -436,32 +473,32 @@ but vanilla is competitive with both on Codex and far cheaper.
   for a factory only when the diff is high-stakes and you're on Claude.
 
 ### metareview 0.8.2
-- **Benefits:** Highest recall on opus (0.82–0.88, incr. 0.97) — best coverage of known bugs on
+- **Benefits:** Highest recall on opus (0.79–0.86, incr. 0.97) — best coverage of known bugs on
   top-tier Claude. 8 adversarial lenses incl. a high-precision Security lens. Single-pass
   synthesis is more xhigh-efficient than compound. Deterministic gates are a free pre-check.
-  ~30% cheaper than compound on opus.
-- **Drawbacks:** Low precision (0.27 adj.) and high hallucination rate (13.2/cell) — ~7× the
+  Cost-equivalent to compound on opus at high effort ($57 vs $56); cheaper at low on sonnet.
+- **Drawbacks:** Low precision (0.29 adj.) and high hallucination rate (13.9/cell) — ~8× the
   noise of vanilla. On Codex the pure-recall gain shrinks but it still finds more *total* bugs
-  (incr_recall 7/8 on gpt). xhigh is wasted spend. The orchestrator (opus) is 99.96% of cost.
+  (incr_recall 4/6 on gpt). xhigh is wasted spend. The orchestrator (opus) is 99.96% of cost.
   Deterministic gates contributed 0 recall on this subset.
 - **Verdict:** **The high-coverage choice on Claude opus.** Best when the diff is
   security/architecture-sensitive and you can absorb triage. Use low/high (not xhigh).
 
 ### Compound Engineering
-- **Benefits:** The **most findings per cell** (14.3 hidden-gold/cell — highest absolute bug
+- **Benefits:** The **most findings per cell** (14.9 hidden-gold/cell — highest absolute bug
   discovery). Risk-driven persona roster adapts to the diff. Highest incr. recall tier (0.83).
   On Codex gpt-5.6-terra xhigh, the one factory that beats vanilla on coverage (recall 0.55,
   incr. 0.84). P0–P3 output is triage-friendly in shape.
-- **Drawbacks:** **Most expensive** ($2.94/cell, ~9× vanilla). Lowest raw precision (0.33).
+- **Drawbacks:** **Most expensive** ($2.72/cell, ~9× vanilla). Lowest adjudicated precision (0.33).
   Two-pass doubles xhigh cost on opus. Persona subagents route partly to Sonnet (not Haiku),
   inflating cost vs metareview's all-Haiku lenses.
 - **Verdict:** **Use when you want maximum bug discovery and cost is secondary** — especially on
   Codex where it's the only factory that consistently works. Expect to triage a lot of noise.
 
 ### Superpowers
-- **Benefits:** Cheap ($0.56/cell). On Claude opus xhigh it reaches incr. recall 0.89 —
+- **Benefits:** Cheap ($0.60/cell). On Claude opus xhigh it reaches incr. recall 0.92 —
   competitive with the other factories at lower cost.
-- **Drawbacks:** **Lowest recall (0.28) and precision (0.21)** overall. Weakest harness on Codex
+- **Drawbacks:** **Lowest recall (0.29) and precision (0.22)** overall. Weakest harness on Codex
   (recall 0.02–0.17) — degrades Claude→Codex more than metareview/compound (drop 0.37 vs
   0.32/0.36) but still produces real findings, so it is not "broken." Highest hidden-gold miss
   rate of the factories.
@@ -488,7 +525,7 @@ move is to **use them in sequence** — each where it is strongest — rather th
   model, not just opus). Default: `metareview/opus-5/low` (recall 0.86, 174 hidden gold, $13);
   on Codex, `metareview/gpt-5.6-sol/medium` or `compound/gpt-5.6-terra/xhigh`. Expect ~4–7× more
   candidates than vanilla, ~40–54% hallucinations. **Do not skip the harness on gpt** — it finds
-  more total bugs (incr_recall) on gpt in 7/8 (metareview) / 6/8 (compound) cells.
+  more total bugs (incr_recall) on gpt in 4/6 (metareview) / 5/6 (compound) comparable cells.
 - **(c) Adjudicate** — filter the candidate list with a *precision* pass: use `gpt-5.6-terra`
   or vanilla as a second-pass judge, or the cross-family judge (`harnesseval/adjudicate.py`).
   Keep findings that survive (real-but-ungold + matched goldens = confirmed bugs).
@@ -532,16 +569,21 @@ A single framework/model for the whole workflow is suboptimal — the loop is wh
 - **N is tiny.** 6 PRs per cell; bootstrap 95% CIs wide or undefined. No "X beats Y" claim
   survives the bootstrap at this N — the interaction analyses report raw win-rates, not
   significance. Phase C is the bar before any final ranking.
+- **batch_083 was partially corrupted by a shared-repo collision bug; every number in §3 comes
+  from the post-remediation clean selections** (20 tainted data points re-run; 0 published-
+  selection points on confirmed-corrupted runs — see §3.5 and `audit_batch_083.py`).
 - **Batch effect.** batch_083 is ~0.14 lower recall than 0824-1019 on matched cells — a
   batch/judge effect, not a framework regression. Cross-batch pooling is avoided.
 - **Cost for GPT is an unverified estimate.** Reported $ = real Anthropic billing; GPT reports
-  $0 via OAuth, so implied $ adds GPT at pinned 2026-08-22 rates. Real GPT cost may differ.
+  $0 via OAuth, so implied $ adds GPT at pinned per-token rates (2026-08-22 pins for sol/terra;
+  gpt-6-astra pinned 2026-09-06 at $10/$12.50 — the older pins no longer match OpenAI's current
+  pricing page). Real GPT cost may differ.
 - **All three harnesses degrade on Codex** (recall drop 0.32–0.37). superpowers is weakest on
   Codex (recall 0.02–0.17) but still produces real findings — not "broken."
 - **Model provenance:** API 'opus' = `claude-opus-4-5` (pinned); CLI realistic 'opus' resolved to
   `claude-opus-5`. API and CLI are never compared head-to-head.
 - **The SDLC loop (§7) is a recommendation derived from review data, not a measured workflow.**
-  The 384-cell matrix measures single-pass review quality — the *finding* (discovery) component
+  The 336-cell matrix measures single-pass review quality — the *finding* (discovery) component
   of the central question — not the iterative discover→adjudicate→*fix* cycle (the *fixing*
   component). Validating the loop is the active research direction
   ([`FURTHER-RESEARCH.md`](FURTHER-RESEARCH.md) §1).
@@ -556,6 +598,7 @@ The exact tested code is pinned: `harnesseval` @ tag `v0.8.2-eval` (= `1847f7d`)
 ```bash
 uv run python bin/analyze_batch_083.py          # rolling batch_083 analysis
 uv run python bin/analyze_083_interactions.py   # the §3.4 interaction tests
+uv run python audit_batch_083.py                # §3.5 collision audit (verify taint = 0)
 uv run python -m harnesseval.analysis           # leaderboards, per-lens, adjudication split
 uv run python -m harnesseval.report             # pareto plots + leaderboard JSON
 ```
