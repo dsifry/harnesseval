@@ -29,12 +29,12 @@ the **fix** component (the discover → adjudicate → fix loop) is the active r
 review prompt, no subagents (the baseline); **metareview 0.8.2** — free deterministic gates + 8
 adversarial "lens" subagents; **Compound Engineering** — risk-driven "persona" subagents + a
 synthesis pass; **Superpowers** — one code-reviewer subagent. The "factories"/"harnesses" = the
-latter three. Two *model families*: **Claude opus/sonnet** (Anthropic) and **Codex gpt-5.6**
-(OpenAI); GLM is a sidebar. **Effort** = a model's reasoning-depth knob (low/medium/high/xhigh) —
-more thinking, more cost. **Hidden gold** = real bugs the human reviewers missed;
-**hallucination** = a reported "bug" that isn't real (the triage tax).
+latter three. Two *model families*: **Claude opus/sonnet/fable** (Anthropic) and **Codex
+gpt-5.6/gpt-6** (OpenAI); GLM is a sidebar. **Effort** = a model's reasoning-depth knob
+(low/medium/high/xhigh) — more thinking, more cost. **Hidden gold** = real bugs the human
+reviewers missed; **hallucination** = a reported "bug" that isn't real (the triage tax).
 
-**Four counterintuitive findings the data shows:**
+**Five counterintuitive findings the data shows:**
 
 1. **The expensive review frameworks are NOT the best value — vanilla is.** A single
    well-built prompt dominates recall-per-dollar; the factories are 10–40× more expensive for the
@@ -49,12 +49,21 @@ more thinking, more cost. **Hidden gold** = real bugs the human reviewers missed
    while cost explodes (e.g. Compound on opus xhigh ≈ $67/review). low/medium captures most of
    the value — and the two new 2026-09-06 model columns confirm it: recall is flat across
    low/medium/high for both gpt-6-astra and claude-fable-5-1 in vanilla mode. → §3.3
+5. **The newest models don't improve bug-finding — pick models for review on data, not
+   release notes.** gpt-6-astra is strictly dominated by last-gen gpt-5.6-sol in the same
+   harness (recall 0.40 vs 0.52, equal precision, ~7× the implied cost) at every effort level.
+   Anthropic's newest generation did help: claude-fable-5.1 posts the strongest vanilla recall
+   measured (0.74 top-6 / 0.62 full-suite, incr. 0.89) at the best premium $/real-bug ($0.077).
+   Model rank for review ≠ model rank for coding. → §3.3
 
 **What to actually use** (pick the framework together with your model + stakes):
 
 - **Routine / low-stakes review on any model → vanilla, low or medium effort.** Highest
   precision (0.71), cheapest (~$0.31/review), fewest false alarms (1.8/review). The only
-  framework that works well on Claude, Codex, *and* GLM. → §3.1, §6, §7 #2
+  framework that works well on Claude, Codex, *and* GLM. On Claude Code specifically,
+  **claude-fable-5-1 at low effort is the strongest vanilla cell measured** (recall 0.74,
+  incr. 0.89, $0.077/real-bug) — the best single upgrade if you review with Claude Code
+  already. → §3.1, §3.3, §6, §7 #2
 - **High-stakes / security-critical diff on Claude opus → metareview, low or high effort
   (not xhigh).** On opus, both factories reach the same ceiling — single-pass metareview and
   two-pass Compound find 92–97% of all real bugs (incl. ones the humans missed) and surface
@@ -66,11 +75,12 @@ more thinking, more cost. **Hidden gold** = real bugs the human reviewers missed
   review (14.9 hidden-gold). On Codex, Compound/gpt-5.6-terra/xhigh is the one factory cell that
   beats vanilla on raw recall. → §3.1, §3.3, §6
 - **On Codex (gpt-5.6) → vanilla for precision/cost; Compound (not metareview) when you want
-  more total bugs.** vanilla starts high-precision (0.74–0.94). The factories still find more
+  more total bugs.** vanilla starts high-precision (0.70–0.94). The factories still find more
   *total* bugs on gpt (metareview 4/6 comparable cells, Compound 5/6; hidden gold 8/8 for
   both) — but the factory-efficiency picture flips vs opus: on Codex, **Compound is the more
   efficient factory** (more findings per token; metareview's xhigh is wasted spend on Codex).
-  The precision drop is steeper on Codex either way. → §3.2, §3.3, §3.4, §5.4, §6, §7 #1
+  The precision drop is steeper on Codex either way. **Skip gpt-6-astra for review** — it is
+  dominated by sol on recall, precision, and cost in the same harness. → §3.2, §3.3, §3.4, §5.4, §6, §7 #1
 - **Triage-constrained team → vanilla as the baseline gate; adjudicate the factories' output
   before filing.** Use a precision model (gpt-5.6-terra) or a cross-family judge as the
   second-pass filter to kill the 40–54% hallucinations. → §5.3, §6, §7 #4 / #8
@@ -78,7 +88,9 @@ more thinking, more cost. **Hidden gold** = real bugs the human reviewers missed
   adjudicates, fix, iterate.** The matrix measures single-pass *finding*; the *fixing* loop is
   the active experiment. → §7, [`FURTHER-RESEARCH.md`](FURTHER-RESEARCH.md) §1
 - **Cost per real bug → vanilla ~$0.04/bug (most efficient); factories ~3.5× more per bug but
-  find ~3.5× more.** → §3.1
+  find ~3.5× more.** On the two new 2026-09-06 columns, fable-5.1/low is the best premium
+  vanilla cell ($0.077/bug, recall 0.74); astra's best cell ($0.094/bug at medium) is ~10×
+  worse than vanilla/sol ($0.009). → §3.1, §3.3
 
 The table below expands the first four use cases; §6 gives per-framework verdicts; §7 gives the
 SDLC loop + the ten tactical points these are drawn from.
