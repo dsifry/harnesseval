@@ -355,7 +355,7 @@ converts a mediocre-priced model into review coverage that the newest premium mo
 reach vanilla. (Fable remains the best *vanilla* model measured — rec 0.74/0.62 — but vanilla
 tops out at ~3 hidden bugs/PR on the full suite.)
 
-### 3.4 The full low/high grid — every model, every harness
+### 3.5 The full low/high grid — every model, every harness
 
 All cells top-6 PRs, latest pass, v2-adjudicated where graded (— = pending v2 grading or not
 run). "high" = our xhigh ladder step. Recorded $/cell shown only where verified in the main
