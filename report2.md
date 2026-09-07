@@ -57,8 +57,22 @@ reviewers' own misses. The harnesses compared:
 - **Compound Engineering ("ce")** — risk-driven persona subagents (investigator, security,
   perf, …) + a synthesis pass.
 
-Each harness × model × effort cell runs the top-6 PRs (cal.com and discourse PRs with 6–9
-goldens each — main report §2). A judge model then matches each reported finding against the
+Each harness × model × effort cell runs the **top-6 benchmark PRs** — real PRs from
+**[cal.com](https://github.com/calcom/cal.com)** and
+**[discourse-graphite](https://github.com/ai-code-review-evaluation/discourse-graphite)**,
+selected for having the most golden comments (6–9 each):
+
+| benchmark PR | goldens |
+|---|---:|
+| [cal.com#11059](https://github.com/calcom/cal.com/pull/11059) — OAuth app-credential sharing + webhook (multi-calendar destination logic) | 9 |
+| [discourse-graphite#4](https://github.com/ai-code-review-evaluation/discourse-graphite/pull/4) (topic embeds / RSS import) | 8 |
+| [discourse-graphite#10](https://github.com/ai-code-review-evaluation/discourse-graphite/pull/10) (embeddable hosts) | 7 |
+| [cal.com#10967](https://github.com/calcom/cal.com/pull/10967) (co-host calendars) | 6 |
+| [cal.com#14740](https://github.com/calcom/cal.com/pull/14740) (add-guests flow) | 6 |
+| [discourse-graphite#8](https://github.com/ai-code-review-evaluation/discourse-graphite/pull/8) (group pagination) | 6 |
+
+A judge model then matches each reported finding against the golden comments, and a **v2
+three-way adjudicator** classifies every unmatched finding as a
 golden comments, and a **v2 three-way adjudicator** classifies every unmatched finding as a
 real bug, an important non-bug, a true hallucination, or unresolved.
 
