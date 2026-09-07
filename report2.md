@@ -15,10 +15,17 @@
 > |---|---:|---:|---:|
 > | naive: vanilla × **Fable 5.1** (frontier) × low | 7.5 | $0.90 | $0.12 |
 > | naive: vanilla × **GPT-6 Astra** (frontier) × low | 2.2 | $0.34 | $0.15 |
-> | **harness: ce × glm-5.3-background × low (open-weight)** | **36.8** | **$0.20** | **$0.005** |
+> | harness: mrv × **glm-5.3-flash** × low (open-weight, fast variant) | 24.2 | $0.02 | $0.0008 |
+> | **harness: ce × glm-5.3 × low (open-weight)** | **36.8** | **$0.20** | **$0.005** |
 >
-> **Same PRs, same ground truth. The open-weight harness setup finds 5× the real bugs of
-> the best frontier-naive setup at a fifth of the price — and ~26× fewer dollars per real
+> Prefer absolute minimum cost over maximum recall? The **metareview × glm-5.3-flash × low**
+> cell finds 24.2 hidden gold/PR at **$0.02/cell — 1/10th the cost** of the ce × glm-5.3 cell,
+> at slightly lower recall (0.66 vs 0.81) and the lowest $-per-real-bug measured ($0.0008).
+> (Here and below, "glm-5.3" = the `glm-5.3-background` variant; "glm-5.3-flash-background"
+> = `glm-5.3-flash-background`.)
+>
+> **Same PRs, same ground truth. The open-weight harness setups find 3–5× the real bugs of
+> the frontier-naive setups at a fraction of the price — and 26–260× fewer dollars per real
 > bug. The harness, not the model tier, is the binding constraint.**
 
 > **What this is.** A follow-up to the main comparison ([`report.md`](report.md)) — read it
