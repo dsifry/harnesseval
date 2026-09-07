@@ -21,11 +21,11 @@
 > **How much better is the harness path?**
 >
 > - **vs vanilla × Fable 5.1 (the best frontier-naive cell):** ce × glm-5.3 finds **4.9× more
->   real bugs** (36.8 vs 7.5/PR) at 80% less cost ($0.20 vs $0.90/cell) — **$0.13 → $0.005 per
->   real bug, a 96% reduction**. mrv × glm-5.3-flash finds **3.2× more** (24.2 vs 7.5) at
->   98% less cost ($0.02 vs $0.90).
+>   real bugs** (36.8 vs 7.5/PR) at 97% less cost ($0.20 vs $0.90/cell) — **$0.13 → $0.005 per
+>   real bug**. mrv × glm-5.3-flash finds **3.2× more** (24.2 vs 7.5) at ~100% less cost
+>   ($0.02 vs $0.90).
 > - **vs vanilla × GPT-6 Astra:** ce × glm-5.3 finds **16.7× more real bugs** (36.8 vs 2.2)
->   at 61% less cost ($0.51 → $0.20) — $0.23 → $0.005 per real bug, a **96% reduction**.
+>   at 41% less cost ($0.34 → $0.20) — **$0.23 → $0.005 per real bug**.
 > - Prefer minimum cost over maximum recall? **metareview × glm-5.3-flash × low** finds
 >   24.2 hidden gold/PR — 3.2× what vanilla Fable finds — at **$0.02/cell, 1/10th the cost**
 >   of the ce × glm-5.3 cell, at slightly lower recall (0.66 vs 0.81) and the lowest
