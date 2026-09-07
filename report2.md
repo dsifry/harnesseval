@@ -1,4 +1,4 @@
-# GLM-5.3 as a Review Engine — the low/high suite, the effort ladder, and the lens-fix smoke (Report 2)
+# Evaluating PR Review Engines — do model or harness make a difference? (yes they do!)
 
 > **What this is.** A follow-up to the main comparison ([`report.md`](report.md)) — read it
 > standalone, but every framework/model/effort claim about the *older* cells cites the main
