@@ -315,6 +315,20 @@ Reuse Martian's pipeline:
    `{candidate, diff context}` asking "is this a real issue in this diff?" High-confidence
    reals → reclassified **real-but-ungold** (excluded from FP; reported separately as
    *incremental recall*). Low-confidence → **hallucination** (true FP).
+   **v2 (2026-09-07, harnesseval#8) — supersedes the v1 binary instrument above:**
+   - **Full diff** context (v1 truncated to `diff[:30000]`, blinding the judge on 15–41% of the
+     largest PRs).
+   - **max_tokens=4096** (v1's 1024 let reasoning models eat the budget → parse failures were
+     mis-ruled as hallucinations with no verdict).
+   - **Three-way taxonomy**: `bug` (verifiable defect; the only precision-taxing FP class) /
+     `important_non_bug` (real, specific, diff-grounded review issue that is not a defect —
+     missing tests, incomplete handling, scope/architecture; reported as its own hidden-findings
+     tier, NOT taxed as FP) / `hallucination` (false, misreads, pure nits, unactionable).
+   - **Unresolved**: adjudicator failures and below-CONF_FLOOR (0.5) positives are reported
+     separately and excluded from the precision denominator — unknown ≠ fake.
+   - Precision becomes **waste precision** = TP/(TP + true_hallucinations).
+   - Measured impact (§3.6 of report.md): the v1 instrument over-counted factory
+     "hallucinations" ~3–6× (old "40–54%" → true rates 7–18% of unmatched findings).
 5. **Score:** precision = TP/(TP+FP_hallucination); recall = TP/(TP+FN);
    severity-weighted variants; **Fβ** (report F1 and F2 — F2 weights recall 4×, matching
    Martian's default `beta=2.0`); per-profile (strict/core/all).
