@@ -22,10 +22,28 @@
 
 ### 0.1 What are we evaluating?
 
-The use case is **automated pre-merge code review**: an AI reviewer (or reviewer team) is
-given a completed pull request — title, full diff, and repo context — and asked to find the
-real bugs before the code ships. Concretely, the numbers in this report map onto four
-deployment scenarios a developer or platform team actually faces:
+**The key use case: a developer with a finished PR who wants to know where the bugs are.**
+Concretely: you have a completed pull request — title, diff, repo — and you want an AI to
+find the real problems before this code ships or gets reviewed by a human. There are two
+natural ways to do that, and they sit at opposite ends of a weight/effort tradeoff:
+
+- **The naive path.** Open Claude or Codex (or any frontier chat model), paste the diff or
+  point the agent at the repo, and ask it to find all the bugs. This is *vanilla* — one
+  prompt, one model, one pass. It's what most developers do today because it's instant and
+  nearly free.
+- **The harness path.** Use a gated, deterministic multi-agent workflow — **metareview**
+  (free security/test gates + 8 adversarial lens subagents, orchestrated and consolidated) or
+  **Compound Engineering** (risk-driven persona subagents + a synthesis pass). Heavier:
+  more tokens, more wall-clock, a harness to install. The bet you're making is that
+  structure and adversarial decomposition beat a single smart model staring at a diff.
+
+**Which is better? That is the question this report measures.** The short answer from the
+data: *it depends on the model you point the harness at* — and the surprise is that the
+harness path wins decisively even on a near-frontier open model, at costs that undercut the
+naive path on frontier models (§1, §3.4).
+
+Around that core question, the numbers map onto four deployment scenarios a developer or
+platform team faces:
 
 1. **Self-review assist** — "review my PR before I open it." One fast pass; precision matters
    (you will read every finding), cost per review is nearly free either way. → vanilla cells.
@@ -37,7 +55,7 @@ deployment scenarios a developer or platform team actually faces:
    is the metric. → the GLM low-effort cells, this report's headline.
 4. **Finding what human reviewers missed** — the golden comments in this benchmark are real
    findings recorded by human reviewers on real PRs; *hidden gold* is everything the AI
-   finds **beyond** that list. Sections §3.6 shows archetypes: credential corruption,
+   finds **beyond** that list. Section §3.6 shows archetypes: credential corruption,
    cross-tenant leakage, import-path XSS, migration landmines.
 
 What we are **not** yet evaluating (main report §1): the *fix* side of the loop
