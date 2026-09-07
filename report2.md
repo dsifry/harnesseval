@@ -1,13 +1,34 @@
 # Evaluating PR Review Engines — do model or harness make a difference? (yes they do!)
 
+# Evaluating PR Review Engines — do model or harness make a difference? (yes they do!)
+
+> ### The finding
+>
 > **Open-source near-frontier models driven by review harnesses find more real bugs — at a
 > lower $ per bug found — than frontier models like Fable 5.1 or GPT-6 Astra** when asked to
 > *"Review the following code diff for real, actionable issues … find issues in these
 > categories: bug, security, concurrency, data, api, performance, test_gap, doc_defect …
 > classify severity … only report real issues you are confident about"* — the standard
-> single-prompt review (§2.1). On the top-6 benchmark PRs: vanilla Fable 5.1 = 7.5 hidden
-> gold/PR at $0.90; vanilla Astra = 2.2/PR at $0.34; **ce × glm-5.3-background × low =
-> 36.8/PR at $0.20** — the harness, not the model tier, is the binding constraint.
+> single-prompt review (§2.1).
+>
+> On the top-6 benchmark PRs (Martian Code Review Bench):
+>
+> | review engine | hidden gold /PR | $/cell | **$ per real bug** |
+> |---|---:|---:|---:|
+> | naive: vanilla × **Fable 5.1** (frontier) × low | 7.5 | $0.90 | $0.12 |
+> | naive: vanilla × **GPT-6 Astra** (frontier) × low | 2.2 | $0.51 | $0.15 |
+> | **harness: ce × glm-5.3-background × low (open-weight)** | **36.8** | **$0.20** | **$0.005** |
+>
+> **Same PRs, same ground truth. The open-weight harness setup finds 5× the real bugs of
+> the best frontier-naive setup at a fifth of the price — and ~26× fewer dollars per real
+> bug. The harness, not the model tier, is the binding constraint.**
+
+> **What this is.** A follow-up to the main comparison ([`report.md`](report.md)) — read it
+> standalone, but every framework/model/effort claim about the *older* cells cites the main
+> report's sections. This report covers only the 2026-09-07 results: the full **GLM-5.3 /
+> GLM-5.3-flash** suite (24 cells), effort-ladder probes on the same model, and a smoke test
+> of metareview PR #145 (the lens-side fix for fabricated "zero tests" claims). All numbers
+> reproducible from committed run records via [`REPRODUCE.md`](REPRODUCE.md).
 
 > **What this is.** A follow-up to the main comparison ([`report.md`](report.md)) — read it
 > standalone, but every framework/model/effort claim about the *older* cells cites the main
