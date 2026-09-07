@@ -1,0 +1,181 @@
+{
+ "run_id": "311f798358cc",
+ "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/4",
+ "framework": "vanilla-engineered",
+ "model": "claude-opus-5",
+ "effort": "high",
+ "original": {
+  "tp": 4,
+  "fn": 4,
+  "n_real_ungold": 14,
+  "n_hallucination": 4,
+  "adj_p": 0.5,
+  "incr": 0.8181818181818182
+ },
+ "corrected": {
+  "n_unmatched": 18,
+  "rejudged": 18,
+  "n_bug_ungold": 12,
+  "n_important": 3,
+  "n_true_hallucination": 1,
+  "n_unresolved": 2,
+  "n_hidden_findings_unmatched": 15,
+  "waste_precision": 0.8,
+  "flips": {
+   "hallucination->bug": 1,
+   "hallucination->hallucination": 1,
+   "hallucination->unresolved": 2,
+   "real_but_ungold->bug": 11,
+   "real_but_ungold->important_non_bug": 3
+  },
+  "judge": "gpt-5.2",
+  "diff_chars": 29064,
+  "wall_s": 11.7
+ },
+ "records": [
+  {
+   "issue_text": "cook returns raw verbatim for cook_method == :raw_html, bypassing the sanitization pipeline and Plugin::Filter, and Jobs::PollFeed feeds unsanitized third-party RSS/Atom HTML into TopicEmbed.import which is rendered with raw post.cooked, causing stored XSS",
+   "source_lens": "vanilla-engineered",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.93,
+   "rationale": "The diff adds `Post.cook_methods[:raw_html]` and changes `Post#cook` to `return raw` when `cook_method == :raw_html`, bypassing `post_analyzer.cook` (which normally handles rendering/sanitization) and `Plugin::Filter.apply`. `Jobs::PollFeed` pulls third-party HTML from `SimpleRSS.parse(open(...))`, uses only `CGI.unescapeHTML(i.content.scrub)` (no sanitization), and passes it to `TopicEmbed.import"
+  },
+  {
+   "issue_text": "poll_feed.rb and topic_embed.rb use Kernel#open on a user-supplied URL, which executes a subprocess when the string begins with '|', allowing command injection",
+   "source_lens": "vanilla-engineered",
+   "old_verdict": "hallucination",
+   "new_verdict": "unresolved",
+   "confidence": 0.45,
+   "rationale": "below CONF_FLOOR (0.45)"
+  },
+  {
+   "issue_text": "Feed fetching via open() has no timeout, redirect limit, or response-size cap, so a slow or huge feed hangs or OOMs the Sidekiq worker",
+   "source_lens": "vanilla-engineered",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.86,
+   "rationale": "In `app/jobs/scheduled/poll_feed.rb`, the feed is fetched with `SimpleRSS.parse open(SiteSetting.feed_polling_url)` using `open-uri` without any `open_timeout`/`read_timeout`, redirect limit handling, or response-size cap. This can block the scheduled Sidekiq job indefinitely on slow/unresponsive servers or consume excessive memory on very large responses. Similar unbounded fetch exists in `TopicE"
+  },
+  {
+   "issue_text": "lib/topic_retriever.rb uses setnx followed by a separate expire, which is not atomic; if the worker or Redis fails between calls the retrieved:<url> key never expires and the embed URL is throttled permanently",
+   "source_lens": "vanilla-engineered",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.84,
+   "rationale": "In lib/topic_retriever.rb#retrieved_recently?, the throttle key is set with `$redis.setnx(retrieved_key, \"1\")` and then TTL is applied via a separate `$redis.expire(retrieved_key, 60)`. Because these are two separate Redis calls, a crash/exception/network failure between them can leave `retrieved:<embed_url>` without an expiry, causing the URL to be treated as \u201cretrieved recently\u201d indefinitely (pe"
+  },
+  {
+   "issue_text": "TopicEmbed.where(embed_url: url).first followed by create! is a check-then-act race; concurrent jobs both create topics and the second create! raises ActiveRecord::RecordNotUnique, leaving an orphaned topic/post",
+   "source_lens": "vanilla-engineered",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.72,
+   "rationale": "In TopicEmbed.import, it does `embed = TopicEmbed.where(embed_url: url).first` and if blank proceeds to create a topic/post and then `TopicEmbed.create!` (db migration adds a unique index on `topic_embeds.embed_url`). Two concurrent executions can both see no row and both try `create!`, causing the second to raise `ActiveRecord::RecordNotUnique`. Whether this leaves an orphaned topic/post depends "
+  },
+  {
+   "issue_text": "embed.update_column(:content_sha1, content_sha1) runs unconditionally even when revisor.revise! returns false, so the revision is lost permanently and later polls always see 'unchanged'",
+   "source_lens": "vanilla-engineered",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.72,
+   "rationale": "In TopicEmbed.import, when content_sha1 differs it calls `revisor.revise!(...)` but ignores the return value and then always executes `embed.update_column(:content_sha1, content_sha1)`. The diff shows `PostRevisor#revise!` can return `false` early (`return false if not should_revise?`), so the embed\u2019s sha1 may be updated even if the post revision didn\u2019t happen, causing future polls to treat the co"
+  },
+  {
+   "issue_text": "embed.post can be nil when the post was deleted (no dependent: handling and no null guard), so PostRevisor.new(nil) raises NoMethodError and kills the whole PollFeed run",
+   "source_lens": "vanilla-engineered",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.72,
+   "rationale": "In TopicEmbed.import, the update path does `post = embed.post` and then unconditionally does `PostRevisor.new(post)` when `content_sha1` changes. Since `topic_embeds.post_id` is not a foreign key and there is no `dependent:` behavior shown, a deleted post can leave a TopicEmbed row whose `embed.post` resolves to nil, which would cause `PostRevisor.new(nil)` / subsequent calls to raise and abort th"
+  },
+  {
+   "issue_text": "An already-shipped migration 20131223171005_create_top_topics.rb is edited to add force: true, which issues DROP TABLE top_topics and destroys existing rows if the migration is re-run",
+   "source_lens": "vanilla-engineered",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.78,
+   "rationale": "The diff changes an existing migration to `create_table :top_topics, force: true`. In Rails, `force: true` will drop the table if it already exists before creating it, so if this migration were ever re-run against a DB that still has `top_topics`, it would destroy existing rows. This is a substantive migration-safety concern, though it doesn\u2019t affect the normal one-time `db:migrate` path where the"
+  },
+  {
+   "issue_text": "spec/jobs/poll_feed_spec.rb tests for 'requires feed_polling_url' and 'requires embed_by_username' pass vacuously because feed_polling_enabled? remains false and short-circuits the guard",
+   "source_lens": "vanilla-engineered",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.88,
+   "rationale": "In Jobs::PollFeed#execute, the guard is `SiteSetting.feed_polling_enabled? && SiteSetting.feed_polling_url.present? && SiteSetting.embed_by_username.present?`. In `spec/jobs/poll_feed_spec.rb`, the tests \"requires feed_polling_url\" and \"requires embed_by_username\" only stub `feed_polling_url` / `embed_by_username` to nil and do not stub `feed_polling_enabled?` to true. Given the default in `config"
+  },
+  {
+   "issue_text": "absolutize_urls only rewrites hrefs/srcs starting with '/' and strips all leading slashes, mangling protocol-relative URLs like //cdn.example.com/x.jpg and leaving genuinely relative paths like images/wat.jpg untouched",
+   "source_lens": "vanilla-engineered",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.92,
+   "rationale": "In TopicEmbed.absolutize_urls, links/images are rewritten only when href/src starts_with?('/'), and the rewrite uses href.sub(/^\\/+/, '') / src.sub(/^\\/+/, '') (see fragment.css('a') and fragment.css('img')), which strips *all* leading slashes. This will incorrectly treat protocol-relative URLs like \"//cdn.example.com/x.jpg\" as if they were root-relative, mangling them into \"{prefix}/cdn.example.c"
+  },
+  {
+   "issue_text": "contents << \"\\n<hr>\u2026\" mutates the caller's string in place, appending the footer repeatedly on retry/reuse and raising FrozenError on frozen input",
+   "source_lens": "vanilla-engineered",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.85,
+   "rationale": "In TopicEmbed.import, the line `contents << \"\\n<hr>\\n<small>...\"` appends to the passed-in String in place. This is verifiable from the diff and can (a) add the footer multiple times if the caller reuses the same `contents` object across calls/retries, and (b) raise `FrozenError` if `contents` is frozen (e.g., immutable string input)."
+  },
+  {
+   "issue_text": "lib/tasks/disqus.thor removes the --category option and silently repoints topic creation from PostCreator to TopicEmbed.import_remote, breaking existing -c invocations and adding an uncontrolled HTTP fetch per thread, undocumented in the PR description",
+   "source_lens": "vanilla-engineered",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.84,
+   "rationale": "The diff in lib/tasks/disqus.thor removes `method_option :category, aliases: '-c'` and all logic that mapped `options[:category]` to a `category_id`, so existing `-c/--category` invocations will no longer work. It also changes the import path from `PostCreator.new(..., category: category_id)` to `TopicEmbed.import_remote(user, t[:link], ...)`, which performs `open(url).read` in `TopicEmbed.import_"
+  },
+  {
+   "issue_text": "discourse_expires_in 1.minute is applied to the loading render, so the loading page's 30-second self-reload is served from cache and the frame can stay on 'Loading Discussion\u2026' past the point the topic exists",
+   "source_lens": "vanilla-engineered",
+   "old_verdict": "hallucination",
+   "new_verdict": "bug",
+   "confidence": 0.72,
+   "rationale": "In `EmbedController#best`, `discourse_expires_in 1.minute` is executed unconditionally at the end of the action, including when `topic_id` is nil and it `render 'loading'`. The loading view (`app/views/embed/loading.html.erb`) relies on a 30s `document.location.reload()`, but if the response is cached for 60s the reload can be served the cached loading page even after the topic is created, leaving"
+  },
+  {
+   "issue_text": "The postMessage height call is inside window.onload, so the iframe height is sent exactly once and never updates as content loads",
+   "source_lens": "vanilla-engineered",
+   "old_verdict": "hallucination",
+   "new_verdict": "hallucination",
+   "confidence": 0.78,
+   "rationale": "In layouts/embed.html.erb the resize postMessage is sent in window.onload, which fires after the embedded document (including images like avatars) finishes loading, so it is not true that it \u201cnever updates as content loads.\u201d The diff does only send the height once (no MutationObserver/periodic resize), but the specific claim about load-time updates is not supported by the code shown."
+  },
+  {
+   "issue_text": "embed.js has no null check on document.getElementById('discourse-comments'), so comments.appendChild throws if the host page lacks that element",
+   "source_lens": "vanilla-engineered",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.95,
+   "rationale": "In newly added app/assets/javascripts/embed.js, `comments` is assigned from `document.getElementById('discourse-comments')` and then used unconditionally in `comments.appendChild(iframe);`. If the host page does not include an element with id `discourse-comments`, `comments` will be null and this will throw at runtime."
+  },
+  {
+   "issue_text": "discourseUrl + \"embed/best?\u2026\" silently produces a broken URL unless the host page includes a trailing slash, which is undocumented",
+   "source_lens": "vanilla-engineered",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "In `app/assets/javascripts/embed.js`, `iframe.src` is built via naive string concatenation: `discourseUrl + \"embed/best?embed_url=\" + ...`. If `discourseUrl` is provided without a trailing `/` (e.g. `https://forum.example.com`), the result becomes `https://forum.example.comembed/best?...`, which is an invalid/broken URL. The diff contains no normalization (e.g. ensuring a trailing slash) or docume"
+  },
+  {
+   "issue_text": "post.user.small_avatar_url / post.user.username raise NoMethodError when the post's author has been deleted, taking down the whole embed render",
+   "source_lens": "vanilla-engineered",
+   "old_verdict": "hallucination",
+   "new_verdict": "unresolved",
+   "confidence": 0.45,
+   "rationale": "below CONF_FLOOR (0.45)"
+  },
+  {
+   "issue_text": "feed_key computes a 'feed-modified:' cache key that is never read or written, so the intended conditional-GET/Last-Modified short-circuit is unimplemented dead code and every hourly run re-downloads the full feed",
+   "source_lens": "vanilla-engineered",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.86,
+   "rationale": "In `app/jobs/scheduled/poll_feed.rb`, `feed_key` builds a Redis-style cache key (`\"feed-modified:...\"`) but is never referenced anywhere in the diff (no reads/writes to it, and `poll_feed` always does `SimpleRSS.parse open(SiteSetting.feed_polling_url)`), so it is dead code and any intended short-circuit/caching behavior is indeed unimplemented."
+  }
+ ]
+}

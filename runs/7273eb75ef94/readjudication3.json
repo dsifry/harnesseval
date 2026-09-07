@@ -1,0 +1,116 @@
+{
+ "run_id": "7273eb75ef94",
+ "url": "https://github.com/getsentry/sentry/pull/95633",
+ "framework": "vanilla-engineered",
+ "model": "claude-fable-5-1",
+ "effort": "low",
+ "original": {
+  "tp": 1,
+  "fn": 1,
+  "n_real_ungold": 4,
+  "n_hallucination": 6,
+  "adj_p": 0.14285714285714285,
+  "incr": 0.8333333333333334
+ },
+ "corrected": {
+  "n_unmatched": 10,
+  "rejudged": 10,
+  "n_bug_ungold": 5,
+  "n_important": 4,
+  "n_true_hallucination": 0,
+  "n_unresolved": 1,
+  "n_hidden_findings_unmatched": 9,
+  "waste_precision": 1.0,
+  "flips": {
+   "hallucination->bug": 1,
+   "hallucination->important_non_bug": 4,
+   "hallucination->unresolved": 1,
+   "real_but_ungold->bug": 4
+  },
+  "judge": "gpt-5.2",
+  "diff_chars": 55464,
+  "wall_s": 17.2
+ },
+ "records": [
+  {
+   "issue_text": "FixedQueuePool is shared across strategies on the factory, but SimpleQueueProcessingStrategy.close()/terminate() call queue_pool.shutdown(), so after the first rebalance new strategies submit to permanently shut-down queues; put() raises queue.ShutDown, the broad except in submit() marks offsets complete, and all subsequent messages are silently dropped and committed",
+   "source_lens": "vanilla-engineered",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.84,
+   "rationale": "In `ResultsStrategyFactory.__init__` (mode `thread-queue-parallel`), a single `self.queue_pool = FixedQueuePool(...)` is created and then reused in `create_thread_queue_parallel_worker` by passing `queue_pool=self.queue_pool` into each new `SimpleQueueProcessingStrategy`. However `SimpleQueueProcessingStrategy.close()` and `terminate()` both call `self.queue_pool.shutdown()`. This means when an ol"
+  },
+  {
+   "issue_text": "close() stops the commit thread before draining worker queues via queue_pool.shutdown(), so messages processed during the drain are never committed and get reprocessed after restart; should drain first then do a final commit",
+   "source_lens": "vanilla-engineered",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.82,
+   "rationale": "In `SimpleQueueProcessingStrategy.close()`, it sets `shutdown_event` and joins `commit_thread` **before** calling `queue_pool.shutdown()`. The commit loop (`_commit_loop`) exits when `shutdown_event` is set and does not perform any final commit on exit. Meanwhile, worker threads can still complete offsets (they call `offset_tracker.complete_offset(...)` in `finally`) after the commit thread has st"
+  },
+  {
+   "issue_text": "submit() catches all exceptions and marks the offset complete, and the worker's finally: complete_offset also commits after errors, so any processing error is swallowed with no DLQ or retry, silently losing results (unlike serial mode); needs an explicit policy and a metric",
+   "source_lens": "vanilla-engineered",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "In the new thread-queue-parallel implementation, processing exceptions do not prevent offsets from being marked complete/committable. `OrderedQueueWorker.run` catches `Exception`, logs it, and in `finally` always calls `self.offset_tracker.complete_offset(...)`, so failed work still advances offset tracking. The commit thread (`_commit_loop`) then commits any offsets that are no longer outstanding"
+  },
+  {
+   "issue_text": "get_committable_offsets breaks on the first offset missing from all_offsets, so any offset never seen by the consumer (control records, compacted topics, upstream filtering) blocks commits for that partition forever and the uncommitted set grows unbounded",
+   "source_lens": "vanilla-engineered",
+   "old_verdict": "hallucination",
+   "new_verdict": "unresolved",
+   "confidence": 0.45,
+   "rationale": "below CONF_FLOOR (0.45)"
+  },
+  {
+   "issue_text": "The arroyo commit callback is invoked from the background commit_thread while the main thread runs consumer.poll() and rebalance callbacks, creating a data race on KafkaConsumer's unlocked state and potentially committing offsets for just-revoked partitions",
+   "source_lens": "vanilla-engineered",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.68,
+   "rationale": "In `SimpleQueueProcessingStrategy.__init__` a background `commit_thread` is started, and `_commit_loop` calls `self.commit_function(committable)` periodically. In `ResultsStrategyFactory.create_thread_queue_parallel_worker`, `commit_function` wraps the Arroyo `commit` callback. This means the commit callback is invoked from a non-main thread, with no locking or rebalance/partition-revocation coord"
+  },
+  {
+   "issue_text": "test_thread_queue_parallel_error_handling asserts no offset is committed after a processing exception, but the implementation completes the offset in finally and commits on the next tick; the test only passes because it waits shorter than the commit interval, making it timing-dependent and asserting behavior the code lacks",
+   "source_lens": "vanilla-engineered",
+   "old_verdict": "hallucination",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "In `OrderedQueueWorker.run`, `offset_tracker.complete_offset(...)` is called in the `finally` block even when `result_processor` raises (generic `except Exception`), so failed messages are still marked complete and become committable by `_commit_loop` (runs every ~1s) in `SimpleQueueProcessingStrategy`. The uptime test `test_thread_queue_parallel_error_handling` then asserts no commit occurs after"
+  },
+  {
+   "issue_text": "test_handles_invalid_messages uses a custom decoder returning None for FilteredPayload, but production decode_payload asserts against FilteredPayload, so the real filtered-message path (a logged AssertionError via the except branch) is untested and noisy in production",
+   "source_lens": "vanilla-engineered",
+   "old_verdict": "hallucination",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.78,
+   "rationale": "In the new thread-queue-parallel path, `ResultsStrategyFactory.create_thread_queue_parallel_worker` passes `decoder=partial(self.decode_payload, ...)` into `SimpleQueueProcessingStrategy`, and `decode_payload` contains `assert not isinstance(payload, FilteredPayload)`. Therefore, if a `FilteredPayload` reaches `SimpleQueueProcessingStrategy.submit`, it will raise `AssertionError` and fall into the"
+  },
+  {
+   "issue_text": "No test covers the rebalance lifecycle (close/join then create_with_partitions again on the same factory), and test_thread_queue_parallel_graceful_shutdown only checks queue_pool is None without verifying queued items were processed or committed",
+   "source_lens": "vanilla-engineered",
+   "old_verdict": "hallucination",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.86,
+   "rationale": "The diff adds a new nontrivial processing mode (\"thread-queue-parallel\") with lifecycle-sensitive state on the factory (e.g., ResultsStrategyFactory.queue_pool created in __init__, reused by create_with_partitions, and torn down in shutdown()). The added tests do not exercise a rebalance-like lifecycle where a strategy is closed/joined and then create_with_partitions is called again on the same fa"
+  },
+  {
+   "issue_text": "get_queue_for_group docstring claims consistent hashing but uses Python's hash() on a str, which is randomized per process via PYTHONHASHSEED, so the mapping is not consistent across restarts or processes",
+   "source_lens": "vanilla-engineered",
+   "old_verdict": "hallucination",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.78,
+   "rationale": "In `FixedQueuePool.get_queue_for_group`, the implementation is `return hash(group_key) % self.num_queues` while the docstring says \"consistent hashing\". Python\u2019s built-in `hash()` for `str` is salted per process by default, so the queue assignment is only consistent within a single process run, not across restarts or different processes. That discrepancy is directly verifiable from the diff, but i"
+  },
+  {
+   "issue_text": "terminate() calls queue_pool.shutdown() with immediate=False, draining every queue and blocking up to 5s per worker instead of being abrupt; should use immediate=True",
+   "source_lens": "vanilla-engineered",
+   "old_verdict": "hallucination",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.7,
+   "rationale": "In `SimpleQueueProcessingStrategy.terminate` (new file `queue_consumer.py`), it calls `self.queue_pool.shutdown()`. `FixedQueuePool.shutdown` iterates queues and calls `q.shutdown(immediate=False)` and then `worker.join(timeout=5.0)` for each worker, which can block during termination. The finding\u2019s claim about non-abrupt termination is grounded in this diff; whether it *should* use `immediate=Tru"
+  }
+ ]
+}

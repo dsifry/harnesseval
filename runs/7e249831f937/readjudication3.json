@@ -1,0 +1,495 @@
+{
+ "run_id": "7e249831f937",
+ "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/8",
+ "framework": "metareview-realistic",
+ "model": "claude-fable-5-1",
+ "effort": "low",
+ "original": {
+  "tp": 5,
+  "fn": 1,
+  "n_real_ungold": 27,
+  "n_hallucination": 30,
+  "adj_p": 0.14285714285714285,
+  "incr": 0.9696969696969697
+ },
+ "corrected": {
+  "n_unmatched": 57,
+  "rejudged": 57,
+  "n_bug_ungold": 17,
+  "n_important": 23,
+  "n_true_hallucination": 6,
+  "n_unresolved": 11,
+  "n_hidden_findings_unmatched": 40,
+  "waste_precision": 0.4545,
+  "flips": {
+   "hallucination->bug": 4,
+   "hallucination->hallucination": 6,
+   "hallucination->important_non_bug": 11,
+   "hallucination->unresolved": 9,
+   "real_but_ungold->bug": 13,
+   "real_but_ungold->important_non_bug": 12,
+   "real_but_ungold->unresolved": 2
+  },
+  "judge": "gpt-5.2",
+  "diff_chars": 30389,
+  "wall_s": 29.6
+ },
+ "records": [
+  {
+   "issue_text": "app/controllers/admin/groups_controller.rb:90 \u2014 has_many :through `delete` issues a bare `delete_all` on group_users, bypassing GroupUser callbacks (counter_cache `user_count` never decremented, member's group-derived title/primary_group never cleared) so the persisted `groups.user_count` and user titles drift while the old `group.remove(user)` path destroyed records properly; the following `group.save` is a no-op stand-in that can never surface this (`group.users.delete(user_id)` / `if group.save`; confidence 75; severity P1)",
+   "source_lens": "metareview-lens/architecture",
+   "old_verdict": "hallucination",
+   "new_verdict": "bug",
+   "confidence": 0.72,
+   "rationale": "In Admin::GroupsController#remove_member the diff changes removal to `group.users.delete(user_id)` followed by `if group.save`. For a has_many :through/HABTM association, `delete` removes the join row without running destroy callbacks on the join model, and `group.save` won\u2019t surface failures because no group attributes changed. This differs from the prior code path that used `group.remove(user)` "
+  },
+  {
+   "issue_text": "app/controllers/admin/groups_controller.rb:71-75 \u2014 `group.add(user)` pushes a new group_users row without checking existing membership, so re-adding a current member (or a CSV containing the same name twice) trips the unique (group_id,user_id) index and raises ActiveRecord::RecordNotUnique as a 500, whereas the replaced `usernames=` path diffed against current membership (`if user = User.find_by_username(username)` / `group.add(user)`; confidence 75; severity P1)",
+   "source_lens": "metareview-lens/architecture",
+   "old_verdict": "hallucination",
+   "new_verdict": "unresolved",
+   "confidence": 0.42,
+   "rationale": "below CONF_FLOOR (0.42)"
+  },
+  {
+   "issue_text": "app/controllers/groups_controller.rb:26-35 \u2014 public `GET /groups/:name/members` response silently changes from a bare JSON array of users to `{members:[...], meta:{...}}` with no versioning or fallback, breaking every existing API/plugin consumer that iterates the top-level array (`render json: { members: serialize_data(members, GroupUserSerializer), meta: {`; confidence 100; severity P1)",
+   "source_lens": "metareview-lens/architecture",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.83,
+   "rationale": "The diff shows `GroupsController#members` changing its response shape from `render_serialized(members.to_a, GroupUserSerializer)` (a bare JSON array) to `render json: { members: ..., meta: ... }` (an object with `members`/`meta`). Internal Ember templates/routes were updated to iterate `members` instead of `model`, but the diff provides no compatibility/fallback/alternate endpoint for clients that"
+  },
+  {
+   "issue_text": "app/controllers/admin/groups_controller.rb:24,37-40 \u2014 admin create/update contract changes from a `group: {\u2026}` wrapped payload (plus PATCH `changes[add]/[delete]`) to top-level params and the membership semantics are dropped from PUT /admin/groups/:id entirely, so existing API clients sending `group[name]`/`group[usernames]` now silently get name='' (create) or a no-op (update) rather than an error (`group.name = (params[:name] || '').strip` / `group.name = params[:name] if params[:name] && !group.automatic`; confidence 100; severity P1)",
+   "source_lens": "metareview-lens/architecture",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.92,
+   "rationale": "The diff shows a deliberate controller contract change: `create` now reads top-level `params[:name]`/`params[:visible]` (and no longer `params[:group][:\u2026]`), `update` now reads top-level `params[:alias_level]`/`params[:visible]`/`params[:name]`, and the PATCH-based membership changes (`update_patch` with `changes[add]/[delete]`) plus `group.usernames` handling in PUT are removed. Membership is mov"
+  },
+  {
+   "issue_text": "app/controllers/groups_controller.rb:22 \u2014 `limit` is taken verbatim from the request with no upper bound, so `?limit=1000000` materializes and serializes the entire membership of a large automatic group (e.g. trust_level_0) on a public, unauthenticated hot path (`limit = (params[:limit] || 50).to_i`; confidence 100; severity P2)",
+   "source_lens": "metareview-lens/architecture",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "In `GroupsController#members`, the diff introduces `limit = (params[:limit] || 50).to_i` and then unconditionally applies `.limit(limit)` with no upper bound before serializing (`serialize_data(members, GroupUserSerializer)`). This makes `?limit=1000000` possible and can force large DB reads/serialization. The route is guarded only by `guardian.ensure_can_see!(group)`, which can allow anonymous ac"
+  },
+  {
+   "issue_text": "app/controllers/admin/groups_controller.rb:71-77 \u2014 unbounded CSV of usernames processed as 2N sequential queries (`User.find_by_username` + INSERT per name) with no transaction, so a mid-loop failure (e.g. the duplicate-key 500 above) leaves partial membership committed while the client is told nothing was added (`usernames.split(\",\").each do |username|`; confidence 100; severity P2)",
+   "source_lens": "metareview-lens/architecture",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "unresolved",
+   "confidence": 0.45,
+   "rationale": "below CONF_FLOOR (0.45)"
+  },
+  {
+   "issue_text": "app/controllers/admin/groups_controller.rb:72-74 \u2014 unknown usernames are silently skipped and the endpoint still returns `success_json`, so the contract \"add these members\" is not enforced and the caller has no way to learn which names were rejected (`if user = User.find_by_username(username)`; confidence 75; severity P2)",
+   "source_lens": "metareview-lens/architecture",
+   "old_verdict": "hallucination",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.66,
+   "rationale": "In `Admin::GroupsController#add_members`, usernames are split and each is added only if `User.find_by_username(username)` returns a user; otherwise it is skipped with no tracking. The action then returns `success_json` as long as `group.save` succeeds, providing no feedback about rejected/unknown usernames. This behavior is directly shown in the diff, but whether it violates an intended API contra"
+  },
+  {
+   "issue_text": "app/assets/javascripts/discourse/models/group.js:42-55 \u2014 membership API is asymmetric and stringly-typed: PUT takes a comma-joined `usernames` string while DELETE takes a numeric `user_id`, and the same verb PUT is overloaded for both \"update group\" (`/admin/groups/:id`) and \"add members\" (`/admin/groups/:id/members`), coupling clients to two identifier schemes for the same relation (`data: { user_id: member.get(\"id\") }` vs `data: { usernames: usernames }`; confidence 75; severity P3)",
+   "source_lens": "metareview-lens/architecture",
+   "old_verdict": "hallucination",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.82,
+   "rationale": "The diff shows the membership endpoints use different identifier types: `Discourse.Group#addMembers` does `PUT /admin/groups/:id/members.json` with `data: { usernames: usernames }` (comma-separated string), while `#removeMember` does `DELETE /admin/groups/:id/members.json` with `data: { user_id: member.get(\"id\") }`. On the Rails side, `add_members` requires `:usernames` and splits by comma, wherea"
+  },
+  {
+   "issue_text": "app/assets/javascripts/discourse/models/group.js:23 \u2014 after `removeMember` on the last page, `offset` is not re-clamped to the new (smaller) total before refetch, so deleting the sole member on a final page yields an empty page with `currentPage > totalPages` and both nav links enabled/disabled inconsistently (`offset = Math.min(this.get(\"user_count\"), Math.max(this.get(\"offset\"), 0))`; confidence 50; severity P3)",
+   "source_lens": "metareview-lens/architecture",
+   "old_verdict": "hallucination",
+   "new_verdict": "bug",
+   "confidence": 0.62,
+   "rationale": "In Discourse.Group#removeMember the success handler calls self.findMembers() without adjusting the model\u2019s offset. In findMembers(), the request offset is clamped using the current (pre-refetch) this.get(\"user_count\") and this.get(\"offset\"), so after deleting the only member on the last page, the model can request an offset that is now past the end of the smaller dataset. GroupsController#members "
+  },
+  {
+   "issue_text": "app/assets/javascripts/discourse/templates/group/members.hbs:6 \u2014 public group members page now silently truncates every group at the server's new default of 50 with no next/previous controls, a regression from the old behavior of listing all members of non-automatic groups ({{#each m in members}} with no pagination UI while GroupsController#members applies `limit = (params[:limit] || 50).to_i`; confidence 100; severity P1)",
+   "source_lens": "metareview-lens/completeness",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.97,
+   "rationale": "The diff changes GroupsController#members to always apply pagination with `limit = (params[:limit] || 50).to_i` and `members = ...limit(limit).offset(offset)` for *all* groups (not just automatic). The public group members route now sets `controller.model = group` and calls `model.findMembers()`, which fetches `/groups/:name/members.json` with that limit/offset and stores the results in `group.mem"
+  },
+  {
+   "issue_text": "app/controllers/groups_controller.rb:19 \u2014 the reshaped public `members` endpoint (array -> {members, meta}, unconditional limit/offset) ships with zero request specs: no test for pagination, meta totals, guardian visibility, or the new default limit (`render json: { members: serialize_data(members, GroupUserSerializer), meta: { total: total, limit: limit, offset: offset } }`; confidence 100; severity P1)",
+   "source_lens": "metareview-lens/completeness",
+   "old_verdict": "hallucination",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.86,
+   "rationale": "The diff substantially changes `GroupsController#members` to always apply pagination and to return a new JSON shape `{ members: ..., meta: { total, limit, offset } }` with a new default `limit` of 50 (was previously an array payload, and pagination logic was conditional/special-cased). The only specs modified/added in this PR are for `Admin::GroupsController` (`spec/controllers/admin/groups_contro"
+  },
+  {
+   "issue_text": "app/controllers/admin/groups_controller.rb:71 \u2014 adding a username that is already a member is unhandled; `group.add(user)` pushes onto the has_many and the unique (group_id,user_id) index turns a re-add from the new \"Add members\" box into a 500 instead of a no-op or 422, and no spec covers duplicate adds (`usernames.split(\",\").each do |username| ... group.add(user)`; confidence 75; severity P1)",
+   "source_lens": "metareview-lens/completeness",
+   "old_verdict": "hallucination",
+   "new_verdict": "unresolved",
+   "confidence": 0.45,
+   "rationale": "below CONF_FLOOR (0.45)"
+  },
+  {
+   "issue_text": "app/controllers/admin/groups_controller.rb:72 \u2014 unknown usernames (and usernames with surrounding whitespace, since split(\",\") is not stripped) are silently dropped and the endpoint still returns success_json, so neither the API nor the UI ever tells the admin nothing was added; the old \"succeeds silently when adding non-existent users\" spec was deleted rather than ported (`if user = User.find_by_username(username)`; confidence 75; severity P2)",
+   "source_lens": "metareview-lens/completeness",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.83,
+   "rationale": "In `Admin::GroupsController#add_members`, the code `usernames.split(\",\").each do |username| if user = User.find_by_username(username) ... end end` (no `strip`) will skip unknown usernames and whitespace-padded entries, and still returns `success_json` as long as `group.save` succeeds. The diff also shows the prior spec coverage for silently ignoring non-existent users was removed (the old incremen"
+  },
+  {
+   "issue_text": "app/controllers/admin/groups_controller.rb:90 \u2014 removing a user_id that is not a member (or a bogus id) is unhandled: `delete` with an integer id does `find` on the association and raises RecordNotFound (404) rather than the previous silent success, and the old \"succeeds silently when removing non-members\" spec was dropped instead of updated (`group.users.delete(user_id)`; confidence 75; severity P2)",
+   "source_lens": "metareview-lens/completeness",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.7,
+   "rationale": "In Admin::GroupsController#remove_member, the diff changes removal to `group.users.delete(user_id)` with `user_id = params.require(:user_id).to_i` and no rescue/guard. In Rails, `association.delete(id)` can call `find` on the association scope for integer ids, which raises `ActiveRecord::RecordNotFound` if the user is not currently in `group.users` (or id is bogus). The previous behavior was expli"
+  },
+  {
+   "issue_text": "app/controllers/admin/groups_controller.rb:90 \u2014 membership removal bypasses `Group#remove` and goes straight to the association, so any model-level cleanup (primary_group reset, user_count maintenance, hooks) that `remove` performs is skipped while `add` still goes through `Group#add`; asymmetric and untested (`group.users.delete(user_id)`; confidence 50; severity P2)",
+   "source_lens": "metareview-lens/completeness",
+   "old_verdict": "hallucination",
+   "new_verdict": "unresolved",
+   "confidence": 0.45,
+   "rationale": "below CONF_FLOOR (0.45)"
+  },
+  {
+   "issue_text": "app/assets/javascripts/admin/controllers/admin-group.js.es6:11 \u2014 totalPages uses floor+1 instead of ceil, so a group with exactly 50 (or 100, ...) members shows \"1/2\" and `next` navigates to an empty page; no JS test exists for currentPage/totalPages/showingLast (`return Math.floor(this.get(\"user_count\") / this.get(\"limit\")) + 1;`; confidence 100; severity P2)",
+   "source_lens": "metareview-lens/completeness",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.95,
+   "rationale": "`totalPages` in `admin-group.js.es6` is computed as `Math.floor(user_count / limit) + 1`, which overcounts when `user_count` is an exact multiple of `limit` (e.g. 50/50 => 2 pages). This makes `showingLast` false on the real last page, enabling the `next` action to set `offset` to `user_count` and call `findMembers()`, which (per `group.js`) will request `offset=user_count` and can return an empty"
+  },
+  {
+   "issue_text": "app/assets/javascripts/discourse/models/group.js:40 \u2014 addMembers/removeMember have no failure path: a 422 (automatic group), 400 (blank usernames) or 404 (non-member) is swallowed with no popupAjaxError, and the member list is only reloaded on success so the admin gets no feedback at all (`}).then(function() { // reload member list self.findMembers(); });`; confidence 75; severity P2)",
+   "source_lens": "metareview-lens/completeness",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.7,
+   "rationale": "In `app/assets/javascripts/discourse/models/group.js`, the new `addMembers` and `removeMember` methods only attach a success handler (`.then(function() { self.findMembers(); })`) and do not handle rejected AJAX promises (e.g., 422 for automatic groups as implemented in `Admin::GroupsController`, or other server errors). The controller actions (`addMembers`, `removeMember`) also don't attach any er"
+  },
+  {
+   "issue_text": "app/assets/javascripts/admin/controllers/admin-group.js.es6:61 \u2014 after a successful add the username input is never cleared (acknowledged by the in-code TODO), so a second click re-submits the same usernames and hits the duplicate-add failure above (`// TODO: should clear the input`; confidence 100; severity P3)",
+   "source_lens": "metareview-lens/completeness",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.82,
+   "rationale": "In `admin-group.js.es6` the `addMembers` action contains `// TODO: should clear the input` and only calls `this.get(\"model\").addMembers(this.get(\"usernames\"));` without ever resetting `usernames` afterward. The claim about a specific \u201cduplicate-add failure\u201d isn\u2019t shown in this diff, but the un-cleared input/UX issue is directly verifiable."
+  },
+  {
+   "issue_text": "app/controllers/groups_controller.rb:22 \u2014 `limit` is taken verbatim from the client with no clamp, so `?limit=0` returns an empty page and `?limit=1000000` reintroduces the unbounded-fetch the pagination was meant to remove (`limit = (params[:limit] || 50).to_i`; confidence 75; severity P2)",
+   "source_lens": "metareview-lens/completeness",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.86,
+   "rationale": "In `GroupsController#members`, the new pagination logic sets `limit = (params[:limit] || 50).to_i` and uses it directly in `group.users...limit(limit)` with no minimum/maximum clamp. This makes `?limit=0` return an empty page and allows arbitrarily large `limit` values (e.g. `1000000`) to trigger very large queries, undermining the intent of bounded pagination and creating a potential performance/"
+  },
+  {
+   "issue_text": "spec/controllers/admin/groups_controller_spec.rb:100 \u2014 no spec asserts `user_count` is updated after add_members/remove_member even though the JS pagination (totalPages, offset clamp in findMembers) depends entirely on that counter being correct after each mutation (`group.users.count.should == 2`; confidence 75; severity P2)",
+   "source_lens": "metareview-lens/completeness",
+   "old_verdict": "hallucination",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.74,
+   "rationale": "The new pagination logic in `admin-group.js.es6` (`totalPages`, `currentPage`, `showingLast`) relies on `model.user_count`, which is updated only via `Group#findMembers()` from `/groups/:name/members.json` (`result.meta.total`). The new admin mutation endpoints (`Admin::GroupsController#add_members` / `#remove_member`) return only `success_json` and do not include any updated count, and the specs "
+  },
+  {
+   "issue_text": "app/controllers/admin/groups_controller.rb:90 \u2014 remove_member bypasses Group#remove and deletes the join row via a raw has_many-through `delete_all`, so GroupUser callbacks (counter-cache `user_count` decrement, title removal) and the `primary_group_id` reset in Group#remove never run, leaving `groups.user_count` drifted and `users.primary_group_id` orphaned pointing at a group the user is no longer in (`group.users.delete(user_id)`; confidence 75; severity P1)",
+   "source_lens": "metareview-lens/data-migration",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "unresolved",
+   "confidence": 0.45,
+   "rationale": "below CONF_FLOOR (0.45)"
+  },
+  {
+   "issue_text": "app/controllers/admin/groups_controller.rb:90 \u2014 `group.users.delete(user_id)` with an integer id does `find(id)` on the association and raises ActiveRecord::RecordNotFound (500) when the user is not a member, whereas the removed PATCH path \"succeeded silently when removing non-members\"; a stale UI page (member already removed in another tab) now errors instead of no-op (`group.users.delete(user_id)`; confidence 75; severity P2)",
+   "source_lens": "metareview-lens/data-migration",
+   "old_verdict": "hallucination",
+   "new_verdict": "unresolved",
+   "confidence": 0.45,
+   "rationale": "below CONF_FLOOR (0.45)"
+  },
+  {
+   "issue_text": "app/controllers/admin/groups_controller.rb:39 \u2014 update silently drops `params[:group][:usernames]`/`params[:changes]` while still returning success_json for PUT and PATCH (resources still routes PATCH to #update), so during a rolling deploy cached old JS (`saveWithUsernames`, `update_patch` clients) sends membership changes, receives 200, and nothing is persisted: expand+contract violation with silent data loss (`group.name = params[:name] if params[:name] && !group.automatic` / `render json: success_json`; confidence 75; severity P1)",
+   "source_lens": "metareview-lens/data-migration",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.86,
+   "rationale": "The diff removes PATCH-specific handling (`update_patch`) and nested payload parsing (`payload = params[:group]` / `group.usernames` / `params[:changes]`). `Admin::GroupsController#update` now only reads top-level `params[:alias_level]`, `params[:visible]`, and `params[:name]`, then returns `success_json` on `group.save`. Since Rails `resources :groups` still provides PATCH/PUT routes to `#update`"
+  },
+  {
+   "issue_text": "app/controllers/admin/groups_controller.rb:71 \u2014 add_members loops `group.add(user)` (immediate `users.push`) outside any transaction with no membership check; if any username in the list is already a member, the unique index on group_users(group_id,user_id) raises RecordNotUnique mid-loop, committing a partial subset of adds and returning 500 to the client, so the admin cannot tell which members were persisted (`usernames.split(\",\").each do |username| ... group.add(user)`; confidence 75; severity P2)",
+   "source_lens": "metareview-lens/data-migration",
+   "old_verdict": "hallucination",
+   "new_verdict": "unresolved",
+   "confidence": 0.45,
+   "rationale": "below CONF_FLOOR (0.45)"
+  },
+  {
+   "issue_text": "app/controllers/admin/groups_controller.rb:71 \u2014 `usernames.split(\",\")` does not strip whitespace and `User.find_by_username` will not match \" bob\", so any username with surrounding spaces (user-selector/hand-typed \"a, b\") is silently skipped while the response is still success_json (`usernames.split(\",\").each do |username|`; confidence 50; severity P2)",
+   "source_lens": "metareview-lens/data-migration",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.82,
+   "rationale": "In `Admin::GroupsController#add_members`, the diff shows `usernames.split(\",\").each do |username|` followed by `User.find_by_username(username)`. There is no `strip` on each token, so an input like \"a, b\" yields \" b\" which will not match and will be silently skipped. The action still returns `success_json` if `group.save` succeeds (which it likely will even if nothing was added)."
+  },
+  {
+   "issue_text": "config/routes.rb:49 \u2014 the admin `get \"users\"` member route is removed in the same change that adds new routes (no expand/contract window), so any cached old admin JS or external caller hitting GET /admin/groups/:id/users gets a 404 during rolling deploy (`-      get \"users\"`; confidence 50; severity P3)",
+   "source_lens": "metareview-lens/data-migration",
+   "old_verdict": "hallucination",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.7,
+   "rationale": "The diff shows `config/routes.rb` removing the admin route `get \"users\"` under `admin/groups` and adding `put \"members\"` / `delete \"members\"` instead. There\u2019s no backwards-compatible route kept (no alias/redirect), so any older client/admin JS still calling the prior GET endpoint would now receive a 404 during a rolling deploy. This is a concrete compatibility/deploy sequencing risk evidenced by t"
+  },
+  {
+   "issue_text": "app/controllers/groups_controller.rb:24 \u2014 `total` is computed with a separate `group.users.count` query from the paginated `members` query with no snapshot isolation, and the client stores `meta.total` into `user_count` and clamps `offset` against it; concurrent removals make the last page return empty with `totalPages` still >0, and `limit` is unbounded (`?limit=0` yields an infinite empty-page loop, huge limit dumps the whole table) (`limit = (params[:limit] || 50).to_i` / `total = group.users.count`; confidence 50; severity P3)",
+   "source_lens": "metareview-lens/data-migration",
+   "old_verdict": "hallucination",
+   "new_verdict": "bug",
+   "confidence": 0.85,
+   "rationale": "In `GroupsController#members`, `limit = (params[:limit] || 50).to_i` is not bounded/validated, so `?limit=0` or very large limits are allowed. This directly breaks the client pagination math introduced in the diff (`totalPages` and `currentPage` divide by `limit` in `admin-group.js.es6`), leading to `Infinity`/nonsensical paging and potentially repeated empty pages. Also, `total = group.users.coun"
+  },
+  {
+   "issue_text": "app/assets/javascripts/admin/controllers/admin-group.js.es6:13 \u2014 totalPages is off by one whenever user_count is an exact multiple of limit (e.g. 50 users -> 2 pages), so showingLast is false on the real last page and \"next\" advances offset to user_count and fetches an empty page (`return Math.floor(this.get(\"user_count\") / this.get(\"limit\")) + 1;`; confidence 75; severity P3)",
+   "source_lens": "metareview-lens/feasibility",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.92,
+   "rationale": "In admin-group.js.es6, totalPages is computed as `Math.floor(user_count / limit) + 1` when `user_count > 0`. For exact multiples (e.g. 50 users, limit 50), this yields 2 pages even though only 1 page of members exists (offsets should be 0 only). As a result `showingLast` (propertyEqual currentPage/totalPages) is false on the real last page, so `next` is enabled and sets `offset` to `Math.min(offse"
+  },
+  {
+   "issue_text": "spec/controllers/admin/groups_controller_spec.rb:120 \u2014 the automatic-group guard test drives remove_member with PUT, but config/routes.rb:49 only exposes it as `delete \"members\" => \"groups#remove_member\"`; the functional test bypasses the router so it never verifies the real DELETE route/verb wiring (`xhr :put, :remove_member, group_id: 1, user_id: 42`; confidence 75; severity P3)",
+   "source_lens": "metareview-lens/feasibility",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.84,
+   "rationale": "The diff shows `config/routes.rb` exposing `remove_member` only via `delete \"members\" => \"groups#remove_member\"`, while `spec/controllers/admin/groups_controller_spec.rb` calls the automatic-group guard for `remove_member` with `xhr :put, :remove_member, group_id: 1, user_id: 42`. In Rails controller specs this hits the action without validating router verb/path wiring, so the test does not actual"
+  },
+  {
+   "issue_text": "app/controllers/admin/groups_controller.rb:89 \u2014 `group.users.delete(user_id)` passes a bare Integer to a has_many :through collection; this only works on Rails >= 4.1 (4.0 raises AssociationTypeMismatch), and the repo snapshot contains no Gemfile.lock to confirm the version (`group.users.delete(user_id)`; confidence 50; severity P2)",
+   "source_lens": "metareview-lens/feasibility",
+   "old_verdict": "hallucination",
+   "new_verdict": "unresolved",
+   "confidence": 0.45,
+   "rationale": "below CONF_FLOOR (0.45)"
+  },
+  {
+   "issue_text": "app/controllers/groups_controller.rb:22 \u2014 public (non-admin) group members page previously returned ALL members for non-automatic groups and is now silently truncated to 50 with no pagination controls in the public template (`limit = (params[:limit] || 50).to_i` / group/members.hbs `{{#each m in members}}` has no next/previous), so the \"fix\" removes a capability from an unrelated user-facing page (confidence 75; severity P1)",
+   "source_lens": "metareview-lens/intent-preservation",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "The diff changes `GroupsController#members` to always apply pagination with a default `limit = (params[:limit] || 50).to_i` and `members = ...limit(limit).offset(offset)`, whereas previously only automatic groups were limited/offset and non-automatic groups returned all members. On the public side, `group-members` route now sets `controller.model = group` and calls `model.findMembers()`, and `grou"
+  },
+  {
+   "issue_text": "app/controllers/admin/groups_controller.rb:35 \u2014 PUT /admin/groups/:id no longer accepts membership (`group.usernames = payload[:usernames]` removed, params shape changed from nested `group:` to flat `params[:name]`) and POST create dropped `usernames`, silently breaking the existing admin API contract as a redesign rather than a fix (`group.name = params[:name] if params[:name] && !group.automatic`; confidence 75; severity P1)",
+   "source_lens": "metareview-lens/intent-preservation",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.83,
+   "rationale": "The diff shows an intentional API shape/behavior change in Admin::GroupsController: `create` now reads flat `params[:name]`/`params[:visible]` and no longer accepts `params[:group][:usernames]`, and `update` no longer handles `group.usernames = ...` (previously from nested `params[:group]`). Membership changes have been moved to new endpoints (`add_members`/`remove_member`) with new routes (`PUT/D"
+  },
+  {
+   "issue_text": "spec/controllers/admin/groups_controller_spec.rb:80 \u2014 tests were rewritten to match the new design rather than verify a fix: deleted assertions for create-with-usernames, PUT update replacing members + rename, incremental PATCH add/delete, \"succeeds silently when adding non-existent users\"/\"removing non-members\", and the automatic-group membership change expectation was changed from 403 to 422 (`response.status.should == 422` replacing `response.status.should == 403`) (confidence 75; severity P2)",
+   "source_lens": "metareview-lens/intent-preservation",
+   "old_verdict": "hallucination",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.82,
+   "rationale": "The diff shows substantive deletions/changes in controller specs: removal of tests around create-with-usernames and update member management via PUT/PATCH (including incremental add/delete and silent handling of non-existent users/non-members), replaced by new endpoint tests for `add_members`/`remove_member` and a different expected status for automatic-group membership changes (now 422 via `can_n"
+  },
+  {
+   "issue_text": "app/assets/javascripts/admin/controllers/admin-group.js.es6:61 \u2014 leftover TODO shows the add-members UX intent is unfulfilled; after adding, the username selector keeps stale usernames so a second click re-submits the same users (`// TODO: should clear the input`; confidence 100; severity P3)",
+   "source_lens": "metareview-lens/intent-preservation",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.9,
+   "rationale": "The diff explicitly adds `actions.addMembers` with a comment `// TODO: should clear the input` and the implementation only calls `this.get(\"model\").addMembers(this.get(\"usernames\"))` without resetting `usernames` afterward. Since the `user-selector` in `admin/templates/group.hbs` is bound to `usernames=usernames`, the input will retain the previously submitted usernames, making repeat submissions "
+  },
+  {
+   "issue_text": "app/assets/javascripts/discourse/models/group.js:21 \u2014 findMembers changed from always returning a promise (`Ember.RSVP.resolve([])`) to `if (Em.isEmpty(this.get('name'))) { return ; }`, so any remaining caller chaining `.then` on a nameless group now throws instead of resolving empty (confidence 50; severity P3)",
+   "source_lens": "metareview-lens/intent-preservation",
+   "old_verdict": "hallucination",
+   "new_verdict": "unresolved",
+   "confidence": 0.4,
+   "rationale": "below CONF_FLOOR (0.40)"
+  },
+  {
+   "issue_text": "app/controllers/groups_controller.rb:29 \u2014 public GET /groups/:name/members response changed from a bare user array to a wrapped object, a breaking public-API change not stated in the task and with no spec or changelog covering external consumers (`render json: { members: serialize_data(members, GroupUserSerializer), meta: {`; confidence 75; severity P1)",
+   "source_lens": "metareview-lens/scope-and-alignment",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.84,
+   "rationale": "The diff in app/controllers/groups_controller.rb changes `members` from `render_serialized(members.to_a, GroupUserSerializer)` (likely a bare array response) to `render json: { members: ..., meta: ... }`, which is an API shape change for GET /groups/:name/members. The diff shows no backward-compat handling and no corresponding spec in this PR covering external consumers of the public endpoint; the"
+  },
+  {
+   "issue_text": "app/controllers/admin/groups_controller.rb:35 \u2014 the existing PATCH incremental `changes: {add:, delete:}` admin API and the `params[:group][:usernames]` create/update payload are silently removed rather than fixed, breaking any external admin API client without any deprecation or traceability to the requirement (`group.name = params[:name] if params[:name] && !group.automatic`; confidence 75; severity P1)",
+   "source_lens": "metareview-lens/scope-and-alignment",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.78,
+   "rationale": "The diff verifiably removes the prior admin API shapes: `update` no longer branches on `request.patch?` and `update_patch` is deleted (so PATCH incremental `changes: { add:, delete: }` is no longer supported). Also `create`/`update` stop reading `params[:group][:name]` / `params[:group][:usernames]` and instead use top-level params (`params[:name]`, `params[:visible]`, `params[:alias_level]`), and"
+  },
+  {
+   "issue_text": "app/controllers/admin/groups_controller.rb:71 \u2014 status code for membership changes on automatic groups changes from 403 (InvalidAccess) to 422 with no justification in the task, altering an observable API contract (`return can_not_modify_automatic if group.automatic`; confidence 75; severity P2)",
+   "source_lens": "metareview-lens/scope-and-alignment",
+   "old_verdict": "hallucination",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.83,
+   "rationale": "The diff shows an observable behavior change for membership modification on automatic groups: previously `update_patch` raised `Discourse::InvalidAccess` (likely resulting in 403) for membership changes, but new endpoints `add_members` and `remove_member` now do `return can_not_modify_automatic if group.automatic`, where `can_not_modify_automatic` explicitly renders status 422. The spec was also u"
+  },
+  {
+   "issue_text": "app/assets/javascripts/admin/templates/group.hbs:14 \u2014 creating a group with initial members in one step is removed (member controls hidden until `id` exists), a user-facing workflow regression not called for by \"proper handling of group memberships\" (`{{#if id}}`; confidence 50; severity P2)",
+   "source_lens": "metareview-lens/scope-and-alignment",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.7,
+   "rationale": "The diff explicitly hides the members UI until the group has an `id` (`app/assets/javascripts/admin/templates/group.hbs` wraps member list + add-members controls in `{{#if id}}`). In parallel, group creation no longer sends `usernames` (`admin-group.js.es6` now calls `group.create()` / `group.save()`; `discourse/models/group.js` `asJSON()` no longer includes usernames; `Admin::GroupsController#cre"
+  },
+  {
+   "issue_text": "app/assets/stylesheets/common/admin/admin_base.scss:164 \u2014 `.form-horizontal` styles are lifted out of the badges section into a shared `.groups, .badges` block, touching badges admin styling outside the group-membership scope (`.groups, .badges {` / `.form-horizontal {`; confidence 75; severity P2)",
+   "source_lens": "metareview-lens/scope-and-alignment",
+   "old_verdict": "hallucination",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.74,
+   "rationale": "The diff explicitly adds a shared CSS block `.groups, .badges { .form-horizontal { ... } }` in `admin_base.scss` and removes the same `.form-horizontal` rules from the later `section.details .form-horizontal` area. This broadens the scope of those form styles to badges as well as groups, which could unintentionally alter badges admin UI styling beyond the group-membership changes, even if not a fu"
+  },
+  {
+   "issue_text": "config/routes.rb:49 \u2014 removal of the `get \"users\"` admin groups route is an unrelated cleanup with no link to the membership fix (`-      get \"users\"`; confidence 75; severity P3)",
+   "source_lens": "metareview-lens/scope-and-alignment",
+   "old_verdict": "hallucination",
+   "new_verdict": "hallucination",
+   "confidence": 0.86,
+   "rationale": "The diff shows `get \"users\"` under `namespace :admin do; resources :groups` was removed and replaced with `delete \"members\" => \"groups#remove_member\"` and `put \"members\" => \"groups#add_members\"`. This is directly tied to the PR\u2019s new membership management endpoints (`Admin::GroupsController#add_members` / `#remove_member`) and the JS model calling `/admin/groups/:id/members.json`, not an unrelated"
+  },
+  {
+   "issue_text": "app/assets/javascripts/discourse/templates/user-selector-autocomplete.raw.hbs:5 \u2014 whitespace-only reindent of an unrelated shared template inflates the diff with no functional relation to group memberships (`<a href='#'>{{avatar this imageSize=\"tiny\"}}`; confidence 100; severity P3)",
+   "source_lens": "metareview-lens/scope-and-alignment",
+   "old_verdict": "hallucination",
+   "new_verdict": "hallucination",
+   "confidence": 0.97,
+   "rationale": "The cited change in `user-selector-autocomplete.raw.hbs` is purely whitespace/indentation and line-wrapping within existing `<a>` tags (no attribute/value changes, no logic/Handlebars changes). It\u2019s a style-only nit and not a substantive review concern related to group memberships."
+  },
+  {
+   "issue_text": "app/assets/javascripts/discourse/templates/components/admin-group-selector.hbs:1 \u2014 blank-line-only edit to an unrelated component template is untraceable noise (`<input type=\"text\">`; confidence 100; severity P3)",
+   "source_lens": "metareview-lens/scope-and-alignment",
+   "old_verdict": "hallucination",
+   "new_verdict": "hallucination",
+   "confidence": 0.98,
+   "rationale": "The diff in app/assets/javascripts/discourse/templates/components/admin-group-selector.hbs only removes leading/trailing blank lines around the existing `<input type=\"text\">` line. This is a purely whitespace/formatting change and does not introduce or expose any functional defect or substantive review concern."
+  },
+  {
+   "issue_text": "app/controllers/admin/groups_controller.rb:8 \u2014 cosmetic `ilike`->`ILIKE` and re-indentation of `protected` blocks in both controllers are unrelated style churn mixed into a functional fix (`groups = groups.where(\"name ILIKE ?\", \"%#{search}%\")`; confidence 100; severity P3)",
+   "source_lens": "metareview-lens/scope-and-alignment",
+   "old_verdict": "hallucination",
+   "new_verdict": "hallucination",
+   "confidence": 0.9,
+   "rationale": "The cited changes are verifiably cosmetic: `where(\"name ilike ?\"...)` to `where(\"name ILIKE ?\"...)` in `Admin::GroupsController#index` and re-indentation/re-nesting of `protected`/private helper methods in both controllers. The finding is a style/format nit about unrelated churn mixed into functional edits, not a substantive defect or nontrivial review concern."
+  },
+  {
+   "issue_text": "spec/controllers/admin/groups_controller_spec.rb:106 \u2014 specs for silent no-op on non-existent users and non-member removal were deleted along with the old API instead of being ported to add_members/remove_member, so the retained behaviour is now untested and the spec removal is not traceable to the requirement (`it \"is able to add several members to a group\" do`; confidence 75; severity P2)",
+   "source_lens": "metareview-lens/scope-and-alignment",
+   "old_verdict": "hallucination",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.82,
+   "rationale": "The diff removes the old incremental membership update specs (including \"succeeds silently when adding non-existent users\" and \"succeeds silently when removing non-members\") from `spec/controllers/admin/groups_controller_spec.rb` without adding equivalent coverage for the new `add_members`/`remove_member` endpoints. The new controller code still appears to implement silent no-ops (`add_members` sk"
+  },
+  {
+   "issue_text": "app/controllers/groups_controller.rb:22 \u2014 public members endpoint takes an unbounded, unsigned-unchecked page size, so any visitor can request `?limit=100000000` against a visible automatic group (trust_level_0 = every user) to bulk-dump the entire user base in one query, or send `limit=-1`/`offset=-1` to trigger a PG syntax error 500 (`limit = (params[:limit] || 50).to_i`; confidence 75; severity P2)",
+   "source_lens": "metareview-lens/security",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.87,
+   "rationale": "In `GroupsController#members`, the diff sets `limit = (params[:limit] || 50).to_i` and `offset = params[:offset].to_i` and then directly applies them in `group.users.order(:username_lower).limit(limit).offset(offset)` with no upper/lower bounds or validation. This makes the page size effectively unbounded (e.g., `limit=100000000`) and allows negative values (e.g., `offset=-1`), which can trigger D"
+  },
+  {
+   "issue_text": "app/controllers/admin/groups_controller.rb:90 \u2014 removal bypasses `Group#remove` and deletes the join row directly, so a user whose `primary_group_id` points at this group keeps the group title/badge and any primary-group-derived privileges after being \"removed\" (`group.users.delete(user_id)`; confidence 50; severity P2)",
+   "source_lens": "metareview-lens/security",
+   "old_verdict": "hallucination",
+   "new_verdict": "unresolved",
+   "confidence": 0.45,
+   "rationale": "below CONF_FLOOR (0.45)"
+  },
+  {
+   "issue_text": "app/controllers/admin/groups_controller.rb:71 \u2014 `params.require(:usernames)` is not type-checked, so `usernames[]=x` (array) raises NoMethodError on `.split` and an already-member username hits the unique index in `group.add(user)` as an unrescued RecordNotUnique, both yielding 500s from an admin write endpoint with no partial-write rollback (adds before the failing one persist) (`usernames.split(\",\").each do |username|`; confidence 50; severity P3)",
+   "source_lens": "metareview-lens/security",
+   "old_verdict": "hallucination",
+   "new_verdict": "bug",
+   "confidence": 0.75,
+   "rationale": "In `Admin::GroupsController#add_members`, `usernames = params.require(:usernames)` is used as a string (`usernames.split(\",\")`), but Rails permits `usernames[]=...` to arrive as an Array; calling `.split` on an Array will raise `NoMethodError` and produce a 500 since there\u2019s no rescue. Also, the loop performs `group.add(user)` repeatedly without a transaction or error handling, so any exception mi"
+  },
+  {
+   "issue_text": "app/controllers/admin/groups_controller.rb:83 \u2014 `remove_member` for a non-member user_id now raises (has_many `delete(Integer)` does `find` -> RecordNotFound -> 404/500) instead of the previously-tested silent success, and the old spec \"succeeds silently when removing non-members\" was deleted with no replacement (`group.users.delete(user_id)`; confidence 75; severity P1)",
+   "source_lens": "metareview-lens/testing-quality",
+   "old_verdict": "hallucination",
+   "new_verdict": "hallucination",
+   "confidence": 0.78,
+   "rationale": "The diff shows `remove_member` implemented as `group.users.delete(user_id)` in `Admin::GroupsController#remove_member`. From the diff alone, there is no indication this will raise `RecordNotFound` for non-member IDs (no `find`, no `delete!`, no explicit exception handling). While the old \u201csucceeds silently when removing non-members\u201d spec was removed, the claim that the new code path *now raises* i"
+  },
+  {
+   "issue_text": "app/controllers/admin/groups_controller.rb:70 \u2014 unknown usernames in `add_members` are silently skipped and a user already in the group hits `group.add` (push -> unique-index violation -> 500); the deleted spec \"succeeds silently when adding non-existent users\" covered the first path and nothing covers either now (`if user = User.find_by_username(username)`; confidence 75; severity P1)",
+   "source_lens": "metareview-lens/testing-quality",
+   "old_verdict": "hallucination",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.62,
+   "rationale": "The diff adds a new `add_members` endpoint in `Admin::GroupsController` that iterates `usernames.split(\",\")` and only calls `group.add(user)` when `User.find_by_username(username)` succeeds, silently skipping unknown usernames (`if user = ...`). The updated specs removed prior coverage for \u201cadding non-existent users succeeds silently\u201d and do not add any equivalent tests for this new endpoint/behav"
+  },
+  {
+   "issue_text": "app/controllers/groups_controller.rb:28 \u2014 public `members` endpoint response shape changed from a bare array to `{members:, meta:{total,limit,offset}}` and pagination now applies to non-automatic groups, with zero spec change in the diff for GroupsController (`members: serialize_data(members, GroupUserSerializer),`; confidence 100; severity P1)",
+   "source_lens": "metareview-lens/testing-quality",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.83,
+   "rationale": "The diff *does* change `GroupsController#members` from `render_serialized(members.to_a, GroupUserSerializer)` (a bare array) to `render json: { members: serialize_data(...), meta: { total, limit, offset } }`, and it now always applies `limit/offset` regardless of `group.automatic?`. There are no corresponding specs added/updated for `GroupsController#members` in this diff (only `Admin::GroupsContr"
+  },
+  {
+   "issue_text": "spec/controllers/admin/groups_controller_spec.rb:56 \u2014 the only `.update` spec asserts a negative (`group.name.should_not == \"WAT\"`) and never verifies that a non-automatic group CAN be renamed or that `alias_level` is applied; the prior spec asserting `group.name.should == 'fred'` was deleted, so a regression that ignores `name` for all groups passes (`group.name.should_not == \"WAT\"`; confidence 100; severity P2)",
+   "source_lens": "metareview-lens/testing-quality",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.86,
+   "rationale": "The diff changes Admin::GroupsController#update to accept top-level params (name/visible/alias_level) and to ignore renames only when `group.automatic` (group.name set only if `!group.automatic`). In the spec, the previous update test that asserted a non-automatic group rename (`group.name.should == 'fred'`) was removed, and the remaining `.update` coverage only asserts that an automatic group doe"
+  },
+  {
+   "issue_text": "spec/controllers/admin/groups_controller_spec.rb:115 \u2014 automatic-group guard specs drive `remove_member` with `:put` although the route is `delete \"members\"`, and both guard specs hard-code `group_id: 1` / `id: 1` assuming a seeded automatic group with id 1 rather than fabricating `automatic: true` as `.destroy` does; if no such row exists the request raises RecordNotFound and the 422 assertion is never the thing under test (`xhr :put, :remove_member, group_id: 1, user_id: 42`; confidence 50; severity P2)",
+   "source_lens": "metareview-lens/testing-quality",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.8,
+   "rationale": "The diff shows the new route is `delete \"members\" => \"groups#remove_member\"` / `put \"members\" => \"groups#add_members\"` (config/routes.rb), but the spec\u2019s automatic-group guard for `remove_member` calls `xhr :put, :remove_member` (spec/controllers/admin/groups_controller_spec.rb) which doesn\u2019t match the DELETE route being added. Also, both guard specs use hard-coded `group_id: 1` (and update spec u"
+  },
+  {
+   "issue_text": "spec/controllers/admin/groups_controller_spec.rb:96 \u2014 automatic-group 422 specs only assert status and never check that membership was left untouched, so an ordering bug that mutates before returning `can_not_modify_automatic` would pass (`response.status.should == 422`; confidence 75; severity P3)",
+   "source_lens": "metareview-lens/testing-quality",
+   "old_verdict": "hallucination",
+   "new_verdict": "hallucination",
+   "confidence": 0.77,
+   "rationale": "The specs for automatic groups in `add_members`/`remove_member` do only assert `response.status.should == 422`, but the controller actions return early before any membership mutation: `return can_not_modify_automatic if group.automatic` appears before `group.add(user)` in `add_members` and before `group.users.delete(user_id)` in `remove_member`. So the claimed risk of an \u201cordering bug that mutates"
+  },
+  {
+   "issue_text": "app/assets/javascripts/admin/controllers/admin-group.js.es6:13 \u2014 `totalPages` is `floor(user_count/limit)+1`, yielding 2 pages for exactly 50 members (an empty last page) and `showingLast` never true on the real last page when count is a multiple of limit; no JS test exists for any of the new pagination/addMembers/removeMember logic in the diff (`return Math.floor(this.get(\"user_count\") / this.get(\"limit\")) + 1;`; confidence 75; severity P2)",
+   "source_lens": "metareview-lens/testing-quality",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "In `admin-group.js.es6`, `totalPages` is computed as `Math.floor(user_count / limit) + 1`, which yields 2 pages when `user_count` is exactly a multiple of `limit` (e.g. 50/50 => 2). Combined with `currentPage = Math.floor(offset/limit)+1` and `next` setting `offset = Math.min(offset+limit, user_count)`, the code can set `offset == user_count` and `Group.findMembers` will request that offset, produ"
+  },
+  {
+   "issue_text": "app/assets/javascripts/discourse/models/group.js:22 \u2014 `findMembers` now returns `undefined` (was `RSVP.resolve([])`) when name is empty and both routes call `model.findMembers()` without returning the promise from `setupController`, so the member list renders asynchronously and any `.then` chaining on the empty-name path throws; no JS test covers the model change (`if (Em.isEmpty(this.get('name'))) { return ; }`; confidence 50; severity P2)",
+   "source_lens": "metareview-lens/testing-quality",
+   "old_verdict": "hallucination",
+   "new_verdict": "unresolved",
+   "confidence": 0.45,
+   "rationale": "below CONF_FLOOR (0.45)"
+  },
+  {
+   "issue_text": "spec/controllers/admin/groups_controller_spec.rb:38 \u2014 `.create` lost the assertion that the created group is returned/serialized with an id and the `usernames` payload path; the remaining spec only checks name strip, so the JS `create()` reading `resp.basic_group.id` has no server-side contract test (`xhr :post, :create, name: \" bob \"`; confidence 50; severity P3)",
+   "source_lens": "metareview-lens/testing-quality",
+   "old_verdict": "hallucination",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.74,
+   "rationale": "The diff shows the `.create` spec was reduced to only verifying whitespace stripping (`xhr :post, :create, name: \" bob \"`) and no longer asserts anything about the response body/serialization. Meanwhile the JS `Discourse.Group#create()` still depends on the server response shape (`resp.basic_group.id` in `app/assets/javascripts/discourse/models/group.js`). The server `Admin::GroupsController#creat"
+  }
+ ]
+}

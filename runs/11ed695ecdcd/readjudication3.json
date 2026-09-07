@@ -1,0 +1,246 @@
+{
+ "run_id": "11ed695ecdcd",
+ "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/4",
+ "framework": "superpowers-realistic",
+ "model": "claude-sonnet-5",
+ "effort": "high",
+ "original": {
+  "tp": 2,
+  "fn": 6,
+  "n_real_ungold": 15,
+  "n_hallucination": 11,
+  "adj_p": 0.15384615384615385,
+  "incr": 0.7391304347826086
+ },
+ "corrected": {
+  "n_unmatched": 26,
+  "rejudged": 26,
+  "n_bug_ungold": 15,
+  "n_important": 5,
+  "n_true_hallucination": 5,
+  "n_unresolved": 1,
+  "n_hidden_findings_unmatched": 20,
+  "waste_precision": 0.2857,
+  "flips": {
+   "hallucination->bug": 2,
+   "hallucination->hallucination": 5,
+   "hallucination->important_non_bug": 3,
+   "hallucination->unresolved": 1,
+   "real_but_ungold->bug": 13,
+   "real_but_ungold->important_non_bug": 2
+  },
+  "judge": "gpt-5.2",
+  "diff_chars": 29064,
+  "wall_s": 13.7
+ },
+ "records": [
+  {
+   "issue_text": "**Stored XSS: imported content is rendered raw with zero HTML sanitization, and is reachable by unauthenticated users.**",
+   "source_lens": "superpowers-realistic/critical",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "The diff introduces a `cook_method` that allows skipping the rendering/sanitization pipeline: `Post#cook` returns `raw` when `cook_method == Post.cook_methods[:raw_html]` (app/models/post.rb). Imported feed/article content is created with `cook_method: :raw_html` and `skip_validations: true` (TopicEmbed.import), and the embed view renders it with `<%= raw post.cooked %>` (app/views/embed/best.html"
+  },
+  {
+   "issue_text": "`app/models/post.rb:130-137` \u2014 when `cook_method == raw_html`, `Post#cook` returns `raw` verbatim, completely bypassing the normal cooking/sanitization pipeline (`post_analyzer.cook`).",
+   "source_lens": "superpowers-realistic/critical",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.82,
+   "rationale": "The diff explicitly adds `Post.cook_methods` with `:raw_html` and changes `Post#cook` to `return raw` when `cook_method == Post.cook_methods[:raw_html]`, bypassing `post_analyzer.cook` (the normal cooking/sanitization pipeline). New code paths set this cook_method for imported content (e.g., `TopicEmbed.import` passes `cook_method: Post.cook_methods[:raw_html]` and feed polling/import pulls extern"
+  },
+  {
+   "issue_text": "`app/views/embed/best.html.erb:16` \u2014 `<%= raw post.cooked %>` renders that unsanitized content directly, without escaping, to any anonymous visitor of `/embed/best`.",
+   "source_lens": "superpowers-realistic/critical",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "The view `app/views/embed/best.html.erb` does `raw post.cooked`. This diff introduces `Post.cook_methods[:raw_html]` where `Post#cook` returns `raw` directly (skipping the normal cooking/sanitization pipeline). `TopicEmbed.import` creates posts with `cook_method: :raw_html` from RSS/remote content (`i.content` / `Readability::Document#content`) and only rewrites relative URLs; it does not sanitize"
+  },
+  {
+   "issue_text": "`app/jobs/scheduled/poll_feed.rb:36-39` \u2014 RSS feed item content (`i.content`) is unescaped via `CGI.unescapeHTML` and handed straight to `TopicEmbed.import` with **no tag/attribute allowlist at all** (unlike `import_remote`, which at least constrains Readability's output to a tag/attribute list). Any `<script>` in a polled feed item becomes a stored, rendered payload.",
+   "source_lens": "superpowers-realistic/critical",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.92,
+   "rationale": "In `app/jobs/scheduled/poll_feed.rb`, the job does `content = CGI.unescapeHTML(i.content.scrub)` and passes it to `TopicEmbed.import(...)` without any sanitization or tag/attribute allowlist. `TopicEmbed.import` creates posts with `cook_method: Post.cook_methods[:raw_html]`, and `Post#cook` returns `raw` directly for that method, bypassing the rendering/sanitization pipeline. The embed view then r"
+  },
+  {
+   "issue_text": "`app/models/topic_embed.rb:13` \u2014 `contents << \"\\n<hr>\\n<small>#{I18n.t('embed.imported_from', link: \"<a href='#{url}'>#{url}</a>\")}</small>\\n\"` interpolates `url` into an HTML attribute/text **without escaping**. `url` is attacker-influenced: `EmbedController#best` accepts `embed_url` from a public request param, and `TopicRetriever#invalid_host?` only validates the *host* component (`URI(@embed_url).host == SiteSetting.embeddable_host`) \u2014 the path/query string is fully attacker-controlled. An unauthenticated request such as `GET /embed/best?embed_url=http://<embeddable_host>/x?y='><script>alert(document.cookie)</script>` will pass host validation, get queued via `Jobs::RetrieveTopic` \u2192 `TopicRetriever#fetch_http` \u2192 `TopicEmbed.import_remote`, and the raw `embed_url` string is spliced unescaped into the post body that is then persisted and rendered `raw` to every visitor of that embed.",
+   "source_lens": "superpowers-realistic/critical",
+   "old_verdict": "hallucination",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "In `TopicEmbed.import`, `url` is interpolated directly into an `<a href='...'>` attribute and link text without escaping (`contents << ... \"<a href='#{url}'>#{url}</a>\" ...`). The diff shows `embed_url` originates from a public request param in `EmbedController#best` (`params.require(:embed_url)`), is validated only by host in `TopicRetriever#invalid_host?` (`URI(@embed_url).host` compared to `Sit"
+  },
+  {
+   "issue_text": "**Why it matters**: this is a persistent, unauthenticated, remotely-triggerable XSS against any site that enables comment embedding \u2014 the exact feature this PR ships.",
+   "source_lens": "superpowers-realistic/critical",
+   "old_verdict": "hallucination",
+   "new_verdict": "bug",
+   "confidence": 0.86,
+   "rationale": "The diff introduces a raw HTML path that bypasses the normal cooking/sanitization pipeline: `Post#cook` returns `raw` when `cook_method == :raw_html` (app/models/post.rb), and `TopicEmbed.import` creates posts with `cook_method: :raw_html` using remote/untrusted HTML (`SimpleRSS.parse ... i.content` in poll_feed.rb and `Readability::Document.new(open(url).read).content` in topic_embed.rb). The emb"
+  },
+  {
+   "issue_text": "**How to fix**: never store/render attacker- or feed-derived HTML without sanitization even under `raw_html`. Run `TopicEmbed.import`'s `contents` (both the RSS-polled body and the Readability-extracted body) through an allowlist sanitizer (the `sanitize` gem is already a dependency) before persisting, and HTML-escape `url`/`title` wherever they're interpolated into markup (e.g. `ERB::Util.html_escape(url)` in the \"imported from\" line). Also constrain `href`/`src` schemes to `http(s)` to prevent `javascript:` URIs from surviving into `<a href>`.",
+   "source_lens": "superpowers-realistic/critical",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.92,
+   "rationale": "The diff introduces a `raw_html` cook path that returns `raw` unmodified (`Post#cook`), and `TopicEmbed.import` persists attacker/feed-derived HTML (from RSS via `SimpleRSS.parse open(...)` and from `Readability::Document.new(open(url).read)`), then the embed view renders it with `<%= raw post.cooked %>` (app/views/embed/best.html.erb). There is no sanitization/escaping of `contents`, and existing"
+  },
+  {
+   "issue_text": "**Regression: `disqus.thor` import loses the ability to target a category.**",
+   "source_lens": "superpowers-realistic/important",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.93,
+   "rationale": "In `lib/tasks/disqus.thor`, the `:category` CLI option was removed (`method_option :category` deleted) along with all logic that resolved `category_id` and passed it to `PostCreator` (`category: category_id`). The import now calls `TopicEmbed.import_remote(user, t[:link], title: t[:title])` with no category parameter, so the Disqus import can no longer target a category as before\u2014this is a functio"
+  },
+  {
+   "issue_text": "`lib/tasks/disqus.thor` \u2014 the `-c/--category` option and its `category_id` lookup were removed, and the replacement call `TopicEmbed.import_remote(user, t[:link], title: t[:title])` has no way to pass a category (`TopicEmbed.import`'s `PostCreator.new` call never threads a `category` option). Existing users of this migration script silently lose a feature.",
+   "source_lens": "superpowers-realistic/important",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.72,
+   "rationale": "The diff explicitly removes the `-c/--category` option and the `category_id` lookup in `lib/tasks/disqus.thor`, and replaces `PostCreator.new(..., category: category_id)` with `TopicEmbed.import_remote(user, t[:link], title: t[:title])`. In `TopicEmbed.import`, the `PostCreator.new` call does not pass any `category` (and `import_remote` only forwards `title`/extracted content), so the import task "
+  },
+  {
+   "issue_text": "**How to fix**: either add an optional `category` param to `TopicEmbed.import`/`import_remote` and thread it through from the thor task, or explicitly note the removal as an intentional breaking change.",
+   "source_lens": "superpowers-realistic/important",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.78,
+   "rationale": "In lib/tasks/disqus.thor the `:category` option and logic computing `category_id` were removed, and the importer now calls `TopicEmbed.import_remote(...)` without any way to pass a category. This is a concrete behavior/API change for the thor task (previously allowed choosing a category; now it can\u2019t), which could be an intentional breaking change but should be explicitly noted or re-supported by "
+  },
+  {
+   "issue_text": "**`disqus.thor` import now depends on live network fetches per thread, with no error handling.**",
+   "source_lens": "superpowers-realistic/important",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.7,
+   "rationale": "In `lib/tasks/disqus.thor`, the import flow was changed from creating a topic directly to `post = TopicEmbed.import_remote(user, t[:link], title: t[:title])`. `TopicEmbed.import_remote` calls `open(url).read` (live network fetch) and runs `Readability::Document.new(...)` with no `rescue`/error handling. Any network/HTTP/parse failure will raise and can abort the entire Disqus import, a broken-beha"
+  },
+  {
+   "issue_text": "Previously, import only needed the stored permalink text; now `TopicEmbed.import_remote` calls `open(url).read` for every thread. If any of the (potentially thousands of) old links is unreachable, renamed, or 404s, the exception is unhandled and aborts the entire migration run partway through, with no resumption story.",
+   "source_lens": "superpowers-realistic/important",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.78,
+   "rationale": "In `TopicEmbed.import_remote`, the code does `open(url).read` (lib/topic_embed.rb) with no error handling. This method is now used by the Disqus import task (`lib/tasks/disqus.thor` changed from creating a simple permalink post to calling `TopicEmbed.import_remote`). Network/HTTP failures (404, timeouts, DNS) would raise exceptions from `open` and abort the import run mid-stream with no recovery i"
+  },
+  {
+   "issue_text": "**How to fix**: wrap the fetch in a `begin/rescue`, log/skip failures, and let the rest of the import continue.",
+   "source_lens": "superpowers-realistic/important",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.72,
+   "rationale": "The diff introduces external fetches without any exception handling: `SimpleRSS.parse open(SiteSetting.feed_polling_url)` in `Jobs::PollFeed#poll_feed` and `Readability::Document.new(open(url).read, ...)` in `TopicEmbed.import_remote`. If `open`/parse/readability raises (network timeout, invalid RSS/HTML, etc.), the job will error and abort the entire import loop; `PollFeed` also sets `sidekiq_opt"
+  },
+  {
+   "issue_text": "**`TopicEmbed.import_remote`/`TopicRetriever#fetch_http` perform server-side fetches of attacker-influenced URLs (open-uri, default redirect-following).**",
+   "source_lens": "superpowers-realistic/important",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.86,
+   "rationale": "The diff introduces server-side HTTP fetching of a request parameter: `EmbedController#best` takes `params.require(:embed_url)` and enqueues `Jobs::RetrieveTopic`, which calls `TopicRetriever.new(args[:embed_url])`. `TopicRetriever#fetch_http` then calls `TopicEmbed.import_remote(user, @embed_url)`, and `TopicEmbed.import_remote` does `open(url).read` (open-uri). Although `TopicRetriever#invalid_h"
+  },
+  {
+   "issue_text": "`app/models/topic_embed.rb:29` (`open(url).read`) \u2014 the host must match `embeddable_host`, but path/query is attacker-controlled, and `open-uri` follows redirects by default; a malicious or compromised target page could redirect the server to internal/other resources (SSRF surface). Given this era's `open-uri`, this is worth hardening rather than assuming it's safe.",
+   "source_lens": "superpowers-realistic/important",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "In `app/models/topic_embed.rb` the new `TopicEmbed.import_remote` method does `open(url).read` (open-uri) with no validation beyond the caller. Although `TopicRetriever#invalid_host?` checks `URI(@embed_url).host == SiteSetting.embeddable_host`, `open-uri` can follow redirects to a different host/resource, and `import_remote` is also invoked directly from `lib/tasks/disqus.thor` without any `embed"
+  },
+  {
+   "issue_text": "**Test coverage gaps for the actual new business logic.**",
+   "source_lens": "superpowers-realistic/important",
+   "old_verdict": "hallucination",
+   "new_verdict": "hallucination",
+   "confidence": 0.83,
+   "rationale": "The diff adds multiple specs that exercise the newly introduced business logic: TopicRetriever behavior (host validation/throttling) in spec/components/topic_retriever_spec.rb, EmbedController referer/host enforcement and embed retrieval in spec/controllers/embed_controller_spec.rb, feed polling gating in spec/jobs/poll_feed_spec.rb, and TopicEmbed import/update + URL absolutization + raw_html coo"
+  },
+  {
+   "issue_text": "`spec/jobs/poll_feed_spec.rb` only tests the three guard conditions in `execute`; the body of `poll_feed` (RSS parsing, `TopicEmbed.import` per item, URL fallback to `i.id`) is never exercised.",
+   "source_lens": "superpowers-realistic/important",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.9,
+   "rationale": "In spec/jobs/poll_feed_spec.rb, all examples are under context \"execute\" and only assert whether poll_feed is called based on SiteSetting guards. There are no specs that invoke poller.poll_feed or stub SimpleRSS/open to exercise the new logic in app/jobs/scheduled/poll_feed.rb (SimpleRSS.parse open(...), iterating rss.items, link/id fallback, CGI.unescapeHTML, TopicEmbed.import per item). This is "
+  },
+  {
+   "issue_text": "`TopicEmbed.import_remote` (Readability integration) has no spec at all.",
+   "source_lens": "superpowers-realistic/important",
+   "old_verdict": "hallucination",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.9,
+   "rationale": "The diff adds new nontrivial behavior in `TopicEmbed.import_remote` (uses `ruby-readability` + `open(url).read` and then calls `TopicEmbed.import`), but the added specs only cover `TopicEmbed.import`, `TopicRetriever`, `EmbedController`, and `Jobs::PollFeed`. There is no spec that exercises `TopicEmbed.import_remote` directly."
+  },
+  {
+   "issue_text": "`TopicEmbed.absolutize_urls` is only indirectly exercised via the `import` spec for anchor/img rewriting on create, not on update, and not for edge cases (missing scheme, non-default ports).",
+   "source_lens": "superpowers-realistic/important",
+   "old_verdict": "hallucination",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.87,
+   "rationale": "In `spec/models/topic_embed_spec.rb`, `absolutize_urls` is only validated in the \u201cnew URL\u201d creation path (it asserts relative `<a href>`/`<img src>` are rewritten). The update spec (`\"Supports updating the post\"`) does not assert that `absolutize_urls` is applied on update (even though update calls `PostRevisor.revise!` with `absolutize_urls(url, contents)`), nor are edge cases covered for `absolu"
+  },
+  {
+   "issue_text": "**Why it matters**: these are precisely the code paths carrying untrusted external content (see Critical #1) \u2014 they need direct tests, including a security-oriented test asserting dangerous tags/attributes are stripped.",
+   "source_lens": "superpowers-realistic/important",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.78,
+   "rationale": "The diff introduces ingestion of external HTML (RSS via Jobs::PollFeed using `i.content` and remote pages via `TopicEmbed.import_remote`) and stores it in `Post#raw` with `cook_method: :raw_html`. In `Post#cook`, `:raw_html` returns `raw` and the embed view renders it with `<%= raw post.cooked %>`. There is no explicit sanitization in these paths, so dangerous tags/attributes from untrusted source"
+  },
+  {
+   "issue_text": "`app/models/topic_embed.rb:1` \u2014 `require_dependency 'nokogiri'` uses Rails' dependency-tracking require on a third-party gem; should just be `require 'nokogiri'`.",
+   "source_lens": "superpowers-realistic/minor",
+   "old_verdict": "hallucination",
+   "new_verdict": "hallucination",
+   "confidence": 0.83,
+   "rationale": "The diff does show `app/models/topic_embed.rb` starting with `require_dependency 'nokogiri'`, but nothing in the diff demonstrates this causes incorrect behavior or a concrete problem. `require_dependency` generally delegates to `require` while adding reload tracking; using it for a gem is at most a style/preference nit, not a verifiable defect or substantive risk based on this PR alone."
+  },
+  {
+   "issue_text": "`app/jobs/regular/retrieve_topic.rb:1` \u2014 `require_dependency 'email/sender'` is unused dead code (nothing in the file references `Email::Sender`).",
+   "source_lens": "superpowers-realistic/minor",
+   "old_verdict": "hallucination",
+   "new_verdict": "hallucination",
+   "confidence": 0.83,
+   "rationale": "In app/jobs/regular/retrieve_topic.rb the diff shows `require_dependency 'email/sender'` at the top, and nothing else in that file references `Email::Sender` (it only looks up a user and calls `TopicRetriever.new(...).retrieve`). While the \u201cunused require\u201d observation is verifiable, it\u2019s a minor cleanup/nit rather than a substantive defect or important review concern grounded in behavior."
+  },
+  {
+   "issue_text": "`config/locales/server.en.yml` \u2014 `embed.permalink` key is added but never referenced anywhere in the views/models.",
+   "source_lens": "superpowers-realistic/minor",
+   "old_verdict": "hallucination",
+   "new_verdict": "hallucination",
+   "confidence": 0.92,
+   "rationale": "The diff does add `embed.permalink` to `config/locales/server.en.yml`, and there is no reference to `t('embed.permalink')` / `I18n.t('embed.permalink')` anywhere in the added/modified Ruby or ERB files shown. However, an unused i18n key is not a functional defect and is a low-impact nit rather than a substantive review concern grounded in behavior."
+  },
+  {
+   "issue_text": "`app/controllers/embed_controller.rb` \u2014 `ensure_embeddable` only supports a single `embeddable_host`; no path to allow multiple embedding domains without redeploying config. Consider a comma-separated list if that's a plausible near-term need.",
+   "source_lens": "superpowers-realistic/minor",
+   "old_verdict": "hallucination",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.86,
+   "rationale": "In `EmbedController#ensure_embeddable`, access is limited by `URI(request.referer||'').host != SiteSetting.embeddable_host`, which by construction supports only a single allowed host from the `embeddable_host` site setting. The finding is a specific, diff-grounded configurability/architecture concern (allowing multiple embedding domains would require changing how this setting is parsed/checked), n"
+  },
+  {
+   "issue_text": "`app/controllers/embed_controller.rb#best` \u2014 if `TopicEmbed.topic_id_for_embed` returns a stale `topic_id` for a topic that's since been deleted/made private, `TopicView.new` will raise unrescued (500 instead of a graceful \"not found\"/loading state).",
+   "source_lens": "superpowers-realistic/minor",
+   "old_verdict": "hallucination",
+   "new_verdict": "unresolved",
+   "confidence": 0.45,
+   "rationale": "below CONF_FLOOR (0.45)"
+  },
+  {
+   "issue_text": "Several new files (`embed.css.scss`, `loading.html.erb`, `layouts/embed.html.erb`, `topic_retriever.rb`) are missing trailing newlines \u2014 trivial, but flagged since it's inconsistent with the rest of the diff.",
+   "source_lens": "superpowers-realistic/minor",
+   "old_verdict": "hallucination",
+   "new_verdict": "hallucination",
+   "confidence": 0.93,
+   "rationale": "The diff explicitly marks several files with \"\\\\ No newline at end of file\" (e.g., `app/assets/stylesheets/embed.css.scss`, `app/views/embed/loading.html.erb`, `app/views/layouts/embed.html.erb`, `lib/topic_retriever.rb`), so the observation is accurate. However, missing trailing newlines is a formatting/style nit and not a substantive defect or important review concern per the category definition"
+  }
+ ]
+}

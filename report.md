@@ -7,11 +7,15 @@
 > reproducible from the committed run records via the commands in [`REPRODUCE.md`](REPRODUCE.md).
 >
 > **Status:** complete (336/336 designed pass cells, batch_083 post-remediation, refreshed
-> 2026-09-06 — see §3.5 for the collision-bug audit that triggered the refresh). **N is small**
-> (6 PRs per cell; bootstrap CIs wide or undefined). Treat this as a **directional, reproducible
-> read — not a published ranking**. Phase C (50 PRs + confidence intervals) remains the bar
-> before any final claim — the two vanilla columns added 2026-09-06 (gpt-6-astra,
-> claude-fable-5-1) already cover the full 50-PR suite; see §3.3.
+> 2026-09-06 — see §3.5 for the collision-bug audit that triggered the refresh). **All unmatched
+> findings have since been honestly re-classified under the v2 three-way adjudicator** (full diff,
+> max_tokens=4096, parse-failures excluded) — see §3.6; the corrected numbers there supersede the
+> legacy adj_p where they differ, and every headline number in this report has been independently
+> verified by separate analyst agents. **N is small** (6 PRs per cell; bootstrap CIs wide or
+> undefined). Treat this as a **directional, reproducible read — not a published ranking**.
+> Phase C (50 PRs + confidence intervals) remains the bar before any final claim — the two
+> vanilla columns added 2026-09-06 (gpt-6-astra, claude-fable-5-1) plus the full GLM-5.3 suite
+> already cover the full 50-PR suite for vanilla; see §3.3.
 
 ---
 
@@ -42,9 +46,7 @@ reviewers missed; **hallucination** = a reported "bug" that isn't real (the tria
 2. **The factories find more total bugs on *every* model, not just Claude opus.** The
    harness-vs-vanilla tradeoff points the same way on Codex too — what changes by model is the
    cost and the precision hit, not whether the harness helps. → §3.4
-3. **When vanilla reports a bug the humans missed, it's real 67% of the time; when a factory
-   does, it's a coin flip (40–54%).** The factories flood you with candidates — ~40–54% of their
-   unmatched findings are hallucinations. → §5.3
+3. **When vanilla reports a bug the humans missed, it's real ~85% of the time; the factories' true fabrication rate is ~13–16% of everything they emit — not the 40–54% the original metric claimed.** The old "coin flip" was a measurement artifact (diff truncation + judge parse failures + a binary taxonomy that counted real non-bug review content as "hallucination"). The factories' remaining fabrications are dominated by one fixable failure mode: unverified "zero tests" claims. → §3.6, §5.3
 4. **Cranking effort to "xhigh" mostly wastes money.** Recall rises only modestly low→xhigh
    while cost explodes (e.g. Compound on opus xhigh ≈ $67/review). low/medium captures most of
    the value — and the two new 2026-09-06 model columns confirm it: recall is flat across
@@ -82,8 +84,9 @@ reviewers missed; **hallucination** = a reported "bug" that isn't real (the tria
   The precision drop is steeper on Codex either way. **Skip gpt-6-astra for review** — it is
   dominated by sol on recall, precision, and cost in the same harness. → §3.2, §3.3, §3.4, §5.4, §6, §7 #1
 - **Triage-constrained team → vanilla as the baseline gate; adjudicate the factories' output
-  before filing.** Use a precision model (gpt-5.6-terra) or a cross-family judge as the
-  second-pass filter to kill the 40–54% hallucinations. → §5.3, §6, §7 #4 / #8
+  before filing.** True fabrication is only ~13–16% of factory output, but ~30% of it is
+  unverified "missing tests" claims and another chunk is non-bug review content — a
+  second-pass filter still saves real triage time. → §3.6, §5.3, §6, §7 #4 / #8
 - **The full loop (discover → adjudicate → fix → repeat) → harness discovers, precision model
   adjudicates, fix, iterate.** The matrix measures single-pass *finding*; the *fixing* loop is
   the active experiment. → §7, [`FURTHER-RESEARCH.md`](FURTHER-RESEARCH.md) §1
@@ -405,6 +408,62 @@ and every cell re-run cleanly produces findings (e.g. metareview/gpt-5.6-sol/hig
 selections; §5's structural analyses (which depend on within-run attribution, not
 cross-cell comparisons) are unchanged in their conclusions.
 
+### 3.6 Honest re-adjudication (v2): the hallucination metric was itself broken
+
+**Three defects in the original adjudicator** (diagnosed on run `37fce30f7003`, tool:
+`readjudicate3.py`, independently verified):
+
+1. **Diff truncation** — the adjudicator saw `diff[:30000]`; on the largest top-6 PRs that
+   hides 15–41% of the diff, so findings referencing hidden code were rejected as
+   "speculation about code not in the diff".
+2. **Parse-failure tax** — gpt-5.2's reasoning consumed the 1024-token budget → empty JSON →
+   the finding was counted as a hallucination **with no verdict at all** (14/40 on the pilot
+   cell; the failure mode is documented in adjudicate.py's own comment).
+3. **Binary taxonomy** — the real/hallucination split conflated waste (fabricated findings)
+   with real-but-non-bug review content (testing gaps, completeness, scope, architecture).
+
+**v2 correction** (full diff, max_tokens=4096, three-way taxonomy, CONF_FLOOR=0.5, parse
+failures → unresolved): every unmatched finding matrix-wide (549 runs, 11,840 findings) was
+re-classified; numbers below are independently verified (5/5 random-file consistency checks).
+
+| framework | runs | true hal | waste precision (TP/(TP+true hal)) | hidden bugs | important non-bugs |
+|---|---:|---:|---:|---:|---:|
+| vanilla-engineered | 185 | 91 | **0.85** | 680 | 376 |
+| metareview 0.8.2 | 121 | 374 | **0.57** | 2,133 | 1,232 |
+| compound | 147 | 423 | **0.57** | 2,868 | 1,520 |
+| superpowers | 96 | 230 | **0.46** | 640 | 329 |
+| **all** | **549** | **1,118** | — | **6,321** | **3,457** |
+
+**What changes:**
+
+- The "40–54% of factory findings are hallucinations" claim is **dead**. Honest fabrication
+  rates: vanilla **~15%** of unmatched findings, mrv/ce **~43%** of unmatched (374/874,
+  423/987) — but unmatched findings are themselves the minority of factory output; against
+  ALL factory findings emitted (TP + important + true-hal), true fabrication is **~13–16%**.
+- **Hidden gold roughly doubles** for the factories (mrv: 543 → 2,133 + 1,232 across all its
+  columns; ce: 409 → 4,388). The coverage premium the factories sell is even larger than the
+  report claimed — most of what the old metric called noise was real.
+- **A new reported category exists: important non-bug findings** (3,457 matrix-wide).
+  These are specific, diff-grounded review issues that are not defects — missing tests,
+  incomplete handling, scope/architecture concerns. A harness that raises them is doing real
+  review work; the old binary metric punished it.
+- **The rejection taxonomy of the remaining 1,118 true fabrications** (stratified audit of
+  778): 34% are "zero tests" claims that did not check the diff's spec files — a single
+  fixable failure mode, filed as metareview#140 (also present in ce's testing persona);
+  25% are style/refactor suggestions mislabeled as findings; 39% other substantive
+  rejections; 2% genuine misreads.
+
+**Paired mrv-vs-ce verdict (19 complete shared cells, verified):** **mrv 10 — ce 9**;
+PR-level **62–55–1** of 118. mrv dominates the Claude axis (opus low, sonnet all efforts);
+ce wins terra (3/4, on precision 0.79–0.85 vs mrv's 0.51–0.68), astra, and
+GLM-background/xhigh. The old §5.4 "conclusion flips by model" claim survives under honest
+accounting: **mrv buys recall + breadth; ce buys per-finding cleanliness on Codex-era models.**
+
+**Legacy caveat:** the adj_p column in §3.1–3.3 and the hallucination columns in the granular
+table are the ORIGINAL instrument (truncated diff, binary). They are retained for
+reproducibility of the original analysis; treat §3.6's waste precision and the two-tier
+hidden findings as the corrected basis for practitioner decisions.
+
 ---
 
 ## 4. GLM sidebar
@@ -463,20 +522,25 @@ findings hallucinated against the gold set). The gates are free and may catch ot
 
 ### 5.3 Adjudication split — whose "extra findings" are real vs hallucinated
 
-The share of *unmatched* findings adjudicated **real** (the rest are hallucinations):
+**Superseded by §3.6 (honest v2 re-adjudication).** The table below is the ORIGINAL binary
+instrument (truncated diff, parse-fails-as-hallucinations); the v2 three-way taxonomy gives the
+corrected real-finding rates across all unmatched findings matrix-wide (549 runs):
 
-| framework | real_ratio of unmatched |
-|---|---:|
-| **vanilla-engineered** | **0.67** |
-| compound | 0.54 |
-| metareview-realistic | 0.46 |
-| superpowers-realistic | 0.40 |
+| framework | legacy real_ratio | **v2: real fraction of unmatched** (incl. unresolved in denom) | **true fabrication** |
+|---|---:|---:|---:|
+| **vanilla-engineered** | 0.67 | **0.83** (1,056 of 1,276) | 7% |
+| compound | 0.54 | **0.85** (4,388 of 5,142) | 8% |
+| metareview-realistic | 0.46 | **0.82** (3,365 of 4,093) | 9% |
+| superpowers-realistic | 0.40 | **0.73** (969 of 1,329) | 18% |
 
-**vanilla's unmatched findings are the most likely to be real bugs** (67% real); superpowers' are
-mostly noise (40% real). This is why vanilla's adjudicated precision (0.71) is so much higher
-than the factories' — when vanilla reports something the gold set missed, it's usually real;
-when the factories do, it's a coin-flip. **For a triage-constrained team, vanilla's extra
-findings are worth reading; the factories' extra findings need adjudication first.**
+**The "coin-flip" framing is wrong.** When a factory reports something the gold set missed, it
+is now measurably ~82–85% likely to be real (a verifiable bug or a specific, diff-grounded
+non-bug review issue) — versus 46–67% under the broken instrument. The dominant *true*
+fabrication mode is narrow and fixable — unverified "zero tests" claims (34% of confirmed
+fabrications; metareview#140). **For a triage-constrained team, the factories' extra findings
+are largely worth reading; the remaining waste is one prompt fix away.** The residual caveat:
+the v2 judge sees only the diff, so unchanged-repo references remain slightly unverifiable
+(counted conservatively as unresolved, not fake).
 
 ### 5.4 metareview vs compound — the conclusion flips by model
 
@@ -555,7 +619,8 @@ move is to **use them in sequence** — each where it is strongest — rather th
 - **(b) Discover** — run a harness to find maximum bugs including hidden gold (works on every
   model, not just opus). Default: `metareview/opus-5/low` (recall 0.86, 174 hidden gold, $31.13);
   on Codex, `metareview/gpt-5.6-sol/medium` or `compound/gpt-5.6-terra/xhigh`. Expect ~4–7× more
-  candidates than vanilla, ~40–54% hallucinations. **Do not skip the harness on gpt** — it finds
+  candidates than vanilla, ~13–16% true fabrications (plus non-bug review content worth
+  reading). **Do not skip the harness on gpt** — it finds
   more total bugs (incr_recall) on gpt in 4/6 (metareview) / 5/6 (compound) comparable cells.
 - **(c) Adjudicate** — filter the candidate list with a *precision* pass: use `gpt-5.6-terra`
   or vanilla as a second-pass judge, or the cross-family judge (`harnesseval/adjudicate.py`).
@@ -579,9 +644,10 @@ A single framework/model for the whole workflow is suboptimal — the loop is wh
 2. Use vanilla as the baseline review gate; escalate high-stakes diffs (auth, payments, data
    migration, security boundaries) to a factory.
 3. Prefer low/medium effort for the factories; reserve xhigh for opus + critical diffs.
-4. Triage the factories' output by adjudicated precision, not raw finding count (~40–54% of
-   their unmatched findings are hallucinations). vanilla's extra findings (67% real) are always
-   worth reading.
+4. Triage the factories' output by the v2 taxonomy (§3.6), not raw finding count: true
+   fabrications are only ~13–16% of emitted findings; the larger triage decision is
+   bug vs important-non-bug (worth reading in a review context) vs waste. vanilla's extra
+   findings are ~85% real and almost always worth reading.
 5. Avoid overengineering via conditional coverage (Compound's risk-driven roster is an
    empirically supported efficiency idea; metareview's fixed 8 lenses always run).
 6. Catch security and architecture early (metareview's Security lens real_rate 0.71;

@@ -1,0 +1,623 @@
+{
+ "run_id": "7219be5cbc75",
+ "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/4",
+ "framework": "compound-realistic",
+ "model": "glm-5.3-background",
+ "effort": "xhigh",
+ "original": {
+  "tp": 5,
+  "fn": 3,
+  "n_real_ungold": 46,
+  "n_hallucination": 27,
+  "adj_p": 0.15625,
+  "incr": 0.9444444444444444
+ },
+ "corrected": {
+  "n_unmatched": 73,
+  "rejudged": 73,
+  "n_bug_ungold": 42,
+  "n_important": 25,
+  "n_true_hallucination": 1,
+  "n_unresolved": 5,
+  "n_hidden_findings_unmatched": 67,
+  "waste_precision": 0.8333,
+  "flips": {
+   "hallucination->bug": 9,
+   "hallucination->hallucination": 1,
+   "hallucination->important_non_bug": 14,
+   "hallucination->unresolved": 3,
+   "real_but_ungold->bug": 33,
+   "real_but_ungold->important_non_bug": 11,
+   "real_but_ungold->unresolved": 2
+  },
+  "judge": "gpt-5.2",
+  "diff_chars": 29064,
+  "wall_s": 35.6
+ },
+ "records": [
+  {
+   "issue_text": "Stored XSS: content imported with cook_method raw_html bypasses sanitization and is rendered raw in embed view and topic pages, allowing script execution from malicious feed content (nothing strips <script>, event handlers, or javascript: URLs; CGI.unescapeHTML even decodes entity-encoded markup)",
+   "source_lens": "compound-persona/correctness",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "Diff introduces a `cook_method :raw_html` path that bypasses the normal cooking/sanitization pipeline: `Post#cook` now returns `raw` directly when `cook_method == raw_html` (app/models/post.rb). `TopicEmbed.import` creates posts with `cook_method: Post.cook_methods[:raw_html]` and stores `raw` from `absolutize_urls(url, contents)` which only rewrites relative `href`/`src` and does not strip `<scri"
+  },
+  {
+   "issue_text": "Attribute injection: url in the 'imported from' footer in topic_embed.rb is not HTML-escaped, so a URL containing a single quote can break out of the href attribute and inject arbitrary attributes/elements",
+   "source_lens": "compound-persona/correctness",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.92,
+   "rationale": "In `TopicEmbed.import`, the code interpolates `url` directly into an HTML string: `\"<a href='#{url}'>#{url}</a>\"` and appends it to `contents`. The only validation is `return unless url =~ /^https?\\:\\/\\//`, which does not prevent a URL containing a single quote or other characters that can break out of the single-quoted `href` attribute and inject arbitrary attributes/elements. This is a verifiabl"
+  },
+  {
+   "issue_text": "topic_embeds rows are never cleaned up when their topic/post is deleted, causing EmbedController#best to raise on stale topic_id (permanent 500 with no recovery path) and TopicEmbed.import update path to call PostRevisor.new(nil)",
+   "source_lens": "compound-persona/correctness",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.66,
+   "rationale": "The diff adds `TopicEmbed` with `belongs_to :topic`/`:post` but no `dependent:` cleanup, no foreign keys, and only an index on `embed_url` (migration `CreateTopicEmbeds`). `EmbedController#best` trusts `TopicEmbed.topic_id_for_embed(embed_url)` and will call `TopicView.new(topic_id, ...)` when a row exists; if the referenced topic/post has been deleted while `topic_embeds` remains, this can raise."
+  },
+  {
+   "issue_text": "Remote fetches in import_remote (topic_embed.rb) and PollFeed use open-uri with no open_timeout/read_timeout and no response size limit, allowing slow or malicious hosts to hang Sidekiq workers and huge responses to exhaust memory",
+   "source_lens": "compound-persona/performance",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "The diff adds remote fetching in two places using `open-uri` without any timeout or size limiting: `Jobs::PollFeed#poll_feed` does `SimpleRSS.parse open(SiteSetting.feed_polling_url)`, and `TopicEmbed.import_remote` does `open(url).read` before parsing with Readability. Both can be invoked from Sidekiq jobs (`PollFeed` is scheduled; `RetrieveTopic`/`TopicRetriever` calls `import_remote`), so a slo"
+  },
+  {
+   "issue_text": "Every uncached embed/best hit enqueues a RetrieveTopic job with no throttle at enqueue time, and each job synchronously runs a full feed poll (Jobs::PollFeed.new.execute) over the network before falling back to the single-page fetch, enabling an unauthenticated attacker to flood the Sidekiq queue and multiply resource usage",
+   "source_lens": "compound-persona/performance",
+   "old_verdict": "hallucination",
+   "new_verdict": "bug",
+   "confidence": 0.78,
+   "rationale": "In EmbedController#best, when TopicEmbed.topic_id_for_embed(embed_url) is nil it enqueues Jobs.enqueue(:retrieve_topic, ..., embed_url: embed_url) with no rate limiting at enqueue time. The job runs TopicRetriever#retrieve, whose throttle (retrieved_recently?) is keyed on the full @embed_url, so an attacker can bypass it by varying paths/query on the same allowed host (invalid_host? only checks ho"
+  },
+  {
+   "issue_text": "The embed loading page (loading.html.erb) reloads every 30 seconds while the response is only cached for 1 minute, so every viewer of a pending embed keeps re-hitting the endpoint and re-enqueuing RetrieveTopic jobs, multiplying load by viewer count",
+   "source_lens": "compound-persona/performance",
+   "old_verdict": "hallucination",
+   "new_verdict": "bug",
+   "confidence": 0.73,
+   "rationale": "In `EmbedController#best`, when no topic is found it always does `Jobs.enqueue(:retrieve_topic, ..., embed_url: embed_url)` and renders `loading` (app/controllers/embed_controller.rb). The loading page JS calls `document.location.reload()` every 30s (app/views/embed/loading.html.erb), so each viewer will repeatedly hit `/embed/best?embed_url=...` and re-enqueue `RetrieveTopic` while the embed is s"
+  },
+  {
+   "issue_text": "Potential N+1 query in embed/best.html.erb where each rendered post accesses post.user.small_avatar_url and post.user.username without eager-loading authors from TopicView",
+   "source_lens": "compound-persona/performance",
+   "old_verdict": "hallucination",
+   "new_verdict": "unresolved",
+   "confidence": 0.42,
+   "rationale": "below CONF_FLOOR (0.42)"
+  },
+  {
+   "issue_text": "The feed_key for caching feed modification state in poll_feed.rb is defined but never used, so the entire feed is re-downloaded and re-processed on every run",
+   "source_lens": "compound-persona/performance",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.86,
+   "rationale": "In app/jobs/scheduled/poll_feed.rb, `feed_key` is defined (builds a Redis key for the feed URL) but is never referenced anywhere in `execute` or `poll_feed`. The job always does `SimpleRSS.parse open(SiteSetting.feed_polling_url)` and iterates all `rss.items` each run, so there is no caching of modification state as implied by `feed_key`, leading to repeated full downloads/processing (an inefficie"
+  },
+  {
+   "issue_text": "PollFeed iterates all feed items with no item cap, causing unbounded per-run work (SHA1 hashing, TopicEmbed lookups, topic creation) especially when also run inline from retrieve jobs",
+   "source_lens": "compound-persona/performance",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.82,
+   "rationale": "In `app/jobs/scheduled/poll_feed.rb`, `poll_feed` does `rss.items.each` with no cap/limit, so per-run work scales with feed size (parsing, `CGI.unescapeHTML`, and `TopicEmbed.import` which does DB lookups and may create/revise posts). Additionally, `lib/topic_retriever.rb` calls `Jobs::PollFeed.new.execute({})` inline from `perform_retrieve` when `feed_polling_enabled?` is true, so a single embed "
+  },
+  {
+   "issue_text": "Stored XSS via raw_html cook method: post.rb returns raw unsanitized HTML when cook_method is :raw_html, and embed/best.html.erb renders it with raw post.cooked, allowing script injection from third-party RSS feed content (which is only CGI.unescapeHTML'd, not sanitized) into the Discourse origin",
+   "source_lens": "compound-persona/performance",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "The diff introduces a `:raw_html` cook method that makes `Post#cook` return `raw` directly (`app/models/post.rb`), bypassing the normal rendering/sanitization pipeline. Imported feed/remote content is saved with `cook_method: Post.cook_methods[:raw_html]` (`TopicEmbed.import` / `import_remote`) and feed content is only `CGI.unescapeHTML(i.content.scrub)` (`Jobs::PollFeed`) with no sanitization. Th"
+  },
+  {
+   "issue_text": "RSS feed path (Jobs::PollFeed#poll_feed -> TopicEmbed.import) passes raw feed content into raw_html cook path with no filtering, allowing script/iframe/onerror attributes in stored cooked content (stored XSS)",
+   "source_lens": "compound-persona/api-contract",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.92,
+   "rationale": "In `Jobs::PollFeed#poll_feed`, the code takes `i.content` from the feed (`content = CGI.unescapeHTML(i.content.scrub)`) and passes it to `TopicEmbed.import` with no sanitization/whitelisting. `TopicEmbed.import` creates the post via `PostCreator` using `cook_method: Post.cook_methods[:raw_html]`, and `Post#cook` explicitly returns `raw` when `cook_method` is `raw_html`, bypassing the normal cookin"
+  },
+  {
+   "issue_text": "Even in the whitelisted path, the readability tag whitelist allows javascript: hrefs since attributes %w[href src] are permitted without scheme validation",
+   "source_lens": "compound-persona/api-contract",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.78,
+   "rationale": "In TopicEmbed.import_remote, Readability::Document is invoked with `attributes: %w[href src]` and no subsequent sanitization or scheme validation is shown. The imported HTML is then stored as a post with `cook_method: Post.cook_methods[:raw_html]`, and `Post#cook` returns `raw` directly for `raw_html`, with the embed view rendering it via `<%= raw post.cooked %>`. This makes it plausible that a `j"
+  },
+  {
+   "issue_text": "topic_embed.rb:14 interpolates feed-controlled url directly into unescaped href='#{url}', allowing single-quote breakout into arbitrary HTML",
+   "source_lens": "compound-persona/api-contract",
+   "old_verdict": "hallucination",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "In `TopicEmbed.import`, the diff adds `contents << ... I18n.t('embed.imported_from', link: \"<a href='#{url}'>#{url}</a>\") ...`. `url` comes from feed items (`Jobs::PollFeed` sets `url = i.link` / `i.id`) and is only checked with `return unless url =~ /^https?\\:\\/\\//`, which does not prevent single quotes. Because imported posts are created with `cook_method: Post.cook_methods[:raw_html]` and `Post"
+  },
+  {
+   "issue_text": "force: true added to already-shipped migration 20131223171005_create_top_topics.rb, causing silent drop of the top_topics table and its data on any re-run",
+   "source_lens": "compound-persona/api-contract",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.87,
+   "rationale": "The diff changes an existing migration `20131223171005_create_top_topics.rb` from `create_table :top_topics do |t|` to `create_table :top_topics, force: true do |t|`. In Rails, `force: true` will drop the table if it already exists before re-creating it, which can silently destroy `top_topics` data on any re-run (e.g., db:setup/db:migrate:reset or if the migration is applied in an environment wher"
+  },
+  {
+   "issue_text": "The new create_topic_embeds migration also uses force: true, which would silently drop the table on any partial re-run",
+   "source_lens": "compound-persona/api-contract",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.8,
+   "rationale": "In db/migrate/20131217174004_create_topic_embeds.rb the new migration explicitly does `create_table :topic_embeds, force: true`, which will drop and recreate the table if the migration is (re)run (e.g., during a failed/partial migration run or schema load), creating a data-loss risk. This is a concrete concern visible in the diff, but not necessarily a functional defect in normal one-time migratio"
+  },
+  {
+   "issue_text": "Disqus import CLI drops the --category method_option with no replacement, breaking existing callers passing -c",
+   "source_lens": "compound-persona/api-contract",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "In lib/tasks/disqus.thor the CLI option `method_option :category, aliases: '-c'` was removed and the associated `category_id` lookup/usage was deleted. The import now calls `TopicEmbed.import_remote(user, t[:link], title: t[:title])` with no category parameter, so existing callers passing `-c/--category` will fail with an unknown option and there is no replacement behavior in the diff."
+  },
+  {
+   "issue_text": "Rewriting Disqus import from PostCreator to TopicEmbed.import_remote silently discards created_at, so imported posts get import-time timestamps with no way to preserve the original",
+   "source_lens": "compound-persona/api-contract",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "In lib/tasks/disqus.thor the import path changed from `PostCreator.new(..., created_at: Date.parse(t[:created_at]), ...)` to `TopicEmbed.import_remote(user, t[:link], title: t[:title])`. `TopicEmbed.import_remote` -> `TopicEmbed.import` -> `PostCreator.new(... )` does not pass any `created_at`, so imported topics/posts will get the current timestamp instead of the Disqus thread's original `t[:crea"
+  },
+  {
+   "issue_text": "SimpleRSS.parse open(...) can raise on network/parse errors with no error handling in the poll feed job",
+   "source_lens": "compound-persona/api-contract",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.82,
+   "rationale": "In `app/jobs/scheduled/poll_feed.rb`, `rss = SimpleRSS.parse open(SiteSetting.feed_polling_url)` has no `rescue` around the network fetch (`open-uri`) or the parse call. Either can raise (e.g., timeout/HTTP error/invalid feed), which will crash the scheduled job; with `sidekiq_options retry: false` this would drop the poll until next schedule without any controlled handling/logging."
+  },
+  {
+   "issue_text": "raw_html early return in Post#cook happens before Plugin::Filter.apply(:after_post_cook, ...), silently skipping the plugin filter contract for raw_html posts",
+   "source_lens": "compound-persona/api-contract",
+   "old_verdict": "hallucination",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.78,
+   "rationale": "In app/models/post.rb, Post#cook now returns `raw` immediately when `cook_method == Post.cook_methods[:raw_html]`, which means `Plugin::Filter.apply(:after_post_cook, ...)` is not invoked for these posts. This is a concrete behavioral change introduced by the diff and could break plugins that rely on the `:after_post_cook` hook running for all posts, even if skipping the rendering pipeline is inte"
+  },
+  {
+   "issue_text": "Non-atomic setnx/expire throttle in TopicRetriever can leave a Redis key with no TTL if the process dies between calls, permanently blocking the embed URL for non-staff users",
+   "source_lens": "compound-persona/api-contract",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "In lib/topic_retriever.rb#retrieved_recently?, the throttle uses two separate Redis calls: `$redis.setnx(retrieved_key, \"1\")` followed by `$redis.expire(retrieved_key, 60)`. If the process crashes or is interrupted after `setnx` succeeds but before `expire` runs, the key can be left without a TTL, causing `setnx` to fail on subsequent requests and permanently treating the URL as \"retrieved recentl"
+  },
+  {
+   "issue_text": "Embed view crashes when post author is deleted because post.user is nil, raising 500 in the /embed/best iframe (post.user.small_avatar_url)",
+   "source_lens": "compound-persona/api-contract",
+   "old_verdict": "hallucination",
+   "new_verdict": "unresolved",
+   "confidence": 0.45,
+   "rationale": "below CONF_FLOOR (0.45)"
+  },
+  {
+   "issue_text": "TopicEmbed.import update path calls PostRevisor.new(post) with no nil check on embed.post, so a destroyed post crashes Jobs::RetrieveTopic",
+   "source_lens": "compound-persona/api-contract",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "unresolved",
+   "confidence": 0.45,
+   "rationale": "below CONF_FLOOR (0.45)"
+  },
+  {
+   "issue_text": "Anonymous /embed/best enqueues a RetrieveTopic Sidekiq job on every cache-miss for an unknown embed_url (user_id: nil), creating an unauthenticated job-enqueue/DoS vector",
+   "source_lens": "compound-persona/api-contract",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.84,
+   "rationale": "In `EmbedController#best`, when `TopicEmbed.topic_id_for_embed(embed_url)` returns nil it unconditionally does `Jobs.enqueue(:retrieve_topic, user_id: current_user.try(:id), embed_url: embed_url)` and renders `loading`. There is no auth check in this controller/route (`get 'embed/best'`) and `current_user` can be nil for anonymous requests, so jobs can be enqueued with `user_id: nil`. While `Topic"
+  },
+  {
+   "issue_text": "Stored XSS: remote HTML scraped via TopicEmbed.import_remote (Readability tag whitelist doesn't sanitize attribute payloads like javascript: hrefs) is persisted and rendered raw with no sanitization on write or render path (Post#cook raw_html + embed view raw post.cooked)",
+   "source_lens": "compound-persona/reliability",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.75,
+   "rationale": "Diff shows remote HTML is fetched (`open(url).read`), reduced to allowed tags/attrs via `Readability::Document` in `TopicEmbed.import_remote`, then persisted as a post with `cook_method: Post.cook_methods[:raw_html]` (bypasses the rendering/sanitization pipeline via `Post#cook` returning `raw`). The embed view renders it with `<%= raw post.cooked %>`. Even with `Readability`'s tag/attribute allowl"
+  },
+  {
+   "issue_text": "HTML injection via embed_url in the 'imported from' footer in TopicEmbed.rb \u2014 url is interpolated directly into a single-quoted href with no escaping, allowing attribute breakout and stored XSS reachable from public /embed/best endpoint",
+   "source_lens": "compound-persona/reliability",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.87,
+   "rationale": "In `TopicEmbed.import`, `url` is interpolated directly into an HTML string: `\"<a href='#{url}'>#{url}</a>\"` and appended to `contents`. The post is created with `cook_method: :raw_html`, and `Post#cook` returns `raw` for this mode, bypassing sanitization/rendering. The embed view renders `raw post.cooked`, so a crafted `url` containing a single quote could break out of the `href` attribute and inj"
+  },
+  {
+   "issue_text": "No error handling or timeouts on any network fetch (PollFeed, import_remote open(url).read, TopicRetriever fetch_http) \u2014 network errors crash the poll with no log-and-continue, and the 60-second Redis throttle key is set before the fetch so transient failures with retry: false never actually retry",
+   "source_lens": "compound-persona/reliability",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.84,
+   "rationale": "The diff adds multiple network fetches via `open(...)` / `open(url).read` (Jobs::PollFeed: `SimpleRSS.parse open(SiteSetting.feed_polling_url)`, TopicEmbed.import_remote: `open(url).read`) with no timeout options and no `rescue`, so transient network/parse errors will raise and abort the job/controller flow. Additionally, `TopicRetriever#retrieved_recently?` sets the Redis throttle key (`setnx` + "
+  },
+  {
+   "issue_text": "On-demand embed request (RetrieveTopic job) runs a full synchronous feed poll via Jobs::PollFeed.new.execute({}) inline, bypassing Sidekiq, causing heavy long-running work per page-load and racing the hourly scheduled poll",
+   "source_lens": "compound-persona/reliability",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.74,
+   "rationale": "In `lib/topic_retriever.rb#perform_retrieve`, when `SiteSetting.feed_polling_enabled?` is true it calls `Jobs::PollFeed.new.execute({})` inline (not `Jobs.enqueue`). `Jobs::PollFeed#poll_feed` does network I/O (`open(SiteSetting.feed_polling_url)`) and iterates all `rss.items` importing posts, so this can be heavy work executed synchronously inside the on-demand retrieval path (e.g., via `Jobs::Re"
+  },
+  {
+   "issue_text": "Infinite reload/retry loop with no terminal failure state \u2014 if retrieval permanently fails the loading page reloads every 30 seconds indefinitely, each reload enqueues another RetrieveTopic job, and the throttle is bypassed entirely for staff (no_throttle: user.staff?) causing unbounded remote fetches",
+   "source_lens": "compound-persona/reliability",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.86,
+   "rationale": "The diff adds a loading page that unconditionally reloads every 30s (`app/views/embed/loading.html.erb`), and `EmbedController#best` enqueues `Jobs::RetrieveTopic` whenever `TopicEmbed.topic_id_for_embed(embed_url)` is nil. There is no terminal failure state if retrieval never creates a `TopicEmbed`, so reloads will continue indefinitely and keep enqueuing jobs. Additionally, `Jobs::RetrieveTopic`"
+  },
+  {
+   "issue_text": "Referer-only guard with no rate limiting on the /embed/best enqueuing endpoint \u2014 forged Referer plus arbitrary embed_url enables request amplification against the job queue and embedded host; throttle is per-URL so varying the path bypasses it",
+   "source_lens": "compound-persona/reliability",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.82,
+   "rationale": "In `EmbedController#best`, when no `topic_id` exists it unconditionally `Jobs.enqueue(:retrieve_topic, ..., embed_url: embed_url)` and only access control is `ensure_embeddable`, which verifies `request.referer` host equals `SiteSetting.embeddable_host`\u2014a spoofable header. There is no controller-level throttling, and the later throttle in `TopicRetriever#retrieved_recently?` is keyed by the full `"
+  },
+  {
+   "issue_text": "force: true added to create_table in already-shipped migrations (create_top_topics.rb and create_topic_embeds.rb) silently drops the table and its data if it already exists or the migration re-runs",
+   "source_lens": "compound-persona/reliability",
+   "old_verdict": "hallucination",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.72,
+   "rationale": "The diff changes an existing migration `db/migrate/20131223171005_create_top_topics.rb` to `create_table :top_topics, force: true`, which in Rails will drop and recreate the table if it already exists, risking silent data loss in non-standard scenarios (e.g., running the migration against a DB where the table already exists). However, `create_topic_embeds.rb` is a new migration in this PR (not \u201cal"
+  },
+  {
+   "issue_text": "Referer validation in EmbedController is brittle with no fallback when Referer is absent or stripped (HTTPS-to-HTTP, referrer policy, host casing mismatch like EvilTrout.com vs eviltrout.com) \u2014 embedding breaks entirely with no graceful error state",
+   "source_lens": "compound-persona/reliability",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.78,
+   "rationale": "The diff shows `EmbedController#ensure_embeddable` hard-requires a Referer host match: `URI(request.referer || '').host != SiteSetting.embeddable_host` raises `Discourse::InvalidAccess` when Referer is missing/blank or doesn\u2019t match exactly, and the controller spec explicitly asserts failure with no referer. This is a real compatibility/design concern (embedding can fail under referrer-stripping p"
+  },
+  {
+   "issue_text": "Origin check in embed.js uses substring matching (discourseUrl.indexOf(e.origin)) instead of exact origin parsing/comparison, breaking resize on scheme/port mismatches and misconfigured discourseUrl",
+   "source_lens": "compound-persona/reliability",
+   "old_verdict": "hallucination",
+   "new_verdict": "bug",
+   "confidence": 0.86,
+   "rationale": "In new `app/assets/javascripts/embed.js`, the message origin validation is `if (discourseUrl.indexOf(e.origin) === -1) { return; }`, which is substring-based and not an exact origin comparison. This can reject legitimate resize messages when `discourseUrl` differs by scheme/port/trailing slash from `e.origin` (breaking resizing), and it is also an unsafe validation pattern compared to parsing and "
+  },
+  {
+   "issue_text": "Test at spec/controllers/embed_controller_spec.rb:44-48 asserts TopicRetriever is instantiated and retrieve is called, but EmbedController#best enqueues a background job and never instantiates TopicRetriever directly, so the expectation cannot be satisfied by the real code (test verifies mocks, not the job enqueue/argument passing/fallback render behavior)",
+   "source_lens": "compound-persona/testing",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.95,
+   "rationale": "EmbedController#best does not instantiate TopicRetriever; when TopicEmbed.topic_id_for_embed returns nil it calls Jobs.enqueue(:retrieve_topic, user_id: ..., embed_url: ...) and renders 'loading'. However spec/controllers/embed_controller_spec.rb expects TopicRetriever.new and retriever.retrieve to be called in that case, so the expectation cannot be satisfied by the real code and the test would f"
+  },
+  {
+   "issue_text": "Post#cook returning raw verbatim and skipping Plugin::Filter.apply(:after_post_cook) for raw_html posts has no direct test coverage \u2014 no spec verifies plugin filters are bypassed, the markdown pipeline (sanitization, onebox) is skipped, or how cook_method interacts with PostRevisor on re-import",
+   "source_lens": "compound-persona/testing",
+   "old_verdict": "hallucination",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.86,
+   "rationale": "Diff adds `Post.cook_methods` and changes `Post#cook` to `return raw if cook_method == Post.cook_methods[:raw_html]`, which bypasses `post_analyzer.cook(*args)` and `Plugin::Filter.apply(:after_post_cook, ...)`. Existing specs (`spec/models/topic_embed_spec.rb`) only assert `post.cooked == post.raw` for raw_html and that updates via `TopicEmbed.import` change content, but they do not verify that p"
+  },
+  {
+   "issue_text": "The only positive poll test (spec/jobs/poll_feed_spec.rb:33-38) mocks away all real feed logic: SimpleRSS.parse/open-uri fetching, the i.link/i.id fallback, CGI.unescapeHTML(i.content.scrub) which will raise NoMethodError on items without content, and the TopicEmbed.import delegation are all untested",
+   "source_lens": "compound-persona/testing",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.85,
+   "rationale": "In spec/jobs/poll_feed_spec.rb, the only \u201cpositive\u201d test asserts that execute delegates to poll_feed when the SiteSetting gates are satisfied, but it never exercises Jobs::PollFeed#poll_feed itself. The diff shows poll_feed contains nontrivial logic (open-uri fetch + SimpleRSS.parse, per-item url selection via i.link/i.id, content processing via CGI.unescapeHTML(i.content.scrub), and delegation to"
+  },
+  {
+   "issue_text": "New job app/jobs/regular/retrieve_topic.rb has zero spec coverage \u2014 untested behavior includes Discourse::InvalidParameters on missing embed_url, user lookup with stale/absent user_id, and the no_throttle: user.try(:staff?) security-relevant throttle bypass",
+   "source_lens": "compound-persona/testing",
+   "old_verdict": "hallucination",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.88,
+   "rationale": "The diff adds a new regular job `app/jobs/regular/retrieve_topic.rb` with nontrivial logic (raises `Discourse::InvalidParameters` when `args[:embed_url]` is missing, looks up `User` by `args[:user_id]`, and passes `no_throttle: user.try(:staff?)` into `TopicRetriever`). The diff also adds several new specs (for `TopicRetriever`, `EmbedController`, `PollFeed`, `TopicEmbed`) but none covering `Jobs:"
+  },
+  {
+   "issue_text": "Redis throttle logic in topic_retriever is never tested because retrieved_recently? is stubbed in both directions \u2014 the $redis.setnx/expire 60-second throttle is unverified, including the failure mode where setnx succeeds but expire never runs (permanent throttle key), and invalid_host?'s URI::InvalidURIError rescue path is not actually tested",
+   "source_lens": "compound-persona/testing",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.78,
+   "rationale": "In `spec/components/topic_retriever_spec.rb`, the \u201cvalid host\u201d examples stub `retrieved_recently?` to return both `false` and `true`, so the real `$redis.setnx`/`$redis.expire(60)` throttle logic in `TopicRetriever#retrieved_recently?` is not exercised or verified. However, the finding\u2019s claim that the `URI::InvalidURIError` rescue path in `invalid_host?` is untested is contradicted by the spec `i"
+  },
+  {
+   "issue_text": "TopicEmbed.import_remote (readability extraction used by the retriever and disqus thor task) has no test at all, and absolutize_urls only has happy-path coverage \u2014 missing tests for protocol-relative URLs (//cdn.example.com/x matches start_with?('/') but produces broken http://host//cdn... href), non-standard ports, and https URLs",
+   "source_lens": "compound-persona/testing",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.74,
+   "rationale": "The diff adds nontrivial logic in `TopicEmbed.import_remote` (uses `ruby-readability` + `open(url).read`) and `TopicEmbed.absolutize_urls`, but the new specs only cover `.import` happy path and do not exercise `.import_remote` at all. The finding\u2019s specific edge-case concern about protocol-relative URLs is grounded in the code: `href.start_with?('/')` will also match `//cdn...` and the method will"
+  },
+  {
+   "issue_text": "Referer-mismatch security check in ensure_embeddable has no test: no test for a referer from a different host than embeddable_host, no test that prefix-matching tricks like http://eviltrout.com.evil.com/ are rejected, and no test that the URI::InvalidURIError rescue path returns an error rather than 500ing on a garbage referer",
+   "source_lens": "compound-persona/testing",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.72,
+   "rationale": "EmbedController#ensure_embeddable adds new security logic (reject when URI(request.referer).host != SiteSetting.embeddable_host; rescue URI::InvalidURIError and raise InvalidAccess). The new controller spec covers missing referer and missing host, but does not cover a referer from a different host nor the InvalidURIError path. The finding\u2019s \u201cprefix-matching tricks\u201d point is less applicable here be"
+  },
+  {
+   "issue_text": "Update path assertions in topic_embed_spec are too weak: the test only checks cooked =~ /new contents/, doesn't assert cook_method == raw_html and cooked == raw still hold after PostRevisor (i.e., the revisor doesn't re-run the markdown pipeline and mangle raw HTML), and there's no idempotency test for importing unchanged content (the sha1-equality short circuit hit on every hourly PollFeed run)",
+   "source_lens": "compound-persona/testing",
+   "old_verdict": "hallucination",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.78,
+   "rationale": "In spec/models/topic_embed_spec.rb, the update-path assertion only checks `post.cooked =~ /new contents/` after calling `TopicEmbed.import` a second time. Given the update path goes through `PostRevisor#revise!` (TopicEmbed#import, else-branch) and does not explicitly preserve/reassert `cook_method`, it would be easy for the revise pipeline to re-cook/mangle raw HTML without the test catching it. "
+  },
+  {
+   "issue_text": "spec/jobs/poll_feed_spec.rb:2 has a copy-paste error: require_dependency 'jobs/regular/process_post' instead of the poll feed job, documenting the wrong dependency; similarly topic_retriever_spec.rb requires 'topic_retriever' as a dependency while retrieve_topic.rb relies on auto-requiring it",
+   "source_lens": "compound-persona/testing",
+   "old_verdict": "hallucination",
+   "new_verdict": "bug",
+   "confidence": 0.78,
+   "rationale": "In spec/jobs/poll_feed_spec.rb the diff shows `require_dependency 'jobs/regular/process_post'`, but the PR adds the PollFeed job at app/jobs/scheduled/poll_feed.rb and the spec tests `Jobs::PollFeed`; this is a clear copy/paste mistake in the test dependency. However, the finding's second claim is not supported: app/jobs/regular/retrieve_topic.rb explicitly has `require_dependency 'topic_retriever"
+  },
+  {
+   "issue_text": "Assertions in spec/controllers/embed_controller_spec.rb:34-38 are hidden in an after block, so response.should be_success and header assertions run even when the example body fails, producing confusing double-failure output",
+   "source_lens": "compound-persona/testing",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.9,
+   "rationale": "In spec/controllers/embed_controller_spec.rb within the \"success\" context, an `after do` block contains `response.should be_success` and an `X-Frame-Options` header assertion. RSpec `after` hooks run even when an example fails, so these assertions can trigger additional failures on top of the original one, leading to confusing double-failure output. This is a test-structure concern visible in the "
+  },
+  {
+   "issue_text": "Raw-HTML cook path in app/models/post.rb:131-133 skips the Plugin::Filter.apply(:after_post_cook) pipeline entirely, silently breaking plugins that hook the cooking pipeline",
+   "source_lens": "compound-persona/maintainability",
+   "old_verdict": "hallucination",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.78,
+   "rationale": "In app/models/post.rb, the new early return in `cook` (`return raw if cook_method == Post.cook_methods[:raw_html]`) bypasses the subsequent `Plugin::Filter.apply(:after_post_cook, ...)` call entirely. That means any plugin relying on the `:after_post_cook` hook will not run for `raw_html` posts (e.g., RSS-imported content), which is a concrete behavioral change introduced by this diff even if inte"
+  },
+  {
+   "issue_text": "Raw-HTML cook path returns unsanitized external content as cooked HTML, which embed/best.html.erb renders with raw post.cooked, enabling XSS from the embedded host's content",
+   "source_lens": "compound-persona/maintainability",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.85,
+   "rationale": "The diff adds a `raw_html` cook path: `Post#cook` returns `raw` directly when `cook_method == Post.cook_methods[:raw_html]` (app/models/post.rb). `TopicEmbed.import` creates posts with `cook_method: :raw_html` and `raw` set to externally-sourced HTML (`absolutize_urls(url, contents)`), with no sanitization (app/models/topic_embed.rb). The embed view renders it with `<%= raw post.cooked %>` (app/vi"
+  },
+  {
+   "issue_text": "TopicRetriever#fetch_http crashes with NoMethodError on nil when SiteSetting.embed_by_username is blank but embeddable_host is set (lib/topic_retriever.rb:47)",
+   "source_lens": "compound-persona/maintainability",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "In lib/topic_retriever.rb#fetch_http, it does `SiteSetting.embed_by_username.downcase` without checking presence. If `embed_by_username` is nil/blank, this will raise NoMethodError. `retrieve`/`perform_retrieve` only gate on `embeddable_host` and throttling; they do not require `embed_by_username` to be set before calling `fetch_http`, so the crash is reachable."
+  },
+  {
+   "issue_text": "Jobs::PollFeed is invoked synchronously via Jobs::PollFeed.new.execute({}) from the request-triggered retriever path, causing the entire feed to be downloaded and imported inline on the embed request path (lib/topic_retriever.rb:40)",
+   "source_lens": "compound-persona/maintainability",
+   "old_verdict": "hallucination",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.83,
+   "rationale": "Verified: lib/topic_retriever.rb#perform_retrieve calls `Jobs::PollFeed.new.execute({})` when `SiteSetting.feed_polling_enabled?` is true, before falling back to `fetch_http`. Since TopicRetriever is triggered from EmbedController#best via `Jobs.enqueue(:retrieve_topic, ...)` (async) but could also be called in other contexts, this introduces a substantive risk: `PollFeed#poll_feed` performs `Simp"
+  },
+  {
+   "issue_text": "PollFeed and the retriever re-evaluate guard conditions inconsistently (PollFeed checks feed_polling_url/embed_by_username, the retriever doesn't), and the two entry points can race on TopicEmbed.import",
+   "source_lens": "compound-persona/maintainability",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.74,
+   "rationale": "TopicRetriever#fetch_http calls `SiteSetting.embed_by_username.downcase` without checking presence (lib/topic_retriever.rb), so if `embed_by_username` is unset it will raise `NoMethodError`, unlike Jobs::PollFeed#execute which guards on `.present?`. Also, TopicEmbed.import does a read-then-create on `topic_embeds` (`where(...).first` then `create!`) with only a unique index on `embed_url`, so conc"
+  },
+  {
+   "issue_text": "Unescaped URL interpolated into single-quoted HTML attribute in the imported-from footer (app/models/topic_embed.rb:14), allowing attribute breakout since URL is only validated by /^https?::////",
+   "source_lens": "compound-persona/maintainability",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.83,
+   "rationale": "In TopicEmbed.import, the footer appends HTML containing \"<a href='#{url}'>#{url}</a>\" (single-quoted href) where `url` is only gated by `return unless url =~ /^https?\\:\\/\\//`. That regex ensures an http(s) prefix but does not prevent quotes or other characters that can break out of the attribute and inject HTML/JS. This is amplified because imported posts use `cook_method: Post.cook_methods[:raw_"
+  },
+  {
+   "issue_text": "Check-then-create race on topic_embeds.embed_url unique index in TopicEmbed.import (topic_embed.rb:19-31): concurrent workers race and the loser raises on the unique index with no rescue, and PollFeed sets retry: false so the failure is silent",
+   "source_lens": "compound-persona/maintainability",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.87,
+   "rationale": "In TopicEmbed.import, it does a check-then-act: `embed = TopicEmbed.where(embed_url: url).first` then, if blank, creates a post and `TopicEmbed.create!` inside a transaction. With the unique index on `topic_embeds.embed_url` (migration adds `add_index :topic_embeds, :embed_url, unique: true`), concurrent workers can both see no row and then race to `create!`, causing the loser to raise (e.g., Reco"
+  },
+  {
+   "issue_text": "Modified already-shipped migration 20131223171005_create_top_topics.rb adds force: true, which drops and recreates the top_topics table in environments where the migration hasn't run, silently discarding data",
+   "source_lens": "compound-persona/maintainability",
+   "old_verdict": "hallucination",
+   "new_verdict": "bug",
+   "confidence": 0.55,
+   "rationale": "The diff changes an existing migration `20131223171005_create_top_topics.rb` to `create_table :top_topics, force: true`. In Rails, `force: true` will drop the table if it already exists before recreating it, which can silently destroy any existing `top_topics` data when this migration is executed in an environment where the table exists (even if the migration hasn\u2019t previously run there)."
+  },
+  {
+   "issue_text": "topic_embeds migration 20131217174004 has force: true added, a re-run foot-gun",
+   "source_lens": "compound-persona/maintainability",
+   "old_verdict": "hallucination",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.78,
+   "rationale": "The migration `db/migrate/20131217174004_create_topic_embeds.rb` creates the table with `create_table :topic_embeds, force: true`, which will drop/recreate the table if it already exists. While migrations normally run once, this is a real, specific risk (data loss/foot-gun) if the migration is re-run in any way (e.g., manual invocation, schema load edge cases)."
+  },
+  {
+   "issue_text": "Editing historical migrations is a maintainability hazard, including whitespace-only churn in migrate_word_counts.rb unrelated to this PR",
+   "source_lens": "compound-persona/maintainability",
+   "old_verdict": "hallucination",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.86,
+   "rationale": "The diff edits existing (already-numbered) migrations: `db/migrate/20131210181901_migrate_word_counts.rb` has whitespace-only churn (and adds/removes newline), and `db/migrate/20131223171005_create_top_topics.rb` changes the migration behavior by adding `force: true` to `create_table`. Modifying historical migrations can cause divergence for environments that have already run them and is a maintai"
+  },
+  {
+   "issue_text": "String#scrub in poll_feed.rb:38 requires Ruby 2.1+, an implicit runtime constraint not declared anywhere",
+   "source_lens": "compound-persona/maintainability",
+   "old_verdict": "hallucination",
+   "new_verdict": "bug",
+   "confidence": 0.62,
+   "rationale": "In app/jobs/scheduled/poll_feed.rb the new code calls `i.content.scrub` before importing (`content = CGI.unescapeHTML(i.content.scrub)`). `String#scrub` is not available on older Ruby versions, so if this project runs on Ruby < 2.1 this will raise `NoMethodError` at runtime. The diff does not add any Ruby version constraint or fallback implementation."
+  },
+  {
+   "issue_text": "i.content is nil for Atom entries without a <content> element, causing NoMethodError that kills the whole poll run with retry: false (poll_feed.rb:38)",
+   "source_lens": "compound-persona/maintainability",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "unresolved",
+   "confidence": 0.45,
+   "rationale": "below CONF_FLOOR (0.45)"
+  },
+  {
+   "issue_text": "Dead code: unused feed_key in poll_feed.rb:19-21, defined but never referenced, suggesting unimplemented Last-Modified/conditional polling",
+   "source_lens": "compound-persona/maintainability",
+   "old_verdict": "hallucination",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.84,
+   "rationale": "In app/jobs/scheduled/poll_feed.rb a `feed_key` method is added (lines ~19-21) that computes a Redis key based on the feed URL, but `feed_key` is never referenced in `execute` or `poll_feed`, nor anywhere else in the shown diff. This is verifiable unused/dead code and suggests an unfinished conditional polling/Last-Modified tracking implementation, but it does not by itself break functionality."
+  },
+  {
+   "issue_text": "God-method TopicEmbed.import (topic_embed.rb:8-33) does five jobs (URL validation, footer injection, hashing, topic/post creation, revision) \u2014 service-layer logic living on an AR model with hidden side effects including in-place mutation of the caller's contents string",
+   "source_lens": "compound-persona/maintainability",
+   "old_verdict": "hallucination",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.88,
+   "rationale": "In `app/models/topic_embed.rb`, `.import` clearly bundles multiple responsibilities: validates URL (`return unless url =~ ...`), mutates the caller-provided `contents` in place via `contents << ...` footer injection, computes a hash (`Digest::SHA1.hexdigest(contents)`), conditionally creates a topic/post/embed within a transaction, and revises an existing post via `PostRevisor` and `update_column`"
+  },
+  {
+   "issue_text": "Dead require_dependency 'email/sender' in app/jobs/regular/retrieve_topic.rb, copy-pasted from a mail job with nothing in this job sending email",
+   "source_lens": "compound-persona/maintainability",
+   "old_verdict": "hallucination",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.86,
+   "rationale": "In app/jobs/regular/retrieve_topic.rb the job has `require_dependency 'email/sender'` but the implementation only looks up an optional user and calls `TopicRetriever.new(...).retrieve`; there is no reference to Email::Sender or any email-sending behavior in this job. The require appears unused and adds unnecessary coupling/load time."
+  },
+  {
+   "issue_text": "Duplicated embed-user lookup (User.where(username_lower: SiteSetting.embed_by_username.downcase).first) in poll_feed.rb:27 and topic_retriever.rb:47 with divergent nil-guarding",
+   "source_lens": "compound-persona/maintainability",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.84,
+   "rationale": "The lookup is duplicated, and nil-guarding is actually divergent in behavior: Jobs::PollFeed#execute only calls poll_feed if SiteSetting.embed_by_username.present?, so poll_feed's `SiteSetting.embed_by_username.downcase` is safe. In contrast, TopicRetriever#fetch_http unconditionally does `SiteSetting.embed_by_username.downcase`, which will raise if embed_by_username is nil/blank, before it can re"
+  },
+  {
+   "issue_text": "Leaky indirect contract: RetrieveTopic job receives user_id solely to re-fetch the user and test staff? for the throttle flag (embed_controller.rb:13, retrieve_topic.rb:16-18); throttle policy should be decided at enqueue time",
+   "source_lens": "compound-persona/maintainability",
+   "old_verdict": "hallucination",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.83,
+   "rationale": "The diff shows EmbedController enqueues Jobs::RetrieveTopic with user_id (app/controllers/embed_controller.rb: best) and RetrieveTopic re-fetches the User solely to compute `no_throttle: user.try(:staff?)` for TopicRetriever (app/jobs/regular/retrieve_topic.rb). This creates a coupling/indirect contract (job args must include user_id and user must still exist) to decide throttling at execution tim"
+  },
+  {
+   "issue_text": "current_user will essentially always be nil for embeds rendered in a cross-origin iframe, making the no_throttle staff path in RetrieveTopic effectively unreachable dead logic",
+   "source_lens": "compound-persona/maintainability",
+   "old_verdict": "hallucination",
+   "new_verdict": "unresolved",
+   "confidence": 0.4,
+   "rationale": "below CONF_FLOOR (0.40)"
+  },
+  {
+   "issue_text": "Unused locale key embed.permalink defined in config/locales/server.en.yml but never referenced by any view",
+   "source_lens": "compound-persona/maintainability",
+   "old_verdict": "hallucination",
+   "new_verdict": "hallucination",
+   "confidence": 0.93,
+   "rationale": "The diff adds `embed.permalink` under `config/locales/server.en.yml`, but none of the added/modified code references `I18n.t('embed.permalink')` (views use `embed.title`, `embed.start_discussion`, `embed.continue`, `embed.loading`, and model uses `embed.imported_from`). However, an unused locale key is a minor cleanup/style issue rather than a verifiable functional defect or substantive review con"
+  },
+  {
+   "issue_text": "`force: true` on `create_table :topic_embeds` will silently drop an existing topic_embeds table before recreating it, destroying embed\u2192topic mappings and content_sha1 bookkeeping with no rollback or warning",
+   "source_lens": "compound-persona/data-migration",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.78,
+   "rationale": "The new migration `20131217174004_create_topic_embeds.rb` uses `create_table :topic_embeds, force: true`, which in Rails will drop the `topic_embeds` table if it already exists and recreate it. That would destroy existing `embed_url`\u2192`topic_id` mappings and `content_sha1` data with no warning; the risk is directly present in the diff via the `force: true` option."
+  },
+  {
+   "issue_text": "`force: true` added to already-committed migration CreateTopTopics is destructive DDL that drops the top_topics table and all its aggregated ranking data if the migration re-runs while the table exists",
+   "source_lens": "compound-persona/data-migration",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.72,
+   "rationale": "The diff modifies an existing migration `db/migrate/20131223171005_create_top_topics.rb`, changing `create_table :top_topics` to `create_table :top_topics, force: true`. In Rails, `force: true` will drop the table if it already exists before recreating it, which is destructive and would delete any existing `top_topics` data if this migration is ever re-run (e.g., rollback/redo, partial migration s"
+  },
+  {
+   "issue_text": "Editing the already-shipped migration CreateTopTopics violates migration immutability, causing environments that applied version 20131223171005 to diverge in behavior and making db:schema:load vs db:migrate paths inconsistent",
+   "source_lens": "compound-persona/data-migration",
+   "old_verdict": "hallucination",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.86,
+   "rationale": "The diff modifies an existing migration `db/migrate/20131223171005_create_top_topics.rb`, changing `create_table :top_topics` to `create_table :top_topics, force: true`. Editing an already-merged/shipped migration is an immutability concern and can lead to divergence between environments depending on when they ran that migration; additionally `force: true` would drop/recreate the table if it alrea"
+  },
+  {
+   "issue_text": "Raw HTML import path (Post.rb cook_method raw_html combined with embed/best.html.erb rendering raw post.cooked) bypasses the sanitizer and after_post_cook filters, resulting in stored XSS on the Discourse origin for embed visitors",
+   "source_lens": "compound-persona/data-migration",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "The diff introduces a `cook_method` enum with `:raw_html` and changes `Post#cook` to `return raw if cook_method == Post.cook_methods[:raw_html]`, explicitly bypassing the normal cooking/sanitization pipeline and `Plugin::Filter.apply(:after_post_cook, ...)`. `TopicEmbed.import` creates posts with `cook_method: Post.cook_methods[:raw_html]` and `raw: absolutize_urls(url, contents)` where `contents`"
+  },
+  {
+   "issue_text": "topic_embeds lacks index/FK on topic_id and post_id, so deleted topics leave orphaned embed rows that cause EmbedController#best to raise on a missing topic instead of gracefully falling back",
+   "source_lens": "compound-persona/data-migration",
+   "old_verdict": "hallucination",
+   "new_verdict": "bug",
+   "confidence": 0.74,
+   "rationale": "The migration `CreateTopicEmbeds` only adds a unique index on `embed_url` and no FK constraints for `topic_id`/`post_id`. The model `TopicEmbed` has plain `belongs_to :topic, :post` with no dependent cleanup, and `EmbedController#best` uses `TopicEmbed.topic_id_for_embed` to pluck a `topic_id` and unconditionally instantiates `TopicView.new(topic_id, ...)` when present. If a topic/post is deleted "
+  },
+  {
+   "issue_text": "embed_url is stored and compared without normalization, so scheme/trailing-slash variants create duplicate topics for the same article and cause lookups to miss existing embeds and re-enqueue retrieval forever",
+   "source_lens": "compound-persona/data-migration",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.82,
+   "rationale": "The diff stores `embed_url` verbatim and performs exact-match lookups: `TopicEmbed.where(embed_url: url)` in `TopicEmbed.import`, `TopicEmbed.topic_id_for_embed(embed_url)` used by `EmbedController#best`, and `TopicRetriever` checks `TopicEmbed.where(embed_url: @embed_url).exists?`. There is no normalization/canonicalization (scheme, trailing slash, etc.), so variants like `http` vs `https` or `/p"
+  },
+  {
+   "issue_text": "cook_method column default of 1 hardcodes the magic Enum position of Post.cook_methods[:regular] in the schema, so reordering the enum would silently change the meaning of existing rows",
+   "source_lens": "compound-persona/data-migration",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.78,
+   "rationale": "The migration `AddCookMethodToPosts` adds `cook_method` as an integer with `default: 1` (db/migrate/20131219203905_add_cook_method_to_posts.rb). In `Post.cook_methods`, the mapping is defined by `Enum.new(:regular, :raw_html)` (app/models/post.rb). This means the stored integer values depend on the enum\u2019s ordering, so reordering/inserting enum entries later could change the meaning of existing row"
+  },
+  {
+   "issue_text": "The raw_html cook method in post.rb:131 bypasses the entire cooking/sanitization pipeline with no downstream sanitization",
+   "source_lens": "compound-persona/adversarial",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "The diff adds `Post.cook_methods[:raw_html]` and in `Post#cook` returns `raw` immediately when `cook_method` is `raw_html` (app/models/post.rb), explicitly skipping `post_analyzer.cook` and the `Plugin::Filter` cooking pipeline. New code paths set this mode for imported content (`TopicEmbed.import` passes `cook_method: Post.cook_methods[:raw_html]` to `PostCreator`), and feed import uses `CGI.unes"
+  },
+  {
+   "issue_text": "PollFeed passes unescaped feed content (i.content) straight to TopicEmbed.import with no tag/attribute whitelist, allowing script, iframe, onerror handlers, or javascript: hrefs to be stored and rendered verbatim",
+   "source_lens": "compound-persona/adversarial",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.92,
+   "rationale": "In Jobs::PollFeed#poll_feed, the code sets `content = CGI.unescapeHTML(i.content.scrub)` and passes it directly to `TopicEmbed.import(...)` with no sanitization/whitelist. In TopicEmbed.import, the post is created with `cook_method: Post.cook_methods[:raw_html]`, and Post#cook returns `raw` for `:raw_html`, bypassing the normal cooking/sanitization pipeline. The embed view then renders with `<%= r"
+  },
+  {
+   "issue_text": "embed/best.html.erb renders post.cooked with raw output, so stored malicious HTML from feeds is rendered unsanitized",
+   "source_lens": "compound-persona/adversarial",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "The diff explicitly introduces a `:raw_html` cook method (`Post.cook` returns `raw` when `cook_method == Post.cook_methods[:raw_html]`) and uses it for imported content (`TopicEmbed.import` passes `cook_method: Post.cook_methods[:raw_html]` with `raw: absolutize_urls(url, contents)` and no sanitization). `embed/best.html.erb` then renders that content with `<%= raw post.cooked %>`, so arbitrary HT"
+  },
+  {
+   "issue_text": "The readability path (import_remote) whitelists a[href] but does not sanitize URL schemes, so javascript: hrefs survive; absolutize_urls only rewrites hrefs starting with / and does not sanitize schemes",
+   "source_lens": "compound-persona/adversarial",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "In `TopicEmbed.import_remote`, `Readability::Document.new(open(url).read, ..., attributes: %w[href src])` preserves `href`/`src` values from remote HTML, and `TopicEmbed.import` stores `raw: absolutize_urls(url, contents)` with `cook_method: Post.cook_methods[:raw_html]`. `Post#cook` returns `raw` directly for `raw_html`, bypassing the normal cooking/sanitization pipeline. `absolutize_urls` only r"
+  },
+  {
+   "issue_text": "/embed/best is served from the forum's own origin with X-Frame-Options set to ALLOWALL, so injected scripts execute with full access on the forum origin",
+   "source_lens": "compound-persona/adversarial",
+   "old_verdict": "hallucination",
+   "new_verdict": "bug",
+   "confidence": 0.86,
+   "rationale": "The diff adds /embed/best (routes.rb) and explicitly sets `response.headers['X-Frame-Options'] = \"ALLOWALL\"` in `EmbedController#ensure_embeddable`, making the page frameable. That page renders posts with `<%= raw post.cooked %>` (best.html.erb). Additionally, imported feed/article content is stored/served as `cook_method == :raw_html` (Post#cook returns `raw` directly) and `TopicEmbed.import`/`Jo"
+  }
+ ]
+}

@@ -1,0 +1,91 @@
+{
+ "run_id": "9a700a2818c2",
+ "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/4",
+ "framework": "compound-realistic",
+ "model": "claude-sonnet-5",
+ "effort": "high",
+ "original": {
+  "tp": 1,
+  "fn": 7,
+  "n_real_ungold": 4,
+  "n_hallucination": 3,
+  "adj_p": 0.25,
+  "incr": 0.4166666666666667
+ },
+ "corrected": {
+  "n_unmatched": 7,
+  "rejudged": 7,
+  "n_bug_ungold": 5,
+  "n_important": 0,
+  "n_true_hallucination": 2,
+  "n_unresolved": 0,
+  "n_hidden_findings_unmatched": 5,
+  "waste_precision": 0.3333,
+  "flips": {
+   "hallucination->bug": 1,
+   "hallucination->hallucination": 2,
+   "real_but_ungold->bug": 4
+  },
+  "judge": "gpt-5.2",
+  "diff_chars": 29064,
+  "wall_s": 11.0
+ },
+ "records": [
+  {
+   "issue_text": "- `app/models/post.rb:130-137` \u2014 when `cook_method == raw_html`, `Post#cook` returns `raw` verbatim, completely bypassing the normal cooking/sanitization pipeline (`post_analyzer.cook`).",
+   "source_lens": "compound-realistic",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.86,
+   "rationale": "The diff explicitly adds `Post.cook_methods` with `:raw_html` and changes `Post#cook` to `return raw if cook_method == Post.cook_methods[:raw_html]`, bypassing `post_analyzer.cook` (the normal cooking/sanitization pipeline). New import paths set this mode (`TopicEmbed.import` passes `cook_method: Post.cook_methods[:raw_html]`) while ingesting remote/RSS content (`PollFeed` uses `i.content` and `To"
+  },
+  {
+   "issue_text": "- `app/views/embed/best.html.erb:16` \u2014 `<%= raw post.cooked %>` renders that unsanitized content directly, without escaping, to any anonymous visitor of `/embed/best`.",
+   "source_lens": "compound-realistic",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "The view `app/views/embed/best.html.erb` renders `<%= raw post.cooked %>` (line shown in diff) without escaping. This diff also introduces a bypass of the normal cooking/sanitization pipeline: `Post#cook` returns `raw` when `cook_method == Post.cook_methods[:raw_html]`, and `TopicEmbed.import` creates posts with `cook_method: :raw_html` using HTML pulled from RSS (`i.content`) or `ruby-readability"
+  },
+  {
+   "issue_text": "- `app/jobs/scheduled/poll_feed.rb:36-39` \u2014 RSS feed item content (`i.content`) is unescaped via `CGI.unescapeHTML` and handed straight to `TopicEmbed.import` with **no tag/attribute allowlist at all** (unlike `import_remote`, which at least constrains Readability's output to a tag/attribute list). Any `<script>` in a polled feed item becomes a stored, rendered payload.",
+   "source_lens": "compound-realistic",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.93,
+   "rationale": "In `app/jobs/scheduled/poll_feed.rb`, `content = CGI.unescapeHTML(i.content.scrub)` is passed directly to `TopicEmbed.import`. `TopicEmbed.import` creates a post with `cook_method: Post.cook_methods[:raw_html]` and `Post#cook` returns `raw` unchanged for `:raw_html`, so any HTML from the feed (including `<script>`/event handlers) is stored and later rendered (e.g. `app/views/embed/best.html.erb` u"
+  },
+  {
+   "issue_text": "- `app/models/topic_embed.rb:13` \u2014 `contents << \"\\n<hr>\\n<small>#{I18n.t('embed.imported_from', link: \"<a href='#{url}'>#{url}</a>\")}</small>\\n\"` interpolates `url` into an HTML attribute/text **without escaping**. `url` is attacker-influenced: `EmbedController#best` accepts `embed_url` from a public request param, and `TopicRetriever#invalid_host?` only validates the *host* component (`URI(@embed_url).host == SiteSetting.embeddable_host`) \u2014 the path/query string is fully attacker-controlled. An unauthenticated request such as `GET /embed/best?embed_url=http://<embeddable_host>/x?y='><script>alert(document.cookie)</script>` will pass host validation, get queued via `Jobs::RetrieveTopic` \u2192 `TopicRetriever#fetch_http` \u2192 `TopicEmbed.import_remote`, and the raw `embed_url` string is spliced unescaped into the post body that is then persisted and rendered `raw` to every visitor of that embed.",
+   "source_lens": "compound-realistic",
+   "old_verdict": "hallucination",
+   "new_verdict": "bug",
+   "confidence": 0.86,
+   "rationale": "In `TopicEmbed.import`, the code appends an HTML snippet containing `<a href='#{url}'>#{url}</a>` directly into `contents` without escaping. The same unescaped `url` is then persisted as `Post.raw` (via `PostCreator` with `cook_method: raw_html`), and later rendered with `raw post.cooked` in `app/views/embed/best.html.erb`. `embed_url` originates from the public `EmbedController#best` param and `T"
+  },
+  {
+   "issue_text": "- `app/models/topic_embed.rb:29` (`open(url).read`) \u2014 the host must match `embeddable_host`, but path/query is attacker-controlled, and `open-uri` follows redirects by default; a malicious or compromised target page could redirect the server to internal/other resources (SSRF surface). Given this era's `open-uri`, this is worth hardening rather than assuming it's safe.",
+   "source_lens": "compound-realistic",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.86,
+   "rationale": "`TopicEmbed.import_remote` calls `open(url).read` on a user-controlled URL without enforcing same-host after redirects. Although `TopicRetriever#invalid_host?` checks `URI(@embed_url).host == SiteSetting.embeddable_host` before calling it, `open-uri` follows redirects by default, so a page on the allowed host can redirect to internal/other resources (SSRF). Additionally, `TopicEmbed.import_remote`"
+  },
+  {
+   "issue_text": "6. `app/models/topic_embed.rb:1` \u2014 `require_dependency 'nokogiri'` uses Rails' dependency-tracking require on a third-party gem; should just be `require 'nokogiri'`.",
+   "source_lens": "compound-realistic",
+   "old_verdict": "hallucination",
+   "new_verdict": "hallucination",
+   "confidence": 0.78,
+   "rationale": "The diff does add `require_dependency 'nokogiri'` at the top of `app/models/topic_embed.rb`, but this is not a verifiable defect or substantive risk from the diff alone. `require_dependency` will still load the gem (it ultimately requires the file while tracking for reload), so the finding is effectively a style/preference nit rather than an actionable bug or important review concern."
+  },
+  {
+   "issue_text": "7. `app/jobs/regular/retrieve_topic.rb:1` \u2014 `require_dependency 'email/sender'` is unused dead code (nothing in the file references `Email::Sender`).",
+   "source_lens": "compound-realistic",
+   "old_verdict": "hallucination",
+   "new_verdict": "hallucination",
+   "confidence": 0.86,
+   "rationale": "In `app/jobs/regular/retrieve_topic.rb`, the diff shows `require_dependency 'email/sender'` is indeed not referenced anywhere in the file (only `User` and `TopicRetriever` are used). However, this is a minor unused-require/cleanup nit rather than a substantive defect or important review concern grounded in behavior change."
+  }
+ ]
+}

@@ -1,0 +1,156 @@
+{
+ "run_id": "5eec3205abc5",
+ "url": "https://github.com/calcom/cal.com/pull/14740",
+ "framework": "superpowers-realistic",
+ "model": "claude-sonnet-5",
+ "effort": "xhigh",
+ "original": {
+  "tp": 4,
+  "fn": 2,
+  "n_real_ungold": 11,
+  "n_hallucination": 4,
+  "adj_p": 0.5,
+  "incr": 0.8823529411764706
+ },
+ "corrected": {
+  "n_unmatched": 15,
+  "rejudged": 15,
+  "n_bug_ungold": 7,
+  "n_important": 6,
+  "n_true_hallucination": 0,
+  "n_unresolved": 2,
+  "n_hidden_findings_unmatched": 13,
+  "waste_precision": 1.0,
+  "flips": {
+   "hallucination->important_non_bug": 2,
+   "hallucination->unresolved": 2,
+   "real_but_ungold->bug": 7,
+   "real_but_ungold->important_non_bug": 4
+  },
+  "judge": "gpt-5.2",
+  "diff_chars": 28407,
+  "wall_s": 7.8
+ },
+ "records": [
+  {
+   "issue_text": "**`packages/trpc/server/routers/viewer/bookings/addGuests.handler.ts:35-40, 158-165`** \u2014 Calendar update uses the *requesting* user's identity/credentials, not the booking organizer's, even though the handler explicitly fetches `booking.user.credentials` via `include` and never uses it. `getUsersCredentials(ctx.user)` and `new EventManager({ ...user, ... })` both use `ctx.user` (the caller). The auth check right above this (`isTeamAdminOrOwner`, `isAttendee`) explicitly supports team admins/owners and attendees calling this endpoint \u2014 but for any of those callers, the calendar sync will run under the wrong account's (or an unrelated) calendar credentials rather than the organizer's, so the actual calendar invite likely won't be updated correctly. This call is also *not* wrapped in the try/catch that guards email sending, so a failure here throws a raw 500 back to the client **after** the `prisma.booking.update` has already committed the new attendee rows \u2014 leaving the DB and calendar out of sync with no rollback, while the user sees a hard error for what is (from the DB's perspective) a successful add.",
+   "source_lens": "superpowers-realistic/critical",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.87,
+   "rationale": "In `addGuests.handler.ts`, the calendar sync is executed using the caller\u2019s identity: `const credentials = await getUsersCredentials(ctx.user);` and `new EventManager({ ...user, credentials })`, where `user` is `ctx.user`. Yet the handler explicitly allows non-organizers to call it (`isTeamAdminOrOwner`, `isAttendee`) and also loads `booking.user.credentials` via the initial `booking` include but "
+  },
+  {
+   "issue_text": "Fix: build `EventManager` from `booking.user` (the organizer) and its already-fetched `credentials`, not `ctx.user`; wrap `updateCalendarAttendees` in error handling (or a transaction/compensating action) so a calendar-sync failure doesn't leave the DB attendee list silently ahead of the calendar state.",
+   "source_lens": "superpowers-realistic/critical",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.85,
+   "rationale": "In `addGuests.handler.ts`, attendees are persisted to the DB first via `prisma.booking.update(... createMany ...)`, and then `eventManager.updateCalendarAttendees(evt, booking)` is awaited with no try/catch/transaction\u2014so a calendar-sync failure would leave the DB attendee list updated while the external calendar is not. Also, `EventManager` is constructed from `ctx.user` and `getUsersCredentials("
+  },
+  {
+   "issue_text": "Fix: change to `||`, or clarify with two separately-named booleans if AND was genuinely intended.",
+   "source_lens": "superpowers-realistic/important",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "In `addGuests.handler.ts`, `isTeamAdminOrOwner` is computed with `&&`:\n```ts\nconst isTeamAdminOrOwner = (await isTeamAdmin(...)) && (await isTeamOwner(...));\n```\nBut the variable name and intended permission check (\u201cadmin OR owner\u201d) strongly imply this should be `||`. As written, only users who are both admin and owner will pass, incorrectly denying access to legitimate admins/owners and breaking "
+  },
+  {
+   "issue_text": "Fix: normalize both sides (`.toLowerCase()`) before comparing.",
+   "source_lens": "superpowers-realistic/important",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "In `addGuests.handler.ts`, email comparisons are case-sensitive: `guest === attendee.email` and `blacklistedGuestEmails.includes(guest)`. However `blacklistedGuestEmails` are lowercased while `guest` is not, so `Test@x.com` can bypass the blacklist, and duplicates can be added if existing attendee emails differ only by case. Normalizing both sides with `.toLowerCase()` would fix this."
+  },
+  {
+   "issue_text": "Fix: thread `eventTypeMetadata` through from the handler and gate the sends the same way the neighboring functions do.",
+   "source_lens": "superpowers-realistic/important",
+   "old_verdict": "hallucination",
+   "new_verdict": "unresolved",
+   "confidence": 0.4,
+   "rationale": "below CONF_FLOOR (0.40)"
+  },
+  {
+   "issue_text": "Fix: dedupe/validate uniqueness server-side too (e.g. move the `.refine` into the shared `addGuests.schema.ts` used by both client and server).",
+   "source_lens": "superpowers-realistic/important",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "The client enforces unique emails via a local Zod `.refine` in `AddGuestsDialog.tsx`, but the server input schema `packages/trpc/server/routers/viewer/bookings/addGuests.schema.ts` only validates `guests` as `z.array(z.string().email())` with no uniqueness check. The handler also doesn\u2019t dedupe duplicates within the incoming `guests` array (it filters against existing attendees/blacklist only), so"
+  },
+  {
+   "issue_text": "No tests were added anywhere in this diff \u2014 not for `addGuestsHandler` (permission branches, blacklist/dedup logic, email dispatch), not for `AddGuestsDialog`/`MultiEmail`, not for the new email templates. This is a booking-mutating, multi-actor-authorized endpoint with several edge cases (exactly the kind of logic that regresses silently without coverage).",
+   "source_lens": "superpowers-realistic/important",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.93,
+   "rationale": "The diff adds significant new functionality (new `addGuests` TRPC mutation + `addGuestsHandler` with permission checks, blacklist/dedup filtering, calendar updates, and email sending; new `AddGuestsDialog` and `MultiEmail` UI components; new email templates and email-manager wiring), but there are no changes to any test files or additions of new tests anywhere in the shown diff. Given the number o"
+  },
+  {
+   "issue_text": "Fix: add handler unit tests covering the three permission branches, blacklist/dedup/case-sensitivity behavior, and a component test for `AddGuestsDialog`'s validation states.",
+   "source_lens": "superpowers-realistic/important",
+   "old_verdict": "hallucination",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.78,
+   "rationale": "The diff adds substantial new logic without any accompanying tests: a new TRPC mutation/handler `addGuests` with multiple permission paths (`isTeamAdminOrOwner`, `isOrganizer`, `isAttendee`), blacklist filtering via `BLACKLISTED_GUEST_EMAILS` (lowercased) and dedup/existing-attendee exclusion (`uniqueGuests` filter), plus a new UI dialog `AddGuestsDialog` that validates emails/uniqueness via a Zod"
+  },
+  {
+   "issue_text": "**`AddGuestsDialog.tsx:36-39`** \u2014 `showToast(message || t(\"unable_to_add_guests\"), \"error\")`: `message` is built from a template literal (`` `${err.data?.code}: ${t(err.message)}` ``) so it's always truthy; the `t(\"unable_to_add_guests\")` fallback is dead code.",
+   "source_lens": "superpowers-realistic/minor",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "In `AddGuestsDialog` the `onError` handler sets `const message = `${err.data?.code}: ${t(err.message)}`;` and then calls `showToast(message || t(\"unable_to_add_guests\"), \"error\")`. A template literal always produces a (non-empty) string such as `\"undefined: ...\"` even when `err.data?.code` is undefined, so `message` is effectively always truthy and the fallback `t(\"unable_to_add_guests\")` is unrea"
+  },
+  {
+   "issue_text": "**`addGuests.handler.ts:55`** \u2014 `TRPCError({ code: \"FORBIDDEN\", message: \"you_do_not_have_permission\" })` is passed through `t(err.message)` on the frontend, but `\"you_do_not_have_permission\"` is not a key in `apps/web/public/static/locales/en/common.json`; the user will see the raw key text instead of a translated message.",
+   "source_lens": "superpowers-realistic/minor",
+   "old_verdict": "hallucination",
+   "new_verdict": "unresolved",
+   "confidence": 0.45,
+   "rationale": "below CONF_FLOOR (0.45)"
+  },
+  {
+   "issue_text": "**`addGuests.handler.ts:167-171`** \u2014 Email-send failures are swallowed with a bare `console.log(\"Error sending AddGuestsEmails\")` \u2014 no error object, no logger integration, making production diagnosis harder.",
+   "source_lens": "superpowers-realistic/minor",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.86,
+   "rationale": "In `addGuests.handler.ts`, the `sendAddGuestsEmails` call is wrapped in `try/catch`, but the `catch (err)` only does `console.log(\"Error sending AddGuestsEmails\")` without logging `err` or using any structured/logger integration, and it silently continues returning success. This is verifiable in the diff and is a concrete operability/diagnostics concern rather than a functional defect."
+  },
+  {
+   "issue_text": "**`addGuests.handler.ts:80-81`** \u2014 When `uniqueGuests` is empty because all submitted addresses were already attendees or blacklisted (not because they were duplicates/invalid emails), the thrown message is still `emails_must_be_unique_valid`, which mischaracterizes the actual reason to the user.",
+   "source_lens": "superpowers-realistic/minor",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "In `addGuests.handler.ts`, `uniqueGuests` is derived by filtering out emails already in `booking.attendees` and those in `BLACKLISTED_GUEST_EMAILS`. If that filtering removes all submitted guests (e.g., all were already attendees or blacklisted, or input is empty), the handler throws `TRPCError` with message `\"emails_must_be_unique_valid\"`, which does not reflect those actual causes. This behavior"
+  },
+  {
+   "issue_text": "**`AddGuestsDialog.tsx:14`** vs **`addGuests.schema.ts:1-8`** \u2014 Validation logic is duplicated and has drifted (frontend adds a uniqueness `.refine`, backend schema doesn't); the frontend schema is also rebuilt on every render instead of being hoisted out of the component.",
+   "source_lens": "superpowers-realistic/minor",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.86,
+   "rationale": "In `apps/web/components/dialog/AddGuestsDialog.tsx`, the dialog defines a local `ZAddGuestsInputSchema = z.array(z.string().email()).refine(...)` enforcing uniqueness, while the backend input schema in `packages/trpc/server/routers/viewer/bookings/addGuests.schema.ts` only validates `guests: z.array(z.string().email())` with no uniqueness constraint. This is a concrete validation drift visible in "
+  },
+  {
+   "issue_text": "**`addGuests.handler.ts:83-90`** \u2014 New guests are inserted with `name: \"\"` since `MultiEmail` only collects email addresses; minor display gap in attendee lists.",
+   "source_lens": "superpowers-realistic/minor",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.86,
+   "rationale": "In `addGuests.handler.ts` the `guestsFullDetails` created for `createMany` explicitly sets `name: \"\"` for each new guest (around lines 83-90 in the new file). The UI input (`MultiEmail`) only collects email strings, so no name is available, and this will result in attendee records with empty names, which can cause a minor UX/display gap wherever attendee names are shown. This is a concrete concern"
+  },
+  {
+   "issue_text": "**`BookingListItem.tsx:194-201, 553-554`** \u2014 \"Add guests\" is exposed even for `isBookingInPast && isConfirmed` (already-completed meetings), which may not be a meaningful use case worth surfacing.",
+   "source_lens": "superpowers-realistic/minor",
+   "old_verdict": "hallucination",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.71,
+   "rationale": "In the diff, the new action `{ id: \"add_members\", label: t(\"additional_guests\"), onClick: () => setIsOpenAddGuestsDialog(true) }` is added directly to the `actions` array in `BookingListItem.tsx` with no conditional gating (unlike other actions that may be conditionally shown elsewhere in the file). From what\u2019s shown here, it will be available regardless of booking state (including potentially pas"
+  }
+ ]
+}
