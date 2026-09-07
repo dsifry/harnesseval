@@ -96,9 +96,23 @@ def from_anthropic_api(resp, model: str) -> dict[str, dict]:
 
 
 def from_openai_api(resp, model: str) -> dict[str, dict]:
-    """OpenAI/Lunaroute chat.completions response -> {model: usage_dict}."""
+    """OpenAI/Lunaroute chat.completions response -> {model: usage_dict}.
+
+    reasoning_tokens can arrive in TWO places depending on the serving stack
+    (harnesseval#8, 2026-09-07): OpenAI convention puts it in
+    usage.completion_tokens_details.reasoning_tokens; SGLang (Lunaroute's current
+    stack) puts it TOP-LEVEL as usage.reasoning_tokens — which the OpenAI SDK
+    shoves into model_extra. Read both; vLLM-era behavior was the OpenAI location.
+    """
     u = resp.usage
-    rt = getattr(getattr(u, "completion_tokens_details", None), "reasoning_tokens", 0) or 0
+    det = getattr(u, "completion_tokens_details", None)
+    rt = getattr(det, "reasoning_tokens", 0) or 0
+    if not rt:
+        # SGLang-style top-level field (lands in model_extra on the OpenAI SDK)
+        extra = getattr(u, "model_extra", None) or {}
+        rt = extra.get("reasoning_tokens", 0) or 0
+        if not rt:
+            rt = getattr(u, "reasoning_tokens", 0) or 0
     mu = ModelUsage(input_tokens=int(getattr(u, "prompt_tokens", 0)),
                     output_tokens=int(getattr(u, "completion_tokens", 0)) - int(rt),
                     reasoning_output_tokens=int(rt))
