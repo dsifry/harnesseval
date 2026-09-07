@@ -62,7 +62,7 @@ real bug, an important non-bug, a true hallucination, or unresolved.
 | **incremental recall (incr)** | recall extended over the enlarged truth: `(confirmed goldens + confirmed hidden gold) / (goldens + hidden gold)`. Rewards finding real bugs the goldens missed; 1.00 means "found every golden *and* everything else it claimed real" |
 | **hallucinations (hal)** | v2-adjudicated **true** fabrications — reported "bugs" that are not real (the triage tax). Deliberately *excludes* important non-bug findings, which are counted as hidden value |
 | **tokens/PR** | all review tokens in+out summed across every call the harness makes (orchestrator, lenses, extraction), averaged per PR. The honest cost unit when pricing is a flat fee |
-| **$/cell** | metered cost of one harness × model × effort cell (all 6 PRs). GLM priced at Z.AI list ([docs.z.ai/guides/overview/pricing](https://docs.z.ai/guides/overview/pricing), fetched 2026-09-07): **GLM-5.3 $1.40/M input, $4.40/M output; GLM-5.3-flash $0.15/M in, $0.50/M out** (launch promo). Our runs went through the Lunaroute gateway at a flat fee ($0 reported) — the metered figures below are what the same token counts would cost on Z.AI's public API |
+| **$/cell** | metered cost of one harness × model × effort cell (all 6 PRs), computed from measured in/out tokens at current published list pricing: **GLM-5.3 $1.40 in / $4.40 out, GLM-5.3-flash $0.15 / $0.50** ([docs.z.ai/guides/overview/pricing](https://docs.z.ai/guides/overview/pricing)); **Fable 5.1 $10 / $50; Astra $10 / $50** ([platform.claude.com](https://platform.claude.com/docs/en/about-claude/pricing), [developers.openai.com](https://developers.openai.com/api/docs/models/gpt-6-astra); fetched 2026-09-07). Our runs went through the Lunaroute gateway at a flat fee ($0 billed) — the metered figures are what the same token counts would cost on the public APIs |
 
 ---
 
@@ -73,28 +73,27 @@ real bug, an important non-bug, a true hallucination, or unresolved.
 | **ce × glm-5.3-background × low** | 0.81 | **40.5** | **0.97** | **103K** | **$0.20** ¹ | **~200** |
 | ce × glm-5.3-flash × low | 0.79 | 36.8 | 0.97 | 99K | $0.02 ¹ | ~1,800 |
 | mrv × glm-5.3-flash × low | 0.66 | 25.3 | 0.93 | 110K | $0.02 ¹ | ~1,150 |
-| vanilla × claude-fable-5.1 × low | 0.74 | 7.5 | 0.89 | 85K | $6.41 ² | 1.2 |
-| vanilla × gpt-6-astra × low | 0.40 | 2.2 | 0.52 | 47K | $2.80 ² | 0.8 |
+| vanilla × claude-fable-5.1 × low | 0.74 | 7.5 | 0.89 | 85K | $0.88 ² | ~8.5 |
+| vanilla × gpt-6-astra × low | 0.40 | 2.2 | 0.52 | 47K | $0.59 ³ | ~3.7 |
 | vanilla × claude-opus-5 × low | 0.66 | 6.0 | 0.81 | 86K | — | — |
 | vanilla × gpt-5.6-sol × low | 0.52 | 4.5 | 0.69 | 44K | — | — |
-| mrv × claude-fable-5.1 × low | 0.63 | 28.2 | 0.80 | 2,081K | — | — |
-| mrv × gpt-6-astra × low | 0.51 | 6.7 | 0.74 | 774K | — | — |
-| ce × claude-fable-5.1 × low | 0.75 | 26.5 | 0.93 | 3,028K | — | — |
-| ce × gpt-6-astra × low | 0.49 | 10.0 | 0.78 | 1,246K | — | — |
-| mrv × claude-opus-5 × high (main report §3.4) | — | 36.0 | 0.85 | 2,980K | $56.65 ² | 0.64 |
+| mrv × claude-fable-5.1 × low | 0.63 | 28.2 | 0.80 | 2,081K | $22.41 ² | 1.3 |
+| mrv × gpt-6-astra × low | 0.51 | 6.7 | 0.74 | 774K | $7.82 ³ | 0.9 |
+| ce × claude-fable-5.1 × low | 0.75 | 26.5 | 0.93 | 3,028K | $32.00 ² | 0.8 |
+| ce × gpt-6-astra × low | 0.49 | 10.0 | 0.78 | 1,246K | $12.62 ³ | 0.8 |
+| mrv × claude-opus-5 × high (main report §3.4) | — | 36.0 | 0.85 | 2,980K | $56.65 ³ | 0.64 |
 
 ¹ Z.AI list pricing applied to measured tokens (our runs: Lunaroute flat fee, $0 billed).
-² Verified actuals from the main report (OAuth-billed / refreshed pricing). "—" = no
-verified figure; recorded run costs for subscription models are pre-refresh (main report
-§3.4), so we quote only audited numbers.
+² Metered at current published list pricing, applied to our measured in/out tokens:
+Fable 5.1 $10 in / $50 out; Astra $10 in / $50 out ([platform.claude.com/docs/en/about-claude/pricing](https://platform.claude.com/docs/en/about-claude/pricing), [developers.openai.com/api/docs/models/gpt-6-astra](https://developers.openai.com/api/docs/models/gpt-6-astra), fetched 2026-09-07; cache reads/writes excluded — cache-hit volume isn't recorded per run). **This corrects the main report's fable/astra figures, which used a stale $12.50/M output pin** (that is the 5-minute cache-*write* price, not the output price). "—" = not recomputed; recorded run costs for subscription models are pre-refresh (main report §3.4).
 
 **Read across the fable/astra rows:** vanilla × fable is the *best* pure-prompt cell in the
-lab (rec 0.74) and still finds 7.5 hidden bugs/PR at $6.41 — while the **same model behind
-either factory** finds 3.5–3.8× more hidden gold (26.5–28.2/PR) at 24–35× the tokens; and
-**a $1.40/$4.40 GLM behind a factory beats both the premium models run vanilla and every
-premium factory on hidden gold per dollar by two orders of magnitude.** mrv × fable and
-mrv × astra confirm the pattern on the metareview side (28.2 and 6.7 hid vs 6.7–7.5 for
-their vanilla counterparts).
+lab (rec 0.74, $0.88/cell at current list pricing) — while the **same model behind either
+factory** finds 3.5–3.8× more hidden gold (26.5–28.2/PR) but at 24–35× the tokens and
+25–36× the metered cost ($22–32/cell). Meanwhile **a $1.40/$4.40 GLM behind a factory beats
+the premium models run vanilla on every axis** — more hidden gold (40.5 vs 7.5/2.2), higher
+recall (0.81 vs 0.74/0.40) — at 3–4× *cheaper* than vanilla fable itself, and ~100× better
+hidden-gold-per-dollar than any premium cell.
 
 **Compound Engineering on GLM-5.3 finds more real bugs the humans missed than the opus
 factory — 40.5 vs 36.0 per PR, at higher incremental recall (0.97 vs 0.85), on 1/29th the
@@ -118,8 +117,8 @@ vanilla.
    fails *silently* (empty 200s that read as "no bugs"). xhigh is an alias for high on GLM.
 3. **A cheap model + a good harness beats a premium model run vanilla.** mrv/ce on GLM-5.3
    ($1.40/$4.40 list) out-find vanilla on both 2026's newest models: vs vanilla × fable-5.1
-   (rec 0.74, incr 0.89, $6.41/cell) the GLM factories deliver recall 0.66–0.81 and incr
-   0.93–0.97 at $0.02–0.20/cell; vs vanilla × astra (rec 0.40, incr 0.52, $2.80/cell) it is
+   (rec 0.74, incr 0.89, $0.88/cell at current list) the GLM factories deliver recall 0.66–0.81 and incr
+   0.93–0.97 at $0.02–0.20/cell; vs vanilla × astra (rec 0.40, incr 0.52, $0.59/cell) it is
    not close. → §3.4
 4. **Triage load is still the real price of factories.** GLM factory cells emit 17–28
    hallucinations per PR alongside 25–45 hidden gold (~59% real fraction, consistent with the
@@ -383,8 +382,8 @@ Against those, the GLM factory cells win outright:
 
 | | harness × model | rec | incr | hid/PR (v2) | hal/PR | tok/PR | $/cell |
 |---|---|---:|---:|---:|---:|---:|---:|
-| **newest premium, vanilla** | vanilla × **fable-5.1** × low | 0.74 | 0.89 | 3.0 | 0.8 | 76K | **$6.41** |
-| | vanilla × **astra** × low | 0.40 | 0.52 | 1.8 | 0.1 | 52K | **$2.80** |
+| **newest premium, vanilla** | vanilla × **fable-5.1** × low | 0.74 | 0.89 | 3.0 | 0.8 | 76K | **$0.88** ³ |
+| | vanilla × **astra** × low | 0.40 | 0.52 | 1.8 | 0.1 | 52K | **$0.59** ³ |
 | **cheap model, factory** | ce × glm-5.3 × low | **0.81** | **0.97** | 40.5 | 28.0 | 103K | **$0.20** |
 | | mrv × glm-flash × low | 0.66 | 0.93 | 25.3 | 22.2 | 110K | **$0.02** |
 | | mrv × glm-5.3 × xhigh | 0.74 | 0.96 | 36.0 | 18.3 | 157K | $0.39 |
@@ -419,8 +418,8 @@ metered at Z.AI list for GLM.
 | vanilla | sol | high | 0.62 | 0.76 | — | — | 1039K | ~0 |
 | vanilla | terra | low | 0.39 | 0.56 | 2.5 | 0.2 | 59K | ~0 |
 | vanilla | terra | high | 0.46 | 0.63 | 3.3 | 0.2 | 280K | ~0 |
-| vanilla | fable-5.1 | low | 0.74 | 0.89 | 7.5 | 1.2 | 85K | $6.41 |
-| vanilla | astra | low | 0.40 | 0.52 | 2.2 | 0.6 | 47K | $2.80 |
+| vanilla | fable-5.1 | low | 0.74 | 0.89 | 7.5 | 1.2 | 85K | $0.88 |
+| vanilla | astra | low | 0.40 | 0.52 | 2.2 | 0.6 | 47K | $0.59 |
 | mrv | opus-5 | low | **0.85** | **0.97** | 28.7 | 6.8 | 3,481K | — |
 | mrv | opus-5 | high | 0.69 | 0.90 | — | — | 6,337K | $56.65 |
 | mrv | sonnet-5 | low | 0.61 | 0.85 | 10.0 | 3.5 | 3,078K | $1.52 |
@@ -429,8 +428,8 @@ metered at Z.AI list for GLM.
 | mrv | sol | high | 0.63 | 0.84 | — | — | 656K | ~0 |
 | mrv | terra | low | 0.30 | 0.52 | 4.2 | 1.7 | 652K | ~0 |
 | mrv | terra | high | 0.42 | 0.70 | 7.7 | 1.7 | 889K | ~0 |
-| mrv | fable-5.1 | low | 0.63 | 0.80 | 28.2 | 5.6 | 2,081K | — |
-| mrv | astra | low | 0.51 | 0.74 | 6.7 | 0.7 | 774K | — |
+| mrv | fable-5.1 | low | 0.63 | 0.80 | 28.2 | 5.6 | 2,081K | $22.41 |
+| mrv | astra | low | 0.51 | 0.74 | 6.7 | 0.7 | 774K | $7.82 |
 | ce | opus-5 | low | 0.67 | 0.91 | 20.0 | 7.5 | 2,065K | — |
 | ce | opus-5 | high | 0.84 | **0.98** | **48.2** | 7.8 | 6,831K | — |
 | ce | sonnet-5 | low | 0.21 | 0.41 | 3.2 | 1.3 | 2,920K | $1.57 |
@@ -439,8 +438,8 @@ metered at Z.AI list for GLM.
 | ce | sol | high | 0.45 | 0.69 | 7.2 | 0.7 | 1,008K | ~0 |
 | ce | terra | low | 0.39 | 0.64 | 6.0 | 0.5 | 679K | ~0 |
 | ce | terra | high | 0.56 | 0.84 | 13.5 | 1.0 | 792K | ~0 |
-| ce | fable-5.1 | low | 0.75 | 0.93 | 26.5 | 5.8 | 3,028K | — |
-| ce | astra | low | 0.49 | 0.78 | 10.0 | 1.5 | 1,246K | — |
+| ce | fable-5.1 | low | 0.75 | 0.93 | 26.5 | 5.8 | 3,028K | $32.00 |
+| ce | astra | low | 0.49 | 0.78 | 10.0 | 1.5 | 1,246K | $12.62 |
 | vanilla | glm-5.3-background | low | 0.54 | 0.75 | 5.8 | 4.5 | 13K | $0.03 |
 | vanilla | glm-5.3-background | high | 0.57 | 0.80 | 7.5 | 3.7 | 20K | $0.05 |
 | vanilla | glm-flash | low | 0.50 | 0.73 | 5.8 | 3.8 | 13K | $0.003 |
@@ -468,13 +467,18 @@ metered at Z.AI list for GLM.
 - **Codex-family factories underperform Claude factories** (ce × sonnet 0.21–0.29; ce × sol
   flat at 0.45) — GLM is the only model family where the factories hit ≥0.79 recall at low
   effort, and it costs the least.
-- **Vanilla fable's top-6 hid count is 7.5/PR at $6.41** — the strongest pure-vanilla cell —
+- **Vanilla fable's top-6 hid count is 7.5/PR at $0.88** (current list) — the strongest pure-vanilla cell —
   vs ce × GLM-low's 40.5/PR at $0.20. Even granting fable's superior precision (1.2 hal vs
   28), the factory cell surfaces **5.4× more real bugs per PR for 3% of the price**; the
   triage trade is decided by how much reviewer attention you have.
 
+Fable/astra $-figures at current list pricing (fable $10 in/$50 out; astra $10 in/$50 out)
+— ³ these **correct the main report's $6.41/$2.80**, which used a stale $12.50/M output pin
+(that is Fable's 5-minute cache-*write* price, not output). Cache reads/writes excluded.
+
 Superpowers is excluded from this grid (single-subagent wrapper — not an apples-to-apples
 harness; main report §2). Historical rows (opus-4.5, sonnet-4.5, gpt-5.2, kimi-k3, glm-5.2)
+are superseded by the cells above and omitted. Historical rows (opus-4.5, sonnet-4.5, gpt-5.2, kimi-k3, glm-5.2)
 are superseded by the cells above and omitted.
 
 ### 3.6 What hidden gold looks like — archetypes with real finds
