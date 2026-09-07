@@ -27,10 +27,34 @@ Concretely: you have a completed pull request — title, diff, repo — and you 
 find the real problems before this code ships or gets reviewed by a human. There are two
 natural ways to do that, and they sit at opposite ends of a weight/effort tradeoff:
 
-- **The naive path.** Open Claude or Codex (or any frontier chat model), paste the diff or
-  point the agent at the repo, and ask it to find all the bugs. This is *vanilla* — one
-  prompt, one model, one pass. It's what most developers do today because it's instant and
-  nearly free.
+- **The naive path — and we steel-manned it.** Open Claude or Codex (or any frontier chat
+  model), paste the diff, and ask it to find all the bugs. This is *vanilla* — one prompt,
+  one model, one pass; instant and nearly free, and what most developers do today. Note
+  that our vanilla arm is **not** the lazy "find the bugs in this code" prompt: it is a
+  carefully engineered single prompt that already encodes most of a senior reviewer's
+  discipline (verbatim, from `vanilla.py:ENGINEERED_PROMPT`):
+
+  > You are an expert code reviewer. Review the following code diff for real, actionable
+  > issues.
+  >
+  > PR: {pr_title}
+  >
+  > ```diff
+  > {diff}
+  > ```
+  >
+  > Find issues in these categories: bug, security, concurrency, data, api, performance,
+  > test_gap, doc_defect.
+  > For each issue:
+  > - State the specific problem concisely (one issue per item — do not bundle).
+  > - Note the file and line if identifiable from the diff.
+  > - Classify severity as Low, Medium, High, or Critical.
+  > - Only report real issues you are confident about; do not pad with style nits or
+  >   speculation.
+
+  We call this the **vanilla harness** throughout. Any harness that beats it is beating a
+  *strong* baseline, not a strawman.
+
 - **The harness path.** Use a gated, deterministic multi-agent workflow — **metareview**
   (free security/test gates + 8 adversarial lens subagents, orchestrated and consolidated) or
   **Compound Engineering** (risk-driven persona subagents + a synthesis pass). Heavier:
