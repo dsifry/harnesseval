@@ -180,6 +180,25 @@ $0.23) while costing less, and matches the best metered factory cells (mrv × op
 36.0 hid, incr 0.85, $1.57/real-bug) at ~1/300th the cost. The open-weight model isn't the
 budget option in this data — it's the front of the Pareto frontier.
 
+**How badly do the frontier models lose?** In cost per real bug found, catastrophically:
+
+- **Vanilla frontier models pay 8–46× more per real bug** than ce × GLM-low ($0.005):
+  vanilla × fable-5.1 pays $0.13 (**26× more, 96% costlier**), vanilla × opus-5 $0.09 (**18×**),
+  vanilla × sol $0.04 (**8×** — the closest competitor), vanilla × astra $0.23 (**46×**).
+  And the frontier models don't even find as many bugs: 2.2–7.5 hidden gold/PR vs 36.8.
+- **Premium factories pay 160–310× more per real bug.** The best premium factory cell
+  measured, mrv × opus-5 × high, pays $1.57/real-bug — **314×** the GLM cell — and ce ×
+  fable-5.1 pays $1.21 (**242×**). These are the cells that match GLM's *hidden-gold
+  volume* (26.5–36.0/PR); they just cost 110–320× more to run.
+- **The token story makes the point sharper:** vanilla × fable uses 85K tokens/PR vs the GLM
+  factory's 103K — *comparable token volume, 5× the price*. The frontier models aren't
+  paying for more tokens; they're paying 10–33× more per token for intelligence that, on
+  this benchmark, finds *fewer* bugs than the cheap model wrapped in a harness.
+
+Concretely for a platform team: **reviewing a PR with the frontier-naive setup costs $0.09–
+$0.23 per real bug found; the open-weight harness setup costs half a cent.** Scaling that to
+a 200-PR backlog sweep: ~$2 vs $18–46 — per release.
+
 **Why it wins: the harness, not the model tier, is the binding constraint.** The
 harness-beats-vanilla pattern now holds on a third model family (ce 0.81/0.78 and mrv
 0.66/0.74 recall vs vanilla 0.54/0.57 on background at low/high) — and GLM's flat-fee
