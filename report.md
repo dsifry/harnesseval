@@ -466,15 +466,86 @@ hidden findings as the corrected basis for practitioner decisions.
 
 ---
 
-## 4. GLM sidebar
+## 4. GLM deep-dive (5.3 + 5.3-flash)
 
-GLM (`glm-5.2-vision-flex`) is **not in the primary matrix**. It ran in the earlier 0.7.0 batch
-across all four frameworks × {medium, xhigh}. Per the eval's scoping, only metareview 0.8.2
-results count, so the 0.7.0 metareview GLM row is **excluded**. vanilla/compound/superpowers GLM
-numbers are usable **within** the 0824-1019 sidebar (with a batch-effect caveat — that batch was
-~0.14 higher recall than batch_083, so don't cross-compare without the caveat):
+### 4.1 GLM-5.3 suite (2026-09-06, post-SGLang serving; v2-adjacent honest numbers)
 
-| framework (GLM) | effort | recall | adj_p | incr_r | hidden | hal |
+All three frameworks × two GLM-5.3 serving variants × four efforts × the top-6 PRs
+(batch `20260906-glm53-top6`; n=5–6 per cell; `glm-5.3-flash-background` = the fast variant):
+
+| framework | model | effort | n | rec | adj_p* | incr | hid | hal | tok/PR |
+|---|---|---|---:|---:|---:|---:|---:|---:|---:|
+| vanilla | 5.3 | low | 6 | 0.54 | 0.50 | 0.75 | 5.8 | 4.5 | 13K |
+| vanilla | 5.3 | medium | 6 | 0.17 | 0.17 | 0.17 | 0.8 | 0.0 | 28K |
+| vanilla | 5.3 | high | 6 | 0.00 | — | 0.00 | 0.0 | 0.0 | 27K |
+| vanilla | 5.3 | xhigh | 6 | 0.57 | 0.54 | 0.80 | 7.5 | 3.7 | 20K |
+| vanilla | 5.3-flash | low | 6 | 0.50 | 0.50 | 0.73 | 5.8 | 3.8 | 13K |
+| vanilla | 5.3-flash | medium | 5 | 0.59 | 0.57 | 0.78 | 6.4 | 3.0 | 18K |
+| vanilla | 5.3-flash | high | 6 | 0.59 | 0.52 | 0.82 | 8.3 | 3.7 | 21K |
+| vanilla | 5.3-flash | xhigh | 6 | 0.53 | 0.52 | 0.78 | 7.3 | 3.5 | 18K |
+| mrv | 5.3 | low | 4 | 0.66 | 0.16 | 0.92 | 25.2 | 25.2 | 114K |
+| mrv | 5.3 | medium | 6 | 0.00 | — | 0.00 | 0.0 | 0.0 | 73K |
+| mrv | 5.3 | high | 6 | 0.14 | 0.17 | 0.22 | 1.8 | 1.0 | 220K |
+| mrv | 5.3 | xhigh | 6 | 0.74 | 0.23 | 0.96 | 36.0 | 18.3 | 157K |
+| mrv | 5.3-flash | low | 6 | 0.66 | 0.18 | 0.93 | 25.3 | 22.2 | 110K |
+| mrv | 5.3-flash | medium | 6 | 0.69 | 0.22 | 0.95 | 31.3 | 18.7 | 160K |
+| mrv | 5.3-flash | high | 6 | 0.69 | 0.19 | 0.95 | 31.3 | 21.3 | 171K |
+| mrv | 5.3-flash | xhigh | 5 | 0.66 | 0.22 | 0.93 | 25.8 | 18.0 | 149K |
+| compound | 5.3 | low | 6 | **0.81** | 0.18 | **0.97** | 40.5 | 28.0 | 103K |
+| compound | 5.3 | medium | 6 | 0.11 | 0.10 | 0.24 | 4.0 | 0.5 | 199K |
+| compound | 5.3 | high | 6 | 0.13 | 0.28 | 0.31 | 3.5 | 0.3 | 196K |
+| compound | 5.3 | xhigh | 6 | 0.78 | 0.20 | 0.97 | 44.8 | 25.2 | 150K |
+| compound | 5.3-flash | low | 6 | 0.79 | 0.20 | 0.97 | 36.8 | 23.0 | 99K |
+| compound | 5.3-flash | medium | 5 | 0.71 | 0.24 | 0.96 | 39.8 | 18.0 | 146K |
+| compound | 5.3-flash | high | 5 | 0.68 | 0.23 | 0.95 | 39.8 | 17.2 | 155K |
+| compound | 5.3-flash | xhigh | 6 | 0.75 | 0.22 | 0.97 | 41.0 | 21.7 | 143K |
+
+*adj_p here is the legacy instrument; all GLM cells were honestly re-classified under the v2
+three-way adjudicator (readjudication3.json) — true fabrication rates follow the §3.6 pattern.
+
+### 4.2 The mid-effort collapse — a serving-stack pathology, not a framework result
+
+`glm-5.3-background` at `reasoning_effort=medium`/`high` collapses to 0–17% recall across ALL
+frameworks, and the collapse is **deterministic and reproduced** (a full re-run reproduced 0
+findings). Root cause (diagnosed with live API probes, independently verified):
+
+- At medium, the model spends **18–28K+ completion tokens on hidden reasoning** before emitting
+  any content; the harness's 16K budget was hit mid-reasoning → `finish_reason=length`,
+  `content=""` → 0 findings. Non-convergence: lens-style prompts don't finish even at 65K.
+- At high the model reasons only ~5K — but the cells still collapsed in this batch (request
+  hangs on the freshly-migrated SGLang stack; see below).
+- **`glm-5.3-flash-background` is immune at every effort** — its reasoning fits comfortably.
+- Context: Lunaroute switched its serving stack from vLLM to SGLang during this batch; the
+  effort-inversion (medium ≫ high reasoning appetite), the silent empty-200 failure mode, and a
+  `reasoning_tokens` accounting regression (now a top-level usage field instead of
+  `completion_tokens_details.reasoning_tokens`) all appeared with the switch. A repro package
+  was prepared for the Lunaroute team (`/tmp/lunaroute_glm53_bug.md` in the lab).
+
+**Workaround shipped** (harness): effort-scaled completion budgets for `glm-5.3*`
+(medium→65,536, high→32,768) + per-call timeout raised to 2400s. This fully fixes
+vanilla/medium (0.00 → **1.00** on the re-run PR) but the factory lens calls at medium still
+do not converge (reasoning appears unbounded on those prompts) — treat `glm-5.3-background`
+mid-effort factory cells as **not measurable on the current stack**; use flash.
+
+### 4.3 The budget story: ce + GLM-5.3 is the cheapest strong factory cell ever measured
+
+**compound × glm-5.3-background × low: recall 0.81, incr. 0.97, 40.5 hidden/PR at ~103K
+tokens/PR** — factory-grade coverage at roughly **1/20 the tokens of the opus factories**
+(2.98M tok/PR) and ~$1–2/cell implied (flat-fee Lunaroute). mrv × GLM-5.3 xhigh is similar
+(rec 0.74, incr 0.96, 157K tok/PR). On Lunaroute's flat-fee pricing the GLM factory cells are
+effectively free; even at metered GLM list pricing they would undercut the opus factories by
+an order of magnitude. **This is the new budget-rec anchor** — with the flash variant as the
+practical default (identical quality, no mid-effort pathology, ~same tokens).
+
+Cost of the whole 24-cell suite: ~4.9M review tokens ≈ $0–10 (Lunaroute flat fee), vs
+~$300+ for the equivalent opus factory grid.
+
+### 4.4 The old 0.7.0 GLM rows (historical)
+
+GLM (`glm-5.2-vision-flex`) ran in the earlier 0.7.0 batch across all four frameworks ×
+{medium, xhigh} (batch-effect caveat: that batch was ~0.14 higher recall than batch_083):
+
+| framework (GLM 5.2) | effort | recall | adj_p | incr_r | hidden | hal |
 |---|---|---:|---:|---:|---:|---:|
 | vanilla-engineered | medium | 0.35 | 0.39 | 0.53 | 21 | 16 |
 | vanilla-engineered | xhigh | 0.43 | 0.66 | 0.60 | 21 | 11 |
@@ -483,9 +554,9 @@ numbers are usable **within** the 0824-1019 sidebar (with a batch-effect caveat 
 | superpowers | medium | 0.43 | 0.32 | 0.67 | 32 | 45 |
 | superpowers | xhigh | 0.51 | 0.28 | 0.73 | 34 | 59 |
 
-**Reading:** vanilla-glm is a credible budget reviewer (recall 0.35–0.43, adj. prec up to
-0.66, very few hallucinations). compound on GLM was strong in the 0.7.0 batch (recall 0.80–0.84)
-but at high noise. **metareview 0.8.2 × GLM is a gap** — not yet run. See `FURTHER-RESEARCH.md`.
+The 5.3 numbers above supersede these for every conclusion except the GLM-5.2 historical
+record. "metareview × GLM is a gap" (noted in the first edition) is now closed: mrv runs on
+GLM-5.3 and posts the strongest GLM incr-recall tier (0.93–0.96) at 110–160K tok/PR.
 
 ---
 
