@@ -15,12 +15,22 @@
 > |---|---:|---:|---:|
 > | naive: vanilla × **Fable 5.1** (frontier) × low | 7.5 | $0.90 | $0.12 |
 > | naive: vanilla × **GPT-6 Astra** (frontier) × low | 2.2 | $0.34 | $0.15 |
-> | harness: mrv × **glm-5.3-flash** × low (open-weight, fast variant) | 24.2 | $0.02 | $0.0008 |
+> | **harness: mrv × glm-5.3-flash × low (open-weight, fast variant)** | **24.2** | **$0.02** | **$0.0008** |
 > | **harness: ce × glm-5.3 × low (open-weight)** | **36.8** | **$0.20** | **$0.005** |
 >
-> Prefer absolute minimum cost over maximum recall? The **metareview × glm-5.3-flash × low**
-> cell finds 24.2 hidden gold/PR at **$0.02/cell — 1/10th the cost** of the ce × glm-5.3 cell,
-> at slightly lower recall (0.66 vs 0.81) and the lowest $-per-real-bug measured ($0.0008).
+> **How much better is the harness path?**
+>
+> - **vs vanilla × Fable 5.1 (the best frontier-naive cell):** ce × glm-5.3 finds **4.9× more
+>   real bugs** (36.8 vs 7.5/PR) at 80% less cost ($0.20 vs $0.90/cell) — **$0.13 → $0.005 per
+>   real bug, a 96% reduction**. mrv × glm-5.3-flash finds **3.2× more** (24.2 vs 7.5) at
+>   98% less cost ($0.02 vs $0.90).
+> - **vs vanilla × GPT-6 Astra:** ce × glm-5.3 finds **16.7× more real bugs** (36.8 vs 2.2)
+>   at 61% less cost ($0.51 → $0.20) — $0.23 → $0.005 per real bug, a **96% reduction**.
+> - Prefer minimum cost over maximum recall? **metareview × glm-5.3-flash × low** finds
+>   24.2 hidden gold/PR — 3.2× what vanilla Fable finds — at **$0.02/cell, 1/10th the cost**
+>   of the ce × glm-5.3 cell, at slightly lower recall (0.66 vs 0.81) and the lowest
+>   $-per-real-bug measured ($0.0008).
+>
 > (Here and below, "glm-5.3" = the `glm-5.3-background` variant; "glm-5.3-flash-background"
 > = `glm-5.3-flash-background`.)
 >
@@ -169,8 +179,8 @@ real bug, an important non-bug, a true hallucination, or unresolved.
 | cell | rec | hid /PR | incr | tokens/PR | $/cell | $ per real bug |
 |---|---:|---:|---:|---:|---:|---:|
 | **ce × glm-5.3-background × low** | 0.81 | **36.8** | **0.97** | **103K** | **$0.20** ¹ | **$0.005** |
-| ce × glm-5.3-flash × low | 0.79 | 35.0 | 0.97 | 99K | $0.02 ¹ | $0.0006 |
-| mrv × glm-5.3-flash × low | 0.66 | 24.2 | 0.93 | 110K | $0.02 ¹ | $0.0008 |
+| **ce × glm-5.3-flash × low** | **0.79** | **35.0** | **0.97** | 99K | **$0.02** ¹ | **$0.0006** |
+| **mrv × glm-5.3-flash × low** | **0.66** | 24.2 | **0.93** | 110K | **$0.02** ¹ | **$0.0008** |
 | vanilla × claude-fable-5.1 × low | 0.74 | 7.5 | 0.89 | 85K | $0.90 ² | $0.12 |
 | vanilla × gpt-6-astra × low | 0.40 | 2.2 | 0.52 | 47K | $0.34 ² | $0.15 |
 | vanilla × claude-opus-5 × low | 0.66 | 6.0 | 0.81 | 86K | $0.40 ² | $0.07 |
