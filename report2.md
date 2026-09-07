@@ -187,9 +187,10 @@ serving makes the winning configuration essentially free to run.
 
 ### TL;DR — practitioner recommendations
 
-1. **Switch the default review engine to glm-5.3(-flash) × low.** Same incremental recall as
-   the opus factory (0.97 vs 0.85), more hidden gold per PR (36.8 vs 36.0), $0.02–0.20/cell
-   metered vs $56.65. No configuration in this data wins on cost per real bug found against it ($0.005 vs $0.04–1.57).
+1. **Switch the default review engine to glm-5.3(-flash) × low.** Open-weight GLM-5.3
+   behind a harness beats the frontier models run vanilla across the board — recall, hidden
+   gold, incremental recall, and cost per real bug ($0.005 vs $0.04–1.57 for every vanilla
+   and premium-factory cell). No configuration in this data wins on value against it.
 2. **Run GLM at low or high — never medium.** low/high are monotonic and healthy; medium
    reasons 4–10× more than high, takes 10–20× the wall time, sometimes never finishes, and
    fails *silently* (empty 200s that read as "no bugs"). xhigh is an alias for high on GLM.
