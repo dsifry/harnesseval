@@ -143,10 +143,10 @@ real bug, an important non-bug, a true hallucination, or unresolved.
 | cell | rec | hid /PR | incr | tokens/PR | $/cell | hid gold per $ |
 |---|---:|---:|---:|---:|---:|---:|
 | **ce × glm-5.3-background × low** | 0.81 | **36.8** | **0.97** | **103K** | **$0.20** ¹ | **~185** |
-| ce × glm-5.3-flash × low | 0.79 | 36.8 | 0.97 | 99K | $0.02 ¹ | ~1,800 |
-| mrv × glm-5.3-flash × low | 0.66 | 25.3 | 0.93 | 110K | $0.02 ¹ | ~1,150 |
-| vanilla × claude-fable-5.1 × low | 0.74 | 7.5 | 0.89 | 85K | $0.88 ² | ~8.5 |
-| vanilla × gpt-6-astra × low | 0.40 | 2.2 | 0.52 | 47K | $0.59 ³ | ~3.7 |
+| ce × glm-5.3-flash × low | 0.79 | 35.0 | 0.97 | 99K | $0.02 ¹ | ~1,750 |
+| mrv × glm-5.3-flash × low | 0.66 | 24.2 | 0.93 | 110K | $0.02 ¹ | ~1,210 |
+| vanilla × claude-fable-5.1 × low | 0.74 | 7.5 | 0.89 | 85K | $1.01 ² | ~7.4 |
+| vanilla × gpt-6-astra × low | 0.40 | 2.2 | 0.52 | 47K | $0.51 ² | ~4.3 |
 | vanilla × claude-opus-5 × low | 0.66 | 6.0 | 0.81 | 86K | $0.51 ³ | ~12 |
 | vanilla × gpt-5.6-sol × low | 0.52 | 4.5 | 0.69 | 44K | $0.20 ⁴ | ~23 |
 | mrv × claude-fable-5.1 × low | 0.63 | 28.2 | 0.80 | 2,081K | $22.41 ² | 1.3 |
@@ -165,7 +165,7 @@ Fable 5.1 $10 in / $50 out; Astra $10 in / $50 out ([platform.claude.com/docs/en
 ⁴ GPT-5.6-sol $4 in / $20 out ([developers.openai.com/api/docs/pricing](https://developers.openai.com/api/docs/pricing) — promotional rate, listed through Nov 21, 2026). "—" = not recomputed; recorded run costs for subscription models are pre-refresh (main report §3.4).
 
 **Read across the fable/astra rows:** vanilla × fable is the *best* pure-prompt cell in the
-lab (rec 0.74, $0.88/cell at current list pricing) — while the **same model behind either
+lab (rec 0.74, $1.01/cell at current list pricing) — while the **same model behind either
 factory** finds 3.5–3.8× more hidden gold (26.5–28.2/PR) but at 24–35× the tokens and
 25–36× the metered cost ($22–32/cell). Meanwhile **a $1.40/$4.40 GLM behind a factory beats
 the premium models run vanilla on every axis** — more hidden gold (36.8 vs 7.5/2.2), higher
@@ -194,8 +194,8 @@ vanilla.
    fails *silently* (empty 200s that read as "no bugs"). xhigh is an alias for high on GLM.
 3. **A cheap model + a good harness beats a premium model run vanilla.** mrv/ce on GLM-5.3
    ($1.40/$4.40 list) out-find vanilla on both 2026's newest models: vs vanilla × fable-5.1
-   (rec 0.74, incr 0.89, $0.88/cell at current list) the GLM factories deliver recall 0.66–0.81 and incr
-   0.93–0.97 at $0.02–0.20/cell; vs vanilla × astra (rec 0.40, incr 0.52, $0.59/cell) it is
+   (rec 0.74, incr 0.89, $1.01/cell at current list) the GLM factories deliver recall 0.66–0.81 and incr
+   0.93–0.97 at $0.02–0.20/cell; vs vanilla × astra (rec 0.40, incr 0.52, $0.51/cell) it is
    not close. → §3.4
 4. **Hallucination load on GLM is low under the v2 instrument.** GLM factory cells emit
    **1.4–5.7 true hallucinations per PR** alongside 24–46 hidden gold (~85–90% real fraction)
@@ -468,8 +468,8 @@ Against those, the GLM factory cells win outright:
 
 | | harness × model | rec | incr | hid/PR (v2) | hal/PR | tok/PR | $/cell |
 |---|---|---:|---:|---:|---:|---:|---:|
-| **newest premium, vanilla** | vanilla × **fable-5.1** × low | 0.74 | 0.89 | 3.0 | 0.8 | 76K | **$0.88** ³ |
-| | vanilla × **astra** × low | 0.40 | 0.52 | 1.8 | 0.1 | 52K | **$0.59** ³ |
+| **newest premium, vanilla** | vanilla × **fable-5.1** × low | 0.74 | 0.89 | 3.0 | 0.8 | 76K | **$1.01** ³ |
+| | vanilla × **astra** × low | 0.40 | 0.52 | 1.8 | 0.1 | 52K | **$0.51** ³ |
 | **cheap model, factory** | ce × glm-5.3 × low | **0.81** | **0.98** | 36.8 | 5.3 | 102K | **$0.20** |
 | | mrv × glm-flash × low | 0.66 | 0.95 | 24.2 | 5.7 | 109K | **$0.02** |
 | | mrv × glm-5.3 × high | 0.74 | 0.97 | 32.7 | 2.3 | 157K | $0.39 |
@@ -504,8 +504,8 @@ metered at Z.AI list for GLM.
 | vanilla | sol | high | 0.62 | 0.76 | 4.5 | 0.2 | 1039K | ~0 |
 | vanilla | terra | low | 0.39 | 0.56 | 2.5 | 0.2 | 59K | ~0 |
 | vanilla | terra | high | 0.46 | 0.63 | 3.3 | 0.2 | 280K | ~0 |
-| vanilla | fable-5.1 | low | 0.74 | 0.89 | 7.5 | 1.2 | 85K | $0.88 |
-| vanilla | astra | low | 0.40 | 0.52 | 2.2 | 0.6 | 47K | $0.59 |
+| vanilla | fable-5.1 | low | 0.74 | 0.89 | 7.5 | 1.2 | 85K | $1.01 |
+| vanilla | astra | low | 0.40 | 0.52 | 2.2 | 0.6 | 47K | $0.51 |
 | mrv | opus-5 | low | **0.85** | **0.97** | 28.7 | 6.8 | 3,481K | — |
 | mrv | opus-5 | high | 0.69 | 0.90 | — | — | 6,337K | $56.65 |
 | mrv | sonnet-5 | low | 0.61 | 0.85 | 10.0 | 3.5 | 3,078K | $1.52 |
