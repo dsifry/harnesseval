@@ -554,7 +554,7 @@ metered at Z.AI list for GLM.
 - **Codex-family factories underperform Claude factories** (ce × sonnet 0.21–0.29; ce × sol
   flat at 0.45) — GLM is the only model family where the factories hit ≥0.79 recall at low
   effort, and it costs the least.
-- **Vanilla fable's top-6 hid count is 7.5/PR at $0.88** (current list) — the strongest pure-vanilla cell —
+- **Vanilla fable's top-6 hid count is 7.5/PR at $1.01** (current list) — the strongest pure-vanilla cell —
   vs ce × GLM-low's 36.8/PR at $0.20. Even granting fable's superior precision (1.2 hal vs
   28), the factory cell surfaces **5.4× more real bugs per PR for 3% of the price**; the
   triage trade is decided by how much reviewer attention you have.
