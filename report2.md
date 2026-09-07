@@ -28,7 +28,7 @@ find the real problems before this code ships or gets reviewed by a human. There
 natural ways to do that, and they sit at opposite ends of a weight/effort tradeoff:
 
 - **The naive path — and we steel-manned it.** Open Claude or Codex (or any frontier chat
-  model), paste the diff, and ask it to find all the bugs. This is *vanilla* — one prompt,
+  model), paste the diff or the link to the PR, and ask it to find all the bugs. This is *vanilla* — one prompt,
   one model, one pass; instant and nearly free, and what most developers do today. Note
   that our vanilla arm is **not** the lazy "find the bugs in this code" prompt: it is a
   carefully engineered single prompt that already encodes most of a senior reviewer's
