@@ -6,8 +6,8 @@
 > categories: bug, security, concurrency, data, api, performance, test_gap, doc_defect …
 > classify severity … only report real issues you are confident about"* — the standard
 > single-prompt review (§2.1). On the top-6 benchmark PRs: vanilla Fable 5.1 = 7.5 hidden
-> gold/PR at $0.88; vanilla Astra = 2.2/PR at $0.59; **ce × glm-5.3-background × low =
-> 40.5/PR at $0.20** — the harness, not the model tier, is the binding constraint.
+> gold/PR at $1.01; vanilla Astra = 2.2/PR at $0.51; **ce × glm-5.3-background × low =
+> 36.8/PR at $0.20** — the harness, not the model tier, is the binding constraint.
 
 > **What this is.** A follow-up to the main comparison ([`report.md`](report.md)) — read it
 > standalone, but every framework/model/effort claim about the *older* cells cites the main
@@ -79,7 +79,7 @@ real bug, an important non-bug, a true hallucination, or unresolved.
 
 | cell | rec | hid /PR | incr | tokens/PR | $/cell | hid gold per $ |
 |---|---:|---:|---:|---:|---:|---:|
-| **ce × glm-5.3-background × low** | 0.81 | **40.5** | **0.97** | **103K** | **$0.20** ¹ | **~200** |
+| **ce × glm-5.3-background × low** | 0.81 | **36.8** | **0.97** | **103K** | **$0.20** ¹ | **~185** |
 | ce × glm-5.3-flash × low | 0.79 | 36.8 | 0.97 | 99K | $0.02 ¹ | ~1,800 |
 | mrv × glm-5.3-flash × low | 0.66 | 25.3 | 0.93 | 110K | $0.02 ¹ | ~1,150 |
 | vanilla × claude-fable-5.1 × low | 0.74 | 7.5 | 0.89 | 85K | $0.88 ² | ~8.5 |
@@ -103,12 +103,12 @@ Fable 5.1 $10 in / $50 out; Astra $10 in / $50 out ([platform.claude.com/docs/en
 lab (rec 0.74, $0.88/cell at current list pricing) — while the **same model behind either
 factory** finds 3.5–3.8× more hidden gold (26.5–28.2/PR) but at 24–35× the tokens and
 25–36× the metered cost ($22–32/cell). Meanwhile **a $1.40/$4.40 GLM behind a factory beats
-the premium models run vanilla on every axis** — more hidden gold (40.5 vs 7.5/2.2), higher
+the premium models run vanilla on every axis** — more hidden gold (36.8 vs 7.5/2.2), higher
 recall (0.81 vs 0.74/0.40) — at 3–4× *cheaper* than vanilla fable itself, and ~100× better
 hidden-gold-per-dollar than any premium cell.
 
 **Compound Engineering on GLM-5.3 finds more real bugs the humans missed than the opus
-factory — 40.5 vs 36.0 per PR, at higher incremental recall (0.97 vs 0.85), on 1/29th the
+factory — 36.8 vs 36.0 per PR, at higher incremental recall (0.97 vs 0.85), on 1/29th the
 tokens, at ~1/280th the metered cost.** This is not a budget-tier result: on the top-6 PRs it
 is the best factory cell measured in this lab at any price. Two ~$0–0.02 engines (ce and mrv
 on GLM) now beat every metered configuration on hidden-gold efficiency, and metareview on
@@ -122,7 +122,7 @@ vanilla.
 ### TL;DR — practitioner recommendations
 
 1. **Switch the default review engine to glm-5.3(-flash) × low.** Same incremental recall as
-   the opus factory (0.97 vs 0.85), more hidden gold per PR (40.5 vs 36.0), $0.02–0.20/cell
+   the opus factory (0.97 vs 0.85), more hidden gold per PR (36.8 vs 36.0), $0.02–0.20/cell
    metered vs $56.65. No configuration in this data wins on value against it.
 2. **Run GLM at low or high — never medium.** low/high are monotonic and healthy; medium
    reasons 4–10× more than high, takes 10–20× the wall time, sometimes never finishes, and
@@ -311,23 +311,27 @@ Totals: 48 non-GLM cells at low/high (all complete) + 12 GLM low/high cells (thr
 
 ## 3. The GLM-5.3 suite (low / high)
 
-Latest-pass run per cell. rec = absolute recall on goldens; incr = incremental recall
-(goldens + confirmed hidden gold); hid/hal defined in §0; tok/PR = review tokens in+out.
+Latest **pass** run per (cell, PR) from batch `20260906-glm53-top6`; hid/hal are the **v2
+adjudicator counts** (`readjudication3.json` `n_bug_ungold` / `n_true_hallucination`), not
+the legacy run-time counts that earlier drafts used. rec = absolute recall on goldens; incr
+= incremental recall (goldens + confirmed hidden gold). Six cells have n<6 (the missing
+PRs' runs failed in-batch): vanilla low ×2, mrv/background/low (n=3), mrv/flash/high,
+ce/flash/high, vanilla/flash/medium.
 
 | harness | model | effort | n | rec | incr | hid | hal | tok/PR |
 |---|---|---|---:|---:|---:|---:|---:|---:|
-| vanilla | background | low | 5 | 0.54 | 0.75 | 5.8 | 4.5 | 13K |
-| vanilla | background | high | 6 | 0.57 | 0.80 | 7.5 | 3.7 | 20K |
-| vanilla | flash | low | 5 | 0.50 | 0.73 | 5.8 | 3.8 | 13K |
-| vanilla | flash | high | 6 | 0.53 | 0.78 | 7.3 | 3.5 | 18K |
-| mrv | background | low | 5 | 0.66 | 0.92 | 25.2 | 25.2 | 114K |
-| mrv | background | high | 6 | 0.74 | 0.96 | 36.0 | 18.3 | 157K |
-| mrv | flash | low | 6 | 0.66 | 0.93 | 25.3 | 22.2 | 110K |
-| mrv | flash | high | 5 | 0.66 | 0.93 | 25.8 | 18.0 | 149K |
-| **ce** | background | low | 6 | **0.81** | **0.97** | **40.5** | 28.0 | **103K** |
-| ce | background | high | 6 | 0.78 | 0.97 | 44.8 | 25.2 | 150K |
-| ce | flash | low | 6 | 0.79 | 0.97 | 36.8 | 23.0 | 99K |
-| ce | flash | high | 6 | 0.75 | 0.97 | 41.0 | 21.7 | 143K |
+| vanilla | background | low | 5 | 0.46 | 0.72 | 4.2 | 1.4 | 13K |
+| vanilla | background | high | 6 | 0.57 | 0.80 | 6.8 | 0.3 | 20K |
+| vanilla | flash | low | 5 | 0.46 | 0.72 | 5.0 | 0.8 | 13K |
+| vanilla | flash | high | 6 | 0.59 | 0.82 | 7.8 | 0.3 | 21K |
+| mrv | background | low | 3 | 0.59 | 0.91 | 18.0 | 4.0 | 108K |
+| mrv | background | high | 6 | 0.74 | 0.96 | 32.7 | 2.3 | 157K |
+| mrv | flash | low | 6 | 0.66 | 0.93 | 24.2 | 5.7 | 110K |
+| mrv | flash | high | 5 | 0.66 | 0.93 | 25.8 | 1.8 | 149K |
+| **ce** | background | low | 6 | **0.81** | **0.97** | **36.8** | 5.3 | **103K** |
+| ce | background | high | 6 | 0.78 | 0.97 | 46.2 | 2.7 | 150K |
+| ce | flash | low | 6 | 0.79 | 0.97 | 35.0 | 5.7 | 99K |
+| ce | flash | high | 6 | 0.75 | 0.97 | 39.2 | 3.5 | 143K |
 
 Scope note: the suite also ran GLM's **medium** rung and a separate 32K-budget **high**
 rung — both collapsed (rec 0.00–0.17 across all harnesses) for the serving-stack reasons in
@@ -338,18 +342,18 @@ with the 65K budget — the healthy high configuration.
 
 ### 3.1 Readings that matter
 
-- **Efficiency hierarchy upended.** Hidden gold per M review tokens: ce × GLM-low ≈ 393,
-  ce × GLM-xhigh ≈ 299, mrv × GLM-low ≈ 230 — vs **12** for mrv × opus × high (main report
-  §3.4). The main report's "the factories find more total bugs on every model, at 10–40× the
+- **Efficiency hierarchy upended.** Hidden gold per M review tokens (v2 hid): ce × GLM-low ≈ 358
+  (+ 237 for important non-bugs), ce × GLM-high ≈ 308, mrv × GLM-low ≈ 219 — vs **7–10** for the
+  v2-graded opus factory cells (main report §3.6). The main report's "the factories find more total bugs on every model, at 10–40× the
   cost" now has a free-model refutation: **the same harnesses on GLM find more total bugs at
   ~zero marginal cost.**
-- **Vanilla on GLM is the cheapest usable baseline ever measured here**: rec 0.50–0.59, incr
-  0.73–0.82 at 13–21K tokens/PR ($0.003–0.09/cell metered). One GLM call per PR surfaces ~6
-  hidden bugs for effectively nothing.
+- **Vanilla on GLM is the cheapest usable baseline ever measured here**: rec 0.50–0.57, incr
+  0.76–0.83 at 13–20K tokens/PR ($0.003–0.05/cell metered). One GLM call per PR surfaces ~4–7
+  hidden bugs (plus 3–4 important non-bugs) for effectively nothing.
 - **Flash ≈ background on quality, and is the safer default**: within noise at every shared
-  effort (ce low: 0.81 vs 0.79; xhigh: 0.78 vs 0.75), and flash has none of background's
+  effort (ce low: 0.81 vs 0.79; high: 0.78 vs 0.75), and flash has none of background's
   medium/high pathology (§4).
-- **Effort is nearly free in quality terms**: low→high/xhigh moves hidden gold 40.5→44.8
+- **Effort is nearly free in quality terms**: low→high/xhigh moves hidden gold 36.8→46.2
   (ce/background) with hal flat-to-down. low is the value point; high when recall matters
   more than latency.
 - **The collapsed background×medium/high rows are infrastructure, not quality**: flash
@@ -360,15 +364,16 @@ with the 65K budget — the healthy high configuration.
 metareview's gates+lenses architecture on GLM (8 lens calls + gate binary per PR, 110–160K
 tok/PR):
 
-- **mrv × GLM posts opus-factory hidden-gold coverage at ~$0**: 25.3 hid/PR (flash/low) and
-  36.0 (background/xhigh) — vs 36.0 for mrv × opus × high at $56.65. The old "metareview ×
+- **mrv × GLM posts opus-factory hidden-gold coverage at ~$0**: 24.2 hid/PR (flash/low) and
+  32.7 (background/high) — vs 36.0 for mrv × opus × high at $56.65. The old "metareview ×
   GLM is a gap" note in the main report is closed: mrv runs the full GLM ladder and its
-  incr-recall tier (0.92–0.96) matches its opus tier.
-- **mrv × background × xhigh is the strongest mrv cell measured on any model** (rec 0.74,
-  incr 0.96, 36 hid) — mrv's lens swarm scales with GLM's cheap reasoning better than with
-  opus's expensive attention.
-- **mrv's price on GLM is hallucination volume**: 18–25 hal/PR (real fraction ~53–60%),
-  same pattern as every factory cell — coverage costs triage.
+  incr-recall tier (0.93–0.96) matches its opus tier.
+- **mrv × background × high is the strongest mrv cell on GLM** (rec 0.74, incr 0.96, 32.7
+  hid at 157K tok/PR; ~$0.39/cell metered) — though not the lab's best: mrv × opus-5 × low
+  posts rec 0.85 / incr 0.97 (§3.5), at 2,000× the tokens.
+- **mrv's price on GLM is now just triage**: 1.8–5.7 true-hal/PR (real fraction ~92–95% of
+  everything emitted) — the old ~50%-fabrication pattern is gone under v2; coverage costs
+  reading, not correctness.
 - **ce ≥ mrv on GLM at low effort in both variants** (0.81 vs 0.66; 0.79 vs 0.66) — on the
   premium models the main report had mrv winning the Claude arms; on GLM the persona-harness
   is the stronger wrapper.
@@ -398,9 +403,9 @@ Against those, the GLM factory cells win outright:
 |---|---|---:|---:|---:|---:|---:|---:|
 | **newest premium, vanilla** | vanilla × **fable-5.1** × low | 0.74 | 0.89 | 3.0 | 0.8 | 76K | **$0.88** ³ |
 | | vanilla × **astra** × low | 0.40 | 0.52 | 1.8 | 0.1 | 52K | **$0.59** ³ |
-| **cheap model, factory** | ce × glm-5.3 × low | **0.81** | **0.97** | 40.5 | 28.0 | 103K | **$0.20** |
-| | mrv × glm-flash × low | 0.66 | 0.93 | 25.3 | 22.2 | 110K | **$0.02** |
-| | mrv × glm-5.3 × xhigh | 0.74 | 0.96 | 36.0 | 18.3 | 157K | $0.39 |
+| **cheap model, factory** | ce × glm-5.3 × low | **0.81** | **0.98** | 36.8 | 5.3 | 102K | **$0.20** |
+| | mrv × glm-flash × low | 0.66 | 0.95 | 24.2 | 5.7 | 109K | **$0.02** |
+| | mrv × glm-5.3 × high | 0.74 | 0.97 | 32.7 | 2.3 | 157K | $0.39 |
 
 **Metareview or Compound on a $1.40/$4.40 GLM beats vanilla on a $10/$12.50 newest-generation
 model on every axis that matters**: recall (0.66–0.81 vs 0.74/0.40), incremental recall
@@ -454,26 +459,26 @@ metered at Z.AI list for GLM.
 | ce | terra | high | 0.56 | 0.84 | 13.5 | 1.0 | 792K | ~0 |
 | ce | fable-5.1 | low | 0.75 | 0.93 | 26.5 | 5.8 | 3,028K | $32.00 |
 | ce | astra | low | 0.49 | 0.78 | 10.0 | 1.5 | 1,246K | $12.62 |
-| vanilla | glm-5.3-background | low | 0.54 | 0.75 | 5.8 | 4.5 | 13K | $0.03 |
-| vanilla | glm-5.3-background | high | 0.57 | 0.80 | 7.5 | 3.7 | 20K | $0.05 |
-| vanilla | glm-flash | low | 0.50 | 0.73 | 5.8 | 3.8 | 13K | $0.003 |
-| vanilla | glm-flash | high | 0.53 | 0.78 | 7.3 | 3.5 | 18K | $0.005 |
-| mrv | glm-5.3-background | low | 0.66 | 0.92 | 25.2 | 25.2 | 114K | $0.12 |
-| mrv | glm-5.3-background | high | 0.74 | 0.96 | 36.0 | 18.3 | 157K | $0.39 |
-| mrv | glm-flash | low | 0.66 | 0.93 | 25.3 | 22.2 | 110K | $0.02 |
-| mrv | glm-flash | high | 0.66 | 0.93 | 25.8 | 18.0 | 149K | $0.04 |
-| ce | glm-5.3-background | low | 0.81 | 0.97 | 40.5 | 28.0 | 103K | $0.20 |
-| ce | glm-5.3-background | high | 0.78 | 0.97 | 44.8 | 25.2 | 150K | $0.38 |
-| ce | glm-flash | low | 0.79 | 0.97 | 36.8 | 23.0 | 99K | $0.02 |
-| ce | glm-flash | high | 0.75 | 0.97 | 41.0 | 21.7 | 143K | $0.04 |
+| vanilla | glm-5.3-background | low | 0.54 | 0.79 | 4.0 | 1.5 | 13K | $0.03 |
+| vanilla | glm-5.3-background | high | 0.57 | 0.83 | 6.8 | 0.3 | 20K | $0.05 |
+| vanilla | glm-flash | low | 0.50 | 0.76 | 4.7 | 1.2 | 13K | $0.003 |
+| vanilla | glm-flash | high | 0.53 | 0.81 | 6.3 | 0.7 | 18K | $0.005 |
+| mrv | glm-5.3-background | low | 0.66 | 0.95 | 25.0 | 4.0 | 114K | $0.12 |
+| mrv | glm-5.3-background | high | 0.74 | 0.97 | 32.7 | 2.3 | 157K | $0.39 |
+| mrv | glm-flash | low | 0.66 | 0.95 | 24.2 | 5.7 | 109K | $0.02 |
+| mrv | glm-flash | high | 0.66 | 0.95 | 25.8 | 1.8 | 149K | $0.04 |
+| ce | glm-5.3-background | low | 0.81 | 0.98 | 36.8 | 5.3 | 102K | $0.20 |
+| ce | glm-5.3-background | high | 0.78 | 0.98 | 46.2 | 2.7 | 149K | $0.38 |
+| ce | glm-flash | low | 0.79 | 0.97 | 35.0 | 5.7 | 98K | $0.02 |
+| ce | glm-flash | high | 0.75 | 0.97 | 39.2 | 3.5 | 143K | $0.04 |
 
 **What the full grid adds to the GLM story:**
 
 - **The GLM factory cells don't just beat the price frontier — they beat every metered cell
   on efficiency.** Best metered hidden-gold cell: ce × opus-5 × high (48.2 hid, rec 0.84,
   6.8M tok, $11.10 recorded) — 46× more tokens and ~$46/cell more per hidden bug than
-  ce × glm-5.3-low (40.5 hid at 103K tok, $0.20). Best *recall* cell: mrv × opus-5 × low
-  (rec 0.85, incr 0.97, 28.7 hid at 3.5M tok) — vs ce × GLM-low's 0.81/0.97/40.5 at 103K.
+  ce × glm-5.3-low (36.8 hid at 102K tok, $0.20). Best *recall* cell: mrv × opus-5 × low
+  (rec 0.85, incr 0.98, 28.7 hid at 3.5M tok) — vs ce × GLM-low's 0.81/0.98/36.8 at 102K.
 - **The harness ranking inverts by model tier, consistently with the main report:** on
   premium models the factories earn their keep (mrv/opus low 0.85 vs vanilla 0.66; ce/opus
   high 0.84 vs vanilla 0.66); on cheap models the same holds (ce/GLM 0.81 vs vanilla 0.54).
@@ -482,7 +487,7 @@ metered at Z.AI list for GLM.
   flat at 0.45) — GLM is the only model family where the factories hit ≥0.79 recall at low
   effort, and it costs the least.
 - **Vanilla fable's top-6 hid count is 7.5/PR at $0.88** (current list) — the strongest pure-vanilla cell —
-  vs ce × GLM-low's 40.5/PR at $0.20. Even granting fable's superior precision (1.2 hal vs
+  vs ce × GLM-low's 36.8/PR at $0.20. Even granting fable's superior precision (1.2 hal vs
   28), the factory cell surfaces **5.4× more real bugs per PR for 3% of the price**; the
   triage trade is decided by how much reviewer attention you have.
 
@@ -558,7 +563,7 @@ convergence across independent harnesses is itself a confidence multiplier. Seco
 are not the kind of thing a human reviewer reliably catches on a large diff**: cross-branch
 sentinel drift, loop-scoped credentials, pagination off-by-ones on exact multiples
 ("floor(user_count/limit)+1 gives 3 pages when count=100, limit=50"), case-sensitivity in
-email comparisons. This is the concrete content behind the "40.5 hidden bugs/PR at $0.20"
+email comparisons. This is the concrete content behind the "36.8 hidden bugs/PR at $0.20"
 headline.
 
 ---
