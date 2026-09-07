@@ -9,11 +9,37 @@
 
 ---
 
-## 0. Background — what this lab measures (standalone context)
+## 0. Background
 
-`harnesseval` benchmarks **AI code-review harnesses** on real PRs with known ground truth.
-Each PR carries *golden comments* — real review findings recorded by human reviewers — plus
-the human reviewers' own misses. Three reviewer harnesses are compared:
+### 0.1 What are we evaluating?
+
+The use case is **automated pre-merge code review**: an AI reviewer (or reviewer team) is
+given a completed pull request — title, full diff, and repo context — and asked to find the
+real bugs before the code ships. Concretely, the numbers in this report map onto four
+deployment scenarios a developer or platform team actually faces:
+
+1. **Self-review assist** — "review my PR before I open it." One fast pass; precision matters
+   (you will read every finding), cost per review is nearly free either way. → vanilla cells.
+2. **Merge gating on high-stakes diffs** — payments, auth, migrations, multi-tenant data.
+   You want maximum bug discovery and can afford a subagent team and triage. → mrv/ce
+   factory cells at high effort. → §3.4, §3.5.
+3. **Backlog sweeps on a budget** — "re-review the last 200 PRs before a release" or an OSS
+   maintainer triaging external contributions. Cost per PR dominates; hidden gold per dollar
+   is the metric. → the GLM low-effort cells, this report's headline.
+4. **Finding what human reviewers missed** — the golden comments in this benchmark are real
+   findings recorded by human reviewers on real PRs; *hidden gold* is everything the AI
+   finds **beyond** that list. Sections §3.6 shows archetypes: credential corruption,
+   cross-tenant leakage, import-path XSS, migration landmines.
+
+What we are **not** yet evaluating (main report §1): the *fix* side of the loop
+(discover → adjudicate → patch → verify), agentic SDLC workflows, or review of docs/ephemeral
+artifacts. Single-pass discovery quality per dollar is the measured quantity.
+
+### 0.2 The lab setup
+
+`harnesseval` benchmarks the three harnesses on real PRs with known ground truth. Each PR
+carries *golden comments* — real review findings recorded by human reviewers — plus the human
+reviewers' own misses. The harnesses compared:
 
 - **vanilla** — one well-engineered review prompt, no subagents (the baseline a developer
   gets from "just ask the model to review this diff");
@@ -42,12 +68,33 @@ real bug, an important non-bug, a true hallucination, or unresolved.
 
 ## 1. The headline result: a free model now beats the $57 factory
 
-| | hid /PR | incr | tokens/PR | $/cell (Z.AI list) | hidden gold per $ |
-|---|---:|---:|---:|---:|---:|
-| **ce × glm-5.3-background × low** | **40.5** | **0.97** | **103K** | **$0.20** | **~200** |
-| ce × glm-5.3-flash × low | 36.8 | 0.97 | 99K | $0.02 | ~1,800 |
-| mrv × glm-5.3-flash × low | 25.3 | 0.93 | 110K | $0.02 | ~1,150 |
-| mrv × claude-opus-5 × high (main report §3.4) | 36.0 | 0.85 | 2.98M | $56.65 | 0.64 |
+| cell | rec | hid /PR | incr | tokens/PR | $/cell | hid gold per $ |
+|---|---:|---:|---:|---:|---:|---:|
+| **ce × glm-5.3-background × low** | 0.81 | **40.5** | **0.97** | **103K** | **$0.20** ¹ | **~200** |
+| ce × glm-5.3-flash × low | 0.79 | 36.8 | 0.97 | 99K | $0.02 ¹ | ~1,800 |
+| mrv × glm-5.3-flash × low | 0.66 | 25.3 | 0.93 | 110K | $0.02 ¹ | ~1,150 |
+| vanilla × claude-fable-5.1 × low | 0.74 | 7.5 | 0.89 | 85K | $6.41 ² | 1.2 |
+| vanilla × gpt-6-astra × low | 0.40 | 2.2 | 0.52 | 47K | $2.80 ² | 0.8 |
+| vanilla × claude-opus-5 × low | 0.66 | 6.0 | 0.81 | 86K | — | — |
+| vanilla × gpt-5.6-sol × low | 0.52 | 4.5 | 0.69 | 44K | — | — |
+| mrv × claude-fable-5.1 × low | 0.63 | 28.2 | 0.80 | 2,081K | — | — |
+| mrv × gpt-6-astra × low | 0.51 | 6.7 | 0.74 | 774K | — | — |
+| ce × claude-fable-5.1 × low | 0.75 | 26.5 | 0.93 | 3,028K | — | — |
+| ce × gpt-6-astra × low | 0.49 | 10.0 | 0.78 | 1,246K | — | — |
+| mrv × claude-opus-5 × high (main report §3.4) | — | 36.0 | 0.85 | 2,980K | $56.65 ² | 0.64 |
+
+¹ Z.AI list pricing applied to measured tokens (our runs: Lunaroute flat fee, $0 billed).
+² Verified actuals from the main report (OAuth-billed / refreshed pricing). "—" = no
+verified figure; recorded run costs for subscription models are pre-refresh (main report
+§3.4), so we quote only audited numbers.
+
+**Read across the fable/astra rows:** vanilla × fable is the *best* pure-prompt cell in the
+lab (rec 0.74) and still finds 7.5 hidden bugs/PR at $6.41 — while the **same model behind
+either factory** finds 3.5–3.8× more hidden gold (26.5–28.2/PR) at 24–35× the tokens; and
+**a $1.40/$4.40 GLM behind a factory beats both the premium models run vanilla and every
+premium factory on hidden gold per dollar by two orders of magnitude.** mrv × fable and
+mrv × astra confirm the pattern on the metareview side (28.2 and 6.7 hid vs 6.7–7.5 for
+their vanilla counterparts).
 
 **Compound Engineering on GLM-5.3 finds more real bugs the humans missed than the opus
 factory — 40.5 vs 36.0 per PR, at higher incremental recall (0.97 vs 0.85), on 1/29th the
