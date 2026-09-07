@@ -1,7 +1,5 @@
 # Evaluating PR Review Engines — do model or harness make a difference? (yes they do!)
 
-# Evaluating PR Review Engines — do model or harness make a difference? (yes they do!)
-
 > ### The finding
 >
 > **Open-source near-frontier models driven by review harnesses find more real bugs — at a
