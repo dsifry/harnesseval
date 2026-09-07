@@ -1,0 +1,181 @@
+{
+ "run_id": "8c4a7af115be",
+ "url": "https://github.com/calcom/cal.com/pull/14740",
+ "framework": "compound-realistic",
+ "model": "glm-5.3-background",
+ "effort": "medium",
+ "original": {
+  "tp": 4,
+  "fn": 2,
+  "n_real_ungold": 15,
+  "n_hallucination": 3,
+  "adj_p": 0.5714285714285714,
+  "incr": 0.9047619047619048
+ },
+ "corrected": {
+  "n_unmatched": 18,
+  "rejudged": 18,
+  "n_bug_ungold": 12,
+  "n_important": 5,
+  "n_true_hallucination": 1,
+  "n_unresolved": 0,
+  "n_hidden_findings_unmatched": 17,
+  "waste_precision": 0.8,
+  "flips": {
+   "hallucination->bug": 1,
+   "hallucination->hallucination": 1,
+   "hallucination->important_non_bug": 1,
+   "real_but_ungold->bug": 11,
+   "real_but_ungold->important_non_bug": 4
+  },
+  "judge": "gpt-5.2",
+  "diff_chars": 28407,
+  "wall_s": 6.9
+ },
+ "records": [
+  {
+   "issue_text": "Exact-string comparison (guest === attendee.email) lets case variants defeat the duplicate guest filter, allowing the same person to be added twice",
+   "source_lens": "compound-persona/security",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.86,
+   "rationale": "In `addGuests.handler.ts`, `uniqueGuests` is computed with `!booking.attendees.some((attendee) => guest === attendee.email)` and `!blacklistedGuestEmails.includes(guest)`. Neither `guest` nor `attendee.email` are normalized (e.g., lowercased), so case variants like `User@x.com` vs `user@x.com` can bypass the duplicate check and the blacklist check, allowing the same email to be added twice with di"
+  },
+  {
+   "issue_text": "No upper bound on the guests array (no .max()) and no rate limiting on the mutation, so any authorized user (including a mere attendee) can submit thousands of emails in one request, each producing a DB row and a full-details scheduled email \u2014 an outbound spam/DoS vector",
+   "source_lens": "compound-persona/security",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.92,
+   "rationale": "The new `addGuests` mutation accepts `guests: z.array(z.string().email())` with no upper bound (`.max()`), and server-side it `createMany` inserts every provided guest into `booking.attendees` (after only filtering existing/blacklisted). The mutation is accessible to any authed user who is an organizer *or an attendee* (`isAttendee` check) and then calls `sendAddGuestsEmails(evt, guests)`, which s"
+  },
+  {
+   "issue_text": "Calendar update uses the requester's credentials instead of the organizer's: getUsersCredentials(ctx.user) is passed to EventManager while the organizer's credentials (explicitly included in the booking query) are never used, so when a non-organizer adds guests, updateCalendarAttendees runs with the wrong or empty credential set and guests are never added to the organizer's actual calendar event (or the update errors out)",
+   "source_lens": "compound-persona/security",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.78,
+   "rationale": "In `addGuests.handler.ts`, the booking query includes `user: { include: { credentials: true } }` (organizer\u2019s stored credentials), but the calendar update path builds `EventManager` with `credentials = await getUsersCredentials(ctx.user)` (the requester). Since the mutation explicitly allows non-organizers (`isAttendee` or team admin/owner) to run it, `eventManager.updateCalendarAttendees(evt, boo"
+  },
+  {
+   "issue_text": "Raw guests array is passed to sendAddGuestsEmails instead of uniqueGuests, so an existing attendee whose email appears in the filtered-out list matches newGuests.includes(attendee.email) in email-manager.ts and receives a full AttendeeScheduledEmail instead of the correct guests-added notification",
+   "source_lens": "compound-persona/security",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "In `addGuests.handler.ts`, `uniqueGuests` is computed to exclude emails already in `booking.attendees` (and blacklisted), but the code calls `sendAddGuestsEmails(evt, guests)` with the original `guests` input instead of `uniqueGuests`. In `packages/emails/email-manager.ts`, `sendAddGuestsEmails` uses `if (newGuests.includes(attendee.email))` to decide to send `AttendeeScheduledEmail` vs `AttendeeA"
+  },
+  {
+   "issue_text": "No booking status or time check: the findFirst has no status filter, so guests can be added to CANCELLED/REJECTED or long-past bookings, generating CONFIRMED ICS invites and calendar updates for events that no longer exist and misleading recipients",
+   "source_lens": "compound-persona/security",
+   "old_verdict": "hallucination",
+   "new_verdict": "bug",
+   "confidence": 0.6,
+   "rationale": "In `addGuestsHandler`, the booking is fetched with `prisma.booking.findFirst({ where: { id: bookingId } })` and there is no subsequent check on booking status (e.g., cancelled/rejected) or on `startTime/endTime` being in the past before mutating attendees, calling `eventManager.updateCalendarAttendees(evt, booking)`, and sending emails with ICS payloads hard-coded to `status: \"CONFIRMED\"` in the n"
+  },
+  {
+   "issue_text": "Partial-state failure: eventManager.updateCalendarAttendees is not wrapped in error handling, so if it throws the mutation returns an error even though the guests were already added (no rollback), and a retry behaves unexpectedly",
+   "source_lens": "compound-persona/security",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "In addGuests.handler.ts, the DB is updated first via prisma.booking.update(... attendees.createMany ...). After that, `await eventManager.updateCalendarAttendees(evt, booking);` is executed without any try/catch or compensating rollback. If `updateCalendarAttendees` throws, the mutation will error even though guests have already been persisted, causing a partial-state failure. A retry can then beh"
+  },
+  {
+   "issue_text": "Email sending errors are swallowed: the catch block logs only a static string (Error sending AddGuestsEmails) and discards err, making delivery failures invisible",
+   "source_lens": "compound-persona/security",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.82,
+   "rationale": "In `packages/trpc/server/routers/viewer/bookings/addGuests.handler.ts`, the `sendAddGuestsEmails` call is wrapped in `try/catch` and the `catch` only does `console.log(\"Error sending AddGuestsEmails\")` without logging/propagating the caught `err`. This makes email delivery failures hard to detect/debug (reduced observability), while the mutation still returns success."
+  },
+  {
+   "issue_text": "Stale validation error in AddGuestsDialog.tsx: setIsInvalidEmail(true) is never reset when the user retries with corrected input (only cleared via the Cancel button), so the error banner persists after the input becomes valid",
+   "source_lens": "compound-persona/security",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "In AddGuestsDialog.tsx, `isInvalidEmail` is set to `true` on validation failure in `handleAdd`, but it is not reset on subsequent successful validation or on mutation success (`onSuccess` only closes dialog and resets `multiEmailValue`). It is only cleared in the Cancel button handler. Since the component remains mounted while `Dialog` is just toggled via `open`, the error banner (`{isInvalidEmail"
+  },
+  {
+   "issue_text": "The `guests` array in addGuests.schema.ts has no `.max()` cap, so a single authenticated request can submit thousands of emails, driving unbounded `createMany` rows, unbounded calendar API attendee pushes, and unbounded email fan-out \u2014 SMTP/provider quota exhaustion, sender-IP reputation damage (an email-bombing/spam vector through the mail infrastructure), DB bloat, and CPU burn",
+   "source_lens": "compound-persona/performance",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "In `packages/trpc/server/routers/viewer/bookings/addGuests.schema.ts`, `guests` is defined as `z.array(z.string().email())` with no `.max()` (and no server-side cap elsewhere in the diff). The handler `addGuests.handler.ts` then uses `createMany` with that array, builds `attendeesList` over all attendees, calls `eventManager.updateCalendarAttendees`, and fans out emails via `sendAddGuestsEmails(ev"
+  },
+  {
+   "issue_text": "Each fanned-out email requires a full `generateIcsString` call that itself iterates all attendees (O(N\u00b2) work per call) plus a React SSR render, all dispatched concurrently via one unbounded `Promise.all`; one ICS payload could be shared per role",
+   "source_lens": "compound-persona/performance",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.72,
+   "rationale": "In `sendAddGuestsEmails` (packages/emails/email-manager.ts) the code fans out one `sendEmail()` per organizer/team member and per attendee, then executes them via a single unbounded `Promise.all(emailsToSend)`. Each of those emails\u2019 node templates (`packages/emails/templates/*-add-guests-email.ts`) builds its own payload including an `icalEvent.content` computed by `generateIcsString({ event: this"
+  },
+  {
+   "issue_text": "addGuests.handler.ts fetches the organizer's credentials via `include: { credentials: true }` (heavy OAuth token blobs) but never reads them, while `getUsersCredentials(ctx.user)` issues a second credentials query for the requester \u2014 a duplicate load when the requester is the organizer, and in the attendee-initiated path the EventManager is built from the wrong user's credentials, causing `updateCalendarAttendees` to no-op or error against the organizer's calendar references",
+   "source_lens": "compound-persona/performance",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.6,
+   "rationale": "In `addGuests.handler.ts`, the booking query includes `user: { include: { ... credentials: true } }` but the handler never reads `booking.user.credentials`, and instead calls `getUsersCredentials(ctx.user)` and builds `new EventManager({ ...user, credentials: [...] })` from the *requester* (`ctx.user`). Since the handler explicitly allows non-organizers (`isAttendee`) to call it, an attendee-initi"
+  },
+  {
+   "issue_text": "N+1 translation loads: `getTranslation(attendee.locale)` is invoked per attendee inside a map, performing O(attendees) i18n resource loads/instantiations on every add-guests request; translations should be cached per distinct locale",
+   "source_lens": "compound-persona/performance",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.9,
+   "rationale": "In `packages/trpc/server/routers/viewer/bookings/addGuests.handler.ts`, the code builds `attendeesListPromises` via `bookingAttendees.attendees.map(async (attendee) => ({ ... language: { translate: await getTranslation(attendee.locale ?? \"en\", \"common\"), ... } }))`, which calls `getTranslation(...)` once per attendee. If multiple attendees share the same locale, this repeats translation loading/in"
+  },
+  {
+   "issue_text": "Linear-scan membership checks inside loops: `booking.attendees.some(...)` per guest (addGuests.handler.ts:74\u201378) and `newGuests.includes(attendee.email)` per attendee (email-manager.ts:~541) are both O(N\u00d7M); a `Set` should be used for lookups",
+   "source_lens": "compound-persona/performance",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.88,
+   "rationale": "Verified in diff: addGuests.handler.ts computes `uniqueGuests` via `guests.filter(... !booking.attendees.some(...))`, doing a linear scan of `booking.attendees` for each guest, and email-manager.ts `sendAddGuestsEmails` maps over `calendarEvent.attendees` and checks `newGuests.includes(attendee.email)` for each attendee. Both are O(N\u00d7M) membership patterns that could be reduced to O(N+M) with `Set"
+  },
+  {
+   "issue_text": "Blanket cache invalidation: `utils.viewer.bookings.invalidate()` in AddGuestsDialog.tsx:37 invalidates every query under `viewer.bookings`, triggering multiple full booking-list refetches per successful guest add; a targeted invalidation of the affected list/detail query should be used instead",
+   "source_lens": "compound-persona/performance",
+   "old_verdict": "hallucination",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.86,
+   "rationale": "In AddGuestsDialog.tsx on successful mutation it calls `utils.viewer.bookings.invalidate();`, which (as written) invalidates the entire `viewer.bookings` router cache rather than a specific bookings list/detail query related to `bookingId`. This is a concrete performance/UX concern (unnecessary refetches) introduced by the diff, not a functional correctness defect."
+  },
+  {
+   "issue_text": "The two sequential awaits for `isTeamAdmin` and `isTeamOwner` could be parallelized with `Promise.all`",
+   "source_lens": "compound-persona/performance",
+   "old_verdict": "hallucination",
+   "new_verdict": "hallucination",
+   "confidence": 0.78,
+   "rationale": "The diff does show two sequential awaits in `addGuests.handler.ts` when computing `isTeamAdminOrOwner` (`await isTeamAdmin(...) && await isTeamOwner(...)`). While they could be run in parallel with `Promise.all`, this is a minor performance micro-optimization and not a substantive review concern or defect grounded in the diff\u2019s functionality."
+  },
+  {
+   "issue_text": "Case-sensitive email comparisons break dedupe and the blacklist: `guest === attendee.email` is exact-case and `blacklistedGuestEmails` is lowercased while guests are not normalized, so `Spam@X.com` bypasses a `spam@x.com` blacklist entry and case-variant duplicates create duplicate attendee rows (duplicate emails/ICS entries); the client-side uniqueness check in AddGuestsDialog.tsx:26\u201329 has the same exact-case flaw \u2014 emails should be normalized to lowercase before all comparisons",
+   "source_lens": "compound-persona/performance",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "In `addGuests.handler.ts`, dedupe and blacklist checks are case-sensitive/mismatched: `!booking.attendees.some((attendee) => guest === attendee.email)` compares raw `guest` vs stored email without normalization, and `blacklistedGuestEmails` are lowercased while `guest` is not (`!blacklistedGuestEmails.includes(guest)`), allowing case-variant duplicates and blacklist bypass (e.g., `Spam@x.com`). On"
+  },
+  {
+   "issue_text": "No transaction or partial-failure handling: attendees are persisted via `prisma.booking.update` before `updateCalendarAttendees`, which is not wrapped in try/catch, so if the calendar update throws the handler errors after the DB write \u2014 the UI reports failure while the guests were actually persisted and no emails were sent",
+   "source_lens": "compound-persona/performance",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.83,
+   "rationale": "In `addGuestsHandler`, the DB write happens first via `prisma.booking.update(... attendees.createMany ...)`, and then `eventManager.updateCalendarAttendees(evt, booking)` is awaited without any try/catch or transaction/rollback mechanism. If `updateCalendarAttendees` throws, the mutation will error after guests have already been persisted, leading to inconsistent state (DB updated but calendar not"
+  },
+  {
+   "issue_text": "In packages/trpc/server/routers/viewer/bookings/addGuests.handler.ts:46-48, the team permission check uses `&&` instead of `||`, contradicting the variable's own name `isTeamAdminOrOwner`",
+   "source_lens": "compound-persona/maintainability",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.85,
+   "rationale": "In `addGuests.handler.ts`, `isTeamAdminOrOwner` is computed as `(await isTeamAdmin(...)) && (await isTeamOwner(...))`, which requires the user to be both a team admin and a team owner. This contradicts the variable name and likely intended permission logic (admin OR owner), and can incorrectly deny access to legitimate admins or owners."
+  }
+ ]
+}

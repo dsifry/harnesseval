@@ -1,0 +1,140 @@
+{
+ "run_id": "aebfcbf2d2d0",
+ "url": "https://github.com/calcom/cal.com/pull/14740",
+ "framework": "vanilla-engineered",
+ "model": "glm-5.3-flash-background",
+ "effort": "high",
+ "original": {
+  "tp": 3,
+  "fn": 3,
+  "n_real_ungold": 9,
+  "n_hallucination": 4,
+  "adj_p": 0.42857142857142855,
+  "incr": 0.8
+ },
+ "corrected": {
+  "n_unmatched": 13,
+  "rejudged": 13,
+  "n_bug_ungold": 10,
+  "n_important": 3,
+  "n_true_hallucination": 0,
+  "n_unresolved": 0,
+  "n_hidden_findings_unmatched": 13,
+  "waste_precision": 1.0,
+  "flips": {
+   "hallucination->bug": 3,
+   "hallucination->important_non_bug": 1,
+   "real_but_ungold->bug": 7,
+   "real_but_ungold->important_non_bug": 2
+  },
+  "judge": "gpt-5.2",
+  "diff_chars": 28407,
+  "wall_s": 6.1
+ },
+ "records": [
+  {
+   "issue_text": "Authorization is too permissive: any attendee of a booking (isAttendee) can add arbitrary guests, triggering emails sent 'from' the organizer and calendar updates, creating a spam/spoofing vector since attendee emails are user-controlled at booking time",
+   "source_lens": "vanilla-engineered",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.86,
+   "rationale": "In `addGuests.handler.ts`, authorization explicitly allows any authenticated user who is an attendee (`const isAttendee = !!booking.attendees.find((attendee) => attendee.email === user.email);`) to proceed (`if (!isTeamAdminOrOwner && !isOrganizer && !isAttendee) throw FORBIDDEN`). The handler then updates calendar attendees (`eventManager.updateCalendarAttendees(evt, booking)`) and sends emails ("
+  },
+  {
+   "issue_text": "When eventType.teamId is null the code checks team id 0",
+   "source_lens": "vanilla-engineered",
+   "old_verdict": "hallucination",
+   "new_verdict": "bug",
+   "confidence": 0.72,
+   "rationale": "In `addGuests.handler.ts`, `isTeamAdminOrOwner` calls `isTeamAdmin(user.id, booking.eventType?.teamId ?? 0)` and `isTeamOwner(... ?? 0)`. This explicitly passes `0` when `eventType.teamId` is `null/undefined`, which could lead to incorrect permission evaluation (or unintended lookup against team id 0) instead of skipping team checks when there is no team."
+  },
+  {
+   "issue_text": "No transaction/atomicity: prisma.booking.update persists new attendees before updateCalendarAttendees runs; if the calendar update throws, guests are already saved and a retry fails with misleading emails_must_be_unique_valid error",
+   "source_lens": "vanilla-engineered",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.74,
+   "rationale": "In addGuests.handler.ts, new attendees are persisted via prisma.booking.update(... attendees.createMany ...) before calling eventManager.updateCalendarAttendees(evt, booking). There is no transaction or compensating rollback. If updateCalendarAttendees throws, the DB now contains the added attendees but the calendar update didn\u2019t occur. On a retry with the same emails, uniqueGuests filters out ema"
+  },
+  {
+   "issue_text": "EventManager is constructed with getUsersCredentials(ctx.user) (the actor's credentials) instead of the organizer's, so when an attendee or team admin adds guests the update uses the wrong user's calendar credentials and will fail or target the wrong calendar; credentials should come from booking.user",
+   "source_lens": "vanilla-engineered",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.85,
+   "rationale": "In `addGuests.handler.ts`, the handler allows non-organizers to add guests (`isTeamAdminOrOwner` / `isAttendee` checks). But it constructs `EventManager` with the acting `ctx.user` and `credentials = await getUsersCredentials(ctx.user)`, then calls `eventManager.updateCalendarAttendees(evt, booking)`. If the actor is an attendee or team admin (not `booking.userId`), this will use the wrong user's "
+  },
+  {
+   "issue_text": "No check of booking.status: guests can be added to cancelled/rejected/pending bookings, sending 'Guests Added' emails and ICS REQUEST updates for events that no longer exist",
+   "source_lens": "vanilla-engineered",
+   "old_verdict": "hallucination",
+   "new_verdict": "bug",
+   "confidence": 0.62,
+   "rationale": "In the newly added `addGuestsHandler` (packages/trpc/server/routers/viewer/bookings/addGuests.handler.ts), the booking is fetched and permission-checked, but there is no guard on any booking state/status before updating attendees and sending calendar/email updates (`prisma.booking.update(...)`, `eventManager.updateCalendarAttendees(...)`, `sendAddGuestsEmails(...)`). From the diff, guests can be a"
+  },
+  {
+   "issue_text": "No upper bound on guests array size in the schema: a single request can add hundreds of emails, fanning out into hundreds of outbound emails per attendee \u2014 a mail-bombing/DoS vector; add .max(N)",
+   "source_lens": "vanilla-engineered",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.87,
+   "rationale": "In `packages/trpc/server/routers/viewer/bookings/addGuests.schema.ts`, `guests` is defined as `z.array(z.string().email())` with no `.max(N)`. The handler `addGuestsHandler` uses this array to `createMany` attendees and then calls `sendAddGuestsEmails(evt, guests)`, which fans out emails to organizer/team members and maps over all `calendarEvent.attendees` to send per-attendee emails. This makes a"
+  },
+  {
+   "issue_text": "For seated event types, attendees are inserted directly into booking.attendees, bypassing seat-booking logic (seatsReferences/capacity tracking), which can overbook seats and produce inconsistent attendee state",
+   "source_lens": "vanilla-engineered",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.72,
+   "rationale": "The new `addGuestsHandler` writes directly to `booking.attendees` via `prisma.booking.update({ data: { attendees: { createMany: ... }}})` without any check against `eventType.seatsPerTimeSlot` capacity or any seat-specific tracking (e.g., seat references). Since the handler also includes `seatsPerTimeSlot`/`seatsShowAttendees` in the CalendarEvent, this endpoint can be used on seated event types w"
+  },
+  {
+   "issue_text": "Read-then-write race: two concurrent addGuests calls both load the booking's attendees before either writes, so the same guest can be added twice; no DB unique constraint on (bookingId, email) and no transaction/serializable isolation",
+   "source_lens": "vanilla-engineered",
+   "old_verdict": "hallucination",
+   "new_verdict": "bug",
+   "confidence": 0.65,
+   "rationale": "In `addGuestsHandler` the code reads existing attendees (`prisma.booking.findFirst(... include: { attendees: true })`), computes `uniqueGuests` by filtering against that snapshot, then writes with `prisma.booking.update(... attendees.createMany ...)`. Two concurrent calls can both see the same pre-write attendee list and both attempt to insert the same guest email(s). The diff shows no transaction"
+  },
+  {
+   "issue_text": "prisma.user.findFirstOrThrow({ where: { id: booking.userId || 0 } }): if booking.userId is null, a query for id 0 throws a raw Prisma error (unhandled \u2192 HTTP 500) instead of a proper TRPCError with a meaningful message",
+   "source_lens": "vanilla-engineered",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.67,
+   "rationale": "In new addGuests.handler.ts, organizer is fetched via prisma.user.findFirstOrThrow({ where: { id: booking.userId || 0 } }). If booking.userId is null/undefined, this forces id=0; findFirstOrThrow will throw when no user exists, and the handler does not convert that into a TRPCError (it will bubble up as an unhandled Prisma error), leading to a 500 instead of a meaningful TRPC error."
+  },
+  {
+   "issue_text": "Email failures are swallowed with console.log('Error sending AddGuestsEmails'): the error object isn't logged, the project logger isn't used, and the API still returns success so the UI shows 'Guests added' even when no emails were sent",
+   "source_lens": "vanilla-engineered",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.72,
+   "rationale": "In `packages/trpc/server/routers/viewer/bookings/addGuests.handler.ts`, `sendAddGuestsEmails` is wrapped in a `try/catch` that only does `console.log(\"Error sending AddGuestsEmails\")` and discards the caught `err`, then the handler still returns `{ message: \"Guests added\" }`. This means the TRPC mutation resolves successfully even if email sending fails, so the UI `onSuccess` toast (`showToast(t(\""
+  },
+  {
+   "issue_text": "isInvalidEmail in AddGuestsDialog is never reset on successful submit or when the dialog is closed/reopened via the overlay (only Cancel resets it), so the stale 'Emails must be unique and valid' error reappears on next open",
+   "source_lens": "vanilla-engineered",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "In `AddGuestsDialog`, `isInvalidEmail` is set to `true` on failed validation (`handleAdd`) but is never cleared in the `addGuestsMutation.onSuccess` handler (it only closes the dialog and resets `multiEmailValue`). Also, closing the dialog via the overlay/ESC triggers `onOpenChange={setIsOpenDialog}` without resetting `isInvalidEmail`, and the component stays mounted (always rendered in `BookingLi"
+  },
+  {
+   "issue_text": "No tests added for the new handler: authorization matrix (organizer/attendee/team admin/owner/unrelated user), duplicate/blacklist filtering, seated bookings, and cancelled-booking rejection are all untested",
+   "source_lens": "vanilla-engineered",
+   "old_verdict": "hallucination",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.74,
+   "rationale": "The diff introduces substantial new server logic in `packages/trpc/server/routers/viewer/bookings/addGuests.handler.ts` (authorization branches for organizer/attendee/team admin/owner, blacklist + duplicate/existing-attendee filtering, mutation + calendar update + email sending), but the diff adds no test files/coverage for this new behavior. Parts of the finding (\"seated bookings\" and \"cancelled-"
+  },
+  {
+   "issue_text": "handleAdd silently returns when the email list is empty, giving no feedback that nothing happened; the Zod schema is also redefined inline in the component instead of importing the shared server schema, risking drift between client and server validation",
+   "source_lens": "vanilla-engineered",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.78,
+   "rationale": "In AddGuestsDialog.handleAdd(), when multiEmailValue becomes an empty array (possible via MultiEmail\u2019s remove button which splices entries), the function returns without any UI feedback. Also, the client defines its own Zod schema inline (including a uniqueness refine) instead of importing the server\u2019s shared ZAddGuestsInputSchema from packages/trpc/server/routers/viewer/bookings/addGuests.schema."
+  }
+ ]
+}

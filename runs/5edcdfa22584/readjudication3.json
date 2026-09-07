@@ -1,0 +1,114 @@
+{
+ "run_id": "5edcdfa22584",
+ "url": "https://github.com/calcom/cal.com/pull/14740",
+ "framework": "metareview-realistic",
+ "model": "glm-5.3-background",
+ "effort": "medium",
+ "original": {
+  "tp": 3,
+  "fn": 3,
+  "n_real_ungold": 10,
+  "n_hallucination": 0,
+  "adj_p": 1.0,
+  "incr": 0.8125
+ },
+ "corrected": {
+  "n_unmatched": 10,
+  "rejudged": 10,
+  "n_bug_ungold": 9,
+  "n_important": 0,
+  "n_true_hallucination": 0,
+  "n_unresolved": 1,
+  "n_hidden_findings_unmatched": 9,
+  "waste_precision": 1.0,
+  "flips": {
+   "real_but_ungold->bug": 9,
+   "real_but_ungold->unresolved": 1
+  },
+  "judge": "gpt-5.2",
+  "diff_chars": 28407,
+  "wall_s": 8.8
+ },
+ "records": [
+  {
+   "issue_text": "The addGuests handler authorizes any booking attendee (not just the organizer) to add guests, so any user who books a meeting with a victim can add arbitrary attendees and trigger emails that disclose the meeting's video-call credentials (meetingUrl/meetingPassword) to attacker-chosen addresses",
+   "source_lens": "metareview-lens/security",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.78,
+   "rationale": "In `addGuests.handler.ts`, authorization explicitly allows any existing attendee to add guests: `const isAttendee = !!booking.attendees.find((attendee) => attendee.email === user.email);` and it only blocks when `!isTeamAdminOrOwner && !isOrganizer && !isAttendee` (so `isAttendee` passes). The handler also copies video-call reference data into `evt.videoCallData` from `booking.references` and then"
+  },
+  {
+   "issue_text": "The guests array schema (z.array(z.string().email())) has no .max() limit and the handler has no rate limiting, allowing unbounded mass-email dispatch and unbounded createMany of Attendee rows per request",
+   "source_lens": "metareview-lens/security",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.84,
+   "rationale": "The new TRPC input schema `ZAddGuestsInputSchema` defines `guests: z.array(z.string().email())` with no `.max()` (packages/trpc/server/routers/viewer/bookings/addGuests.schema.ts), and the handler directly uses `createMany` to insert all provided guests (addGuests.handler.ts `attendees.createMany`) and then triggers `sendAddGuestsEmails(evt, guests)` which can enqueue emails proportional to the ar"
+  },
+  {
+   "issue_text": "The calendar update builds the EventManager with the caller's (ctx.user) OAuth credentials instead of the booking organizer's credentials (which were already loaded), causing wrong-account credential use and leaving committed attendee rows without calendar sync on failure since the DB write is not transactional with this step",
+   "source_lens": "metareview-lens/security",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.93,
+   "rationale": "In `addGuests.handler.ts`, after loading the booking (including `user.credentials`) and separately fetching the `organizer`, the calendar sync is performed with `getUsersCredentials(ctx.user)` and `new EventManager({ ...user, credentials: [...] })`, i.e. the *caller\u2019s* OAuth credentials, not the booking organizer\u2019s. This is directly shown in the diff and can cause syncing against the wrong account"
+  },
+  {
+   "issue_text": "There is no booking.status check, so guests can be added to CANCELLED/REJECTED bookings, and the ICS attachment hardcodes status: 'CONFIRMED', causing cancelled events to be resurrected on attendees' calendars via fresh confirmed invites",
+   "source_lens": "metareview-lens/security",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.74,
+   "rationale": "In `addGuestsHandler` (new file) the booking is fetched and guests are appended with `prisma.booking.update(... attendees.createMany ...)` with no check on any booking state/status before proceeding. The newly added email templates for adding guests hardcode the ICS payload status to `\"CONFIRMED\"` in both `packages/emails/templates/attendee-add-guests-email.ts` and `packages/emails/templates/organ"
+  },
+  {
+   "issue_text": "addGuests.handler.ts: The Attendee DB rows are committed via prisma.booking.update/createMany (lines 92-106) before the external calendar write (eventManager.updateCalendarAttendees, line ~160) with no transaction, compensation, or rollback \u2014 if the calendar API call throws, guests are persisted in the DB but never propagated to the calendar or emailed, causing permanent DB\u2194calendar divergence.",
+   "source_lens": "metareview-lens/data-migration",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "In addGuests.handler.ts the handler persists new attendees to the DB via `prisma.booking.update({ data: { attendees: { createMany: ... }}})` before calling the external side effect `await eventManager.updateCalendarAttendees(evt, booking);`. There is no transaction/rollback/compensation around these steps, and `updateCalendarAttendees` is not wrapped in a try/catch, so if it throws the mutation ab"
+  },
+  {
+   "issue_text": "addGuests.handler.ts: The retry path after a failed calendar write is permanently blocked \u2014 resubmitting the same emails causes the attendee-dedup filter (lines 74-78) to empty uniqueGuests and the guard (lines 80-81) to throw BAD_REQUEST emails_must_be_unique_valid, and there is no remove-guest endpoint to undo and redo, so the user cannot re-trigger calendar propagation without manual DB surgery.",
+   "source_lens": "metareview-lens/data-migration",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.86,
+   "rationale": "In addGuests.handler.ts the DB is updated first (prisma.booking.update creating attendees) before calling eventManager.updateCalendarAttendees(evt, booking). If the calendar propagation throws (there\u2019s no try/catch around updateCalendarAttendees), the mutation fails after guests are already persisted. A subsequent retry with the same emails will be filtered out by uniqueGuests (it excludes emails "
+  },
+  {
+   "issue_text": "addGuests.schema.ts: The server input schema uses z.array(z.string().email()) without the duplicate-email .refine validation the client (AddGuestsDialog.tsx) enforces, and the handler's uniqueGuests filter does not dedupe emails within the submitted list \u2014 API clients can submit duplicates, persisting duplicate Attendee rows (person double-counted against seat capacity, duplicate emails, listed twice on the calendar) or surfacing an unhandled Prisma P2002 as a raw 500.",
+   "source_lens": "metareview-lens/data-migration",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.78,
+   "rationale": "In the diff, the server schema `ZAddGuestsInputSchema` (packages/trpc/.../addGuests.schema.ts) only validates `guests: z.array(z.string().email())` and does not enforce uniqueness like the client-side `ZAddGuestsInputSchema` in `AddGuestsDialog.tsx` (which `.refine`s unique emails). In `addGuests.handler.ts`, `uniqueGuests` filters out already-existing booking attendees and blacklisted emails, but"
+  },
+  {
+   "issue_text": "addGuests.handler.ts: The read of booking.attendees (lines 26-42) and the attendee write (lines 92-106) are not in a transaction, so two concurrent addGuests requests can both pass the uniqueness filter and create duplicate Attendee rows (TOCTOU race).",
+   "source_lens": "metareview-lens/data-migration",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "unresolved",
+   "confidence": 0.45,
+   "rationale": "below CONF_FLOOR (0.45)"
+  },
+  {
+   "issue_text": "addGuests.handler.ts: The attendee dedup uses an exact case-sensitive comparison (guest === attendee.email), so a case-variant of an existing attendee's stored email defeats the dedup and writes a second persistent record for the same person that no later exact-match code path will recognize as the same human.",
+   "source_lens": "metareview-lens/data-migration",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "In addGuests.handler.ts, deduplication filters out existing attendees via an exact string match: `!booking.attendees.some((attendee) => guest === attendee.email)`. Inputs (`guests`) are validated as emails but not normalized (e.g., lowercased), while the blacklist is lowercased, so a case-variant like `User@Example.com` vs `user@example.com` can bypass dedup and create a duplicate attendee record "
+  },
+  {
+   "issue_text": "addGuests.handler.ts (lines 153-160): The EventManager used to update the organizer's calendar event is constructed with the caller's credentials (getUsersCredentials(ctx.user)) instead of the organizer's \u2014 the organizer's credentials are fetched but never used.",
+   "source_lens": "metareview-lens/data-migration",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.83,
+   "rationale": "In `addGuests.handler.ts`, the `EventManager` used for `eventManager.updateCalendarAttendees(evt, booking)` is instantiated with `credentials` from `getUsersCredentials(ctx.user)` and spread `...user` (the caller), not the booking organizer. Since the mutation allows non-organizers (team admin/owner or even an attendee) to add guests, this can cause calendar updates to run with the wrong account\u2019s"
+  }
+ ]
+}

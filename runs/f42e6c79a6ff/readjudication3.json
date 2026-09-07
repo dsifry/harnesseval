@@ -1,0 +1,277 @@
+{
+ "run_id": "f42e6c79a6ff",
+ "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/4",
+ "framework": "metareview-realistic",
+ "model": "claude-sonnet-5",
+ "effort": "low",
+ "original": {
+  "tp": 3,
+  "fn": 5,
+  "n_real_ungold": 19,
+  "n_hallucination": 11,
+  "adj_p": 0.21428571428571427,
+  "incr": 0.8148148148148148
+ },
+ "corrected": {
+  "n_unmatched": 30,
+  "rejudged": 30,
+  "n_bug_ungold": 11,
+  "n_important": 15,
+  "n_true_hallucination": 4,
+  "n_unresolved": 0,
+  "n_hidden_findings_unmatched": 26,
+  "waste_precision": 0.4286,
+  "flips": {
+   "hallucination->bug": 1,
+   "hallucination->hallucination": 4,
+   "hallucination->important_non_bug": 6,
+   "real_but_ungold->bug": 10,
+   "real_but_ungold->important_non_bug": 9
+  },
+  "judge": "gpt-5.2",
+  "diff_chars": 29064,
+  "wall_s": 19.1
+ },
+ "records": [
+  {
+   "issue_text": "app/models/topic_embed.rb:14-30 \u2014 TopicEmbed.import does read-then-write (where(embed_url:).first then create!) with no locking/find_or_create_or upsert, so concurrent PollFeed/RetrieveTopic jobs processing the same URL race and one raises an unrescued RecordInvalid/RecordNotUnique from the unique index, aborting the transaction instead of being handled as \"already imported\".",
+   "source_lens": "metareview-lens/architecture",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "In TopicEmbed.import, it does `embed = TopicEmbed.where(embed_url: url).first` and if blank enters a transaction and later calls `TopicEmbed.create!` (app/models/topic_embed.rb). The migration adds a unique index on `topic_embeds.embed_url` (db/migrate/20131217174004_create_topic_embeds.rb). With concurrent PollFeed/RetrieveTopic runs for the same URL, both can observe `embed.blank?` and attempt `"
+  },
+  {
+   "issue_text": "lib/topic_retriever.rb:38-46 \u2014 perform_retrieve checks TopicEmbed.exists? then calls Jobs::PollFeed.new.execute({}) synchronously inline inside a regular job and checks exists? again, but this reimplements the same racy read-then-write path as TopicEmbed.import and can also fetch/parse the entire feed synchronously inside a request-triggered job just to resolve one embed_url.",
+   "source_lens": "metareview-lens/architecture",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.83,
+   "rationale": "In lib/topic_retriever.rb#perform_retrieve, the code does `return if TopicEmbed.where(embed_url: @embed_url).exists?`, then (when `SiteSetting.feed_polling_enabled?`) calls `Jobs::PollFeed.new.execute({})` synchronously, then checks `exists?` again before falling through to `fetch_http`. This is verifiable in the diff and does mean a request-triggered retrieval path can synchronously fetch/parse t"
+  },
+  {
+   "issue_text": "app/jobs/scheduled/poll_feed.rb:24-25 \u2014 SimpleRSS.parse open(SiteSetting.feed_polling_url) performs an unbounded, untimed-out synchronous HTTP fetch of an external, admin-controlled URL inside a scheduled Sidekiq job with sidekiq_options retry: false, so a slow/hanging remote server stalls the worker for the life of the request with no retry recovery.",
+   "source_lens": "metareview-lens/architecture",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.82,
+   "rationale": "In app/jobs/scheduled/poll_feed.rb the job does `rss = SimpleRSS.parse open(SiteSetting.feed_polling_url)` after `require 'open-uri'`, which performs a synchronous external HTTP fetch with no explicit open/read timeouts shown in the diff. Because this runs inside a scheduled Sidekiq job and the class sets `sidekiq_options retry: false`, a slow/hanging feed URL can block the worker thread/process w"
+  },
+  {
+   "issue_text": "app/models/topic_embed.rb:38-46 \u2014 import_remote does open(url).read to fetch arbitrary external content synchronously with no timeout/size bound, called from both the scheduled poll path and the per-request RetrieveTopic job, risking worker/job hangs and unbounded memory use on large or slow responses.",
+   "source_lens": "metareview-lens/architecture",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.84,
+   "rationale": "The diff introduces synchronous external HTTP fetches with `open(...).read` in `TopicEmbed.import_remote` (app/models/topic_embed.rb:38-46) and `SimpleRSS.parse open(...)` in `Jobs::PollFeed` (app/jobs/scheduled/poll_feed.rb:30-32) without any explicit timeout or response-size limit. `import_remote` is invoked from `TopicRetriever#fetch_http`, which is executed by the per-request `Jobs::RetrieveTo"
+  },
+  {
+   "issue_text": "db/migrate/20131217174004_create_topic_embeds.rb:3-10 \u2014 topic_id and post_id columns are plain integers with null: false but no foreign key constraint and no index on topic_id/post_id (only embed_url is indexed), so TopicEmbed.where(topic_id: post.topic_id) lookups and topic/post associations rely on unindexed columns and DB-level referential integrity is not enforced, allowing orphaned embeds if a topic/post is destroyed.",
+   "source_lens": "metareview-lens/architecture",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.82,
+   "rationale": "The migration `db/migrate/20131217174004_create_topic_embeds.rb` creates `topic_id` and `post_id` as plain `integer` columns with `null: false` but only adds an index on `embed_url` (no index on `topic_id`/`post_id`) and defines no foreign key constraints. This is verifiable from the diff and is a concrete performance/integrity concern for associations and lookups like `TopicEmbed.where(topic_id: "
+  },
+  {
+   "issue_text": "app/models/topic_embed.rb:5-6 \u2014 validates_presence_of :embed_url plus the DB unique index only guarantees uniqueness/non-blankness of the string, not that it is a well-formed absolute URL; the actual invariant enforced by callers (url =~ /^https?\\:\\/\\// in .import) is checked ad hoc before save rather than as a model validation, so a TopicEmbed could be created directly (e.g. via console or future code path) with a non-http embed_url that passes validation.",
+   "source_lens": "metareview-lens/architecture",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.83,
+   "rationale": "In the diff, TopicEmbed only has `validates_presence_of :embed_url` (app/models/topic_embed.rb) and the migration adds only a unique index on `embed_url` (db/migrate/20131217174004_create_topic_embeds.rb). The \u201cabsolute http(s) URL\u201d constraint is enforced only ad hoc in `.import` via `return unless url =~ /^https?\\:\\/\\//`, not as a model-level validation. So while the current import pathway guards"
+  },
+  {
+   "issue_text": "app/jobs/scheduled/poll_feed.rb:33 \u2014 `rss.items.each do |i|` has no per-item begin/rescue, so one malformed item (bad link, nil content) aborts processing of all remaining feed items for that poll cycle (confidence 60, P2).",
+   "source_lens": "metareview-lens/completeness",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.75,
+   "rationale": "In new `Jobs::PollFeed#poll_feed`, the loop `rss.items.each do |i|` calls methods like `i.link`, `i.id`, and especially `i.content.scrub` without guarding against `nil` or malformed items. Any `NoMethodError`/parse exception inside the loop would raise and abort the whole job, preventing processing of subsequent items. This is amplified by `sidekiq_options retry: false`, so one bad item can break "
+  },
+  {
+   "issue_text": "app/models/topic_embed.rb:39 \u2014 `Readability::Document.new(open(url).read, ...)` in `import_remote` has no rescue for network failures (404/timeout/SSL) from open-uri; an unhandled exception propagates out of the async RetrieveTopic job with no explicit error handling or logging (confidence 55, P2).",
+   "source_lens": "metareview-lens/completeness",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.7,
+   "rationale": "In `TopicEmbed.import_remote`, the diff shows `Readability::Document.new(open(url).read, ...)` with no `rescue` around `open(url)`/`.read`, and `Jobs::RetrieveTopic#execute` / `TopicRetriever#fetch_http` call this without handling exceptions. Network/HTTP/SSL failures from `open-uri` can therefore raise and fail the background job; while Sidekiq will surface/log exceptions, there is no explicit ha"
+  },
+  {
+   "issue_text": "app/models/topic_embed.rb:64 \u2014 `absolutize_urls` treats protocol-relative URLs (e.g. `//evil.com/x`) as root-relative via `start_with?('/')`, producing a mangled URL (`prefix + \"/\" + \"evil.com/x\"`) instead of leaving it absolute or handling it correctly (confidence 65, P3).",
+   "source_lens": "metareview-lens/completeness",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.86,
+   "rationale": "In app/models/topic_embed.rb `absolutize_urls` rewrites any `href`/`src` that `start_with?('/')` by stripping all leading slashes (`sub(/^\\/+/, '')`) and prefixing with the embed host. For protocol-relative URLs like `//evil.com/x`, this logic triggers and produces `#{prefix}/evil.com/x`, which is incorrect/mangled instead of preserving it as protocol-relative/absolute. This behavior is directly v"
+  },
+  {
+   "issue_text": "app/jobs/scheduled/poll_feed.rb:34-35 \u2014 if both `i.link` and `i.id` are blank/non-http, the resulting url fails the regex check inside `TopicEmbed.import` and the item is silently skipped with no logging, so failed imports are unobservable (confidence 50, P3).",
+   "source_lens": "metareview-lens/completeness",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.84,
+   "rationale": "In `app/jobs/scheduled/poll_feed.rb`, the URL is derived as `url = i.link` then replaced with `i.id` if blank/non-http. If both are blank or non-http, `TopicEmbed.import` immediately returns (`return unless url =~ /^https?\\:\\/\\//`), and `poll_feed` doesn\u2019t log/report that the item was skipped. This makes failed imports unobservable, but the skip itself is consistent with the current import contrac"
+  },
+  {
+   "issue_text": "app/jobs/scheduled/poll_feed.rb:35 \u2014 `i.content.scrub` calls String#scrub, which was only added in Ruby 2.1 (Dec 2013), but the Gemfile targets Ruby 1.9/2.0 (\"perftools only works on 1.9 atm\"), so this will raise NoMethodError on every feed poll under the app's actual runtime. confidence:75 severity:P1",
+   "source_lens": "metareview-lens/feasibility",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.65,
+   "rationale": "The diff adds `Jobs::PollFeed` and in `app/jobs/scheduled/poll_feed.rb` it calls `i.content.scrub` (`content = CGI.unescapeHTML(i.content.scrub)`). `String#scrub` is not available on older Ruby versions (not shown as upgraded in this diff), and the Gemfile comment indicates the app may still run on Ruby 1.9-era runtimes (\"perftools only works on 1.9 atm\"). If running on <2.1, this would raise `NoM"
+  },
+  {
+   "issue_text": "none \u2014 no findings above threshold",
+   "source_lens": "metareview-lens/intent",
+   "old_verdict": "hallucination",
+   "new_verdict": "hallucination",
+   "confidence": 0.98,
+   "rationale": "The stated finding is explicitly \u201cnone \u2014 no findings above threshold\u201d and does not assert any specific defect or review concern to verify against the diff."
+  },
+  {
+   "issue_text": "db/migrate/20131223171005_create_top_topics.rb:3 \u2014 confidence 75/P0: `create_table :top_topics, force: true do |t|` was added retroactively to an already-applied migration (only whitespace/name changed otherwise), so re-running or replaying it (redo, fresh restore replaying schema_migrations mismatch, manual rerun) will silently DROP the existing top_topics table and lose all cached topic ranking data instead of being a no-op.",
+   "source_lens": "metareview-lens/migration",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.82,
+   "rationale": "The diff shows an existing migration was modified from `create_table :top_topics do |t|` to `create_table :top_topics, force: true do |t|`. In Rails, `force: true` will drop the table if it already exists, so retroactively changing an already-versioned migration increases the risk of unintended data loss in scenarios where the migration is rerun/reset (even if normal `db:migrate` won\u2019t rerun appli"
+  },
+  {
+   "issue_text": "db/migrate/20131223171005_create_top_topics.rb:3 \u2014 confidence 50/P2: editing the body of a migration that has already run breaks migration content-integrity assumptions (checksums/expectations other devs or CI have of that file), risking divergent schemas across environments that already ran the original version without force: true.",
+   "source_lens": "metareview-lens/migration",
+   "old_verdict": "hallucination",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.78,
+   "rationale": "The diff modifies an existing migration `db/migrate/20131223171005_create_top_topics.rb` by changing `create_table :top_topics do |t|` to `create_table :top_topics, force: true do |t|`. Editing a previously-committed migration can cause schema divergence across environments that already ran the original migration, because re-running the migration may now drop/recreate the table (and data) while al"
+  },
+  {
+   "issue_text": "db/migrate/20131217174004_create_topic_embeds.rb:3 \u2014 confidence 50/P2: `create_table :topic_embeds, force: true do |t|` is safe on first run since the table is new, but force: true means any future accidental re-run (redo, migrate:reset replay, or manual dup) will drop and recreate topic_embeds without warning, discarding any data already stored there.",
+   "source_lens": "metareview-lens/migration",
+   "old_verdict": "hallucination",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.78,
+   "rationale": "The diff shows the new migration `db/migrate/20131217174004_create_topic_embeds.rb` uses `create_table :topic_embeds, force: true`, which in Rails will drop the table if it already exists. While the first run is fine, this choice increases the risk of silent data loss if the migration is re-run (e.g., `db:migrate:redo`, `db:reset`, or accidental duplicate execution) after data has been stored."
+  },
+  {
+   "issue_text": "db/migrate/20131219203905_add_cook_method_to_posts.rb:3 \u2014 confidence 50/P2: `add_column :posts, :cook_method, :integer, default: 1, null: false` adds a NOT NULL column with a default to the posts table, which on large existing posts tables (pre-Rails 5/older MySQL semantics implied by this codebase) triggers a full table rewrite and locks posts for reads/writes for the duration, with no indication the migration accounts for this (no disable_ddl_transaction!, no batched backfill).",
+   "source_lens": "metareview-lens/migration",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.78,
+   "rationale": "The diff adds a migration `db/migrate/20131219203905_add_cook_method_to_posts.rb` with `add_column :posts, :cook_method, :integer, default: 1, null: false`. The migration shown does not use `disable_ddl_transaction!` and does not backfill in batches; it applies the NOT NULL + default in one step. On large `posts` tables and older MySQL/Rails behaviors, this pattern can cause a table rewrite and pr"
+  },
+  {
+   "issue_text": "app/jobs/scheduled/poll_feed.rb:1-41 \u2014 task claims \"embed URL handling and validation\" but this adds an entirely new RSS/ATOM feed-polling subsystem (SimpleRSS, hourly scheduled job, new site settings) unrelated to URL validation, which is scope drift beyond the stated intent.",
+   "source_lens": "metareview-lens/scope",
+   "old_verdict": "hallucination",
+   "new_verdict": "hallucination",
+   "confidence": 0.85,
+   "rationale": "The diff clearly and intentionally adds an embedding + feed importing feature set (e.g., new `Jobs::PollFeed` scheduled job, new site settings under `embedding:`, added `simple-rss`/`ruby-readability`, `TopicEmbed.import/import_remote`). The finding hinges on an external \u201cstated intent\u201d (that the task was only about URL handling/validation), which is not present in the diff and is contradicted by "
+  },
+  {
+   "issue_text": "app/models/post.rb:63-65 \u2014 introduces a new cook_methods enum and raw_html rendering bypass on Post, a cross-cutting rendering-pipeline change not implied by \"embed URL handling and validation.\"",
+   "source_lens": "metareview-lens/scope",
+   "old_verdict": "hallucination",
+   "new_verdict": "hallucination",
+   "confidence": 0.71,
+   "rationale": "The diff does add `Post.cook_methods` and a `raw_html` bypass in `Post#cook` (app/models/post.rb), but the same diff also introduces RSS/feed importing and remote embedding (`Jobs::PollFeed`, `TopicEmbed.import/import_remote`) that explicitly sets `cook_method: Post.cook_methods[:raw_html]`. The claim that this change is \u201cnot implied by 'embed URL handling and validation'\u201d relies on PR intent/desc"
+  },
+  {
+   "issue_text": "lib/post_revisor.rb:85 \u2014 `@post.save(validate: !@opts[:skip_validations])` adds a skip_validations capability to the shared PostRevisor used by all post edits, not just embeds, which is a broader behavioral change to core posting logic than the stated embed-URL scope.",
+   "source_lens": "metareview-lens/scope",
+   "old_verdict": "hallucination",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.86,
+   "rationale": "The diff changes `PostRevisor#update_post` from unconditional `@post.save` to `@post.save(validate: !@opts[:skip_validations])`, introducing a new opt-in path to bypass validations for *any* PostRevisor caller (not embed-specific). The embed code uses it (`TopicEmbed.import` calls `revisor.revise!(..., skip_validations: true, ...)`), but the capability is now available broadly and alters core edit"
+  },
+  {
+   "issue_text": "lib/tasks/disqus.thor:114-143 \u2014 removal of the `--category` option and category_id assignment logic from the Disqus import task is unrelated to embed URL handling/validation and silently drops previously supported functionality (posts can no longer be imported into a specific category).",
+   "source_lens": "metareview-lens/scope",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.78,
+   "rationale": "The diff in lib/tasks/disqus.thor explicitly removes `method_option :category` and all `category_id` lookup/assignment logic, and replaces the PostCreator call (which passed `category: category_id`) with `TopicEmbed.import_remote(...)` that takes no category argument. This verifiably drops the previously supported ability to import Disqus threads into a specified category via `--category`."
+  },
+  {
+   "issue_text": "Gemfile:209-211 \u2014 adding `ruby-readability` and `simple-rss` gems for full feed importing/scraping goes beyond \"embed URL handling and validation,\" pulling in a much larger content-extraction feature.",
+   "source_lens": "metareview-lens/scope",
+   "old_verdict": "hallucination",
+   "new_verdict": "hallucination",
+   "confidence": 0.72,
+   "rationale": "The diff does add `ruby-readability` and `simple-rss` and introduces feed polling/content extraction code (`Jobs::PollFeed`, `TopicEmbed.import_remote`), but the finding\u2019s claim that this \u201cgoes beyond 'embed URL handling and validation'\u201d depends on an external PR scope/intent that is not present in the diff. From the diff alone, these gems are consistent with the newly added feed importing and emb"
+  },
+  {
+   "issue_text": "app/models/topic_embed.rb:38-47 \u2014 `import_remote` uses ruby-readability to scrape and re-host arbitrary remote page content, which is a content-import feature, not URL handling/validation as scoped by the task.",
+   "source_lens": "metareview-lens/scope",
+   "old_verdict": "hallucination",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.7,
+   "rationale": "The diff clearly introduces a new content-import/scraping pathway: `TopicEmbed.import_remote` (app/models/topic_embed.rb) requires `ruby-readability`, does `open(url).read`, extracts `doc.content`, and then calls `TopicEmbed.import` to create/update posts with `cook_method: :raw_html`. This is substantive new functionality (remote content ingestion and reposting), not just URL parsing/validation l"
+  },
+  {
+   "issue_text": "app/models/post.rb:133 combined with app/views/embed/best.html.erb:19 \u2014 `raw` is returned as `cooked` for `cook_method: raw_html` posts and then rendered via `raw post.cooked`, so remote content fetched by TopicEmbed.import_remote (filtered only by Readability's tag/attribute allowlist, which permits `href`/`src` with no scheme validation, e.g. `javascript:`) bypasses Discourse's normal HTML sanitization pipeline entirely, enabling stored XSS from any embeddable_host page or polled RSS feed; confidence 60, severity P1.",
+   "source_lens": "metareview-lens/security",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.82,
+   "rationale": "The diff explicitly adds a `cook_method: :raw_html` path where `Post#cook` returns `raw` (app/models/post.rb), and `TopicEmbed.import` creates posts with `cook_method: raw_html` and `raw` set to HTML from feeds/Readability (app/models/topic_embed.rb). The embed view then renders that HTML with `raw post.cooked` (app/views/embed/best.html.erb). Since `import_remote` only limits tags/attributes via "
+  },
+  {
+   "issue_text": "app/controllers/embed_controller.rb:29 \u2014 `ensure_embeddable` authorizes the request by comparing `URI(request.referer).host` to `SiteSetting.embeddable_host`, but the Referer header is fully client-controlled (trivially spoofed with curl/any non-browser client or a stripped/forged header), so this is not a real access boundary despite acting as the sole auth check for the embed endpoint; confidence 90, severity P2.",
+   "source_lens": "metareview-lens/security",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.85,
+   "rationale": "In `EmbedController#ensure_embeddable`, the only gate before rendering/enqueuing work is `URI(request.referer || '').host != SiteSetting.embeddable_host`. The diff shows no other auth/verification for `GET /embed/best` beyond this (and the required `embed_url` param). Since `request.referer` comes from the client-controlled `Referer` header, it can be omitted or forged, so it is not a reliable aut"
+  },
+  {
+   "issue_text": "app/assets/javascripts/embed.js:16 \u2014 `discourseUrl.indexOf(e.origin) === -1` checks whether the postMessage sender's origin is a *substring* of the configured discourseUrl rather than an exact/prefix match, so an origin that differs only by port or trailing path segments (e.g. discourseUrl `https://forum.example.com:1234` vs. attacker origin `https://forum.example.com`) can pass the check and have its resize messages accepted; confidence 60, severity P2.",
+   "source_lens": "metareview-lens/security",
+   "old_verdict": "hallucination",
+   "new_verdict": "bug",
+   "confidence": 0.75,
+   "rationale": "In the newly added `app/assets/javascripts/embed.js`, the message handler validates the sender with `if (discourseUrl.indexOf(e.origin) === -1) return;`. This is a substring check against `discourseUrl` (which may include scheme/host/port/path), not an exact origin equality check. As a result, an origin that is a substring of `discourseUrl` (e.g., same host but different port, or other crafted cas"
+  },
+  {
+   "issue_text": "app/models/topic_embed.rb:47 \u2014 `Readability::Document.new(open(url).read, ...)` (via lib/topic_retriever.rb fetch_http) performs a server-side fetch of a user-influenced URL; although TopicRetriever#invalid_host? restricts the host to SiteSetting.embeddable_host before calling import_remote, it does not restrict scheme, port, or IP (only hostname string equality), so DNS rebinding or a non-standard port on the same hostname could still be used for SSRF against internal services, and import_remote itself has no independent validation if ever called from another path; confidence 50, severity P2.",
+   "source_lens": "metareview-lens/security",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.78,
+   "rationale": "The diff introduces SSRF-capable server-side fetching: `TopicEmbed.import_remote` does `open(url).read` with no validation, and `TopicRetriever#invalid_host?` only checks `URI(@embed_url).host == SiteSetting.embeddable_host` (ignores scheme, port, and resolved IP). Thus URLs like `http://embeddable_host:PORT/...` would pass and allow fetching non-standard ports on that host; DNS rebinding could al"
+  },
+  {
+   "issue_text": "lib/topic_retriever.rb:33-42 \u2014 every spec in spec/components/topic_retriever_spec.rb mocks/stubs `perform_retrieve` itself (`topic_retriever.expects(:perform_retrieve).once`), so the new `SiteSetting.feed_polling_enabled?` branch that calls `Jobs::PollFeed.new.execute({})` inline is never actually exercised by any test.",
+   "source_lens": "metareview-lens/testing",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.88,
+   "rationale": "In lib/topic_retriever.rb, the new logic inside perform_retrieve includes a feed polling branch: `if SiteSetting.feed_polling_enabled?; Jobs::PollFeed.new.execute({}); return if TopicEmbed.where(embed_url: @embed_url).exists?; end`. In spec/components/topic_retriever_spec.rb, the examples stub/mock `perform_retrieve` itself (e.g., `topic_retriever.expects(:perform_retrieve).once/never`), so none o"
+  },
+  {
+   "issue_text": "spec/controllers/embed_controller_spec.rb:38-43 \u2014 `TopicRetriever.expects(:new).returns(retriever)` fully mocks TopicRetriever, so the \"success\" spec never verifies the controller passes the correct embed_url/opts or that real TopicRetriever#retrieve integrates correctly with the controller.",
+   "source_lens": "metareview-lens/testing",
+   "old_verdict": "hallucination",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.78,
+   "rationale": "In spec/controllers/embed_controller_spec.rb, the \u201ctells the topic retriever to work\u2026\u201d example stubs the class constructor (`TopicRetriever.expects(:new).returns(retriever)`) and only asserts `retriever.expects(:retrieve)`. It does not assert what arguments `TopicRetriever.new` was called with (e.g., `with(embed_url, ...)`), so the spec would not catch the controller passing the wrong embed_url/op"
+  },
+  {
+   "issue_text": "lib/post_revisor.rb:85 \u2014 `@post.save(validate: !@opts[:skip_validations])` has no test that actually verifies validations are bypassed (e.g. saving otherwise-invalid content with skip_validations: true); spec/models/topic_embed_spec.rb's \"Supports updating the post\" test only checks cooked content changed, not that validation-skipping behavior works or is needed.",
+   "source_lens": "metareview-lens/testing",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.86,
+   "rationale": "The diff changes PostRevisor behavior to conditionally bypass validations via `@post.save(validate: !@opts[:skip_validations])` (lib/post_revisor.rb). Callers in this diff explicitly rely on `skip_validations: true` (e.g., TopicEmbed.import uses PostCreator with `skip_validations: true`, and TopicEmbed update path calls `revisor.revise!(..., skip_validations: true, ...)`). However, the added/updat"
+  },
+  {
+   "issue_text": "lib/tasks/disqus.thor \u2014 no spec file covers this task before or after the diff, so removal of the `--category` option and the switch to `TopicEmbed.import_remote` is entirely untested (no existing coverage to regress, but also no new coverage added despite the behavioral change).",
+   "source_lens": "metareview-lens/testing",
+   "old_verdict": "hallucination",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.86,
+   "rationale": "The diff changes `lib/tasks/disqus.thor` by removing the `--category` option and replacing the previous `PostCreator.new(... category: category_id)` flow with `TopicEmbed.import_remote(user, t[:link], title: t[:title])`. The diff also adds multiple new specs (for `TopicEmbed`, `TopicRetriever`, `EmbedController`, `Jobs::PollFeed`) but none for the Disqus Thor task, so this behavioral change in the"
+  }
+ ]
+}

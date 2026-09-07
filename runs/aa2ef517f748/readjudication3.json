@@ -1,0 +1,106 @@
+{
+ "run_id": "aa2ef517f748",
+ "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/4",
+ "framework": "compound-realistic",
+ "model": "glm-5.3-background",
+ "effort": "high",
+ "original": {
+  "tp": 0,
+  "fn": 8,
+  "n_real_ungold": 9,
+  "n_hallucination": 0,
+  "adj_p": 0.0,
+  "incr": 0.5294117647058824
+ },
+ "corrected": {
+  "n_unmatched": 9,
+  "rejudged": 9,
+  "n_bug_ungold": 4,
+  "n_important": 5,
+  "n_true_hallucination": 0,
+  "n_unresolved": 0,
+  "n_hidden_findings_unmatched": 9,
+  "waste_precision": 0.0,
+  "flips": {
+   "real_but_ungold->bug": 4,
+   "real_but_ungold->important_non_bug": 5
+  },
+  "judge": "gpt-5.2",
+  "diff_chars": 29064,
+  "wall_s": 8.3
+ },
+ "records": [
+  {
+   "issue_text": "Server-side retrieval is gated only by a spoofable client-controlled Referer header check and a per-URL 60-second Redis throttle, with no global rate limit, no cap on topics created, and no cap on Redis keys, allowing the instance to be used as an on-demand scraper of the embedded host and enabling DB/app-server exhaustion and unbounded topic spam",
+   "source_lens": "compound-persona/performance",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.65,
+   "rationale": "The diff adds an embedding endpoint and background fetcher that can create topics/posts by fetching arbitrary URLs on the configured host. `EmbedController#ensure_embeddable` authorizes based on `request.referer` host matching `SiteSetting.embeddable_host` (a client-controlled/spoofable header) and then enqueues `Jobs::RetrieveTopic` with `embed_url` from params. `TopicRetriever#retrieved_recently"
+  },
+  {
+   "issue_text": "RetrieveTopic jobs are enqueued on every cache miss without throttling or deduplication at enqueue time (the throttle lives inside the job), so the auto-reloading loading view (30s reload) causes one duplicate job per viewer per 30 seconds, flooding the Sidekiq queue with thousands of duplicate jobs that each burn a Redis round-trip and a DB exists? check",
+   "source_lens": "compound-persona/performance",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.86,
+   "rationale": "In EmbedController#best, when TopicEmbed.topic_id_for_embed(embed_url) returns nil, it unconditionally enqueues Jobs.enqueue(:retrieve_topic, ... embed_url: embed_url) and renders a loading view. The loading view (app/views/embed/loading.html.erb) auto-reloads every 30s, so each viewer will enqueue another RetrieveTopic job every reload until the embed exists. There is throttling/dedup only inside"
+  },
+  {
+   "issue_text": "Jobs::PollFeed.new.execute({}) downloads, parses, and imports the entire feed synchronously inside the RetrieveTopic worker thread for every embed miss, instead of being enqueued as a job and/or scoped to the requested URL",
+   "source_lens": "compound-persona/performance",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.85,
+   "rationale": "Verified: `TopicRetriever#perform_retrieve` calls `Jobs::PollFeed.new.execute({})` synchronously when `SiteSetting.feed_polling_enabled?` is true (see `lib/topic_retriever.rb`). Since `Jobs::RetrieveTopic#execute` invokes `TopicRetriever#retrieve`, this means the RetrieveTopic worker can synchronously `open(SiteSetting.feed_polling_url)`, parse via `SimpleRSS.parse`, and iterate/import *all* `rss."
+  },
+  {
+   "issue_text": "rss.items.each iterates every feed entry with no limit, so a first poll of a large feed runs thousands of PostCreator calls (cooking, indexing, callbacks) synchronously inside one scheduled job, and every hourly run re-iterates all items even when nothing changed",
+   "source_lens": "compound-persona/performance",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.83,
+   "rationale": "In `app/jobs/scheduled/poll_feed.rb`, `rss.items.each do |i| ... TopicEmbed.import(...) end` processes every item returned by `SimpleRSS.parse open(SiteSetting.feed_polling_url)` with no batching/limit or HTTP cache validation. On a first run of a large feed this can synchronously create many topics/posts in a single scheduled job. On subsequent hourly runs it still iterates all items, only skippi"
+  },
+  {
+   "issue_text": "open-uri calls (topic_embed.rb:45 open(url).read and poll_feed.rb:31) have no timeout and no size cap, so a slow or hung remote host blocks a Sidekiq worker thread indefinitely (PollFeed has retry: false so it just hangs) and an arbitrarily large body is fully materialized in memory before parsing",
+   "source_lens": "compound-persona/performance",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.86,
+   "rationale": "The diff adds unbounded network reads via open-uri in two new code paths: Jobs::PollFeed#poll_feed does `SimpleRSS.parse open(SiteSetting.feed_polling_url)` and TopicEmbed.import_remote does `open(url).read`. Neither specifies `read_timeout`/`open_timeout` nor any response size limit, so a slow/hung host can block a Sidekiq worker and a large response will be fully materialized in memory before pa"
+  },
+  {
+   "issue_text": "feed_key is dead code \u2014 computed but never read or written \u2014 so no If-Modified-Since/ETag conditional fetch is implemented, causing the full feed to be re-downloaded and every item re-checked with a DB lookup plus SHA1 computation every hour even when nothing changed",
+   "source_lens": "compound-persona/performance",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.86,
+   "rationale": "In app/jobs/scheduled/poll_feed.rb, `feed_key` is defined (computes a Redis key based on the feed URL) but is never referenced anywhere in the diff. `poll_feed` always does `SimpleRSS.parse open(SiteSetting.feed_polling_url)` with no conditional GET/ETag logic, and then iterates all items, calling `TopicEmbed.import`, which performs a DB lookup (`TopicEmbed.where(embed_url: url).first`) and comput"
+  },
+  {
+   "issue_text": "Non-atomic setnx/expire in topic_retriever.rb can leave the throttle key with no TTL if the process dies between the two calls, permanently marking that embed_url as recently retrieved so non-staff users can never trigger retrieval for it; should use a single atomic SET key 1 EX 60 NX",
+   "source_lens": "compound-persona/performance",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "In lib/topic_retriever.rb#retrieved_recently?, the throttle uses `$redis.setnx(retrieved_key, \"1\")` followed by a separate `$redis.expire(retrieved_key, 60)`. If the process crashes or is interrupted after `setnx` succeeds but before `expire` executes, the key can be left without a TTL, causing `retrieved_recently?` to return true forever for that embed_url (non-staff users would be permanently th"
+  },
+  {
+   "issue_text": "Staff requests bypass the throttle entirely (no_throttle: user.try(:staff?)), so every staff pageview of an un-created embed re-runs the full retrieve path (remote fetch plus full synchronous feed poll) with no throttle until the topic exists",
+   "source_lens": "compound-persona/performance",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.82,
+   "rationale": "The diff shows staff requests set `no_throttle: user.try(:staff?)` in `Jobs::RetrieveTopic` (app/jobs/regular/retrieve_topic.rb), and `TopicRetriever#retrieved_recently?` explicitly disables throttling when `@opts[:no_throttle]` is true (lib/topic_retriever.rb). For an embed URL not yet in `topic_embeds`, `perform_retrieve` will run and, if `SiteSetting.feed_polling_enabled?`, it synchronously cal"
+  },
+  {
+   "issue_text": "The raw_html cook method returns the raw string verbatim, bypassing the markdown/sanitizer pipeline, and content originating from external RSS feeds or scraped remote pages is stored and rendered unsanitized (raw post.cooked in best.html.erb), enabling stored XSS on the Discourse instance from a compromised or hostile feed/embeddable host",
+   "source_lens": "compound-persona/performance",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.93,
+   "rationale": "The diff adds `Post.cook_methods[:raw_html]` and changes `Post#cook` to `return raw` when `cook_method == :raw_html`, explicitly bypassing the normal cooking/sanitization pipeline (`post_analyzer.cook`). `TopicEmbed.import` uses `PostCreator.new(... raw: absolutize_urls(url, contents), cook_method: Post.cook_methods[:raw_html])` where `contents` originates from external RSS (`Jobs::PollFeed` uses "
+  }
+ ]
+}

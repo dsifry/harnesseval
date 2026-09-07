@@ -1,0 +1,107 @@
+{
+ "run_id": "8f4b995bbedd",
+ "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/4",
+ "framework": "compound-realistic",
+ "model": "glm-5.3-background",
+ "effort": "medium",
+ "original": {
+  "tp": 0,
+  "fn": 8,
+  "n_real_ungold": 9,
+  "n_hallucination": 0,
+  "adj_p": 0.0,
+  "incr": 0.5294117647058824
+ },
+ "corrected": {
+  "n_unmatched": 9,
+  "rejudged": 9,
+  "n_bug_ungold": 4,
+  "n_important": 4,
+  "n_true_hallucination": 0,
+  "n_unresolved": 1,
+  "n_hidden_findings_unmatched": 8,
+  "waste_precision": 0.0,
+  "flips": {
+   "real_but_ungold->bug": 4,
+   "real_but_ungold->important_non_bug": 4,
+   "real_but_ungold->unresolved": 1
+  },
+  "judge": "gpt-5.2",
+  "diff_chars": 29064,
+  "wall_s": 9.0
+ },
+ "records": [
+  {
+   "issue_text": "RetrieveTopic synchronously executes the entire PollFeed job inline whenever an /embed/best request misses for a URL with no TopicEmbed yet (full feed fetch, parse, per-item queries, and on first run creating a topic for every backlog item), and the 60s throttle is keyed per embed URL so every distinct URL triggers the full poll \u2014 worker/origin amplification that should be throttled globally, not per-URL",
+   "source_lens": "compound-persona/performance",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.78,
+   "rationale": "The controller does not run PollFeed in the request; it enqueues `Jobs.enqueue(:retrieve_topic, ...)` and the work happens in the `Jobs::RetrieveTopic` worker. However, in that worker path `TopicRetriever#perform_retrieve` will call `Jobs::PollFeed.new.execute({})` inline whenever `SiteSetting.feed_polling_enabled?` is true and the embed is missing, which polls/parses the entire feed (`SimpleRSS.p"
+  },
+  {
+   "issue_text": "PollFeed declares retry: false, but the inline invocation runs under RetrieveTopic's default Sidekiq retry (25 attempts), so a failing fetch redoes the whole feed poll on each retry after the 60s throttle key expires",
+   "source_lens": "compound-persona/performance",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.82,
+   "rationale": "In TopicRetriever#perform_retrieve, when feed polling is enabled it calls `Jobs::PollFeed.new.execute({})` inline (synchronously), not via Sidekiq. So `Jobs::PollFeed`'s `sidekiq_options retry: false` is irrelevant in this call path. `EmbedController` enqueues `Jobs::RetrieveTopic`, which does not set `sidekiq_options`, so it will run with Sidekiq\u2019s default retry behavior. If an exception occurs d"
+  },
+  {
+   "issue_text": "Remote fetches (open(url).read in TopicEmbed.import_remote and open(SiteSetting.feed_polling_url) in PollFeed) read the entire remote body into memory with no size limit and no explicit timeouts, so a slow-drip origin pins workers indefinitely and attacker-selectable large assets on the trusted host cause huge memory reads",
+   "source_lens": "compound-persona/performance",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.78,
+   "rationale": "The diff introduces remote fetching via `open(url).read` in `TopicEmbed.import_remote` and `SimpleRSS.parse open(SiteSetting.feed_polling_url)` in `Jobs::PollFeed#poll_feed` (both using `open-uri`) with no explicit `open_timeout`/`read_timeout` and no maximum body size/streaming. This can hang Sidekiq workers on slow responses and can read arbitrarily large remote bodies into memory, creating a Do"
+  },
+  {
+   "issue_text": "Remote content is stored via PostCreator with skip_validations: true, which skips the max-body-length validation, allowing a giant fetched page to be persisted to the DB as a post",
+   "source_lens": "compound-persona/performance",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "unresolved",
+   "confidence": 0.45,
+   "rationale": "below CONF_FLOOR (0.45)"
+  },
+  {
+   "issue_text": "feed_key in PollFeed (intended for an If-Modified-Since/ETag-style conditional fetch) is defined but never used, so the entire feed is re-fetched and re-processed unconditionally every hour",
+   "source_lens": "compound-persona/performance",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.86,
+   "rationale": "In `app/jobs/scheduled/poll_feed.rb`, `feed_key` is defined (computes a Redis key based on the feed URL) but is never referenced by `execute` or `poll_feed`. `poll_feed` always does `SimpleRSS.parse open(SiteSetting.feed_polling_url)` with no use of `feed_key` (or any If-Modified-Since/ETag conditional logic), so the feed will be fetched and items iterated every scheduled run. This is a concrete i"
+  },
+  {
+   "issue_text": "The PollFeed item loop issues one TopicEmbed.where(embed_url:).first query plus a full-content SHA1 per item every run even when nothing changed (the sha1 comparison only prevents the write, not the query/hash work), an N+1 pattern with no batching such as embed_url IN (...)",
+   "source_lens": "compound-persona/performance",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.88,
+   "rationale": "In `Jobs::PollFeed#poll_feed`, it iterates `rss.items.each` and for each item calls `TopicEmbed.import(...)`. `TopicEmbed.import` always computes `content_sha1 = Digest::SHA1.hexdigest(contents)` and always does `TopicEmbed.where(embed_url: url).first` to decide create vs update, so every poll run will perform one query + SHA1 per feed item even when content is unchanged (the SHA1 check only avoid"
+  },
+  {
+   "issue_text": "The retrieval throttle uses non-atomic $redis.setnx followed by a separate $redis.expire; if the process dies between the two calls the key exists with no TTL, so retrieved_recently? returns true forever and retrieval for that embed URL is permanently blocked \u2014 should be a single SET key 1 EX 60 NX (or MULTI/EXEC)",
+   "source_lens": "compound-persona/performance",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "In lib/topic_retriever.rb#retrieved_recently?, the throttle sets the redis key with `$redis.setnx(retrieved_key, \"1\")` and then separately calls `$redis.expire(retrieved_key, 60)`. If the process crashes or errors between these two calls, the key can be left without a TTL, causing `retrieved_recently?` to return `true` indefinitely for that embed URL and permanently preventing retrieval. This is v"
+  },
+  {
+   "issue_text": "The embed loading page reloads the iframe unconditionally every 30 seconds with no attempt cap or backoff, so permanently failed retrievals cause every viewer to keep generating requests and RetrieveTopic enqueues indefinitely",
+   "source_lens": "compound-persona/performance",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.87,
+   "rationale": "In `app/views/embed/loading.html.erb` the script unconditionally calls `document.location.reload()` every 30s. In `EmbedController#best`, when `TopicEmbed.topic_id_for_embed` returns nil it always `Jobs.enqueue(:retrieve_topic, ...)` then renders `loading`. Therefore, as long as the embed never resolves (e.g., remote fetch fails), each viewer will repeatedly hit `/embed/best` and enqueue `retrieve"
+  },
+  {
+   "issue_text": "Raw HTML posts (cook_method :raw_html returns raw) rendered via raw post.cooked in the embed view store and render remote HTML with zero sanitization (Sanitize is an unused project dependency), so user-controlled content at the attacker-influenced embed URL path becomes stored XSS on the Discourse origin",
+   "source_lens": "compound-persona/performance",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "The diff introduces a new `Post.cook_methods[:raw_html]` path where `Post#cook` returns `raw` directly (app/models/post.rb). `TopicEmbed.import` creates posts with `cook_method: :raw_html` using remote `contents` / `Readability::Document#content` (app/models/topic_embed.rb), and the embed view renders it with `<%= raw post.cooked %>` (app/views/embed/best.html.erb). Since this bypasses the normal "
+  }
+ ]
+}

@@ -1,0 +1,108 @@
+{
+ "run_id": "ee895c9f4d35",
+ "url": "https://github.com/grafana/grafana/pull/79265",
+ "framework": "vanilla-engineered",
+ "model": "claude-fable-5-1",
+ "effort": "low",
+ "original": {
+  "tp": 3,
+  "fn": 2,
+  "n_real_ungold": 2,
+  "n_hallucination": 7,
+  "adj_p": 0.3,
+  "incr": 0.7142857142857143
+ },
+ "corrected": {
+  "n_unmatched": 9,
+  "rejudged": 9,
+  "n_bug_ungold": 0,
+  "n_important": 6,
+  "n_true_hallucination": 2,
+  "n_unresolved": 1,
+  "n_hidden_findings_unmatched": 6,
+  "waste_precision": 0.6,
+  "flips": {
+   "hallucination->hallucination": 2,
+   "hallucination->important_non_bug": 4,
+   "hallucination->unresolved": 1,
+   "real_but_ungold->important_non_bug": 2
+  },
+  "judge": "gpt-5.2",
+  "diff_chars": 14805,
+  "wall_s": 13.1
+ },
+ "records": [
+  {
+   "issue_text": "TagDevice moved from a background goroutine with its own 2-minute timeout to synchronous execution on the request path in client.go, so every anonymous request blocks on a COUNT query plus insert/update, adding DB latency to every page/API hit and turning DB slowness into auth latency",
+   "source_lens": "vanilla-engineered",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.84,
+   "rationale": "The diff shows TagDevice is no longer executed in a background goroutine with its own 2-minute timeout. In `pkg/services/anonymous/anonimpl/client.go`, the goroutine + `context.WithTimeout(context.Background(), timeoutTag)` block was removed and replaced with a synchronous `a.anonDeviceService.TagDevice(ctx, ...)` call on the request path. Separately, `pkg/services/anonymous/anonimpl/anonstore/dat"
+  },
+  {
+   "issue_text": "In database.go, the count >= deviceLimit branch calls updateDevice which only succeeds for existing devices, but the count includes the current device; combined with the 29-minute local cache and DeleteDevicesOlderThan eviction, devices evicted by cleanup are permanently locked out until other devices expire",
+   "source_lens": "vanilla-engineered",
+   "old_verdict": "hallucination",
+   "new_verdict": "hallucination",
+   "confidence": 0.7,
+   "rationale": "The diff shows that when `deviceLimit` is reached, `CreateOrUpdateDevice` calls `updateDevice`, which indeed only updates existing rows and returns `ErrDeviceLimitReached` if no row matches. However, the finding\u2019s key claim that \u201cthe count includes the current device\u201d is not supported: the count is computed before any insert/update in this call, so a *new* device is not included (only already-exis"
+  },
+  {
+   "issue_text": "When deviceLimit > 0, every CreateOrUpdateDevice issues an extra COUNT(*) over anon_device with a range predicate on updated_at before the upsert, doubling DB round-trips on the hot path, now run synchronously per anonymous request",
+   "source_lens": "vanilla-engineered",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.9,
+   "rationale": "In pkg/services/anonymous/anonimpl/anonstore/database.go, CreateOrUpdateDevice now does a CountDevices(...) call when s.deviceLimit > 0 before performing the upsert, adding an extra DB query per call in that mode. Separately, pkg/services/anonymous/anonimpl/client.go removed the async goroutine/timeout and now calls TagDevice synchronously during Authenticate, so this added COUNT can occur on the "
+  },
+  {
+   "issue_text": "ProvideAnonymousDeviceService now takes db.DB and constructs the store internally instead of accepting the anonstore.AnonStore interface, removing the injection seam for fake stores and breaking the existing wire provider for anonstore.ProvideAnonDBStore whose signature changed to require deviceLimit, which will fail wire generation unless the wire set is updated",
+   "source_lens": "vanilla-engineered",
+   "old_verdict": "hallucination",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.72,
+   "rationale": "The diff shows `ProvideAnonymousDeviceService` changed from accepting an `anonstore.AnonStore` to accepting `sqlStore db.DB` and constructing the store internally (`anonstore.ProvideAnonDBStore(sqlStore, cfg.AnonymousDeviceLimit)`), which removes an injection seam for swapping in a fake/mock store (tests now must use a real DB). It\u2019s also true that `ProvideAnonDBStore`\u2019s signature changed to requi"
+  },
+  {
+   "issue_text": "updateDevice in database.go matches updated_at within a 30-day window, but the cleanup retention (61 days in tests) and the duplicated anonymousDeviceExpiration const in api/api.go can drift, so devices between 30 and 61 days old are counted as absent for limit purposes yet still present in listings",
+   "source_lens": "vanilla-engineered",
+   "old_verdict": "hallucination",
+   "new_verdict": "hallucination",
+   "confidence": 0.78,
+   "rationale": "The claim that devices 30\u201361 days old would \u201cstill [be] present in listings\u201d isn\u2019t supported by the diff: the API listing window is explicitly limited to `now - anonymousDeviceExpiration` where `anonymousDeviceExpiration = 30 * 24 * time.Hour` in `pkg/services/anonymous/anonimpl/api/api.go`. The \u201c61 days\u201d value appears only as a test constant (`keepFor := 61 days`) for `DeleteDevicesOlderThan` beh"
+  },
+  {
+   "issue_text": "AnonymousDeviceLimit in frontend_settings.go is serialized unconditionally, so 0 (unlimited) is sent to the frontend where the TS type is number | undefined; the frontend must special-case 0 which the type does not communicate, and exposing the limit to unauthenticated clients is unnecessary information disclosure",
+   "source_lens": "vanilla-engineered",
+   "old_verdict": "hallucination",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.72,
+   "rationale": "Diff shows `FrontendSettingsDTO` always includes `AnonymousDeviceLimit int64` and `getFrontendSettings` sets it from `hs.Cfg.AnonymousDeviceLimit`, which is read from ini with default `MustInt64(0)`. So the JSON will always contain a numeric value (often `0`). On the frontend, the new TS field is typed as `number | undefined` and the boot config initializes it to `undefined`, creating a semantic/c"
+  },
+  {
+   "issue_text": "In packages/grafana-runtime/src/config.ts, `anonymousDeviceLimit = undefined;` with no type annotation infers type undefined (or any) rather than number | undefined, so the implements GrafanaConfig check may fail or the field is silently overwritten with a number at runtime while typed as undefined",
+   "source_lens": "vanilla-engineered",
+   "old_verdict": "hallucination",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.7,
+   "rationale": "The diff adds `anonymousDeviceLimit: number | undefined` to `GrafanaConfig`, and `GrafanaBootConfig` sets `anonymousDeviceLimit = undefined;` without an explicit type. In TypeScript this commonly widens to `any` (or at least loses the intended `number | undefined`), so the `implements GrafanaConfig` check will still succeed but you lose type safety on that field. The finding\u2019s claim that the imple"
+  },
+  {
+   "issue_text": "TestIntegrationBeyondDeviceLimit only checks that a second new device is rejected; there are no tests that an existing device at the limit can still update, that the limit applies only within the 30-day window, or that Authenticate in client.go returns an auth failure on ErrDeviceLimitReached",
+   "source_lens": "vanilla-engineered",
+   "old_verdict": "hallucination",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.86,
+   "rationale": "The diff adds nontrivial device-limit logic in `AnonDBStore.CreateOrUpdateDevice` (counting only devices updated within `anonymousDeviceExpiration` and falling back to `updateDevice` when at limit) and propagates `anonstore.ErrDeviceLimitReached` up to `Anonymous.Authenticate` (returns `nil, err` on that specific error). The new `TestIntegrationBeyondDeviceLimit` only covers the \u201csecond new device"
+  },
+  {
+   "issue_text": "New device_limit setting under [auth.anonymous] in setting.go has no corresponding entry in conf/defaults.ini, conf/sample.ini, or the docs, leaving the setting undiscoverable and its semantics (0 = unlimited, 30-day window, behavior for rejected clients) undocumented",
+   "source_lens": "vanilla-engineered",
+   "old_verdict": "hallucination",
+   "new_verdict": "unresolved",
+   "confidence": 0.42,
+   "rationale": "below CONF_FLOOR (0.42)"
+  }
+ ]
+}

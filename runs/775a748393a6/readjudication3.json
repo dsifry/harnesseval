@@ -1,0 +1,149 @@
+{
+ "run_id": "775a748393a6",
+ "url": "https://github.com/calcom/cal.com/pull/14740",
+ "framework": "superpowers-realistic",
+ "model": "claude-sonnet-5",
+ "effort": "low",
+ "original": {
+  "tp": 2,
+  "fn": 4,
+  "n_real_ungold": 9,
+  "n_hallucination": 5,
+  "adj_p": 0.2857142857142857,
+  "incr": 0.7333333333333333
+ },
+ "corrected": {
+  "n_unmatched": 14,
+  "rejudged": 14,
+  "n_bug_ungold": 4,
+  "n_important": 6,
+  "n_true_hallucination": 3,
+  "n_unresolved": 1,
+  "n_hidden_findings_unmatched": 10,
+  "waste_precision": 0.4,
+  "flips": {
+   "hallucination->hallucination": 3,
+   "hallucination->important_non_bug": 1,
+   "hallucination->unresolved": 1,
+   "real_but_ungold->bug": 4,
+   "real_but_ungold->important_non_bug": 5
+  },
+  "judge": "gpt-5.2",
+  "diff_chars": 28407,
+  "wall_s": 10.6
+ },
+ "records": [
+  {
+   "issue_text": "**No tests added.** A new authorization-guarded mutation (`addGuestsHandler`) with four permission branches (organizer, attendee, team admin, team owner, unauthorized), a dedup/blacklist filter, and an error path with `BAD_REQUEST` has zero test coverage. Given this PR is entirely new backend logic that mutates bookings and sends emails, this should not ship without at least handler-level tests covering: happy path, `booking_not_found`, unauthorized user, duplicate-only guests, and blacklist filtering.",
+   "source_lens": "superpowers-realistic/critical",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.9,
+   "rationale": "The diff adds substantial new backend behavior: a new authed TRPC mutation `addGuests` wired in `packages/trpc/server/routers/viewer/bookings/_router.tsx`, with new handler `addGuests.handler.ts` containing multiple permission branches (`isTeamAdminOrOwner`, `isOrganizer`, `isAttendee`), guest filtering (dedup vs existing attendees + env blacklist), and an explicit `BAD_REQUEST` error when no uniq"
+  },
+  {
+   "issue_text": "**Calendar sync failure leaves DB/calendar inconsistent.** In `addGuests.handler.ts`, `prisma.booking.update` (guest insert) commits before `eventManager.updateCalendarAttendees(evt, booking)` runs, and the latter is not wrapped in try/catch. If the calendar sync throws, the mutation errors out to the client, but the new attendees are already persisted in the DB \u2014 the booking's guest list and the actual calendar event (and any emails already sent) go out of sync with no rollback or compensating action.",
+   "source_lens": "superpowers-realistic/critical",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "In `addGuests.handler.ts`, the mutation persists new attendees via `prisma.booking.update(... attendees.createMany ...)` before calling `await eventManager.updateCalendarAttendees(evt, booking)`. That calendar sync call is not wrapped in a try/catch (only `sendAddGuestsEmails` is), so if `updateCalendarAttendees` throws, the TRPC mutation will error to the client while the DB changes have already "
+  },
+  {
+   "issue_text": "**Misleading error message conflates two different causes.** `uniqueGuests.length === 0` throws `emails_must_be_unique_valid` whether the guests were already attendees or were blacklisted. A user submitting only blacklisted emails gets a message implying their email format was invalid/duplicated, not that it was blocked.",
+   "source_lens": "superpowers-realistic/important",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.78,
+   "rationale": "In `addGuests.handler.ts`, `uniqueGuests` filters out both already-attending emails and `BLACKLISTED_GUEST_EMAILS` (and only those two conditions). When `uniqueGuests.length === 0`, it throws `TRPCError` with message key `emails_must_be_unique_valid`, which indeed conflates different causes (duplicate/existing attendee vs blacklisted). This is a specific, verifiable UX/error-semantics issue, not a"
+  },
+  {
+   "issue_text": "**Wrong data passed to email branching logic.** `sendAddGuestsEmails(evt, guests)` is called with the original (unfiltered) `guests` array, not `uniqueGuests`. Inside `email-manager.ts`, `newGuests.includes(attendee.email)` decides whether an attendee is sent `AttendeeScheduledEmail` (as if newly booked) vs. `AttendeeAddGuestsEmail`. If a submitted email matched an existing attendee (filtered out of `uniqueGuests` but still in `guests`), that existing attendee will incorrectly get the \"you're newly scheduled\" email again.",
+   "source_lens": "superpowers-realistic/important",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.93,
+   "rationale": "In `addGuests.handler.ts`, the code computes `uniqueGuests` (filtering out existing attendees and blacklisted emails) and only persists those, but then calls `sendAddGuestsEmails(evt, guests)` with the original unfiltered input array. In `email-manager.ts`, `sendAddGuestsEmails(calEvent, newGuests)` branches on `newGuests.includes(attendee.email)` to choose between `AttendeeScheduledEmail` vs `Att"
+  },
+  {
+   "issue_text": "**Errors from `sendAddGuestsEmails` are swallowed with a bare `console.log`**, no error object/stack, no structured logging. The mutation still returns success to the client even when every notification email failed, giving a false-positive UX signal with no operational visibility.",
+   "source_lens": "superpowers-realistic/important",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.78,
+   "rationale": "In `addGuests.handler.ts`, `sendAddGuestsEmails(evt, guests)` is wrapped in a `try/catch` that only does `console.log(\"Error sending AddGuestsEmails\")` and does not log `err` or rethrow. The handler then returns `{ message: \"Guests added\" }`, so the client `onSuccess` toast (`t(\"guests_added\")`) will still show even if all emails fail. This is a concrete observability/UX signaling concern visible "
+  },
+  {
+   "issue_text": "**Missing translation key.** `you_do_not_have_permission` (thrown as the `TRPCError` message and consumed via `t(err.message)` in the dialog) does not exist in `apps/web/public/static/locales/en/common.json`. Users hitting this path will see the raw untranslated key/string instead of a real message.",
+   "source_lens": "superpowers-realistic/important",
+   "old_verdict": "hallucination",
+   "new_verdict": "unresolved",
+   "confidence": 0.45,
+   "rationale": "below CONF_FLOOR (0.45)"
+  },
+  {
+   "issue_text": "**No cap on number of guests.** `guests: z.array(z.string().email())` has no `.min(1)`/`.max(n)`. A caller (or a buggy client state) could submit an empty array or an unbounded number of emails in one call, causing an unbounded `createMany` insert and an unbounded email fan-out via `Promise.all` in `sendAddGuestsEmails`.",
+   "source_lens": "superpowers-realistic/important",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.7,
+   "rationale": "The new TRPC input schema `ZAddGuestsInputSchema` defines `guests: z.array(z.string().email())` with no `.max(...)` (and no `.min(1)`), and the handler blindly uses `createMany` with the derived list and then triggers an email fan-out via `Promise.all` in `sendAddGuestsEmails`. While empty arrays are later rejected in `addGuestsHandler` via `if (uniqueGuests.length === 0) throw ...`, there is stil"
+  },
+  {
+   "issue_text": "**Credentials used for calendar sync are the requester's, not the organizer's.** `getUsersCredentials(ctx.user)` fetches the *calling* user's credentials, but the calendar event being updated belongs to the booking's organizer. When a non-organizer attendee (who is permitted via `isAttendee`) calls this mutation, `EventManager` is built with the wrong user's calendar credentials, which will likely no-op or fail silently for the actual calendar update.",
+   "source_lens": "superpowers-realistic/important",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.92,
+   "rationale": "In `addGuests.handler.ts`, the mutation allows non-organizer attendees to call it (`isAttendee` check). However, the calendar sync is performed via `const credentials = await getUsersCredentials(ctx.user);` and `new EventManager({ ...user, credentials: [...credentials] })`, where `user`/`ctx.user` is the caller, not the booking organizer (`booking.userId` / `organizer`). This means an attendee-tri"
+  },
+  {
+   "issue_text": "`addGuestsHandler` is a single ~150-line function mixing auth, Prisma queries, `CalendarEvent` construction, calendar sync, and email dispatch \u2014 worth decomposing for readability/testability, consistent with other patterns in the router.",
+   "source_lens": "superpowers-realistic/minor",
+   "old_verdict": "hallucination",
+   "new_verdict": "hallucination",
+   "confidence": 0.82,
+   "rationale": "The diff does show `addGuestsHandler` as a single long function (~174 lines) that mixes authorization checks, Prisma fetch/update, `CalendarEvent` assembly, calendar sync, and email sending. However, the finding is essentially a generic refactor suggestion (\u201cworth decomposing for readability/testability\u201d) rather than a specific substantive risk or defect evidenced by the diff, which per the rules "
+  },
+  {
+   "issue_text": "Client (`AddGuestsDialog.tsx`) re-declares its own Zod validation schema instead of importing `ZAddGuestsInputSchema` from `addGuests.schema.ts`; the two can silently drift (e.g., server schema doesn't currently enforce uniqueness at all).",
+   "source_lens": "superpowers-realistic/minor",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.78,
+   "rationale": "In `apps/web/components/dialog/AddGuestsDialog.tsx`, the client defines its own Zod schema (`z.array(z.string().email()).refine(...)`) and validates only the `string[]` of emails, while the server procedure uses `packages/trpc/server/routers/viewer/bookings/addGuests.schema.ts` (`{ bookingId: number; guests: string[] }`) and does not encode the client\u2019s uniqueness constraint. This creates a concre"
+  },
+  {
+   "issue_text": "`AttendeeAddGuestsEmail`/`OrganizerAddGuestsEmail` template classes (`packages/emails/templates/*-add-guests-email.ts`) duplicate near-identical `getNodeMailerPayload` bodies from their `*-scheduled-email.ts` counterparts; could share more via the parent class.",
+   "source_lens": "superpowers-realistic/minor",
+   "old_verdict": "hallucination",
+   "new_verdict": "hallucination",
+   "confidence": 0.77,
+   "rationale": "The diff adds new template classes `packages/emails/templates/attendee-add-guests-email.ts` and `organizer-add-guests-email.ts` that override `getNodeMailerPayload()`, but the purported `*-scheduled-email.ts` counterparts are not shown in the diff, so the claim that these bodies are \u201cnear-identical\u201d duplicates cannot be verified from what\u2019s provided. As stated, it\u2019s essentially an unverified refac"
+  },
+  {
+   "issue_text": "`getTranslation` is invoked per-attendee inside `Promise.all` without any caching, so bookings with many attendees/guests incur N sequential-per-item i18n loads.",
+   "source_lens": "superpowers-realistic/minor",
+   "old_verdict": "hallucination",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.83,
+   "rationale": "In `addGuests.handler.ts`, translations are fetched per attendee inside `attendeesListPromises` (`await getTranslation(attendee.locale ?? \"en\", \"common\")`), then executed via `Promise.all(...)`. This means bookings with many attendees will trigger N separate i18n loads (no caching shown). The finding\u2019s \u201csequential\u201d wording is off (Promise.all runs concurrently), but the underlying performance conc"
+  },
+  {
+   "issue_text": "`isTeamAdmin`/`isTeamOwner` are awaited sequentially rather than via `Promise.all`, adding avoidable latency to every call.",
+   "source_lens": "superpowers-realistic/minor",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.84,
+   "rationale": "In `addGuests.handler.ts`, `isTeamAdminOrOwner` is computed as `(await isTeamAdmin(...)) && (await isTeamOwner(...))`, which awaits `isTeamAdmin` before starting `isTeamOwner`. These are independent async checks and could be run in parallel via `Promise.all` to avoid extra latency on every `addGuests` call."
+  },
+  {
+   "issue_text": "Hardcoded `name: \"\"` for new guest attendee records \u2014 fine for now since the UI only collects emails, but worth a comment noting the limitation for future readers.",
+   "source_lens": "superpowers-realistic/minor",
+   "old_verdict": "hallucination",
+   "new_verdict": "hallucination",
+   "confidence": 0.7,
+   "rationale": "The diff does hardcode `name: \"\"` when creating new guest attendees in `addGuests.handler.ts` (`guestsFullDetails`), so the observation is grounded. However, the finding only suggests adding a comment for future readers (\u201cfine for now...\u201d), which is a minor style/documentation nit rather than a substantive review concern or a verifiable defect from the diff alone."
+  }
+ ]
+}

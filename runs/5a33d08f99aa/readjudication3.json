@@ -1,0 +1,197 @@
+{
+ "run_id": "5a33d08f99aa",
+ "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/10",
+ "framework": "compound-realistic",
+ "model": "claude-opus-5",
+ "effort": "medium",
+ "original": {
+  "tp": 5,
+  "fn": 2,
+  "n_real_ungold": 7,
+  "n_hallucination": 13,
+  "adj_p": 0.2777777777777778,
+  "incr": 0.8571428571428571
+ },
+ "corrected": {
+  "n_unmatched": 20,
+  "rejudged": 20,
+  "n_bug_ungold": 3,
+  "n_important": 15,
+  "n_true_hallucination": 2,
+  "n_unresolved": 0,
+  "n_hidden_findings_unmatched": 18,
+  "waste_precision": 0.7143,
+  "flips": {
+   "hallucination->bug": 1,
+   "hallucination->hallucination": 2,
+   "hallucination->important_non_bug": 10,
+   "real_but_ungold->bug": 2,
+   "real_but_ungold->important_non_bug": 5
+  },
+  "judge": "gpt-5.2",
+  "diff_chars": 35089,
+  "wall_s": 11.1
+ },
+ "records": [
+  {
+   "issue_text": "db/migrate/20150818190757_create_embeddable_hosts.rb:3 \u2014 New embeddable_hosts table adds no index on `host`, so every embed permission check is a sequential scan.",
+   "source_lens": "compound-realistic/p1/performance",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.84,
+   "rationale": "The migration `db/migrate/20150818190757_create_embeddable_hosts.rb` creates `embeddable_hosts` with `host` and `category_id` but adds no index on `host`. The runtime permission check path calls `EmbeddableHost.host_allowed?` -> `record_for_host` -> `where(\"lower(host) = ?\", host).first`, which will require a table scan without a suitable (functional) index, making embed permission checks potentia"
+  },
+  {
+   "issue_text": "app/models/embeddable_host.rb:17 \u2014 where(\"lower(host) = ?\")` cannot use a plain b-tree index; needs a functional index on lower(host) (or normalized column).",
+   "source_lens": "compound-realistic/p1/performance",
+   "old_verdict": "hallucination",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.7,
+   "rationale": "The diff adds `EmbeddableHost.record_for_host` using `where(\"lower(host) = ?\", host)` (app/models/embeddable_host.rb), but the migration creating `embeddable_hosts` (db/migrate/20150818190757_create_embeddable_hosts.rb) does not add any index on `host` or a functional index on `lower(host)`. This isn\u2019t a correctness bug, but it is a concrete performance/DB design concern: the query as written won\u2019"
+  },
+  {
+   "issue_text": "app/controllers/embed_controller.rb:61 \u2014 ensure_embeddable now issues an uncached DB query per embed request, replacing an in-process cached site setting on a hot anonymous path.",
+   "source_lens": "compound-realistic/p1/performance",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.86,
+   "rationale": "In `EmbedController#ensure_embeddable`, the check changed from `SiteSetting.allows_embeddable_host?(request.referer)` to `EmbeddableHost.host_allowed?(request.referer)` (app/controllers/embed_controller.rb). `EmbeddableHost.host_allowed?` calls `record_for_host`, which performs `where(\"lower(host) = ?\", host).first` (app/models/embeddable_host.rb), i.e., a DB query with no caching shown. This is a"
+  },
+  {
+   "issue_text": "app/models/embeddable_host.rb:20 \u2014 host_allowed? has no caching layer at all, unlike the SiteSetting-backed check it replaces; a Discourse.cache/@@cache of the small host list would avoid per-request I/O.",
+   "source_lens": "compound-realistic/p2/performance",
+   "old_verdict": "hallucination",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.86,
+   "rationale": "The diff replaces `SiteSetting.allows_embeddable_host?` (which checked an in-memory SiteSetting string) with `EmbeddableHost.host_allowed?`, which calls `record_for_host` and executes `where(\"lower(host) = ?\", host).first`\u2014a DB query\u2014each time it runs (used in `EmbedController#ensure_embeddable` and `TopicRetriever#invalid_host?`). No caching layer is present in the new model code, so the performa"
+  },
+  {
+   "issue_text": "lib/topic_retriever.rb:16 \u2014 invalid_host? adds a DB round-trip per retrieve call (including background/feed polling loops) where a cached setting was read before.",
+   "source_lens": "compound-realistic/p2/performance",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.9,
+   "rationale": "The diff changes `TopicRetriever#invalid_host?` from `SiteSetting.allows_embeddable_host?(@embed_url)` to `EmbeddableHost.host_allowed?(@embed_url)` (lib/topic_retriever.rb). `EmbeddableHost.host_allowed?` calls `record_for_host`, which parses the URL then executes `where(\"lower(host) = ?\", host).first`\u2014a DB query each time. The old approach read from `SiteSetting.embeddable_hosts` (an in-memory c"
+  },
+  {
+   "issue_text": "app/controllers/admin/embedding_controller.rb:18 \u2014 EmbeddableHost.all.order(:host)` materializes and serializes every host with no limit or pagination.",
+   "source_lens": "compound-realistic/p2/performance",
+   "old_verdict": "hallucination",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.78,
+   "rationale": "In `Admin::EmbeddingController#fetch_embedding`, the model is built with `embeddable_hosts: EmbeddableHost.all.order(:host)`, and `EmbeddingSerializer` declares `has_many :embeddable_hosts ...`, so the admin `/customize/embedding` endpoint will serialize the full set of embeddable hosts with no pagination/limit. That\u2019s a concrete scalability/performance concern visible in the diff, but not a corre"
+  },
+  {
+   "issue_text": "app/models/topic_embed.rb:36 \u2014 record_for_host repeats the host lookup already performed by host_allowed? in the caller, doubling queries per import.",
+   "source_lens": "compound-realistic/p2/performance",
+   "old_verdict": "hallucination",
+   "new_verdict": "hallucination",
+   "confidence": 0.87,
+   "rationale": "In the diff, `TopicEmbed.import` (app/models/topic_embed.rb) newly calls `eh = EmbeddableHost.record_for_host(url)` and does not call `EmbeddableHost.host_allowed?` anywhere in that method. The host-allow check (`host_allowed?`) was updated in other callers (`EmbedController#ensure_embeddable`, `TopicRetriever#invalid_host?`), but there\u2019s no evidence in this diff that `TopicEmbed.import` is invoke"
+  },
+  {
+   "issue_text": "app/models/embeddable_host.rb:21 \u2014 host_allowed? instantiates a full AR record only to test presence; `exists?` avoids the row materialization.",
+   "source_lens": "compound-realistic/p3/performance",
+   "old_verdict": "hallucination",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.86,
+   "rationale": "In app/models/embeddable_host.rb, `host_allowed?` is implemented as `record_for_host(host).present?`, and `record_for_host` does `where(\"lower(host) = ?\", host).first`, which materializes an `EmbeddableHost` row just to check whether one exists. Switching to `exists?` (after the same URI parsing/normalization) would avoid instantiating an AR object. This is a concrete performance/efficiency concer"
+  },
+  {
+   "issue_text": "db/migrate/20150818190757_create_embeddable_hosts.rb:5 \u2014 No index on category_id despite belongs_to :category, so category-scoped lookups/deletes scan the table.",
+   "source_lens": "compound-realistic/p3/performance",
+   "old_verdict": "hallucination",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.76,
+   "rationale": "The migration `CreateEmbeddableHosts` creates `embeddable_hosts` with a `category_id` column (`t.integer :category_id, null: false`) and the model declares `belongs_to :category`, but the migration does not add an index on `category_id`. That\u2019s a concrete, diff-verifiable performance/DB design concern (category-scoped queries/joins on `embeddable_hosts` would require a full table scan). It\u2019s not a"
+  },
+  {
+   "issue_text": "db/migrate/20150818190757_create_embeddable_hosts.rb:25 \u2014 Raw interpolation of the `embeddable_hosts` site-setting value into an INSERT string allows SQL injection via a stored setting containing a single quote.",
+   "source_lens": "compound-realistic/p1/security",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.93,
+   "rationale": "In db/migrate/20150818190757_create_embeddable_hosts.rb the migration builds SQL via string interpolation: `execute \"INSERT INTO embeddable_hosts ... VALUES ('#{h}', #{category_id}, ...)\"`, where `h` comes from the stored `site_settings` value `embeddable_hosts` split by newlines. If `h` contains a single quote, the SQL becomes syntactically invalid at minimum, and it also enables SQL injection du"
+  },
+  {
+   "issue_text": "app/controllers/admin/embeddable_hosts_controller.rb:3 \u2014 Allowlist mutation endpoints enforce only `ensure_staff` in-controller; admin-only access depends solely on the route's AdminConstraint, so any moderator-reachable mount grants embed-allowlist writes.",
+   "source_lens": "compound-realistic/p2/security",
+   "old_verdict": "hallucination",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.62,
+   "rationale": "In the diff, `Admin::EmbeddableHostsController` adds `before_filter :ensure_logged_in, :ensure_staff` (which would permit moderators) and does not explicitly enforce admin-only access in-controller. However, the only routing added for these endpoints is `resources :embeddable_hosts, constraints: AdminConstraint.new`, which suggests admin-only access is enforced at the routing layer in this PR. So "
+  },
+  {
+   "issue_text": "db/migrate/20150818190757_create_embeddable_hosts.rb:3 \u2014 create_table :embeddable_hosts, force: true` drops any pre-existing embeddable_hosts table and its data without warning.",
+   "source_lens": "compound-realistic/p2/security",
+   "old_verdict": "hallucination",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.7,
+   "rationale": "The migration explicitly uses `create_table :embeddable_hosts, force: true`, which will drop and recreate the table if it already exists, causing data loss in environments where the table pre-exists (e.g., a partially applied migration, manual table creation, or reruns). While a fresh migration run normally won\u2019t have the table yet (so no defect in the standard path), the risk is real and grounded"
+  },
+  {
+   "issue_text": "app/models/embeddable_host.rb:2 \u2014 Host format regex is anchored with `\\Z`, which permits a trailing newline in a stored allowlist entry (`evil.com\\n`), yielding an entry that can never match and bypassing intended normalization.",
+   "source_lens": "compound-realistic/p3/security",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.8,
+   "rationale": "In app/models/embeddable_host.rb the validation uses `\\A...\\Z` (`validates_format_of :host, with: /\\A...\\Z/i`). In Ruby, `\\Z` matches before a final newline, so a value like `\"evil.com\\n\"` can pass validation. The `before_validation` normalization only strips protocol and path (`sub!(/^https?:\\/\\//, '')`, `sub!(/\\/.*$/, '')`) and does not remove trailing whitespace/newlines, so the newline could b"
+  },
+  {
+   "issue_text": "app/models/topic_embed.rb:36 \u2014 When no EmbeddableHost matches the URL (e.g. feed-polling imports), category falls back to nil/uncategorized instead of the previously configured embed_category, potentially publishing imported content to a more public category.",
+   "source_lens": "compound-realistic/p3/security",
+   "old_verdict": "hallucination",
+   "new_verdict": "bug",
+   "confidence": 0.72,
+   "rationale": "In TopicEmbed.import the category assignment changed from a global fallback (previously `category: SiteSetting.embed_category`) to `eh = EmbeddableHost.record_for_host(url)` and `category: eh.try(:category_id)` (app/models/topic_embed.rb). If `record_for_host` returns nil (no matching EmbeddableHost), the category passed to PostCreator becomes nil. Since the diff also removes the `embed_category` "
+  },
+  {
+   "issue_text": "spec/controllers/admin/embeddable_hosts_controller_spec.rb:5 \u2014 Spec only asserts class inheritance, so create/update/destroy, staff auth, param handling and error rendering are entirely untested.",
+   "source_lens": "compound-realistic/p1/testing",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.9,
+   "rationale": "The new spec `spec/controllers/admin/embeddable_hosts_controller_spec.rb` only asserts `Admin::EmbeddableHostsController < Admin::AdminController` and does not exercise any of the actual behavior added in `app/controllers/admin/embeddable_hosts_controller.rb` (the `create`, `update`, `destroy` actions, the `before_filter :ensure_logged_in, :ensure_staff`, or `save_host` parameter handling and erro"
+  },
+  {
+   "issue_text": "spec/controllers/admin/embedding_controller_spec.rb:5 \u2014 Spec only asserts class inheritance; show/update actions, the OpenStruct payload and EmbeddingSerializer JSON are never exercised.",
+   "source_lens": "compound-realistic/p1/testing",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.9,
+   "rationale": "The diff adds `spec/controllers/admin/embedding_controller_spec.rb` with only an inheritance assertion (`Admin::EmbeddingController < Admin::AdminController`). Meanwhile the PR introduces nontrivial behavior in `Admin::EmbeddingController` (`before_filter ... :fetch_embedding`, `show`/`update` rendering `EmbeddingSerializer` over an `OpenStruct` containing `embeddable_hosts`). None of that logic o"
+  },
+  {
+   "issue_text": "app/models/embeddable_host.rb:1 \u2014 No model spec exists for EmbeddableHost: host format validation, the before_validation scheme/path stripping, record_for_host and host_allowed? are all uncovered.",
+   "source_lens": "compound-realistic/p1/testing",
+   "old_verdict": "hallucination",
+   "new_verdict": "hallucination",
+   "confidence": 0.95,
+   "rationale": "The diff *adds* a model spec at `spec/models/embeddable_host_spec.rb` which explicitly tests the `before_validation` trimming of http/https and paths, and covers `EmbeddableHost.host_allowed?` (and thus `record_for_host` indirectly). So the claim that no model spec exists / logic is uncovered is contradicted by the diff."
+  },
+  {
+   "issue_text": "spec/controllers/embed_controller_spec.rb:13 \u2014 \"raises an error with a missing host\" now passes vacuously because the table is empty; it no longer distinguishes \"no hosts configured\" from \"referer not allowed\".",
+   "source_lens": "compound-realistic/p2/testing",
+   "old_verdict": "hallucination",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.86,
+   "rationale": "In spec/controllers/embed_controller_spec.rb the test \"raises an error with a missing host\" previously forced the failure via `SiteSetting.embeddable_hosts = nil` and the controller explicitly raised `InvalidAccess` when no hosts were configured. After the diff, `EmbedController#ensure_embeddable` no longer checks for \"no hosts configured\" and always raises unless `EmbeddableHost.host_allowed?(req"
+  },
+  {
+   "issue_text": "app/assets/javascripts/discourse/models/store.js.es6:200 \u2014 hydrated || []` is dead code (map always returns an array) and unresolved ids become undefined entries; no test pins the expected behaviour.",
+   "source_lens": "compound-realistic/p2/testing",
+   "old_verdict": "hallucination",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.74,
+   "rationale": "In `store.js.es6` `_hydrateEmbedded`, the new plural-ID branch does `const hydrated = obj[k].map(...)` and then assigns `obj[self.pluralize(subType)] = hydrated || [];`. Since `Array#map` always returns an array, `|| []` is indeed redundant. Also, `_lookupSubType(...)` can return a falsey/undefined value (as seen in the singular-id path where they guard with `if (hydrated)`), but the plural-id pat"
+  },
+  {
+   "issue_text": "lib/topic_retriever.rb:16 \u2014 invalid_host? switched to EmbeddableHost.host_allowed? with no accompanying TopicRetriever spec for allowed/disallowed hosts.",
+   "source_lens": "compound-realistic/p3/testing",
+   "old_verdict": "hallucination",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.76,
+   "rationale": "The diff changes TopicRetriever#invalid_host? from `SiteSetting.allows_embeddable_host?(@embed_url)` to `EmbeddableHost.host_allowed?(@embed_url)` (lib/topic_retriever.rb). While EmbeddableHost has new model specs for `host_allowed?` (spec/models/embeddable_host_spec.rb), the diff does not add or modify any TopicRetriever-focused spec coverage to ensure TopicRetriever\u2019s allow/deny behavior is exer"
+  }
+ ]
+}
