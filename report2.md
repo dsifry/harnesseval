@@ -6,7 +6,7 @@
 > categories: bug, security, concurrency, data, api, performance, test_gap, doc_defect …
 > classify severity … only report real issues you are confident about"* — the standard
 > single-prompt review (§2.1). On the top-6 benchmark PRs: vanilla Fable 5.1 = 7.5 hidden
-> gold/PR at $1.01; vanilla Astra = 2.2/PR at $0.51; **ce × glm-5.3-background × low =
+> gold/PR at $0.90; vanilla Astra = 2.2/PR at $0.34; **ce × glm-5.3-background × low =
 > 36.8/PR at $0.20** — the harness, not the model tier, is the binding constraint.
 
 > **What this is.** A follow-up to the main comparison ([`report.md`](report.md)) — read it
@@ -145,24 +145,31 @@ real bug, an important non-bug, a true hallucination, or unresolved.
 | **ce × glm-5.3-background × low** | 0.81 | **36.8** | **0.97** | **103K** | **$0.20** ¹ | **$0.005** |
 | ce × glm-5.3-flash × low | 0.79 | 35.0 | 0.97 | 99K | $0.02 ¹ | $0.0006 |
 | mrv × glm-5.3-flash × low | 0.66 | 24.2 | 0.93 | 110K | $0.02 ¹ | $0.0008 |
-| vanilla × claude-fable-5.1 × low | 0.74 | 7.5 | 0.89 | 85K | $1.01 ² | $0.13 |
-| vanilla × gpt-6-astra × low | 0.40 | 2.2 | 0.52 | 47K | $0.51 ² | $0.23 |
-| vanilla × claude-opus-5 × low | 0.66 | 6.0 | 0.81 | 86K | $0.51 ³ | $0.09 |
-| vanilla × gpt-5.6-sol × low | 0.52 | 4.5 | 0.69 | 44K | $0.20 ⁴ | $0.04 |
-| mrv × claude-fable-5.1 × low | 0.63 | 28.2 | 0.80 | 2,081K | $22.41 ² | $0.79 |
-| mrv × gpt-6-astra × low | 0.51 | 6.7 | 0.74 | 774K | $7.82 ³ | 0.9 |
-| ce × claude-fable-5.1 × low | 0.75 | 26.5 | 0.93 | 3,028K | $32.00 ² | $1.21 |
-| ce × gpt-6-astra × low | 0.49 | 10.0 | 0.78 | 1,246K | $12.62 ² | $1.26 |
-| mrv × claude-opus-5 × high (main report §3.4) | — | 36.0 | 0.85 | 2,980K | $56.65 ² | $1.57 |
+| vanilla × claude-fable-5.1 × low | 0.74 | 7.5 | 0.89 | 85K | $0.90 ² | $0.12 |
+| vanilla × gpt-6-astra × low | 0.40 | 2.2 | 0.52 | 47K | $0.34 ² | $0.15 |
+| vanilla × claude-opus-5 × low | 0.66 | 6.0 | 0.81 | 86K | $0.40 ² | $0.07 |
+| vanilla × gpt-5.6-sol × low | 0.52 | 4.5 | 0.69 | 44K | $0.12 ³ | $0.027 |
+| mrv × claude-fable-5.1 × low | 0.63 | 28.2 | 0.80 | 2,081K | $7.23 ² | $0.26 |
+| mrv × gpt-6-astra × low | 0.51 | 6.7 | 0.74 | 774K | $1.38 ² | $0.21 |
+| ce × claude-fable-5.1 × low | 0.75 | 26.5 | 0.93 | 3,028K | $6.40 ² | $0.24 |
+| ce × gpt-6-astra × low | 0.49 | 10.0 | 0.78 | 1,246K | $1.89 ² | $0.19 |
+| mrv × claude-opus-5 × high (main report §3.4) | — | 36.0 | 0.85 | 2,980K | $10.93 ² | $0.30 |
 
 ¹ Z.AI list pricing applied to measured tokens. Our runs were served through
    **[Lunaroute](https://lunaroute.com)** — a US-based, **zero-data-retention** inference
    gateway (flat fee, $0 billed per run) — so the metered figures are what the same token
    counts would cost on the public APIs.
-² Metered at current published list pricing, applied to our measured in/out tokens:
-Fable 5.1 $10 in / $50 out; Astra $10 in / $50 out ([platform.claude.com/docs/en/about-claude/pricing](https://platform.claude.com/docs/en/about-claude/pricing), [developers.openai.com/api/docs/models/gpt-6-astra](https://developers.openai.com/api/docs/models/gpt-6-astra), fetched 2026-09-07; cache reads/writes excluded — cache-hit volume isn't recorded per run). **This corrects the main report's fable/astra figures, which used a stale $12.50/M output pin** (that is the 5-minute cache-*write* price, not the output price).
-³ Opus 5 $5 in / $25 out (platform.claude.com).
-⁴ GPT-5.6-sol $4 in / $20 out ([developers.openai.com/api/docs/pricing](https://developers.openai.com/api/docs/pricing) — promotional rate, listed through Nov 21, 2026). "—" = not recomputed; recorded run costs for subscription models are pre-refresh (main report §3.4).
+² Metered at current published list pricing, applied to our measured per-call token splits
+   **including cache reads and cache writes** (recorded per run in `per_model_usage`):
+   Fable 5.1 $10 in / $0.25 cache-read / $12.50 cache-write / $50 out; Astra $10 / $1.00 /
+   $12.50 / $50; Opus 5 $5 / $0.50 / $6.25 / $25; sol $4 / $0.40 / $5.00 / $20
+   ([platform.claude.com/docs/en/about-claude/pricing](https://platform.claude.com/docs/en/about-claude/pricing),
+   [developers.openai.com/api/docs/pricing](https://developers.openai.com/api/docs/pricing),
+   fetched 2026-09-07). Two **corrections to the main report** this surfaces: the
+   fable/astra figures used a stale $12.50/M *output* pin (that is Fable's cache-*write*
+   price), and mrv × opus × high was computed without cache discounts — **$56.65 →
+   $10.93/cell** (cache hits at $0.50/M cover 5.4M of its 5.9M input tokens).
+
 
 **Read across the rows ($ per real bug = $/cell ÷ hidden gold/PR — lower is better):** vanilla × fable is the *best* pure-prompt cell in the is the *best* pure-prompt cell in the
 lab (rec 0.74, $1.01/cell at current list pricing) — while the **same model behind either
@@ -175,29 +182,31 @@ lower $-per-real-bug than any premium cell.
 **Open-weight near-frontier GLM-5.3 behind a review harness beats the frontier models run
 vanilla across the board — recall, hidden gold, incremental recall, and cost per real bug.**
 ce × glm-5.3-background × low (rec 0.81, incr 0.97, 36.8 hid/PR, $0.005/real-bug) outscores
-vanilla × fable 5.1 (0.74/0.89/7.5 at $0.13/bug) and vanilla × astra (0.40/0.52/2.2 at
-$0.23) while costing less, and matches the best metered factory cells (mrv × opus × high:
-36.0 hid, incr 0.85, $1.57/real-bug) at ~1/300th the cost. The open-weight model isn't the
+vanilla × fable 5.1 (0.74/0.89/7.5 at $0.12/bug) and vanilla × astra (0.40/0.52/2.2 at
+$0.15) while costing less, and matches the best metered factory cells (mrv × opus × high:
+36.0 hid, incr 0.85, $0.30/real-bug cache-adjusted) at ~1/60th the cost. The open-weight model isn't the
 budget option in this data — it's the front of the Pareto frontier.
 
 **How badly do the frontier models lose?** In cost per real bug found, catastrophically:
 
-- **Vanilla frontier models pay 8–46× more per real bug** than ce × GLM-low ($0.005):
-  vanilla × fable-5.1 pays $0.13 (**26× more, 96% costlier**), vanilla × opus-5 $0.09 (**18×**),
-  vanilla × sol $0.04 (**8×** — the closest competitor), vanilla × astra $0.23 (**46×**).
-  And the frontier models don't even find as many bugs: 2.2–7.5 hidden gold/PR vs 36.8.
-- **Premium factories pay 160–310× more per real bug.** The best premium factory cell
-  measured, mrv × opus-5 × high, pays $1.57/real-bug — **314×** the GLM cell — and ce ×
-  fable-5.1 pays $1.21 (**242×**). These are the cells that match GLM's *hidden-gold
-  volume* (26.5–36.0/PR); they just cost 110–320× more to run.
-- **The token story makes the point sharper:** vanilla × fable uses 85K tokens/PR vs the GLM
-  factory's 103K — *comparable token volume, 5× the price*. The frontier models aren't
-  paying for more tokens; they're paying 10–33× more per token for intelligence that, on
-  this benchmark, finds *fewer* bugs than the cheap model wrapped in a harness.
+- **Vanilla frontier models pay 4–28× more per real bug** than ce × GLM-low ($0.005):
+  vanilla × fable-5.1 pays $0.12 (**22× more**), vanilla × astra $0.15 (**29×**), vanilla ×
+  opus-5 $0.067 (**12×**), vanilla × sol $0.027 (**5×** — the closest competitor). And the
+  frontier models don't even find as many bugs: 2.2–7.5 hidden gold/PR vs 36.8.
+- **Premium factories pay 35–56× more per real bug.** ce × fable-5.1 pays $0.24 (**45×**),
+  mrv × fable $0.26 (**48×**), ce × astra $0.19 (**35×**) — and the best premium factory
+  cell, mrv × opus-5 × high, pays **$0.30/real-bug (56×)** once its 5.4M cache-hit tokens are
+  priced at $0.50/M instead of full input rate. These premium factories *do* match GLM's
+  hidden-gold volume (26.5–36.0/PR); they just cost 35–56× more to get there.
+- **The token story makes the point sharper:** vanilla × fable reviews the same PRs with
+  85K tokens/PR vs the GLM factory's 103K — *comparable token volume, 4× the price*. The
+  frontier models aren't paying for more tokens; they're paying ~7× more per token for
+  intelligence that, on this benchmark, finds *fewer* bugs than the cheap model wrapped in
+  a harness.
 
-Concretely for a platform team: **reviewing a PR with the frontier-naive setup costs $0.09–
-$0.23 per real bug found; the open-weight harness setup costs half a cent.** Scaling that to
-a 200-PR backlog sweep: ~$2 vs $18–46 — per release.
+Concretely for a platform team: **reviewing a PR with the frontier-naive setup costs
+$0.03–$0.24 per real bug found; the open-weight harness setup costs half a cent.** Scaling
+that to a 200-PR backlog sweep: ~$1 vs $6–48 — per release.
 
 **Why it wins: the harness, not the model tier, is the binding constraint.** The
 harness-beats-vanilla pattern now holds on a third model family (ce 0.81/0.78 and mrv
@@ -208,7 +217,7 @@ serving makes the winning configuration essentially free to run.
 
 1. **Switch the default review engine to glm-5.3(-flash) × low.** Open-weight GLM-5.3
    behind a harness beats the frontier models run vanilla across the board — recall, hidden
-   gold, incremental recall, and cost per real bug ($0.005 vs $0.04–1.57 for every vanilla
+   gold, incremental recall, and cost per real bug ($0.005 vs $0.03–0.30 for every vanilla
    and premium-factory cell). No configuration in this data wins on value against it.
 2. **Run GLM at low or high — never medium.** low/high are monotonic and healthy; medium
    reasons 4–10× more than high, takes 10–20× the wall time, sometimes never finishes, and
@@ -453,7 +462,7 @@ metareview's gates+lenses architecture on GLM (8 lens calls + gate binary per PR
 tok/PR):
 
 - **mrv × GLM posts opus-factory hidden-gold coverage at ~$0**: 24.2 hid/PR (flash/low) and
-  32.7 (background/high) — vs 36.0 for mrv × opus × high at $56.65. The old "metareview ×
+  32.7 (background/high) — vs 36.0 for mrv × opus × high at $10.93 (cache-adjusted). The old "metareview ×
   GLM is a gap" note in the main report is closed: mrv runs the full GLM ladder and its
   incr-recall tier (0.93–0.96) matches its opus tier.
 - **mrv × background × high is the strongest mrv cell on GLM** (rec 0.74, incr 0.96, 32.7
@@ -476,11 +485,11 @@ tok/PR):
 | mrv × background × xhigh | 99K | 58K | $0.39 | $0.011 |
 | vanilla × background × low | 11K | 2K | $0.03 | $0.004 |
 | vanilla × flash × low | 11K | 2K | $0.003 | $0.0005 |
-| *mrv × opus × high (main report)* | *2,880K* | *~100K* | *$56.65* | *$1.57* |
+| *mrv × opus × high (main report, cache-adjusted)* | *2,880K* | *~100K* | *$10.93* | *$0.30* |
 
 Every GLM factory cell is **one to two orders of magnitude cheaper per hidden bug** than the
 opus factory even at full Z.AI list pricing — and our actual runs cost $0 (Lunaroute flat
-fee). The best cell pays **$0.005 per real bug found**, vs $1.57 for mrv × opus × high.
+fee). The best cell pays **$0.005 per real bug found**, vs $0.30 for mrv × opus × high (cache-adjusted).
 
 ### 3.4 Cheap model + good harness beats newest premium model vanilla
 
@@ -528,7 +537,7 @@ metered at Z.AI list for GLM.
 | vanilla | fable-5.1 | low | 0.74 | 0.89 | 7.5 | 1.2 | 85K | $1.01 |
 | vanilla | astra | low | 0.40 | 0.52 | 2.2 | 0.6 | 47K | $0.51 |
 | mrv | opus-5 | low | **0.85** | **0.97** | 28.7 | 6.8 | 3,481K | — |
-| mrv | opus-5 | high | 0.69 | 0.90 | — | — | 6,337K | $56.65 |
+| mrv | opus-5 | high | 0.69 | 0.90 | — | — | 6,337K | $10.93 |
 | mrv | sonnet-5 | low | 0.61 | 0.85 | 10.0 | 3.5 | 3,078K | $1.52 |
 | mrv | sonnet-5 | high | 0.57 | 0.87 | 14.3 | 3.8 | 9,458K | $4.95 |
 | mrv | sol | low | 0.48 | 0.67 | 7.0 | 2.7 | 569K | ~0 |
