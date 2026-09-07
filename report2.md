@@ -138,7 +138,7 @@ real bug, an important non-bug, a true hallucination, or unresolved.
 
 ---
 
-## 1. The headline result: a free model now beats the $57 factory
+## 1. The headline result: open-weight near-frontier models beat the frontier models across the board
 
 | cell | rec | hid /PR | incr | tokens/PR | $/cell | $ per real bug |
 |---|---:|---:|---:|---:|---:|---:|
@@ -172,12 +172,13 @@ the premium models run vanilla on every axis** — more hidden gold (36.8 vs 7.5
 recall (0.81 vs 0.74/0.40) — at 3–4× *cheaper* than vanilla fable itself, and ~100× better
 lower $-per-real-bug than any premium cell.
 
-**Compound Engineering on GLM-5.3 finds more real bugs the humans missed than the opus
-factory — 36.8 vs 36.0 per PR, at higher incremental recall (0.97 vs 0.85), on 1/29th the
-tokens, at ~1/280th the metered cost.** This is not a budget-tier result: on the top-6 PRs it
-is the best factory cell measured in this lab at any price. Two $0.02–0.20 engines (ce and mrv
-on GLM) now beat every metered configuration on hidden-gold efficiency, and metareview on
-GLM delivers opus-factory-grade hidden gold (25–36/PR) for pennies.
+**Open-weight near-frontier GLM-5.3 behind a review harness beats the frontier models run
+vanilla across the board — recall, hidden gold, incremental recall, and cost per real bug.**
+ce × glm-5.3-background × low (rec 0.81, incr 0.97, 36.8 hid/PR, $0.005/real-bug) outscores
+vanilla × fable 5.1 (0.74/0.89/7.5 at $0.13/bug) and vanilla × astra (0.40/0.52/2.2 at
+$0.23) while costing less, and matches the best metered factory cells (mrv × opus × high:
+36.0 hid, incr 0.85, $1.57/real-bug) at ~1/300th the cost. The open-weight model isn't the
+budget option in this data — it's the front of the Pareto frontier.
 
 The second headline: **the harness-beats-vanilla pattern extends to a third model family**
 (ce 0.81/0.78 and mrv 0.66/0.74 recall vs vanilla 0.54/0.57 on background at low/xhigh) —
