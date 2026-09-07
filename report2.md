@@ -64,7 +64,8 @@ natural ways to do that, and they sit at opposite ends of a weight/effort tradeo
 **Which is better? That is the question this report measures.** The short answer from the
 data: *it depends on the model you point the harness at* — and the surprise is that the
 harness path wins decisively even on a near-frontier open model, at costs that undercut the
-naive path on frontier models (§1, §3.4).
+naive path on frontier models (e.g. Fable 5.1, GPT-6 Astra) as well as non-frontier models
+like Opus 5, Sol, Sonnet, and Terra (§1, §3.4).
 
 Around that core question, the numbers map onto four deployment scenarios a developer or
 platform team faces:
