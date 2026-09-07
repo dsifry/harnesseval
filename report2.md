@@ -1,4 +1,4 @@
-# Evaluating PR Review Engines — do model or harness make a difference? (yes they do!)
+# The Harness Beats the Model: open-weight GLM-5.3 review harnesses find ~5× more real bugs than frontier models run vanilla — at 1/26th the $ per real bug
 
 > ### The finding
 >
