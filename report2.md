@@ -1,5 +1,14 @@
 # Evaluating PR Review Engines — do model or harness make a difference? (yes they do!)
 
+> **Open-source near-frontier models driven by review harnesses find more real bugs — at a
+> lower $ per bug found — than frontier models like Fable 5.1 or GPT-6 Astra** when asked to
+> *"Review the following code diff for real, actionable issues … find issues in these
+> categories: bug, security, concurrency, data, api, performance, test_gap, doc_defect …
+> classify severity … only report real issues you are confident about"* — the standard
+> single-prompt review (§2.1). On the top-6 benchmark PRs: vanilla Fable 5.1 = 7.5 hidden
+> gold/PR at $0.88; vanilla Astra = 2.2/PR at $0.59; **ce × glm-5.3-background × low =
+> 40.5/PR at $0.20** — the harness, not the model tier, is the binding constraint.
+
 > **What this is.** A follow-up to the main comparison ([`report.md`](report.md)) — read it
 > standalone, but every framework/model/effort claim about the *older* cells cites the main
 > report's sections. This report covers only the 2026-09-07 results: the full **GLM-5.3 /
