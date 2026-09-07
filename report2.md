@@ -110,7 +110,7 @@ hidden-gold-per-dollar than any premium cell.
 **Compound Engineering on GLM-5.3 finds more real bugs the humans missed than the opus
 factory — 36.8 vs 36.0 per PR, at higher incremental recall (0.97 vs 0.85), on 1/29th the
 tokens, at ~1/280th the metered cost.** This is not a budget-tier result: on the top-6 PRs it
-is the best factory cell measured in this lab at any price. Two ~$0–0.02 engines (ce and mrv
+is the best factory cell measured in this lab at any price. Two $0.02–0.20 engines (ce and mrv
 on GLM) now beat every metered configuration on hidden-gold efficiency, and metareview on
 GLM delivers opus-factory-grade hidden gold (25–36/PR) for pennies.
 
@@ -132,9 +132,10 @@ vanilla.
    (rec 0.74, incr 0.89, $0.88/cell at current list) the GLM factories deliver recall 0.66–0.81 and incr
    0.93–0.97 at $0.02–0.20/cell; vs vanilla × astra (rec 0.40, incr 0.52, $0.59/cell) it is
    not close. → §3.4
-4. **Triage load is still the real price of factories.** GLM factory cells emit 17–28
-   hallucinations per PR alongside 25–45 hidden gold (~59% real fraction, consistent with the
-   main report's v2 real-fractions). The models are free; reviewer attention isn't.
+4. **Hallucination load on GLM is low under the v2 instrument.** GLM factory cells emit
+   **1.4–5.7 true hallucinations per PR** alongside 24–46 hidden gold (~85–90% real fraction)
+   — most of what these harnesses report beyond the goldens is real. Budget human review time
+   for the volume of findings (25–46/PR), not for noise.
 5. **The metareview lens fix (PR #145) is safe but unproven at smoke scale** — no detectable
    fabrication win at n=3 PRs, no precision cost either. Decisive test: the big-hal mrv cells
    (~$230–460) or metareview's own corpus re-judge. → §5
@@ -233,9 +234,8 @@ The lens arm differed by backend:
   … If a candidate test exists, the finding must cite the SPECIFIC assertion gap … or be
   dropped entirely. State which test files you checked (paths) — never a bare 'no tests'."
 
-  Each lens output then passes through a JSON extraction call ("extract every distinct issue
-  from this lens review as a JSON array, one object per issue with issue_text and
-  severity") before judging.
+  Each lens output then passes through a JSON extraction call (the extractor returns
+  `{"issues": ["issue 1", …]}` — one plain string per issue) before judging.
 
 **Compound Engineering ("ce") — risk-driven persona roster** (`compound_realistic.py`). The
 orchestrator prompt: read `git diff HEAD~1` + `--stat`; write a one-line intent summary from
@@ -298,13 +298,15 @@ the Claude/OpenAI rows use our two-rung ladder (low / high — `high` sent nativ
 | | high | 6 | — | — |
 | gpt-6-astra | low | 6 | 6 | 6 |
 | | high | 6 | — | — |
-| **glm-5.3-background** | low | 5 | 5 | 6 |
+| **glm-5.3-background** | low | 5 | 3 | 6 |
 | | high | 6 | 6 | 6 |
 | **glm-5.3-flash-background** | low | 5 | 6 | 6 |
 | | high | 6 | 5 | 6 |
 
-Totals: 48 non-GLM cells at low/high (all complete) + 12 GLM low/high cells (three at n=5)
-+ the GLM medium/32K-high rungs (§4, out of scope) + the 6 smoke cells (§5).
+Totals: 44 of 48 non-GLM low/high cells present (4 missing: fable/astra × mrv/ce × high)
++ all 12 GLM low/high cells + the GLM medium/32K-high rungs (§4, out of scope) + the 6
+smoke cells (§5). Five GLM cells sit below n=6: four at n=5 and one at n=3
+(mrv × background × low).
 
 
 ---
@@ -314,9 +316,9 @@ Totals: 48 non-GLM cells at low/high (all complete) + 12 GLM low/high cells (thr
 Latest **pass** run per (cell, PR) from batch `20260906-glm53-top6`; hid/hal are the **v2
 adjudicator counts** (`readjudication3.json` `n_bug_ungold` / `n_true_hallucination`), not
 the legacy run-time counts that earlier drafts used. rec = absolute recall on goldens; incr
-= incremental recall (goldens + confirmed hidden gold). Six cells have n<6 (the missing
-PRs' runs failed in-batch): vanilla low ×2, mrv/background/low (n=3), mrv/flash/high,
-ce/flash/high, vanilla/flash/medium.
+= incremental recall (goldens + confirmed hidden gold). Six cells have n<6 (the missing PRs' runs failed in-batch): vanilla low ×2 (n=5),
+vanilla/flash/medium (n=5), mrv/background/low (n=3), mrv/flash/high (n=5), ce/flash/high
+(n=5), mrv/flash/xhigh (n=5).
 
 | harness | model | effort | n | rec | incr | hid | hal | tok/PR |
 |---|---|---|---:|---:|---:|---:|---:|---:|
@@ -434,7 +436,7 @@ metered at Z.AI list for GLM.
 | vanilla | sonnet-5 | low | 0.42 | 0.61 | 3.2 | 1.2 | 106K | $0.20 |
 | vanilla | sonnet-5 | high | 0.37 | 0.65 | 4.7 | 0.2 | 127K | $0.41 |
 | vanilla | sol | low | 0.52 | 0.69 | 4.5 | 0.0 | 44K | ~0 |
-| vanilla | sol | high | 0.62 | 0.76 | — | — | 1039K | ~0 |
+| vanilla | sol | high | 0.62 | 0.76 | 4.5 | 0.2 | 1039K | ~0 |
 | vanilla | terra | low | 0.39 | 0.56 | 2.5 | 0.2 | 59K | ~0 |
 | vanilla | terra | high | 0.46 | 0.63 | 3.3 | 0.2 | 280K | ~0 |
 | vanilla | fable-5.1 | low | 0.74 | 0.89 | 7.5 | 1.2 | 85K | $0.88 |
@@ -459,25 +461,26 @@ metered at Z.AI list for GLM.
 | ce | terra | high | 0.56 | 0.84 | 13.5 | 1.0 | 792K | ~0 |
 | ce | fable-5.1 | low | 0.75 | 0.93 | 26.5 | 5.8 | 3,028K | $32.00 |
 | ce | astra | low | 0.49 | 0.78 | 10.0 | 1.5 | 1,246K | $12.62 |
-| vanilla | glm-5.3-background | low | 0.54 | 0.79 | 4.0 | 1.5 | 13K | $0.03 |
-| vanilla | glm-5.3-background | high | 0.57 | 0.83 | 6.8 | 0.3 | 20K | $0.05 |
-| vanilla | glm-flash | low | 0.50 | 0.76 | 4.7 | 1.2 | 13K | $0.003 |
-| vanilla | glm-flash | high | 0.53 | 0.81 | 6.3 | 0.7 | 18K | $0.005 |
-| mrv | glm-5.3-background | low | 0.66 | 0.95 | 25.0 | 4.0 | 114K | $0.12 |
-| mrv | glm-5.3-background | high | 0.74 | 0.97 | 32.7 | 2.3 | 157K | $0.39 |
-| mrv | glm-flash | low | 0.66 | 0.95 | 24.2 | 5.7 | 109K | $0.02 |
-| mrv | glm-flash | high | 0.66 | 0.95 | 25.8 | 1.8 | 149K | $0.04 |
-| ce | glm-5.3-background | low | 0.81 | 0.98 | 36.8 | 5.3 | 102K | $0.20 |
-| ce | glm-5.3-background | high | 0.78 | 0.98 | 46.2 | 2.7 | 149K | $0.38 |
-| ce | glm-flash | low | 0.79 | 0.97 | 35.0 | 5.7 | 98K | $0.02 |
+| vanilla | glm-5.3-background | low | 0.46 | 0.72 | 4.2 | 1.4 | 13K | $0.03 |
+| vanilla | glm-5.3-background | high | 0.57 | 0.80 | 6.8 | 0.3 | 20K | $0.05 |
+| vanilla | glm-flash | low | 0.46 | 0.72 | 5.0 | 0.8 | 13K | $0.003 |
+| vanilla | glm-flash | high | 0.59 | 0.82 | 7.8 | 0.3 | 21K | $0.005 |
+| mrv | glm-5.3-background | low | 0.59 | 0.91 | 18.0 | 4.0 | 108K | $0.21 |
+| mrv | glm-5.3-background | high | 0.74 | 0.96 | 32.7 | 2.3 | 157K | $0.39 |
+| mrv | glm-flash | low | 0.66 | 0.93 | 24.2 | 5.7 | 110K | $0.02 |
+| mrv | glm-flash | high | 0.66 | 0.93 | 25.8 | 1.8 | 149K | $0.04 |
+| ce | glm-5.3-background | low | 0.81 | 0.97 | 36.8 | 5.3 | 103K | $0.20 |
+| ce | glm-5.3-background | high | 0.78 | 0.97 | 46.2 | 2.7 | 150K | $0.38 |
+| ce | glm-flash | low | 0.79 | 0.97 | 35.0 | 5.7 | 99K | $0.02 |
 | ce | glm-flash | high | 0.75 | 0.97 | 39.2 | 3.5 | 143K | $0.04 |
 
 **What the full grid adds to the GLM story:**
 
 - **The GLM factory cells don't just beat the price frontier — they beat every metered cell
   on efficiency.** Best metered hidden-gold cell: ce × opus-5 × high (48.2 hid, rec 0.84,
-  6.8M tok, $11.10 recorded) — 46× more tokens and ~$46/cell more per hidden bug than
-  ce × glm-5.3-low (36.8 hid at 102K tok, $0.20). Best *recall* cell: mrv × opus-5 × low
+  6.8M tok, $11.10 recorded) — 66× more tokens and $10.90/cell more than ce × glm-5.3-low
+  (36.8 hid at 103K tok, $0.20; $0.23 vs $0.005 per hidden bug). Best *recall* cell:
+  mrv × opus-5 × low
   (rec 0.85, incr 0.98, 28.7 hid at 3.5M tok) — vs ce × GLM-low's 0.81/0.98/36.8 at 102K.
 - **The harness ranking inverts by model tier, consistently with the main report:** on
   premium models the factories earn their keep (mrv/opus low 0.85 vs vanilla 0.66; ce/opus
@@ -510,9 +513,9 @@ adjudication records with the cell that produced them:
    `{success, data}` persisted *as* the OAuth token instead of the parsed credential —
    "credential row now written as {success,data} instead of the flat token object, silently
    corrupting every stored Google credential on refresh [P0]" (mrv × opus-5 × low, PR 11059;
-   found independently by **three** harnesses — also ce × opus-5 × xhigh and mrv × GLM ×
+   found in **three cells across two harnesses** — also ce × opus-5 × xhigh and mrv × GLM ×
    xhigh, plus the sibling "computed keys stringify to '[object Object]' so the schema strips
-   all properties except access_token"). Multi-harness convergence is the strongest signal
+   all properties except access_token"). Cross-harness convergence is the strongest signal
    these are real.
 2. **Cross-tenant data leakage.** "`credential` declared once outside the per-reference loop,
    so a failed lookup silently reuses the previous host's credential, writing host B's
@@ -612,13 +615,13 @@ prompts synced with the upstream rubric (commit `45a55b6`):
 
 | arm | true_hal base→new (3 PRs) | recall (new) |
 |---|---|---|
-| background | 6 → 7 | 0.50–0.89 |
+| background | 6 → 6 | 0.50–0.89 |
 | flash | 1 → 3 | 0.67–0.89 |
 
 Baseline hal counts (6 and 1) are too small to resolve a fix-sized effect; the deltas are
 within run-to-run noise. Recalls held or improved (0.50–0.89; 36–45 bug_ungold/PR), so the
 added discipline costs nothing in coverage. Decisive tests: (a) the big-hal mrv cells
-(opus/sonnet, 20–28 hal/PR, ~$230–460 for the A/B), or (b) metareview's staged corpus
+(opus/sonnet, ~6–14 hal/PR under v2, ~$230–460 for the A/B), or (b) metareview's staged corpus
 re-judge of the 343-claim corpus against v2 ground truth (`cmd/claimcheck-eval`; needs model
 spend). Until one runs, the honest status of PR #145 in this lab is **"promising, unproven."**
 
