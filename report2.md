@@ -149,7 +149,7 @@ real bug, an important non-bug, a true hallucination, or unresolved.
 | vanilla × gpt-6-astra × low | 0.40 | 2.2 | 0.52 | 47K | $0.34 ² | $0.15 |
 | vanilla × claude-opus-5 × low | 0.66 | 6.0 | 0.81 | 86K | $0.40 ² | $0.07 |
 | vanilla × gpt-5.6-sol × low | 0.52 | 4.5 | 0.69 | 44K | $0.12 ³ | $0.027 |
-| mrv × claude-fable-5.1 × low | 0.63 | 28.2 | 0.80 | 2,081K | $7.23 ² | $0.26 |
+| mrv × claude-fable-5.1 × low | 0.63 | 33.7 | 0.80 | 2,081K | $7.23 ² | $0.21 |
 | mrv × gpt-6-astra × low | 0.51 | 6.7 | 0.74 | 774K | $1.38 ² | $0.21 |
 | ce × claude-fable-5.1 × low | 0.75 | 26.5 | 0.93 | 3,028K | $6.40 ² | $0.24 |
 | ce × gpt-6-astra × low | 0.49 | 10.0 | 0.78 | 1,246K | $1.89 ² | $0.19 |
@@ -173,8 +173,8 @@ real bug, an important non-bug, a true hallucination, or unresolved.
 
 **Read across the rows ($ per real bug = $/cell ÷ hidden gold/PR — lower is better):** vanilla × fable is the *best* pure-prompt cell in the is the *best* pure-prompt cell in the
 lab (rec 0.74, $1.01/cell at current list pricing) — while the **same model behind either
-factory** finds 3.5–3.8× more hidden gold (26.5–28.2/PR) but at 24–35× the tokens and
-25–36× the metered cost ($22–32/cell). Meanwhile **a $1.40/$4.40 GLM behind a factory beats
+factory** finds 3.5–3.8× more hidden gold (26.5–33.7/PR) but at 24–35× the tokens and
+7–9× the metered cost ($6.40–$7.23/cell, cache-adjusted). Meanwhile **a $1.40/$4.40 GLM behind a factory beats
 the premium models run vanilla on every axis** — more hidden gold (36.8 vs 7.5/2.2), higher
 recall (0.81 vs 0.74/0.40) — at 3–4× *cheaper* than vanilla fable itself, and ~100× better
 lower $-per-real-bug than any premium cell.
@@ -194,7 +194,7 @@ budget option in this data — it's the front of the Pareto frontier.
   opus-5 $0.067 (**12×**), vanilla × sol $0.027 (**5×** — the closest competitor). And the
   frontier models don't even find as many bugs: 2.2–7.5 hidden gold/PR vs 36.8.
 - **Premium factories pay 35–56× more per real bug.** ce × fable-5.1 pays $0.24 (**45×**),
-  mrv × fable $0.26 (**48×**), ce × astra $0.19 (**35×**) — and the best premium factory
+  mrv × fable $0.21 (**40×**), ce × astra $0.19 (**35×**) — and the best premium factory
   cell, mrv × opus-5 × high, pays **$0.30/real-bug (56×)** once its 5.4M cache-hit tokens are
   priced at $0.50/M instead of full input rate. These premium factories *do* match GLM's
   hidden-gold volume (26.5–36.0/PR); they just cost 35–56× more to get there.
@@ -544,8 +544,8 @@ metered at Z.AI list for GLM.
 | mrv | sol | high | 0.63 | 0.84 | — | — | 656K | ~0 |
 | mrv | terra | low | 0.30 | 0.52 | 4.2 | 1.7 | 652K | ~0 |
 | mrv | terra | high | 0.42 | 0.70 | 7.7 | 1.7 | 889K | ~0 |
-| mrv | fable-5.1 | low | 0.63 | 0.80 | 28.2 | 5.6 | 2,081K | $22.41 |
-| mrv | astra | low | 0.51 | 0.74 | 6.7 | 0.7 | 774K | $7.82 |
+| mrv | fable-5.1 | low | 0.63 | 0.80 | 33.7 | 5.6 | 2,081K | $7.23 |
+| mrv | astra | low | 0.51 | 0.74 | 6.7 | 0.7 | 774K | $1.38 |
 | ce | opus-5 | low | 0.67 | 0.91 | 20.0 | 7.5 | 2,065K | — |
 | ce | opus-5 | high | 0.84 | **0.98** | **48.2** | 7.8 | 6,831K | — |
 | ce | sonnet-5 | low | 0.21 | 0.41 | 3.2 | 1.3 | 2,920K | $1.57 |
@@ -554,8 +554,8 @@ metered at Z.AI list for GLM.
 | ce | sol | high | 0.45 | 0.69 | 7.2 | 0.7 | 1,008K | ~0 |
 | ce | terra | low | 0.39 | 0.64 | 6.0 | 0.5 | 679K | ~0 |
 | ce | terra | high | 0.56 | 0.84 | 13.5 | 1.0 | 792K | ~0 |
-| ce | fable-5.1 | low | 0.75 | 0.93 | 26.5 | 5.8 | 3,028K | $32.00 |
-| ce | astra | low | 0.49 | 0.78 | 10.0 | 1.5 | 1,246K | $12.62 |
+| ce | fable-5.1 | low | 0.75 | 0.93 | 26.5 | 5.8 | 3,028K | $6.40 |
+| ce | astra | low | 0.49 | 0.78 | 10.0 | 1.5 | 1,246K | $1.89 |
 | vanilla | glm-5.3-background | low | 0.46 | 0.72 | 4.2 | 1.4 | 13K | $0.03 |
 | vanilla | glm-5.3-background | high | 0.57 | 0.80 | 6.8 | 0.3 | 20K | $0.05 |
 | vanilla | glm-flash | low | 0.46 | 0.72 | 5.0 | 0.8 | 13K | $0.003 |
