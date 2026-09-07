@@ -92,7 +92,10 @@ real bug, an important non-bug, a true hallucination, or unresolved.
 | ce × gpt-6-astra × low | 0.49 | 10.0 | 0.78 | 1,246K | $12.62 ³ | 0.8 |
 | mrv × claude-opus-5 × high (main report §3.4) | — | 36.0 | 0.85 | 2,980K | $56.65 ³ | 0.64 |
 
-¹ Z.AI list pricing applied to measured tokens (our runs: Lunaroute flat fee, $0 billed).
+¹ Z.AI list pricing applied to measured tokens. Our runs were served through
+   **[Lunaroute](https://lunaroute.com)** — a US-based, **zero-data-retention** inference
+   gateway (flat fee, $0 billed per run) — so the metered figures are what the same token
+   counts would cost on the public APIs.
 ² Metered at current published list pricing, applied to our measured in/out tokens:
 Fable 5.1 $10 in / $50 out; Astra $10 in / $50 out ([platform.claude.com/docs/en/about-claude/pricing](https://platform.claude.com/docs/en/about-claude/pricing), [developers.openai.com/api/docs/models/gpt-6-astra](https://developers.openai.com/api/docs/models/gpt-6-astra), fetched 2026-09-07; cache reads/writes excluded — cache-hit volume isn't recorded per run). **This corrects the main report's fable/astra figures, which used a stale $12.50/M output pin** (that is the 5-minute cache-*write* price, not the output price). "—" = not recomputed; recorded run costs for subscription models are pre-refresh (main report §3.4).
 
@@ -149,7 +152,9 @@ vanilla.
 | Claimcheck smoke: mrv × {background, flash} × xhigh × {11059, 10967, 14740}, lens prompts synced with metareview#145 Evidence-of-Absence | 6 | `20260907-claimcheck-smoke` |
 
 Judging/scoring identical to the main report (extract → judge → v2 three-way adjudication).
-GLM served via Lunaroute (OpenAI-compatible); per-call timeout 2400s; effort-scaled
+GLM served via **[Lunaroute](https://lunaroute.com)** — a US-based, zero-data-retention
+OpenAI-compatible inference gateway (flat fee, $0 billed for these runs); per-call timeout
+2400s; effort-scaled
 completion budgets (medium→65,536 / high→32,768) as the shipped workaround.
 
 ### 2.1 The prompts each harness was given
