@@ -56,7 +56,7 @@ factories earn their keep on a third model family, not just Claude and Codex.
 
 | arm | cells | batch |
 |---|---|---|
-| GLM-5.3 suite: {vanilla, mrv, ce} × {background, flash} × {low, medium, high, xhigh} × top-6 PRs | 24 (latest-pass; 135 pass runs) | `20260906-glm53-top6` |
+| GLM-5.3 suite: {vanilla, mrv, ce} × {background, flash} × {low, medium, high, xhigh} × top-6 PRs | 24 (141 runs; 135 pass; latest-pass per cell — three cells have n=5, rest n=6) | `20260906-glm53-top6` |
 | Effort probes: single calls, glm-5.3-background, 79K-char diff, 65,536 budget | 2×low, 2×high live + 3 prior medium | §4.1 transcripts |
 | Claimcheck smoke: mrv × {background, flash} × xhigh × {11059, 10967, 14740}, lens prompts synced with metareview#145 | 6 | `20260907-claimcheck-smoke` |
 
@@ -74,15 +74,15 @@ gold (real findings humans missed); hal = true hallucinations (v2).
 
 | harness | model | effort | n | rec | incr | hid | hal | tok/PR |
 |---|---|---|---:|---:|---:|---:|---:|---:|
-| vanilla | background | low | 6 | 0.54 | 0.75 | 5.8 | 4.5 | 13K |
+| vanilla | background | low | 5 | 0.54 | 0.75 | 5.8 | 4.5 | 13K |
 | vanilla | background | medium | 6 | 0.17 | 0.17 | 0.8 | 0.0 | 28K |
 | vanilla | background | high | 6 | 0.00 | 0.00 | 0.0 | 0.0 | 27K |
 | vanilla | background | xhigh | 6 | 0.57 | 0.80 | 7.5 | 3.7 | 20K |
-| vanilla | flash | low | 6 | 0.50 | 0.73 | 5.8 | 3.8 | 13K |
+| vanilla | flash | low | 5 | 0.50 | 0.73 | 5.8 | 3.8 | 13K |
 | vanilla | flash | medium | 5 | 0.59 | 0.78 | 6.4 | 3.0 | 18K |
 | vanilla | flash | high | 6 | 0.59 | 0.82 | 8.3 | 3.7 | 21K |
 | vanilla | flash | xhigh | 6 | 0.53 | 0.78 | 7.3 | 3.5 | 18K |
-| mrv | background | low | 4 | 0.66 | 0.92 | 25.2 | 25.2 | 114K |
+| mrv | background | low | 5 | 0.66 | 0.92 | 25.2 | 25.2 | 114K |
 | mrv | background | medium | 6 | 0.00 | 0.00 | 0.0 | 0.0 | 73K |
 | mrv | background | high | 6 | 0.14 | 0.22 | 1.8 | 1.0 | 220K |
 | mrv | background | xhigh | 6 | 0.74 | 0.96 | 36.0 | 18.3 | 157K |
