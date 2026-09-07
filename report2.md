@@ -180,10 +180,10 @@ $0.23) while costing less, and matches the best metered factory cells (mrv × op
 36.0 hid, incr 0.85, $1.57/real-bug) at ~1/300th the cost. The open-weight model isn't the
 budget option in this data — it's the front of the Pareto frontier.
 
-The second headline: **the harness-beats-vanilla pattern extends to a third model family**
-(ce 0.81/0.78 and mrv 0.66/0.74 recall vs vanilla 0.54/0.57 on background at low/xhigh) —
-and, per §3.3, a cheap model behind a good harness now beats the newest premium models run
-vanilla.
+**Why it wins: the harness, not the model tier, is the binding constraint.** The
+harness-beats-vanilla pattern now holds on a third model family (ce 0.81/0.78 and mrv
+0.66/0.74 recall vs vanilla 0.54/0.57 on background at low/high) — and GLM's flat-fee
+serving makes the winning configuration essentially free to run.
 
 ### TL;DR — practitioner recommendations
 
