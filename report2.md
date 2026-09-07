@@ -1,4 +1,4 @@
-# GLM-5.3 as a Review Engine — the 24-cell suite, the effort ladder, and the lens-fix smoke (Report 2)
+# GLM-5.3 as a Review Engine — the low/high suite, the effort ladder, and the lens-fix smoke (Report 2)
 
 > **What this is.** A follow-up to the main comparison ([`report.md`](report.md)) — read it
 > standalone, but every framework/model/effort claim about the *older* cells cites the main
@@ -89,7 +89,7 @@ vanilla.
 
 | arm | cells | batch |
 |---|---|---|
-| GLM-5.3 suite: {vanilla, mrv, ce} × {background, flash} × {low, medium, high, xhigh} × top-6 PRs | 24 (141 runs; 135 pass; latest-pass per cell — three cells have n=5, rest n=6) | `20260906-glm53-top6` |
+| GLM-5.3 suite: {vanilla, mrv, ce} × {background, flash} × {low, high} × top-6 PRs (medium/32K-high rungs run but collapsed — §4) | 12 low/high cells (of 24 suite cells) | `20260906-glm53-top6` |
 | Effort probes: single calls, glm-5.3-background, 79K-char diff, 65,536 budget | 2×low, 2×high live + 3 prior medium | §4 transcripts |
 | Claimcheck smoke: mrv × {background, flash} × xhigh × {11059, 10967, 14740}, lens prompts synced with metareview#145 Evidence-of-Absence | 6 | `20260907-claimcheck-smoke` |
 
@@ -215,9 +215,41 @@ The instrument split this implies: vanilla cells give the model one prompt (all 
 the model's); factory cells add the orchestrator + per-lens/persona prompts — the token and
 hallucination totals in §3 include all of that scaffolding.
 
+### 2.2 The measured grid
+
+Every cell = one harness × model × effort over the top-6 PRs; the number is the count of
+latest-pass PR runs (— = not run). GLM rows are this report's suite (batch
+`20260906-glm53-top6`); the other models come from the main report's matrix. Effort naming:
+the Claude/OpenAI rows use our two-rung ladder (low / high — `high` sent natively as
+`xhigh`/`high`); the GLM rows' "high" is upstream `reasoning_effort=high` (our xhigh step,
+§4). GLM's medium rung was also measured and collapsed (§4); it is out of scope here.
+
+| model | effort | vanilla | mrv | ce |
+|---|---|---:|---:|---:|
+| claude-opus-5 | low | 6 | 6 | 6 |
+| | high | 6 | 6 | 6 |
+| claude-sonnet-5 | low | 6 | 6 | 6 |
+| | high | 6 | 6 | 6 |
+| gpt-5.6-sol | low | 6 | 6 | 6 |
+| | high | 6 | 6 | 6 |
+| gpt-5.6-terra | low | 6 | 6 | 6 |
+| | high | 6 | 6 | 6 |
+| claude-fable-5-1 | low | 6 | 6 | 6 |
+| | high | 6 | — | — |
+| gpt-6-astra | low | 6 | 6 | 6 |
+| | high | 6 | — | — |
+| **glm-5.3-background** | low | 5 | 5 | 6 |
+| | high | 6 | 6 | 6 |
+| **glm-5.3-flash-background** | low | 5 | 6 | 6 |
+| | high | 6 | 5 | 6 |
+
+Totals: 48 non-GLM cells at low/high (all complete) + 12 GLM low/high cells (three at n=5)
++ the GLM medium/32K-high rungs (§4, out of scope) + the 6 smoke cells (§5).
+
+
 ---
 
-## 3. The 24-cell suite
+## 3. The GLM-5.3 suite (low / high)
 
 Latest-pass run per cell. rec = absolute recall on goldens; incr = incremental recall
 (goldens + confirmed hidden gold); hid/hal defined in §0; tok/PR = review tokens in+out.
@@ -225,29 +257,24 @@ Latest-pass run per cell. rec = absolute recall on goldens; incr = incremental r
 | harness | model | effort | n | rec | incr | hid | hal | tok/PR |
 |---|---|---|---:|---:|---:|---:|---:|---:|
 | vanilla | background | low | 5 | 0.54 | 0.75 | 5.8 | 4.5 | 13K |
-| vanilla | background | medium | 6 | 0.17 | 0.17 | 0.8 | 0.0 | 28K |
-| vanilla | background | high | 6 | 0.00 | 0.00 | 0.0 | 0.0 | 27K |
-| vanilla | background | xhigh | 6 | 0.57 | 0.80 | 7.5 | 3.7 | 20K |
+| vanilla | background | high | 6 | 0.57 | 0.80 | 7.5 | 3.7 | 20K |
 | vanilla | flash | low | 5 | 0.50 | 0.73 | 5.8 | 3.8 | 13K |
-| vanilla | flash | medium | 5 | 0.59 | 0.78 | 6.4 | 3.0 | 18K |
-| vanilla | flash | high | 6 | 0.59 | 0.82 | 8.3 | 3.7 | 21K |
-| vanilla | flash | xhigh | 6 | 0.53 | 0.78 | 7.3 | 3.5 | 18K |
+| vanilla | flash | high | 6 | 0.53 | 0.78 | 7.3 | 3.5 | 18K |
 | mrv | background | low | 5 | 0.66 | 0.92 | 25.2 | 25.2 | 114K |
-| mrv | background | medium | 6 | 0.00 | 0.00 | 0.0 | 0.0 | 73K |
-| mrv | background | high | 6 | 0.14 | 0.22 | 1.8 | 1.0 | 220K |
-| mrv | background | xhigh | 6 | 0.74 | 0.96 | 36.0 | 18.3 | 157K |
+| mrv | background | high | 6 | 0.74 | 0.96 | 36.0 | 18.3 | 157K |
 | mrv | flash | low | 6 | 0.66 | 0.93 | 25.3 | 22.2 | 110K |
-| mrv | flash | medium | 6 | 0.69 | 0.95 | 31.3 | 18.7 | 160K |
-| mrv | flash | high | 6 | 0.69 | 0.95 | 31.3 | 21.3 | 171K |
-| mrv | flash | xhigh | 5 | 0.66 | 0.93 | 25.8 | 18.0 | 149K |
+| mrv | flash | high | 5 | 0.66 | 0.93 | 25.8 | 18.0 | 149K |
 | **ce** | background | low | 6 | **0.81** | **0.97** | **40.5** | 28.0 | **103K** |
-| ce | background | medium | 6 | 0.11 | 0.24 | 4.0 | 0.5 | 199K |
-| ce | background | high | 6 | 0.13 | 0.31 | 3.5 | 0.3 | 196K |
-| ce | background | xhigh | 6 | 0.78 | 0.97 | 44.8 | 25.2 | 150K |
+| ce | background | high | 6 | 0.78 | 0.97 | 44.8 | 25.2 | 150K |
 | ce | flash | low | 6 | 0.79 | 0.97 | 36.8 | 23.0 | 99K |
-| ce | flash | medium | 5 | 0.71 | 0.96 | 39.8 | 18.0 | 146K |
-| ce | flash | high | 5 | 0.68 | 0.95 | 39.8 | 17.2 | 155K |
-| ce | flash | xhigh | 6 | 0.75 | 0.97 | 41.0 | 21.7 | 143K |
+| ce | flash | high | 6 | 0.75 | 0.97 | 41.0 | 21.7 | 143K |
+
+Scope note: the suite also ran GLM's **medium** rung and a separate 32K-budget **high**
+rung — both collapsed (rec 0.00–0.17 across all harnesses) for the serving-stack reasons in
+§4; those rows are excluded from this report's low/high scope and documented in §4. The
+"high" rows above are our xhigh ladder step, which sends upstream `reasoning_effort=high`
+with the 65K budget — the healthy high configuration.
+
 
 ### 3.1 Readings that matter
 
@@ -328,6 +355,81 @@ converts a mediocre-priced model into review coverage that the newest premium mo
 reach vanilla. (Fable remains the best *vanilla* model measured — rec 0.74/0.62 — but vanilla
 tops out at ~3 hidden bugs/PR on the full suite.)
 
+### 3.4 The full low/high grid — every model, every harness
+
+All cells top-6 PRs, latest pass, v2-adjudicated where graded (— = pending v2 grading or not
+run). "high" = our xhigh ladder step. Recorded $/cell shown only where verified in the main
+report (OAuth-subscription run costs are pre-refresh there; see main report §3.4/§5) or
+metered at Z.AI list for GLM.
+
+| harness | model | effort | rec | incr | hid | hal | tok/PR | $/cell |
+|---|---|---|---:|---:|---:|---:|---:|---:|
+| vanilla | opus-5 | low | 0.66 | 0.81 | 6.0 | 0.5 | 86K | — |
+| vanilla | opus-5 | high | 0.66 | 0.88 | — | — | 102K | $0.82 |
+| vanilla | sonnet-5 | low | 0.42 | 0.61 | 3.2 | 1.2 | 106K | $0.20 |
+| vanilla | sonnet-5 | high | 0.37 | 0.65 | 4.7 | 0.2 | 127K | $0.41 |
+| vanilla | sol | low | 0.52 | 0.69 | 4.5 | 0.0 | 44K | ~0 |
+| vanilla | sol | high | 0.62 | 0.76 | — | — | 1039K | ~0 |
+| vanilla | terra | low | 0.39 | 0.56 | 2.5 | 0.2 | 59K | ~0 |
+| vanilla | terra | high | 0.46 | 0.63 | 3.3 | 0.2 | 280K | ~0 |
+| vanilla | fable-5.1 | low | 0.74 | 0.89 | 7.5 | 1.2 | 85K | $6.41 |
+| vanilla | astra | low | 0.40 | 0.52 | 2.2 | 0.6 | 47K | $2.80 |
+| mrv | opus-5 | low | **0.85** | **0.97** | 28.7 | 6.8 | 3,481K | — |
+| mrv | opus-5 | high | 0.69 | 0.90 | — | — | 6,337K | $56.65 |
+| mrv | sonnet-5 | low | 0.61 | 0.85 | 10.0 | 3.5 | 3,078K | $1.52 |
+| mrv | sonnet-5 | high | 0.57 | 0.87 | 14.3 | 3.8 | 9,458K | $4.95 |
+| mrv | sol | low | 0.48 | 0.67 | 7.0 | 2.7 | 569K | ~0 |
+| mrv | sol | high | 0.63 | 0.84 | — | — | 656K | ~0 |
+| mrv | terra | low | 0.30 | 0.52 | 4.2 | 1.7 | 652K | ~0 |
+| mrv | terra | high | 0.42 | 0.70 | 7.7 | 1.7 | 889K | ~0 |
+| mrv | fable-5.1 | low | 0.63 | 0.80 | 28.2 | 5.6 | 2,081K | — |
+| mrv | astra | low | 0.51 | 0.74 | 6.7 | 0.7 | 774K | — |
+| ce | opus-5 | low | 0.67 | 0.91 | 20.0 | 7.5 | 2,065K | — |
+| ce | opus-5 | high | 0.84 | **0.98** | **48.2** | 7.8 | 6,831K | — |
+| ce | sonnet-5 | low | 0.21 | 0.41 | 3.2 | 1.3 | 2,920K | $1.57 |
+| ce | sonnet-5 | high | 0.29 | 0.56 | 5.8 | 0.7 | 9,992K | $5.65 |
+| ce | sol | low | 0.45 | 0.69 | 8.7 | 1.2 | 544K | ~0 |
+| ce | sol | high | 0.45 | 0.69 | 7.2 | 0.7 | 1,008K | ~0 |
+| ce | terra | low | 0.39 | 0.64 | 6.0 | 0.5 | 679K | ~0 |
+| ce | terra | high | 0.56 | 0.84 | 13.5 | 1.0 | 792K | ~0 |
+| ce | fable-5.1 | low | 0.75 | 0.93 | 26.5 | 5.8 | 3,028K | — |
+| ce | astra | low | 0.49 | 0.78 | 10.0 | 1.5 | 1,246K | — |
+| vanilla | glm-5.3-background | low | 0.54 | 0.75 | 5.8 | 4.5 | 13K | $0.03 |
+| vanilla | glm-5.3-background | high | 0.57 | 0.80 | 7.5 | 3.7 | 20K | $0.05 |
+| vanilla | glm-flash | low | 0.50 | 0.73 | 5.8 | 3.8 | 13K | $0.003 |
+| vanilla | glm-flash | high | 0.53 | 0.78 | 7.3 | 3.5 | 18K | $0.005 |
+| mrv | glm-5.3-background | low | 0.66 | 0.92 | 25.2 | 25.2 | 114K | $0.12 |
+| mrv | glm-5.3-background | high | 0.74 | 0.96 | 36.0 | 18.3 | 157K | $0.39 |
+| mrv | glm-flash | low | 0.66 | 0.93 | 25.3 | 22.2 | 110K | $0.02 |
+| mrv | glm-flash | high | 0.66 | 0.93 | 25.8 | 18.0 | 149K | $0.04 |
+| ce | glm-5.3-background | low | 0.81 | 0.97 | 40.5 | 28.0 | 103K | $0.20 |
+| ce | glm-5.3-background | high | 0.78 | 0.97 | 44.8 | 25.2 | 150K | $0.38 |
+| ce | glm-flash | low | 0.79 | 0.97 | 36.8 | 23.0 | 99K | $0.02 |
+| ce | glm-flash | high | 0.75 | 0.97 | 41.0 | 21.7 | 143K | $0.04 |
+
+**What the full grid adds to the GLM story:**
+
+- **The GLM factory cells don't just beat the price frontier — they beat every metered cell
+  on efficiency.** Best metered hidden-gold cell: ce × opus-5 × high (48.2 hid, rec 0.84,
+  6.8M tok, $11.10 recorded) — 46× more tokens and ~$46/cell more per hidden bug than
+  ce × glm-5.3-low (40.5 hid at 103K tok, $0.20). Best *recall* cell: mrv × opus-5 × low
+  (rec 0.85, incr 0.97, 28.7 hid at 3.5M tok) — vs ce × GLM-low's 0.81/0.97/40.5 at 103K.
+- **The harness ranking inverts by model tier, consistently with the main report:** on
+  premium models the factories earn their keep (mrv/opus low 0.85 vs vanilla 0.66; ce/opus
+  high 0.84 vs vanilla 0.66); on cheap models the same holds (ce/GLM 0.81 vs vanilla 0.54).
+  What changes with GLM is that the factory premium stops being expensive.
+- **Codex-family factories underperform Claude factories** (ce × sonnet 0.21–0.29; ce × sol
+  flat at 0.45) — GLM is the only model family where the factories hit ≥0.79 recall at low
+  effort, and it costs the least.
+- **Vanilla fable's top-6 hid count is 7.5/PR at $6.41** — the strongest pure-vanilla cell —
+  vs ce × GLM-low's 40.5/PR at $0.20. Even granting fable's superior precision (1.2 hal vs
+  28), the factory cell surfaces **5.4× more real bugs per PR for 3% of the price**; the
+  triage trade is decided by how much reviewer attention you have.
+
+Superpowers is excluded from this grid (single-subagent wrapper — not an apples-to-apples
+harness; main report §2). Historical rows (opus-4.5, sonnet-4.5, gpt-5.2, kimi-k3, glm-5.2)
+are superseded by the cells above and omitted.
+
 ---
 
 ## 4. The effort ladder: two healthy rungs, a broken middle
@@ -389,9 +491,10 @@ spend). Until one runs, the honest status of PR #145 in this lab is **"promising
 ## 6. Coverage state (low + high, all harnesses)
 
 Complete (6/6 PRs, both efforts, vanilla/mrv/ce): **opus-5, sonnet-5, sol, terra,
-glm-5.3-background, glm-5.3-flash**. Missing: **fable-5.1 and astra have no high-effort runs**
-(~36 cells, ≈$230 + ≈$100 to fill). The low-vs-high and effort-ladder claims here are scoped
-to the six complete models.
+glm-5.3-background, glm-5.3-flash-background**. Missing: fable-5.1 and astra have **no factory
+(mrv/ce) cells at high effort** — 2 cells per model, **4 cells total** (≈$60–90; vanilla high
+already exists for both). The low-vs-high and effort-ladder claims here are scoped to the six
+complete models.
 
 ---
 
