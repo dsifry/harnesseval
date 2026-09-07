@@ -57,10 +57,14 @@ reviewers' own misses. The harnesses compared:
 - **Compound Engineering ("ce")** — risk-driven persona subagents (investigator, security,
   perf, …) + a synthesis pass.
 
-Each harness × model × effort cell runs the **top-6 benchmark PRs** — real PRs from
+Each harness × model × effort cell runs the **top-6 PRs of the
+[Martian Code Review Bench](https://github.com/withmartian/code-review-benchmark)** — the
+lab's primary dataset+grader (50 real PRs across 5 OSS projects — Sentry/Python,
+Grafana/Go, Cal.com/TypeScript, Discourse/Ruby, Keycloak/Java — with **173 human-verified
+golden comments**; vendored at SHA `2b092b670f`, main report §2). The six PRs used here,
+selected for the most golden comments (6–9 each), come from two of those projects:
 **[cal.com](https://github.com/calcom/cal.com)** and
-**[discourse-graphite](https://github.com/ai-code-review-evaluation/discourse-graphite)**,
-selected for having the most golden comments (6–9 each):
+**[discourse-graphite](https://github.com/ai-code-review-evaluation/discourse-graphite)**:
 
 | benchmark PR | goldens |
 |---|---:|
