@@ -16,7 +16,7 @@
 > | review engine | hidden gold /PR | $/cell | **$ per real bug** |
 > |---|---:|---:|---:|
 > | naive: vanilla × **Fable 5.1** (frontier) × low | 7.5 | $0.90 | $0.12 |
-> | naive: vanilla × **GPT-6 Astra** (frontier) × low | 2.2 | $0.51 | $0.15 |
+> | naive: vanilla × **GPT-6 Astra** (frontier) × low | 2.2 | $0.34 | $0.15 |
 > | **harness: ce × glm-5.3-background × low (open-weight)** | **36.8** | **$0.20** | **$0.005** |
 >
 > **Same PRs, same ground truth. The open-weight harness setup finds 5× the real bugs of
