@@ -147,20 +147,22 @@ real bug, an important non-bug, a true hallucination, or unresolved.
 | mrv × glm-5.3-flash × low | 0.66 | 25.3 | 0.93 | 110K | $0.02 ¹ | ~1,150 |
 | vanilla × claude-fable-5.1 × low | 0.74 | 7.5 | 0.89 | 85K | $0.88 ² | ~8.5 |
 | vanilla × gpt-6-astra × low | 0.40 | 2.2 | 0.52 | 47K | $0.59 ³ | ~3.7 |
-| vanilla × claude-opus-5 × low | 0.66 | 6.0 | 0.81 | 86K | — | — |
-| vanilla × gpt-5.6-sol × low | 0.52 | 4.5 | 0.69 | 44K | — | — |
+| vanilla × claude-opus-5 × low | 0.66 | 6.0 | 0.81 | 86K | $0.51 ³ | ~12 |
+| vanilla × gpt-5.6-sol × low | 0.52 | 4.5 | 0.69 | 44K | $0.20 ⁴ | ~23 |
 | mrv × claude-fable-5.1 × low | 0.63 | 28.2 | 0.80 | 2,081K | $22.41 ² | 1.3 |
 | mrv × gpt-6-astra × low | 0.51 | 6.7 | 0.74 | 774K | $7.82 ³ | 0.9 |
 | ce × claude-fable-5.1 × low | 0.75 | 26.5 | 0.93 | 3,028K | $32.00 ² | 0.8 |
-| ce × gpt-6-astra × low | 0.49 | 10.0 | 0.78 | 1,246K | $12.62 ³ | 0.8 |
-| mrv × claude-opus-5 × high (main report §3.4) | — | 36.0 | 0.85 | 2,980K | $56.65 ³ | 0.64 |
+| ce × gpt-6-astra × low | 0.49 | 10.0 | 0.78 | 1,246K | $12.62 ² | 0.8 |
+| mrv × claude-opus-5 × high (main report §3.4) | — | 36.0 | 0.85 | 2,980K | $56.65 ² | 0.64 |
 
 ¹ Z.AI list pricing applied to measured tokens. Our runs were served through
    **[Lunaroute](https://lunaroute.com)** — a US-based, **zero-data-retention** inference
    gateway (flat fee, $0 billed per run) — so the metered figures are what the same token
    counts would cost on the public APIs.
 ² Metered at current published list pricing, applied to our measured in/out tokens:
-Fable 5.1 $10 in / $50 out; Astra $10 in / $50 out ([platform.claude.com/docs/en/about-claude/pricing](https://platform.claude.com/docs/en/about-claude/pricing), [developers.openai.com/api/docs/models/gpt-6-astra](https://developers.openai.com/api/docs/models/gpt-6-astra), fetched 2026-09-07; cache reads/writes excluded — cache-hit volume isn't recorded per run). **This corrects the main report's fable/astra figures, which used a stale $12.50/M output pin** (that is the 5-minute cache-*write* price, not the output price). "—" = not recomputed; recorded run costs for subscription models are pre-refresh (main report §3.4).
+Fable 5.1 $10 in / $50 out; Astra $10 in / $50 out ([platform.claude.com/docs/en/about-claude/pricing](https://platform.claude.com/docs/en/about-claude/pricing), [developers.openai.com/api/docs/models/gpt-6-astra](https://developers.openai.com/api/docs/models/gpt-6-astra), fetched 2026-09-07; cache reads/writes excluded — cache-hit volume isn't recorded per run). **This corrects the main report's fable/astra figures, which used a stale $12.50/M output pin** (that is the 5-minute cache-*write* price, not the output price).
+³ Opus 5 $5 in / $25 out (platform.claude.com).
+⁴ GPT-5.6-sol $4 in / $20 out ([developers.openai.com/api/docs/pricing](https://developers.openai.com/api/docs/pricing) — promotional rate, listed through Nov 21, 2026). "—" = not recomputed; recorded run costs for subscription models are pre-refresh (main report §3.4).
 
 **Read across the fable/astra rows:** vanilla × fable is the *best* pure-prompt cell in the
 lab (rec 0.74, $0.88/cell at current list pricing) — while the **same model behind either
@@ -494,11 +496,11 @@ metered at Z.AI list for GLM.
 
 | harness | model | effort | rec | incr | hid | hal | tok/PR | $/cell |
 |---|---|---|---:|---:|---:|---:|---:|---:|
-| vanilla | opus-5 | low | 0.66 | 0.81 | 6.0 | 0.5 | 86K | — |
+| vanilla | opus-5 | low | 0.66 | 0.81 | 6.0 | 0.5 | 86K | $0.51 |
 | vanilla | opus-5 | high | 0.66 | 0.88 | — | — | 102K | $0.82 |
 | vanilla | sonnet-5 | low | 0.42 | 0.61 | 3.2 | 1.2 | 106K | $0.20 |
 | vanilla | sonnet-5 | high | 0.37 | 0.65 | 4.7 | 0.2 | 127K | $0.41 |
-| vanilla | sol | low | 0.52 | 0.69 | 4.5 | 0.0 | 44K | ~0 |
+| vanilla | sol | low | 0.52 | 0.69 | 4.5 | 0.0 | 44K | $0.20 |
 | vanilla | sol | high | 0.62 | 0.76 | 4.5 | 0.2 | 1039K | ~0 |
 | vanilla | terra | low | 0.39 | 0.56 | 2.5 | 0.2 | 59K | ~0 |
 | vanilla | terra | high | 0.46 | 0.63 | 3.3 | 0.2 | 280K | ~0 |
