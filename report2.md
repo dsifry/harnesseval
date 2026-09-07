@@ -46,9 +46,11 @@ artifacts. Single-pass discovery quality per dollar is the measured quantity.
 
 ### 0.2 The lab setup
 
-`harnesseval` benchmarks the three harnesses on real PRs with known ground truth. Each PR
-carries *golden comments* — real review findings recorded by human reviewers — plus the human
-reviewers' own misses. The harnesses compared:
+`harnesseval` benchmarks the three harnesses against the **Martian Code Review Bench**
+([github.com/withmartian/code-review-benchmark](https://github.com/withmartian/code-review-benchmark),
+vendored at SHA `2b092b670f`) — 50 real OSS PRs with **173 human-verified golden comments**.
+Each PR carries *golden comments* — real review findings recorded by human reviewers — plus
+the human reviewers' own misses. The harnesses compared:
 
 - **vanilla** — one well-engineered review prompt, no subagents (the baseline a developer
   gets from "just ask the model to review this diff");
