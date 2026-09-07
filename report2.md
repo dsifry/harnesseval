@@ -97,6 +97,124 @@ Judging/scoring identical to the main report (extract → judge → v2 three-way
 GLM served via Lunaroute (OpenAI-compatible); per-call timeout 2400s; effort-scaled
 completion budgets (medium→65,536 / high→32,768) as the shipped workaround.
 
+### 2.1 The prompts each harness was given
+
+Full texts live in the harness (`harnesseval/adapters/*.py`); the operative text is quoted
+here. The GLM cells ran all three harnesses, with one GLM-specific detail: metareview and
+Compound fell back to API-direct orchestration (no interactive CLI exists for GLM), detailed
+below.
+
+**vanilla — one prompt, one call** (`vanilla.py:ENGINEERED_PROMPT`, verbatim, with
+`{pr_title}` and a 60,000-char-truncated `{diff}`):
+
+> You are an expert code reviewer. Review the following code diff for real, actionable
+> issues.
+>
+> PR: {pr_title}
+>
+> ```diff
+> {diff}
+> ```
+>
+> Find issues in these categories: bug, security, concurrency, data, api, performance,
+> test_gap, doc_defect.
+> For each issue:
+> - State the specific problem concisely (one issue per item — do not bundle).
+> - Note the file and line if identifiable from the diff.
+> - Classify severity as Low, Medium, High, or Critical.
+> - Only report real issues you are confident about; do not pad with style nits or
+>   speculation.
+>
+> Respond with a numbered list, one issue per line, e.g.:
+> 1. [High/bug] path/to/file.py:71 — description of the specific problem
+> 2. [Medium/performance] ...
+
+**metareview ("mrv") — gates + 8 adversarial lenses.** The deterministic gates ran as the
+real Go binary (`metareview review task-done <task> --base HEAD~2`); their findings are
+scored separately and excluded from the mrv score (main report §2 — they match 0 goldens).
+The lens arm differed by backend:
+
+- *Claude/Codex cells (main report)*: an orchestrator prompt instructs the CLI agent to run
+  the binary, then "Dispatch the 8 required reviewer lenses as PARALLEL SUBAGENTS", with the
+  adversarial stance: "assume the creator's intent is GOOD but be hostile to unexamined
+  assumptions — assume there may be a fundamental mistake hiding in this design and find
+  it", confidence anchors (100/75/50/25/0; suppress <50 unless P0), and per-lens hunting
+  briefs (the Architecture brief alone is ~90 lines of concrete failure modes: N+1 patterns,
+  missing schema invariants, sentinel-meaning-change, cascading failure,
+  stand-in-guard-fidelity, …).
+
+- *GLM cells (this report)*: API-direct fallback — the harness plays orchestrator. Eight
+  lens calls, each: system = the artifact-review rubric persona ("You are an expert code
+  reviewer using the metareview artifact-review rubric (v0.8.0). ADVERSARIAL STANCE: assume
+  the creator's intent is GOOD … but you ARE hostile to unexamined assumptions. Assume there
+  may be a fundamental mistake hiding in this design — find it."), user = the lens brief +
+  this header (verbatim):
+
+  > PR: {pr_title}
+  >
+  > ```diff
+  > {diff}
+  > ```
+  >
+  > List each distinct real issue you find (one per item, with file:line if identifiable).
+  > Only report issues you are confident about.
+
+  The 8 lens briefs: **feasibility, completeness, scope, architecture, intent, security,
+  testing-quality, data-migration**. Example — testing-quality, verbatim as synced with
+  metareview PR #145 for the smoke cells (§5): "You are the Testing-quality lens. Attack the
+  assumption that the tests verify the behavior they claim to. Tests can lie — find where
+  they do. … Hunt for false-confidence assertions (toBeTruthy()/toBeDefined()/bare assert(x)
+  that assert nothing …). Hunt for tests verifying mocks not real logic … Hunt for
+  mirror-tests-that-miss-the-machine … Evidence of absence (required before any
+  missing-tests finding): before reporting ANY finding whose claim is that tests, specs or
+  coverage are absent — 'no tests', 'nothing asserts', 'untested', 'no spec exists' — you
+  MUST first scan the diff for test-shaped files (spec/**, test/**, __tests__/**, *.test.*,
+  *.spec.*, *_test.go, test_*.py) whose changes reference the subject you claim is untested
+  … If a candidate test exists, the finding must cite the SPECIFIC assertion gap … or be
+  dropped entirely. State which test files you checked (paths) — never a bare 'no tests'."
+
+  Each lens output then passes through a JSON extraction call ("extract every distinct issue
+  from this lens review as a JSON array, one object per issue with issue_text and
+  severity") before judging.
+
+**Compound Engineering ("ce") — risk-driven persona roster** (`compound_realistic.py`). The
+orchestrator prompt: read `git diff HEAD~1` + `--stat`; write a one-line intent summary from
+the PR title; select the roster — "ALWAYS spawn `correctness` (logic/behavioral correctness —
+off-by-one, null propagation, races, state transitions, broken error propagation)" plus
+conditionals only when the diff shows their concrete surface (security / performance /
+api-contract / reliability / testing / maintainability / data-migration / adversarial, each
+with a trigger such as ">=50 changed code lines, OR auth/payments/persistence" or "a
+silent-pass verification mechanism (a CI/gate that can go green while the real thing is
+red)"); then "Dispatch each selected persona as a PARALLEL SUBAGENT … the orchestrator
+dispatches persona subagents and only synthesizes their findings." Each persona subagent
+gets its persona-focus text + the diff. Typical roster: 3–5 personas/PR. On the GLM cells
+the personas run as API calls with the same focus texts.
+
+**Judge (scoring, all cells).** One cross-family judge call per (finding × golden) pair —
+for the GLM cells, gpt-5.2 (OpenAI judges GLM, the same cross-family rule as everywhere in
+the lab; main report §2). Verbatim:
+
+> You are evaluating AI code review tools. Determine if the candidate issue matches the
+> golden (expected) comment.
+>
+> Golden Comment (the issue we're looking for): {golden_comment}
+> Candidate Issue (from the tool's review): {candidate}
+>
+> Instructions:
+> - Determine if the candidate identifies the SAME underlying issue as the golden comment
+> - Accept semantic matches - different wording is fine if it's the same problem
+> - Focus on whether they point to the same bug, concern, or code issue
+>
+> Respond with ONLY a JSON object:
+> {"reasoning": "brief explanation", "match": true/false, "confidence": 0.0-1.0}
+
+Unmatched findings then go through the v2 three-way adjudicator (full diff in context,
+max_tokens=4096, confidence floor 0.5 → bug / important-non-bug / true-hallucination /
+unresolved; main report §3.6). The rec/hid/hal numbers in §3 and §5 are post-adjudication.
+The instrument split this implies: vanilla cells give the model one prompt (all reasoning is
+the model's); factory cells add the orchestrator + per-lens/persona prompts — the token and
+hallucination totals in §3 include all of that scaffolding.
+
 ---
 
 ## 3. The 24-cell suite
