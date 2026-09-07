@@ -56,6 +56,7 @@ class JudgeResult:
     reasoning: str
     raw: str
     error: str | None = None
+    category: str | None = None  # v2 adjudication: bug | important_non_bug | hallucination | unresolved
 
 
 async def _call_anthropic(client, model: str, prompt: str, max_retries: int = 5) -> JudgeResult:

@@ -60,10 +60,13 @@ def _decompose(scored, findings) -> dict:
 
 
 def _diff_context_hash(diff: str) -> str:
-    """SHA1 of the diff context the adjudicator saw (diff[:30000], matching adjudicate.py).
-    Re-adjudication can verify it's re-judging the same context."""
+    """SHA1 of the diff context the adjudicator saw (FULL diff since v2; pre-2026-09-07 runs used
+    diff[:30000] — readjudicate3.json files record diff_chars to disambiguate)."""
     import hashlib
-    return hashlib.sha1(diff[:30000].encode("utf-8", "replace")).hexdigest()
+    return hashlib.sha1(diff[:DIFF_LIMIT_HASH].encode("utf-8", "replace")).hexdigest()
+
+
+DIFF_LIMIT_HASH = 1_000_000
 
 
 def _build_finding_records(run, scored, adjudicated, judge_model: str, diff: str) -> dict:
@@ -83,7 +86,9 @@ def _build_finding_records(run, scored, adjudicated, judge_model: str, diff: str
              "reasoning": tp.get("reasoning")})
     # candidate -> adjudication verdict record
     ru_map = {r["candidate"]: r for r in adjudicated.get("real_but_ungold", [])}
+    imp_map = {r["candidate"]: r for r in adjudicated.get("important_non_bug", [])}
     hal_map = {r["candidate"]: r for r in adjudicated.get("hallucination", [])}
+    unres_map = {r["candidate"]: r for r in adjudicated.get("unresolved", [])}
     dch = _diff_context_hash(diff)
     records = []
     for f in run.findings:
@@ -101,9 +106,23 @@ def _build_finding_records(run, scored, adjudicated, judge_model: str, diff: str
                    "rationale": r.get("reasoning")}
             matched_goldens = None
             primary_conf = primary_reason = None
+        elif issue in imp_map:
+            r = imp_map[issue]
+            verdict = "important_non_bug"
+            adj = {"adjudicating_judge": judge_model, "confidence": r.get("confidence"),
+                   "rationale": r.get("reasoning")}
+            matched_goldens = None
+            primary_conf = primary_reason = None
         elif issue in hal_map:
             r = hal_map[issue]
             verdict = "hallucination"
+            adj = {"adjudicating_judge": judge_model, "confidence": r.get("confidence"),
+                   "rationale": r.get("reasoning")}
+            matched_goldens = None
+            primary_conf = primary_reason = None
+        elif issue in unres_map:
+            r = unres_map[issue]
+            verdict = "unresolved"
             adj = {"adjudicating_judge": judge_model, "confidence": r.get("confidence"),
                    "rationale": r.get("reasoning")}
             matched_goldens = None
@@ -168,6 +187,9 @@ async def _run_cell_async(pr, framework, model, effort, judge_model, mode: str =
         return {"tp": 0, "fp": 0, "fn": len(goldens), "precision": 0, "recall": 0,
                 "tokens_in": run.tokens_in, "tokens_out": run.tokens_out, "n_findings": len(run.findings),
                 "adjudicated_precision": 0.0, "incremental_recall": 0.0,
+                # v2 count keys present even for empty cells (schema consistency, #8)
+                "n_bug_ungold": 0, "n_important_non_bug": 0,
+                "n_true_hallucination": 0, "n_unresolved": 0,
                 "n_real_ungold": 0, "n_hallucination": 0, "decomposition": {},
                 "findings": [{"issue_text": f.issue_text, "source_lens": f.source} for f in run.findings],
                 "goldens": [{"comment": g["comment"], "severity": g.get("severity"),
@@ -189,6 +211,13 @@ async def _run_cell_async(pr, framework, model, effort, judge_model, mode: str =
             "resolved_model": run.model,
             "adjudicated_precision": adjudicated.get("adjudicated_precision", 0.0),
             "incremental_recall": adjudicated.get("incremental_recall", 0.0),
+            # v2 three-way adjudication (harnesseval#8): bug / important_non_bug /
+            # true_hallucination / unresolved. Legacy keys kept for analysis.py compat:
+            # n_real_ungold = bug_ungold, n_hallucination = true hallucinations (waste).
+            "n_bug_ungold": len(adjudicated.get("bug_ungold", adjudicated.get("real_but_ungold", []))),
+            "n_important_non_bug": len(adjudicated.get("important_non_bug", [])),
+            "n_true_hallucination": len(adjudicated.get("true_hallucination", adjudicated.get("hallucination", []))),
+            "n_unresolved": len(adjudicated.get("unresolved", [])),
             "n_real_ungold": len(adjudicated.get("real_but_ungold", [])),
             "n_hallucination": len(adjudicated.get("hallucination", [])),
             "decomposition": decomp,
