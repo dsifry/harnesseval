@@ -140,20 +140,20 @@ real bug, an important non-bug, a true hallucination, or unresolved.
 
 ## 1. The headline result: a free model now beats the $57 factory
 
-| cell | rec | hid /PR | incr | tokens/PR | $/cell | hid gold per $ |
+| cell | rec | hid /PR | incr | tokens/PR | $/cell | $ per real bug |
 |---|---:|---:|---:|---:|---:|---:|
-| **ce × glm-5.3-background × low** | 0.81 | **36.8** | **0.97** | **103K** | **$0.20** ¹ | **~185** |
-| ce × glm-5.3-flash × low | 0.79 | 35.0 | 0.97 | 99K | $0.02 ¹ | ~1,750 |
-| mrv × glm-5.3-flash × low | 0.66 | 24.2 | 0.93 | 110K | $0.02 ¹ | ~1,210 |
-| vanilla × claude-fable-5.1 × low | 0.74 | 7.5 | 0.89 | 85K | $1.01 ² | ~7.4 |
-| vanilla × gpt-6-astra × low | 0.40 | 2.2 | 0.52 | 47K | $0.51 ² | ~4.3 |
-| vanilla × claude-opus-5 × low | 0.66 | 6.0 | 0.81 | 86K | $0.51 ³ | ~12 |
-| vanilla × gpt-5.6-sol × low | 0.52 | 4.5 | 0.69 | 44K | $0.20 ⁴ | ~23 |
-| mrv × claude-fable-5.1 × low | 0.63 | 28.2 | 0.80 | 2,081K | $22.41 ² | 1.3 |
+| **ce × glm-5.3-background × low** | 0.81 | **36.8** | **0.97** | **103K** | **$0.20** ¹ | **$0.005** |
+| ce × glm-5.3-flash × low | 0.79 | 35.0 | 0.97 | 99K | $0.02 ¹ | $0.0006 |
+| mrv × glm-5.3-flash × low | 0.66 | 24.2 | 0.93 | 110K | $0.02 ¹ | $0.0008 |
+| vanilla × claude-fable-5.1 × low | 0.74 | 7.5 | 0.89 | 85K | $1.01 ² | $0.13 |
+| vanilla × gpt-6-astra × low | 0.40 | 2.2 | 0.52 | 47K | $0.51 ² | $0.23 |
+| vanilla × claude-opus-5 × low | 0.66 | 6.0 | 0.81 | 86K | $0.51 ³ | $0.09 |
+| vanilla × gpt-5.6-sol × low | 0.52 | 4.5 | 0.69 | 44K | $0.20 ⁴ | $0.04 |
+| mrv × claude-fable-5.1 × low | 0.63 | 28.2 | 0.80 | 2,081K | $22.41 ² | $0.79 |
 | mrv × gpt-6-astra × low | 0.51 | 6.7 | 0.74 | 774K | $7.82 ³ | 0.9 |
-| ce × claude-fable-5.1 × low | 0.75 | 26.5 | 0.93 | 3,028K | $32.00 ² | 0.8 |
-| ce × gpt-6-astra × low | 0.49 | 10.0 | 0.78 | 1,246K | $12.62 ² | 0.8 |
-| mrv × claude-opus-5 × high (main report §3.4) | — | 36.0 | 0.85 | 2,980K | $56.65 ² | 0.64 |
+| ce × claude-fable-5.1 × low | 0.75 | 26.5 | 0.93 | 3,028K | $32.00 ² | $1.21 |
+| ce × gpt-6-astra × low | 0.49 | 10.0 | 0.78 | 1,246K | $12.62 ² | $1.26 |
+| mrv × claude-opus-5 × high (main report §3.4) | — | 36.0 | 0.85 | 2,980K | $56.65 ² | $1.57 |
 
 ¹ Z.AI list pricing applied to measured tokens. Our runs were served through
    **[Lunaroute](https://lunaroute.com)** — a US-based, **zero-data-retention** inference
@@ -164,13 +164,13 @@ Fable 5.1 $10 in / $50 out; Astra $10 in / $50 out ([platform.claude.com/docs/en
 ³ Opus 5 $5 in / $25 out (platform.claude.com).
 ⁴ GPT-5.6-sol $4 in / $20 out ([developers.openai.com/api/docs/pricing](https://developers.openai.com/api/docs/pricing) — promotional rate, listed through Nov 21, 2026). "—" = not recomputed; recorded run costs for subscription models are pre-refresh (main report §3.4).
 
-**Read across the fable/astra rows:** vanilla × fable is the *best* pure-prompt cell in the
+**Read across the rows ($ per real bug = $/cell ÷ hidden gold/PR — lower is better):** vanilla × fable is the *best* pure-prompt cell in the is the *best* pure-prompt cell in the
 lab (rec 0.74, $1.01/cell at current list pricing) — while the **same model behind either
 factory** finds 3.5–3.8× more hidden gold (26.5–28.2/PR) but at 24–35× the tokens and
 25–36× the metered cost ($22–32/cell). Meanwhile **a $1.40/$4.40 GLM behind a factory beats
 the premium models run vanilla on every axis** — more hidden gold (36.8 vs 7.5/2.2), higher
 recall (0.81 vs 0.74/0.40) — at 3–4× *cheaper* than vanilla fable itself, and ~100× better
-hidden-gold-per-dollar than any premium cell.
+lower $-per-real-bug than any premium cell.
 
 **Compound Engineering on GLM-5.3 finds more real bugs the humans missed than the opus
 factory — 36.8 vs 36.0 per PR, at higher incremental recall (0.97 vs 0.85), on 1/29th the
@@ -188,7 +188,7 @@ vanilla.
 
 1. **Switch the default review engine to glm-5.3(-flash) × low.** Same incremental recall as
    the opus factory (0.97 vs 0.85), more hidden gold per PR (36.8 vs 36.0), $0.02–0.20/cell
-   metered vs $56.65. No configuration in this data wins on value against it.
+   metered vs $56.65. No configuration in this data wins on cost per real bug found against it ($0.005 vs $0.04–1.57).
 2. **Run GLM at low or high — never medium.** low/high are monotonic and healthy; medium
    reasons 4–10× more than high, takes 10–20× the wall time, sometimes never finishes, and
    fails *silently* (empty 200s that read as "no bugs"). xhigh is an alias for high on GLM.
@@ -447,7 +447,7 @@ tok/PR):
 
 ### 3.3 Cost — metered at Z.AI list pricing ([docs.z.ai/guides/overview/pricing](https://docs.z.ai/guides/overview/pricing), fetched 2026-09-07: GLM-5.3 $1.40/M in, $4.40/M out; GLM-5.3-flash $0.15/M in, $0.50/M out at the launch-promo rate)
 
-| cell | in/PR | out/PR | $/cell | $ per hidden gold |
+| cell | in/PR | out/PR | $/cell | $ per real bug |
 |---|---:|---:|---:|---:|
 | **ce × background × low** | 85K | 18K | **$0.20** | **$0.005** |
 | ce × flash × low | 83K | 16K | $0.02 | $0.0005 |
