@@ -430,6 +430,72 @@ Superpowers is excluded from this grid (single-subagent wrapper — not an apple
 harness; main report §2). Historical rows (opus-4.5, sonnet-4.5, gpt-5.2, kimi-k3, glm-5.2)
 are superseded by the cells above and omitted.
 
+### 3.6 What hidden gold looks like — archetypes with real finds
+
+"Hidden gold" is abstract until you see it. Below are archetypal examples, all judge-confirmed
+real (confidence ≥0.90), all unmatched by the human golden comments, quoted from the committed
+adjudication records with the cell that produced them:
+
+1. **Silent credential corruption (shape-of-data bugs).** The zod `safeParse` wrapper
+   `{success, data}` persisted *as* the OAuth token instead of the parsed credential —
+   "credential row now written as {success,data} instead of the flat token object, silently
+   corrupting every stored Google credential on refresh [P0]" (mrv × opus-5 × low, PR 11059;
+   found independently by **three** harnesses — also ce × opus-5 × xhigh and mrv × GLM ×
+   xhigh, plus the sibling "computed keys stringify to '[object Object]' so the schema strips
+   all properties except access_token"). Multi-harness convergence is the strongest signal
+   these are real.
+2. **Cross-tenant data leakage.** "`credential` declared once outside the per-reference loop,
+   so a failed lookup silently reuses the previous host's credential, writing host B's
+   reschedule into host A's calendar" (mrv × opus-5 × low, PR 10967); and "only Google
+   Calendar implements multi-host destination selection; Office365, Lark, and CalDAV ignore
+   the credentialId/destination params and always use host #1's calendar, writing other
+   hosts' events" (mrv × GLM × xhigh, PR 10967).
+3. **The headline feature silently doesn't work.** "Headline acceptance criterion unmet when
+   the organizer has no destination calendar but co-hosts do; co-host calendars silently
+   dropped with no error [90,P0]" (mrv × opus-5 × low, PR 10967) — found on the PR's core
+   use case, exactly the class human reviewers miss because the happy path works.
+4. **Import-path security holes.** "Imported RSS/remote HTML stored with cook_method raw_html
+   is rendered unsanitized … stored XSS for every viewer" and "PollFeed uses Kernel#open on
+   SiteSetting.feed_polling_url; an admin-settable value starting with '|cmd' yields command
+   execution" (vanilla × fable-5.1 × low, PR 4; also ce × GLM-low and mrv × opus-5 on the
+   same PR).
+5. **Silent no-ops that report success.** "EmbeddingController#update fetches and
+   re-serializes an OpenStruct without reading params or saving, making it a silent no-op
+   that reports success" (ce × GLM × low, PR 10); "the admin's alias_level selection is
+   silently discarded, so groups are created at alias_level 0" (mrv × opus-5 × low, PR 8).
+6. **Authorization logic bugs.** "Permission check uses && (AND) instead of || (OR) for
+   isTeamAdmin/isTeamOwner, denying team admins who aren't owners" (mrv × GLM × xhigh,
+   PR 14740); "case-sensitive `guest === attendee.email` against a lowercased blacklist;
+   Foo@x.com bypasses both dedupe and blacklist [conf=100,P1]" (mrv × opus-5 × low, PR 14740).
+7. **Unbounded attacker-controlled fan-out.** "Any authenticated user who is merely an
+   attendee on any booking can push unlimited arbitrary addresses through this mutation"
+   + "guests is an unbounded array with no server-side max length" (ce × opus-5 × xhigh,
+   PR 14740); "the throttle key embeds the full attacker-controlled embed_url, so unbounded
+   distinct URLs produce unbounded redis keys" (ce × opus-5 × xhigh, PR 4).
+8. **Error-swallowing that corrupts observability and loses data.** "On Storage.Create
+   failure, recordLegacyDuration is called instead of recordStorageDuration, misattributing
+   storage errors to the legacy metric" (vanilla × fable, PR 90045); "submit() catches all
+   exceptions and marks the offset complete … silently losing results" (vanilla × fable,
+   PR 95633); the `forEach(async…)` family that escapes try/catch (vanilla × fable, PR 8087).
+9. **Migration landmines.** "Migration irreversibly deletes legacy site settings with no down
+   path, even when the preceding conversion was skipped" and "the embed_category lookup
+   indexes [0]['id'] on a result set that is empty on every site that never set embed_category,
+   so the migration raises and blocks the upgrade" (mrv × GLM × xhigh, PR 10); plus the raw
+   SQL interpolation in migration `VALUES` found by every harness on PR 10.
+10. **Tests that lie.** "The test asserts no offset is committed after a processing exception,
+    but the implementation completes the offset in finally and commits on the next tick; the
+    test only passes because it awaits the wrong tick" (vanilla × fable-5.1 × low, PR 95633) —
+    the false-confidence class the main report's §3.6 reclassification first surfaced.
+
+Two properties are worth internalizing. First, **most of these were found by more than one
+harness independently** (the zod-wrapper bug: three; the migration SQL injection: four) —
+convergence across independent harnesses is itself a confidence multiplier. Second, **most
+are not the kind of thing a human reviewer reliably catches on a large diff**: cross-branch
+sentinel drift, loop-scoped credentials, pagination off-by-ones on exact multiples
+("floor(user_count/limit)+1 gives 3 pages when count=100, limit=50"), case-sensitivity in
+email comparisons. This is the concrete content behind the "40.5 hidden bugs/PR at $0.20"
+headline.
+
 ---
 
 ## 4. The effort ladder: two healthy rungs, a broken middle
