@@ -612,7 +612,10 @@ list prices applied to measured per-call splits (cache-adjusted); "—" = not pr
   What changes with GLM is that the factory premium stops being expensive.
 - **Codex-family factories underperform Claude factories** (ce × sonnet 0.21–0.29; ce × sol
   flat at 0.45) — GLM is the only model family where the factories hit ≥0.79 recall at low
-  effort, and it costs the least.
+  effort, and it costs the least. Terra is now the second-cheapest metered engine
+  ($0.08–0.30/PR), but it is a clear **second choice**: its factory recall (0.30–0.56) is
+  roughly half of GLM's (0.66–0.81) at comparable cost, so it earns a spot only as the
+  fallback when the Lunaroute path is unavailable.
 - **Vanilla fable's top-6 hid count is 7.5/PR at $0.73/PR** (current list) — the strongest pure-vanilla cell —
   vs ce × GLM-low's 36.8/PR at $0.20. Even granting fable's superior precision (1.2 hal vs
   28), the factory cell surfaces **5.4× more real bugs per PR for 3% of the price**; the
