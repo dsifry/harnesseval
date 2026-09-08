@@ -113,7 +113,13 @@ def from_openai_api(resp, model: str) -> dict[str, dict]:
         rt = extra.get("reasoning_tokens", 0) or 0
         if not rt:
             rt = getattr(u, "reasoning_tokens", 0) or 0
-    mu = ModelUsage(input_tokens=int(getattr(u, "prompt_tokens", 0)),
+    # Cached-input split: OpenAI-style responses carry it in
+    # prompt_tokens_details.cached_tokens (Lunaroute/SGLang sends this for GLM).
+    # Normalize to the Anthropic convention: input_tokens EXCLUDES cached reads.
+    pd = getattr(u, "prompt_tokens_details", None)
+    cached = int(getattr(pd, "cached_tokens", 0) or 0) if pd else 0
+    mu = ModelUsage(input_tokens=int(getattr(u, "prompt_tokens", 0)) - cached,
+                    cache_read_input_tokens=cached,
                     output_tokens=int(getattr(u, "completion_tokens", 0)) - int(rt),
                     reasoning_output_tokens=int(rt))
     return {model: asdict(mu) | {"total_tokens": mu.total_tokens}}
