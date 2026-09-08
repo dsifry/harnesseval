@@ -683,7 +683,7 @@ adjudication records with the cell that produced them:
    PR 95633); the `forEach(async…)` family that escapes try/catch (vanilla × fable, PR 8087).
 9. **Migration landmines.** "Migration irreversibly deletes legacy site settings with no down
    path, even when the preceding conversion was skipped" and "the embed_category lookup
-   indexes [0]['id'] on a result set that is empty on every site that never set embed_category,
+   indexes `[0]['id']` on a result set that is empty on every site that never set embed_category,
    so the migration raises and blocks the upgrade" (mrv × GLM × xhigh, PR 10); plus the raw
    SQL interpolation in migration `VALUES` found by every harness on PR 10.
 10. **Tests that lie.** "The test asserts no offset is committed after a processing exception,
