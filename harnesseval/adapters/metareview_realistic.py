@@ -8,7 +8,7 @@ and keeps fixes 2,3,4 (orchestrator: no post-lens re-verification, no skill-ref,
 Hypothesis: capture most of the token win without the recall loss.
 
 Kept fixes (all orchestrator-side, no lens-recall impact):
-  2. After the 8 lenses return, consolidate directly — do NOT re-read files / re-run git diff /
+  2. After the 9 lenses return, consolidate directly — do NOT re-read files / re-run git diff /
      re-verify lens findings (cuts post-lens orchestrator turns).
   3. Drop the "Per the metareview review-artifact skill" reference (skill isn't installed in
      the throwaway repo; the mention triggered a fruitless skill-search on codex).
@@ -63,25 +63,30 @@ Steps:
    {mrv_bin} review task-done {task_path} --base {base_ref}
    The command prints the path to the generated review markdown; read that file.
 2. Read the review scaffold + context pack it generated.
-3. Dispatch the 8 required reviewer lenses as PARALLEL SUBAGENTS via your host's subagent-spawn
+3. Dispatch the 9 required reviewer lenses as PARALLEL SUBAGENTS via your host's subagent-spawn
    tool — in Claude Code that is the `Agent` tool (one `Agent` call per lens, run in
    background; then collect each result); in Codex that is `collaboration.spawn_agent` (one
    spawn per lens) then `collaboration.wait_agent` to collect each result. Do NOT run the
    lenses in-session; do NOT fall back to a single in-session pass.
 
-   ADVERSARIAL STANCE (applies to ALL 8 lenses): assume the creator's intent is GOOD but be
+   ADVERSARIAL STANCE (applies to ALL 9 lenses): assume the creator's intent is GOOD but be
    hostile to unexamined assumptions — assume there may be a fundamental mistake hiding in
    this design and find it. Do NOT confirm the artifact is well-shaped. Each finding carries
    a confidence anchor (100/75/50/25/0) + severity (P0-P3); SUPPRESS findings below confidence
    50 unless they are P0. Cite file:line + the verbatim code + the failure mode for every finding.
 
-   The 8 lenses (each subagent gets the diff context — run `git diff {base_ref}..HEAD` — + its lens focus):
+   The 9 lenses (each subagent gets the diff context — run `git diff {base_ref}..HEAD` — + its lens focus):
    - Feasibility: attack the assumption that paths/commands/dependencies are correct against the
      diff reality; block on fabricated paths, impossible ordering, missing tools, invalid commands.
      Does NOT flag: requirements completeness (Completeness) or architecture soundness (Architecture).
    - Completeness: attack the assumption the artifact covers every requirement; block on missing
-     acceptance criteria, missing verification, unhandled obvious edge cases. Does NOT flag:
-     feasibility (Feasibility), scope drift (Scope), architecture soundness (Architecture).
+     acceptance criteria, missing verification, unhandled obvious edge cases. Hunt for
+     SIBLING-FLAG-PROPAGATION (when the diff touches a notification/rendering/serialization path
+     gated by user-config flags, enumerate ALL gating flags — disable*, hide*, include* — and check
+     each one; catching disableStandardEmails but missing hideCalendarNotes on the same path is a
+     miss). Does NOT flag:
+     feasibility (Feasibility), scope drift (Scope), architecture soundness (Architecture),
+     concrete runtime error-path handling in this diff's code (Runtime-reliability).
    - Scope-and-Alignment: attack the assumption the artifact solves only the stated intent without
      unrelated expansion; block on scope drift, under-scoping, work not traceable to requirements.
      Does NOT flag: completeness (Completeness) or architecture soundness (Architecture).
@@ -121,17 +126,36 @@ Steps:
      training but absent in the domain; docstrings describing behavior the code doesn't implement);
      SENTINEL-MEANING-CHANGE (a return value that changed meaning in this diff — null/empty/[] that
      meant 'nothing here' now meaning 'not yet loaded' or 'error suppressed'; a status sentinel whose
-     semantics shifted so existing callers misbehave); CASCADING-FAILURE (trace failure propagation —
-     when one dependency fails does it degrade gracefully or cascade? a sync call chain with no
-     timeout/circuit-breaker/fallback; a queue consumer whose failure poisons the batch; a shared
-     resource whose exhaustion takes down all tenants); STAND-IN-GUARD-FIDELITY (a CI gate/check/test
+     semantics shifted so existing callers misbehave); FORMAT-DRIFT (the value one path writes and
+     another path compares disagree on canonical form: case — a lower(host) column vs raw user input,
+     a column stored lowercased but matched against mixed-case input; scheme — http://-prefixed
+     hosts stored, bare URI#host compared; port — validation accepts host:8080, lookup via URI#host
+     strips it; trailing-slash concatenation; type coercion — JSON boolean vs string "true", array
+     vs CSV string; encoding — double-decode; normalization asymmetry — model callbacks normalize new
+     rows but a raw-SQL insert or other non-migration path bypasses them, a migration's own backfill
+     safety is Data-migration's; the correctness failure this hunt owns is the lookup that fails to
+     match what was stored, a drift that defeats a security control is Security's); CASCADING-FAILURE
+     (trace failure propagation — when one dependency fails does it degrade gracefully or cascade?
+     a sync call chain with no timeout/circuit-breaker/fallback; an async chain with no rejection
+     handling at the design level — the concrete error-path handling in this diff's code (.then
+     without .catch, unreturned inner promises, optimistic state mutated before resolution,
+     out-of-order responses overwriting newer state) is Runtime-reliability's; a queue consumer
+     whose failure poisons the batch; a shared resource whose exhaustion takes down all tenants);
+     STAND-IN-GUARD-FIDELITY (a CI gate/check/test
      that can go green while production is red — tests a proxy/mock instead of the real code path;
      a check that passes because the prod-only branch is #ifdef/feature-flagged away; a 'green' build
      that never exercised the changed code); API-CONTRACT-BREAKING-CHANGES (renamed/removed fields,
      narrowed inputs, widened returns, missing versioning on breaking changes; a response shape
      existing callers depend on but the diff silently changes; a field re-typed int->string with no
-     version bump). Does NOT flag: security (Security), test quality (Testing-quality), migration
-     safety (Data-migration).
+     version bump; and when a diff changes an interface/abstract-method signature, check EVERY
+     implementer, not just the call sites in the diff — an implementer left on the old signature
+     compiles against duck-typing and silently misroutes, e.g. always hitting the default calendar
+     path; advertised routes with no controller action; an accepted request envelope changed or
+     dropped so existing callers send fields that are silently ignored; strict-equality param parsing
+     that silently inverts booleans — params[:visible] == "true" vs JSON true). Does NOT flag:
+     security (Security), test quality (Testing-quality), migration
+     safety (Data-migration), concrete runtime error-path handling in this diff's code
+     (Runtime-reliability — design-level failure propagation shape stays here).
    - Intent-Preservation: attack the assumption the final artifact still matches the original intent;
      block when review iterations changed the objective without explicit human acceptance. Does
      NOT flag: feasibility/completeness/scope/architecture soundness.
@@ -175,11 +199,61 @@ Steps:
      before readers updated); dual-write gaps (should dual-write old+new but only writes one side);
      orphaned refs (FK pointing at nonexistent rows, or FK dropped without cleanup); silent data
      loss (drops/overwrites/truncates without backup; DELETE with broader WHERE than intended;
-     column repurposed same-name-new-meaning; ALTER COLUMN TYPE that narrows/truncates). Block on
+     column repurposed same-name-new-meaning; ALTER COLUMN TYPE that narrows/truncates);
+     MIGRATION-RE-RUN-SAFETY (force: true added to an already-shipped migration — drops
+     pre-existing tables on re-run; a conditional insert paired with an unconditional delete —
+     settings destroyed even when no rows were migrated; dead guards on query results —
+     cmd_tuples > 0 is always 0 for SELECTs in PostgreSQL, so the guarded insert never runs while
+     the paired delete destroys the old rows, settings deleted with no replacement created;
+     backfills that bypass model validations/callbacks — whitespace/junk rows, values interpolated
+     into backfill SQL without the escaping/parameterization the model layer would have applied
+     (the data-integrity failure is this lens's, the injection angle is Security's);
+     enum/boolean defaults that silently reclassify every existing row — cook_method default 1 =
+     raw_html; transformation field-fidelity — each output field must derive from the right source
+     at the right precision, raw vs cooked, date vs datetime, precision loss on parse). Block on
      irreversible migrations without rollback, missing backfills, expand+contract violations,
-     silent data loss, or orphaned refs. Does NOT flag: security (Security), test quality
+     silent data loss, or orphaned refs, a shipped migration made destructive on re-run
+     (force: true), a conditional insert paired with an unconditional delete, a dead guard that
+     leaves a delete unreplaced (no replacement rows created), an enum/boolean default that
+     silently reclassifies existing rows, a backfill that bypasses validations, or a
+     transformation that derives an output field from the wrong source or at the wrong
+     precision. Does NOT flag: security (Security), test quality
      (Testing-quality), architecture soundness beyond migration safety (Architecture — this lens
-     judges only whether the transition from old to new schema is safe and reversible).
+     judges only whether the transition from old to new schema is safe and reversible), runtime
+     error-path handling outside the migration itself (Runtime-reliability; runtime error paths
+     INSIDE the migration code stay here).
+   - Runtime-reliability: attack the assumption that every runtime failure path in this diff is
+     handled, observable, and honest — find the failure that is silently swallowed, silently
+     partial, or reported as success. Hunt for UNHANDLED-ASYNC-FAILURE (a promise/future with no
+     rejection handler — .then without .catch; an inner async call not returned/awaited so the
+     caller resolves success before the work completes; a fire-and-forget refresh whose failure
+     leaves stale state with no error surfaced to the user); OPTIMISTIC-STATE-DESYNC (UI/persistent
+     state mutated before the operation resolves with no rollback on failure; no in-flight guard so
+     concurrent invocations interleave — double-click issues overlapping requests, out-of-order
+     responses overwrite newer state, last response wins; pagination/offset bookkeeping committed
+     before the request succeeds); SILENT-PARTIAL-SUCCESS (work skipped or dropped while the API
+     returns success — unknown IDs silently skipped; an unresolvable dependency silently skipped
+     with no log and no error result; a throttle/lock/dedup key committed before the operation
+     succeeds so retries no-op "successfully"; a hash/cursor advanced even when the underlying
+     write failed); OUTBOUND-CALL-HARDENING (no timeout on network/file fetches — open(url), fetch,
+     feed/HTTP clients; unbounded request payloads or downloads — no size/count cap, no max() on
+     schema fields written to storage; request amplification with no rate limit — an enqueue
+     endpoint throttled per-URL, bypassed by varying the path; the reliability hardening here is
+     timeouts, payload/storage caps, and exhaustion on the request path — a missing rate limit that
+     is a vulnerability (unauthenticated amplification) is Security's); ERROR-SHAPE-LEAKAGE (a raw
+     exception/500 where the API contract promises a 4xx — unguarded parse/decrypt, find-or-throw
+     on optional relations, missing param envelope; error messages that can never render — a
+     template-literal fallback that is always truthy; stack traces or error details exposed to end
+     users are Security's A05, this hunt owns the wrong-shape response and the never-rendering
+     message); CROSS-BOUNDARY-CREDENTIAL-TOKEN-LIFECYCLE (a response schema that cannot
+     structurally satisfy the parser on one path — every refresh fails; a connection/client rebuilt
+     from the pre-refresh token after persisting the new one; response.ok/status never checked
+     before parsing). Block on a user-facing operation whose failure is invisible, an API that
+     reports success while dropping work, an unbounded or timeout-less outbound call on a request
+     path, or a raw 500 where a 4xx belongs. Does NOT flag: security vulnerabilities (Security);
+     test quality (Testing-quality); migration safety, including runtime error paths inside the
+     migration itself (Data-migration); design-level failure propagation shape or schema
+     invariants (Architecture); whether error handling is tested (Testing-quality).
 4. Each lens subagent must WRITE its own findings directly to a per-lens file
    {findings_path}.<lens-name> (e.g. {findings_path}.architecture) as it finishes — ONE finding per
    line in this exact format: `[lens/<lens-name>] file:line — one-sentence failure mode`. Do NOT return
@@ -189,7 +263,7 @@ Steps:
    file by the scaffold command; you do not need to re-collect them. (If they are printed to stdout
    in step 1, append them to {findings_path}.deterministic yourself, one per line in the format
    `[deterministic/<gate-name>] <issue>`.)
-6. After all 8 lens subagents finish, concatenate ALL the per-lens/per-gate files into {findings_path}
+6. After all 9 lens subagents finish, concatenate ALL the per-lens/per-gate files into {findings_path}
    yourself by running: `cat {findings_path}.* > {findings_path}`. Do NOT read, re-verify, or
    synthesize the findings in-session — just concatenate the files. Do NOT re-read files, re-run git
    diff, or re-verify lens findings — trust the lenses.
