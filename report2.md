@@ -722,7 +722,15 @@ Probes: single calls, glm-5.3-background, same 79K-char review prompt, 65,536-to
 - **Accounting drift**: `reasoning_tokens` arrives as a top-level `usage` field (OpenAI SDK
   `model_extra`) rather than `completion_tokens_details` — conventional-location readers
   mis-attribute reasoning spend to output tokens.
-- **xhigh == high on the wire** (the harness sends `reasoning_effort=high` for both).
+- **xhigh == high on the wire for the harness** (the harness sends `reasoning_effort=high`
+  for both). The literal gateway ladder is richer: probes on flash show
+  low ~1.3K < medium ~3.9K < high ~4.6–5.9K ≪ xhigh ~34K reasoning/call (315s), and
+  `max` is accepted by both variants and behaves like xhigh — i.e. **xhigh is an alias for
+  a max tier**, which we exclude from all cells as impractically slow. Post-fix (upstream,
+  2026-09-07) background's medium also tracks high exactly (6.9K/12.0K reasoning vs high's
+  6.3K/11.3K) — three effort names, two behaviors. For flash, reasoning is embedded in
+  `completion_tokens` with no separate accounting field (est. reasoning = completion −
+  content tokens; ~3.5 chars/token).
 
 Repro packaged for Lunaroute (vLLM→SGLang migration suspected; `flash` unaffected at every
 effort). The medium §3 rows should be re-measured once the upstream fix ships.
