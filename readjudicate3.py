@@ -128,6 +128,132 @@ DIFF_LIMIT = 1_000_000  # full diff
 CONF_FLOOR = 0.5  # below this, a "bug"/"important" verdict is downgraded to unresolved (unverifiable)
 CLUSTER_THRESHOLD = 0.75  # difflib ratio at which two normalized texts are the same root cause
 
+MERGE_PROMPT = """You are clustering code review findings from the same PR. For each PAIR below, decide whether the two findings describe the SAME underlying issue — same root cause in the same code location. Different wording is fine. A finding about a DIFFERENT defect in the same file or function is NOT the same issue. Severity or aspect differences of the same root cause ARE the same issue.
+
+Respond with ONLY a JSON array, one object per pair, in order:
+{{"pairs": [{{"pair": 1, "same": true}}, {{"pair": 2, "same": false}}]}}
+
+PAIRS:
+{pairs}"""
+
+
+def _cluster_toks(text: str) -> set[str]:
+    t = re.sub(r"[^a-z0-9_./]+", " ", normalize_for_cluster(text))
+    return set(w for w in t.split() if len(w) > 2)
+
+
+def _cluster_ents(text: str):
+    tk = _cluster_toks(text)
+    files = set(w for w in tk if "/" in w or w.endswith((".rb", ".ts", ".js", ".py", ".go", ".tsx", ".es6")))
+    idents = set(w for w in tk if len(w) > 5 and not w.startswith("http"))
+    return files, idents
+
+
+def prefilter_pair(a: str, b: str) -> bool:
+    """Weak lexical bridge: keep the pair for the judge if it MIGHT be the same issue.
+
+    High recall is what matters (the judge decides); the false-passthrough rate is the
+    judge's job to filter, and the candidate count is what keeps the judge affordable.
+    Measured on the labeled pair set: ~98% recall on matcher-labeled same-issue pairs.
+    """
+    fa, ia = _cluster_ents(a)
+    fb, ib = _cluster_ents(b)
+    if fa and fa & fb:
+        return True
+    if ia & ib:
+        return True
+    ta, tb = _cluster_toks(a), _cluster_toks(b)
+    return bool(ta and tb) and len(ta & tb) / len(ta | tb) >= 0.12
+
+
+MERGE_SYSTEM = "You are clustering code review findings from one PR. Always respond with valid JSON."
+
+
+async def _judge_pairs(judge: str, pairs: list[tuple[str, str]], sem: asyncio.Semaphore,
+                       batch: int = 20, effort: str = "medium", trunc: int = 400) -> tuple[list[bool], int]:
+    """Judge same-issue for pairs in batches.
+
+    Returns (one bool per pair, n_parse_failures). Failures count separately from clean
+    "different issue" verdicts so a degenerate run is visible as parse failures, not as a
+    plausible-looking zero-merge result.
+    """
+    from harnesseval.model_router import call_model_json
+    out: list[bool] = []
+    fails = 0
+    for i in range(0, len(pairs), batch):
+        chunk = pairs[i:i + batch]
+        lines = []
+        for n, (a, b) in enumerate(chunk, 1):
+            lines.append(f"PAIR {n}:\nA: {a[:trunc]}\nB: {b[:trunc]}")
+        parsed = None
+        try:
+            async with sem:
+                parsed, _, _, _ = await call_model_json(judge, MERGE_SYSTEM,
+                                                        MERGE_PROMPT.format(pairs="\n\n".join(lines)),
+                                                        effort=effort, max_tokens=2048)
+        except Exception:
+            parsed = None
+        arr = None
+        if isinstance(parsed, dict):
+            arr = parsed.get("pairs")
+        elif isinstance(parsed, list):
+            arr = parsed
+        if not isinstance(arr, list) or len(arr) != len(chunk):
+            fails += 1
+            out.extend([False] * len(chunk))
+            continue
+        by_idx: dict[int, bool] = {}
+        for x in arr:
+            if isinstance(x, dict) and "same" in x:
+                try:
+                    by_idx[int(x.get("pair", 0))] = bool(x["same"])
+                except (TypeError, ValueError):
+                    pass
+        out.extend(by_idx.get(n, False) for n in range(1, len(chunk) + 1))
+    return out, fails
+
+
+async def cluster_texts_hybrid(texts: list[str], judge: str, sem: asyncio.Semaphore,
+                               threshold: float = CLUSTER_THRESHOLD) -> list[int]:
+    """Deterministic difflib clustering + a judge-driven semantic merge pass.
+
+    Stage 1 is unchanged (identical normalized text short-circuits — the flip-gate-1
+    guarantee is preserved and no judge call is spent on verbatim dups). Stage 2 asks a
+    judge about prefiltered candidate pairs between cluster representatives and merges
+    via union-find, so a true group merges if ANY of its pairs bridges (connectivity, not
+    pairwise recall, is the operative property). Errors degrade to stage-1 clusters.
+    """
+    cids = cluster_texts(texts, threshold)
+    reps: dict[int, str] = {}
+    for t, cid in zip(texts, cids):
+        reps.setdefault(cid, t)
+    if len(reps) <= 1:
+        return cids
+    rep_ids = sorted(reps)
+    cand = [(i, j) for i, j in __import__("itertools").combinations(rep_ids, 2)
+            if prefilter_pair(reps[i], reps[j])]
+    if not cand:
+        return cids
+    verdicts, merge_fails = await _judge_pairs(judge, [(reps[i], reps[j]) for i, j in cand], sem)
+    if merge_fails:
+        print(f"[merge] WARNING: {merge_fails} judge batches failed to parse — "
+              f"those pairs were not merged (cluster count is an upper bound)", flush=True)
+    parent = {i: i for i in rep_ids}
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    for (i, j), same in zip(cand, verdicts):
+        if same:
+            ri, rj = find(i), find(j)
+            if ri != rj:
+                parent[rj] = ri
+    remap = {cid: find(cid) for cid in rep_ids}
+    return [remap[c] for c in cids]
+
 # --- Provenance stripping (fix 4) -----------------------------------------------------------
 # Forms observed in the corpus: "[confidence:100][severity:P1] text", "[conf=100,P1] text",
 # "text (confidence 75, P2)", "text [lens/architecture]", "[deterministic/gate-name] text".
@@ -346,7 +472,7 @@ def _corrected_block(records: list[dict], tp: int, judge: str, diff_chars: int, 
 
 
 async def classify_run(run_id: str, s: dict, concurrency: int, k: int = 3,
-                       second_pass: bool = False) -> dict | None:
+                       second_pass: bool = False, semantic_merge: bool = True) -> dict | None:
     """Single-run mode: dedup WITHIN the run (identical/near-verbatim texts share one verdict)."""
     out_path = Path(f"runs/{run_id}/readjudication3.json")
     if out_path.exists():
@@ -363,7 +489,10 @@ async def classify_run(run_id: str, s: dict, concurrency: int, k: int = 3,
     sem = asyncio.Semaphore(concurrency)
     t0 = time.time()
     texts = [r["issue_text"] for r in unmatched]
-    cids = cluster_texts(texts)
+    if semantic_merge:
+        cids = await cluster_texts_hybrid(texts, judge, sem)
+    else:
+        cids = cluster_texts(texts)
     n_clusters = len(set(cids))
     # first occurrence per cluster is its representative — one adjudication per cluster
     rep_idx: dict[int, int] = {}
@@ -396,7 +525,8 @@ async def classify_run(run_id: str, s: dict, concurrency: int, k: int = 3,
 
 
 async def classify_batch_dedup(batch: str, targets: list[tuple[str, dict]], concurrency: int,
-                               k: int = 3, second_pass: bool = False) -> None:
+                               k: int = 3, second_pass: bool = False,
+                               semantic_merge: bool = True) -> None:
     """Fix 1: adjudicate once per root cause across the WHOLE batch.
 
     Every unmatched finding from every target run is clustered by (PR, normalized text);
@@ -433,7 +563,10 @@ async def classify_batch_dedup(batch: str, targets: list[tuple[str, dict]], conc
     for url, items in sorted(by_url.items()):
       try:  # per-URL isolation: one PR's fetch/judge/write failure must not abort the batch
         texts = [t for _, _, t in items]
-        cids = cluster_texts(texts)
+        if semantic_merge:
+            cids = await cluster_texts_hybrid(texts, judges[url], sem)
+        else:
+            cids = cluster_texts(texts)
         url_clusters = len(set(cids))
         rep_idx: dict[int, int] = {}
         for i, cid in enumerate(cids):
@@ -502,12 +635,16 @@ def main():
     ap.add_argument("--k", type=int, default=3, help="votes per adjudication (majority wins)")
     ap.add_argument("--second-pass", action="store_true",
                     help="one higher-effort retry for unresolved verdicts before they stay unresolved")
+    ap.add_argument("--no-semantic-merge", action="store_true",
+                    help="disable the judge-driven semantic merge pass (difflib-only clustering; "
+                         "deterministic, zero extra judge calls — the pre-0.11.1 behavior)")
     args = ap.parse_args()
 
     if args.run:
         s = json.load(open(f"runs/{args.run}/summary.json"))
         r = asyncio.run(classify_run(args.run, s, args.concurrency, k=args.k,
-                                     second_pass=args.second_pass))
+                                     second_pass=args.second_pass,
+                                     semantic_merge=not args.no_semantic_merge))
         print(json.dumps(r["corrected"], indent=1) if r else "nothing to classify")
         return
 
@@ -541,7 +678,8 @@ def main():
                 print(f"  [{i+1}/{len(targets)}] {rid[:8]} ERROR {type(e).__name__}: {str(e)[:120]}", flush=True)
         return
     asyncio.run(classify_batch_dedup(args.batch, targets, args.concurrency, k=args.k,
-                                     second_pass=args.second_pass))
+                                     second_pass=args.second_pass,
+                                     semantic_merge=not args.no_semantic_merge))
 
 
 if __name__ == "__main__":

@@ -1,0 +1,646 @@
+{
+ "model": "claude-opus-5",
+ "eff": "low",
+ "url": "https://github.com/calcom/cal.com/pull/11059",
+ "pair_id": 16,
+ "ce_bugs": [
+  {
+   "id": "C0",
+   "text": "packages/app-store/salesforce/lib/CalendarService.ts:96 \u2014 `prisma.credential.update` is called but `prisma` is never imported (verified: imports end at `parseRefreshTokenResponse`). Compile failure / `ReferenceError` on every Salesforce client construction.",
+   "persona": "compound-realistic/p0/api-contract",
+   "conf": 0.72
+  },
+  {
+   "id": "C1",
+   "text": "packages/app-store/_utils/oauth/parseRefreshTokenResponse.ts:5-11 \u2014 `minimumTokenResponseSchema`'s computed keys `[z.string().toString()]` and `[z.string().optional().toString()]` both stringify to the same literal (`\"[object Object]\"`), so the second overwrites the first. The \"any numeric property is the expiry\" and \"allow other properties\" behavior the comments promise does not exist; the schema is effectively `{access_token: string}` and, being a default stripping `z.object`, **discards every other field** (`refresh_token`, `expiry_date`, `expires_in`, `instance_url`, `scope`). In sync mode the stripped object is persisted, destroying the credential while reporting success \u2014 a textbook silent-pass gate. Needs `.passthrough()`/`.catchall()`.",
+   "persona": "compound-realistic/p0",
+   "conf": 0.9
+  },
+  {
+   "id": "C2",
+   "text": "packages/app-store/_utils/oauth/refreshOAuthTokens.ts:8-14 \u2014 The sync `fetch` has **no timeout/abort signal**, no `response.ok` check, and no retry. Node fetch has no default timeout, so a hanging self-hosted endpoint blocks token refresh on the booking/availability hot path indefinitely, for every user of every OAuth app. A 4xx/5xx or HTML error page is returned as if it were a token response.",
+   "persona": "compound-realistic/p1",
+   "conf": 0.86
+  },
+  {
+   "id": "C3",
+   "text": "packages/app-store/_utils/oauth/refreshOAuthTokens.ts:8-14 \u2014 The outbound leg carries **no authentication** \u2014 only `calcomUserId` and `appSlug`, no shared secret or signature \u2014 while the inbound webhook is secret-protected. There is no scheme validation either, so an `http://` endpoint ships the token exchange in cleartext. Anyone who can reach or spoof that endpoint obtains access tokens for an arbitrary user id.",
+   "persona": "compound-realistic/p1",
+   "conf": 0.86
+  },
+  {
+   "id": "C4",
+   "text": "apps/web/pages/api/webhook/app-credential.ts:57-59 \u2014 The decrypted `keys` is `JSON.parse` output typed `any`, written to `credential.key` with **zero schema validation**. A caller with the secret can persist `\"hello\"` or `null` as any app's credential; consuming `CalendarService`s then crash at use time rather than at write time. `symmetricDecrypt(..., process.env.CALCOM_APP_CREDENTIAL_ENCRYPTION_KEY \\",
+   "persona": "compound-realistic/p1",
+   "conf": 0.9
+  },
+  {
+   "id": "C5",
+   "text": "packages/app-store/hubspot/lib/CalendarService.ts:176-201 \u2014 HubSpot is the one migrated app that never calls `parseRefreshTokenResponse`, and it asserts the helper's return as `HubspotToken`. In sync mode it writes a serialized `Response`/`NaN` expiry to `credential.key` and calls `setAccessToken(undefined)`; the only handler is `this.log.error(e)`, so the credential is left in a worse state than before with no user-visible failure.",
+   "persona": "compound-realistic/p1",
+   "conf": 0.62
+  },
+  {
+   "id": "C6",
+   "text": "apps/web/pages/api/webhook/app-credential.ts:16-17 \u2014 No HTTP method guard \u2014 `GET`/`PUT`/`DELETE` reach the credential mutation path identically to `POST`. Sibling routes in this same diff (e.g. `zoho-bigin/api/add.ts:11`) do check `req.method`. The absence of the codebase's `defaultHandler`/`defaultResponder` is also why the error handling in #13 is missing.",
+   "persona": "compound-realistic/p2",
+   "conf": 0.86
+  },
+  {
+   "id": "C7",
+   "text": "apps/web/pages/api/webhook/app-credential.ts:24-29 \u2014 Secret comparison uses `!==`, which is non-constant-time, on an endpoint with no rate limiting \u2014 a byte-at-a-time oracle in principle, and an unbounded brute-force surface in practice.",
+   "persona": "compound-realistic/p2",
+   "conf": 0.75
+  },
+  {
+   "id": "C8",
+   "text": "`apps/web/pages/api/webhook/app-credential.ts` (whole file)",
+   "persona": "compound-realistic/p2/api-contract",
+   "conf": 0.74
+  },
+  {
+   "id": "C9",
+   "text": "`refreshOAuthTokens` call sites (google, hubspot, lark, office365calendar, office365video, webex)",
+   "persona": "compound-realistic/p3/maintainability",
+   "conf": 0.87
+  }
+ ],
+ "mrv_findings": [
+  {
+   "id": "M0",
+   "text": "packages/app-store/_utils/oauth/parseRefreshTokenResponse.ts:3 \u2014 imports APP_CREDENTIAL_SHARING_ENABLED from @calcom/lib/constants but the diff never adds that export; every consumer fails to build (conf=70, P0)",
+   "lens": "metareview-lens/feasibility",
+   "verdict": "hallucination"
+  },
+  {
+   "id": "M1",
+   "text": "packages/app-store/googlecalendar/lib/CalendarService.ts:97 \u2014 `const key = parseRefreshTokenResponse(...)` then `data: { key }` writes the whole SafeParseReturnType wrapper into credential.key (conf=90, P1)",
+   "lens": "metareview-lens/feasibility",
+   "verdict": "matched"
+  },
+  {
+   "id": "M2",
+   "text": "packages/app-store/_utils/oauth/parseRefreshTokenResponse.ts:8 \u2014 `[z.string().toString()]: z.number()` and line 10 evaluate to the same literal computed key, so the schema is effectively {access_token} and strips expiry/refresh (conf=90, P1)",
+   "lens": "metareview-lens/feasibility",
+   "verdict": "bug"
+  },
+  {
+   "id": "M3",
+   "text": "packages/app-store/_utils/oauth/refreshOAuthTokens.ts:8 \u2014 sync-mode fetch sends no CALCOM_WEBHOOK_HEADER_NAME/SECRET header and no Content-Type, so the documented secret-protected endpoint rejects every refresh (conf=70, P1)",
+   "lens": "metareview-lens/feasibility",
+   "verdict": "hallucination"
+  },
+  {
+   "id": "M4",
+   "text": "packages/app-store/_utils/oauth/refreshOAuthTokens.ts:15 \u2014 returns a raw Response in sync mode while callers read `res?.data` / `HubspotToken.expiresIn`, yielding undefined token and NaN expiry (conf=85, P1)",
+   "lens": "metareview-lens/feasibility",
+   "verdict": "matched"
+  },
+  {
+   "id": "M5",
+   "text": "packages/app-store/_utils/oauth/createOAuthAppCredential.ts:7 \u2014 imports ../throwIfNotHaveAdminAccessToTeam, a module the diff never creates (conf=55, P1)",
+   "lens": "metareview-lens/feasibility",
+   "verdict": "hallucination"
+  },
+  {
+   "id": "M6",
+   "text": "packages/app-store/_utils/oauth/decodeOAuthState.ts:9 \u2014 unguarded JSON.parse(req.query.state); stripepayment callback now routes here and Stripe state may not be JSON \u2192 uncaught 500 mid-install (conf=80, P2)",
+   "lens": "metareview-lens/feasibility",
+   "verdict": "unresolved"
+  },
+  {
+   "id": "M7",
+   "text": "packages/app-store/_utils/oauth/createOAuthAppCredential.ts:59 \u2014 throwIfNotHaveAdminAccessToTeam only reachable when state.teamId is falsy, so it always runs with teamId: null (conf=85, P2)",
+   "lens": "metareview-lens/feasibility",
+   "verdict": "unresolved"
+  },
+  {
+   "id": "M8",
+   "text": "packages/app-store/_utils/oauth/parseRefreshTokenResponse.ts:25 \u2014 assigning a string to refresh_token is a type error against the minimum-schema branch's inferred numeric index signature (conf=60, P2)",
+   "lens": "metareview-lens/feasibility",
+   "verdict": "bug"
+  },
+  {
+   "id": "M9",
+   "text": "apps/web/pages/api/webhook/app-credential.ts:31 \u2014 throwing `.parse(req.body)` (not safeParse) yields an uncaught ZodError 500 instead of 400 (conf=80, P2)",
+   "lens": "metareview-lens/feasibility",
+   "verdict": "matched"
+  },
+  {
+   "id": "M10",
+   "text": "packages/app-store/_utils/oauth/encodeOAuthState.ts:11 \u2014 JSON.parse\u2192JSON.stringify identity round-trip performs no encoding despite the name (conf=75, P3)",
+   "lens": "metareview-lens/feasibility",
+   "verdict": "unresolved"
+  },
+  {
+   "id": "M11",
+   "text": "packages/app-store/zoho-bigin/api/add.ts:17 \u2014 hardcodes the slug that appConfig.slug already supplies, silently diverging if config changes (conf=90, P3)",
+   "lens": "metareview-lens/feasibility",
+   "verdict": "important_non_bug"
+  },
+  {
+   "id": "M12",
+   "text": "packages/app-store/salesforce/lib/CalendarService.ts:96 \u2014 `await prisma.credential.update` with no prisma import in the file; every Salesforce calendar op throws ReferenceError / fails typecheck (conf=100, P0)",
+   "lens": "metareview-lens/completeness",
+   "verdict": "bug"
+  },
+  {
+   "id": "M13",
+   "text": "apps/web/pages/api/webhook/app-credential.ts:25 \u2014 when CALCOM_WEBHOOK_SECRET is unset both sides are undefined, so a header-less request authenticates and can overwrite any user's credentials (conf=75, P0)",
+   "lens": "metareview-lens/completeness",
+   "verdict": "hallucination"
+  },
+  {
+   "id": "M14",
+   "text": "packages/app-store/_utils/oauth/createOAuthAppCredential.ts:30-59 \u2014 team branch returns before the admin check; any accepted member can install a team credential (conf=90, P1)",
+   "lens": "metareview-lens/completeness",
+   "verdict": "unresolved"
+  },
+  {
+   "id": "M15",
+   "text": "packages/app-store/googlecalendar/lib/CalendarService.ts:86-96 \u2014 sync path returns a Response so `token = res?.data` is undefined \u2192 TypeError on every Google refresh when the sync endpoint is set (conf=75, P1)",
+   "lens": "metareview-lens/completeness",
+   "verdict": "matched"
+  },
+  {
+   "id": "M16",
+   "text": "packages/app-store/hubspot/lib/CalendarService.ts:177-188 \u2014 result typed HubspotToken but sync path returns a Response; expiry/access token undefined, writes a broken credential (conf=75, P1)",
+   "lens": "metareview-lens/completeness",
+   "verdict": "bug"
+  },
+  {
+   "id": "M17",
+   "text": "packages/app-store/_utils/oauth/refreshOAuthTokens.ts:8-15 \u2014 no auth header and no response.ok check; a 4xx/5xx body is returned to callers as if it were a token response (conf=100, P1)",
+   "lens": "metareview-lens/completeness",
+   "verdict": "unjudged"
+  },
+  {
+   "id": "M18",
+   "text": "packages/app-store/salesforce/lib/CalendarService.ts:86 \u2014 `if (response.statusText !== \"OK\")` is empty on HTTP/2, so successful refreshes throw HttpError with an empty message (conf=75, P1)",
+   "lens": "metareview-lens/completeness",
+   "verdict": "unjudged"
+  },
+  {
+   "id": "M19",
+   "text": "packages/app-store/salesforce/lib/CalendarService.ts:75-108 \u2014 refresh runs unconditionally on every getClient with no expiry check, and the refreshed token is discarded (connection still built from the stale key) (conf=90, P1)",
+   "lens": "metareview-lens/completeness",
+   "verdict": "unjudged"
+  },
+  {
+   "id": "M20",
+   "text": "packages/app-store/salesforce/lib/CalendarService.ts:90-94 \u2014 raw fetch bypasses refreshOAuthTokens (excluded from credential sync) and the `!accessTokenParsed.success` branch is dead (conf=90, P1)",
+   "lens": "metareview-lens/completeness",
+   "verdict": "bug"
+  },
+  {
+   "id": "M21",
+   "text": "packages/app-store/zoho-bigin/api/add.ts \u2014 only add.ts migrated; no callback.ts change, so its imports still point at pre-move _utils paths (conf=50, P1)",
+   "lens": "metareview-lens/completeness",
+   "verdict": "hallucination"
+  },
+  {
+   "id": "M22",
+   "text": "packages/app-store/larkcalendar/lib/CalendarService.ts:67-82 \u2014 sync-path Response fed to handleLarkError which expects Lark's {code,data} envelope (conf=50, P2)",
+   "lens": "metareview-lens/completeness",
+   "verdict": "unresolved"
+  },
+  {
+   "id": "M23",
+   "text": "packages/app-store/_utils/oauth/parseRefreshTokenResponse.ts:8-10 \u2014 computed keys collide; expiry is never validated despite the comment claiming it (conf=75, P2)",
+   "lens": "metareview-lens/completeness",
+   "verdict": "bug"
+  },
+  {
+   "id": "M24",
+   "text": "packages/app-store/_utils/oauth/parseRefreshTokenResponse.ts:25-27 \u2014 writes literal \"refresh_token\" as the stored refresh token, permanently breaking the next refresh (conf=75, P2)",
+   "lens": "metareview-lens/completeness",
+   "verdict": "matched"
+  },
+  {
+   "id": "M25",
+   "text": "packages/app-store/_utils/oauth/decodeOAuthState.ts:9 \u2014 malformed/tampered state throws uncaught SyntaxError in every OAuth callback \u2192 500 instead of a redirect (conf=100, P2)",
+   "lens": "metareview-lens/completeness",
+   "verdict": "unresolved"
+  },
+  {
+   "id": "M26",
+   "text": "apps/web/pages/api/webhook/app-credential.ts:57-59 \u2014 symmetricDecrypt with `|| \"\"` key fallback inside JSON.parse, no try/catch \u2192 unhandled 500 on a missing/bad key (conf=100, P2)",
+   "lens": "metareview-lens/completeness",
+   "verdict": "bug"
+  },
+  {
+   "id": "M27",
+   "text": "apps/web/pages/api/webhook/app-credential.ts:62-70 \u2014 findFirst by userId+appId only, ignoring type and team credentials; an arbitrary credential is overwritten (conf=75, P2)",
+   "lens": "metareview-lens/completeness",
+   "verdict": "unresolved"
+  },
+  {
+   "id": "M28",
+   "text": ".env.example:243 \u2014 comment says the key must be 32 bytes but suggests `openssl rand -base64 24` (24 bytes), producing a key that may fail AES256 setup (conf=75, P2)",
+   "lens": "metareview-lens/completeness",
+   "verdict": "bug"
+  },
+  {
+   "id": "M29",
+   "text": "packages/app-store/_utils/oauth/ \u2014 no tests for any of the five new helpers or the webhook; no verification of sync path, secret mismatch, or decrypt failure (conf=100, P2)",
+   "lens": "metareview-lens/completeness",
+   "verdict": "important_non_bug"
+  },
+  {
+   "id": "M30",
+   "text": "apps/web/pages/api/webhook/app-credential.ts:17 \u2014 no HTTP method guard; GET/PUT/DELETE all execute the credential write path (conf=100, P3)",
+   "lens": "metareview-lens/completeness",
+   "verdict": "bug"
+  },
+  {
+   "id": "M31",
+   "text": "packages/app-store/_utils/oauth/encodeOAuthState.ts:9 \u2014 returns undefined when state is absent with no caller-side handling (conf=100, P3)",
+   "lens": "metareview-lens/completeness",
+   "verdict": "unresolved"
+  },
+  {
+   "id": "M32",
+   "text": "packages/app-store/salesforce/lib/CalendarService.ts:75 \u2014 a brand-new token-refresh fetch + credential.update on every init is new behavior, not the stated \"migrate to shared helpers\" (conf=80, P1)",
+   "lens": "metareview-lens/scope-and-alignment",
+   "verdict": "important_non_bug"
+  },
+  {
+   "id": "M33",
+   "text": "packages/app-store/salesforce/lib/CalendarService.ts:75 \u2014 bypasses refreshOAuthTokens unlike every other migrated app, silently opting salesforce out of credential sync (conf=85, P1)",
+   "lens": "metareview-lens/scope-and-alignment",
+   "verdict": "important_non_bug"
+  },
+  {
+   "id": "M34",
+   "text": "packages/app-store/zoho-bigin/api/add.ts:17 \u2014 hardcoded slug replaces appConfig.slug, unrelated to the OAuth-helper migration (conf=90, P2)",
+   "lens": "metareview-lens/scope-and-alignment",
+   "verdict": "important_non_bug"
+  },
+  {
+   "id": "M35",
+   "text": "packages/app-store/googlecalendar/api/callback.ts:44 \u2014 still inline prisma.credential.create; migrated only to state helpers, not createOAuthAppCredential (conf=70, P2)",
+   "lens": "metareview-lens/scope-and-alignment",
+   "verdict": "important_non_bug"
+  },
+  {
+   "id": "M36",
+   "text": "packages/app-store/office365calendar/api/callback.ts:68 \u2014 same under-scoping: credential creation left inline (conf=70, P2)",
+   "lens": "metareview-lens/scope-and-alignment",
+   "verdict": "unresolved"
+  },
+  {
+   "id": "M37",
+   "text": "packages/app-store/larkcalendar/api/callback.ts:70 \u2014 same under-scoping: credential creation left inline (conf=70, P2)",
+   "lens": "metareview-lens/scope-and-alignment",
+   "verdict": "hallucination"
+  },
+  {
+   "id": "M38",
+   "text": "packages/app-store/office365calendar/lib/CalendarService.ts:263 \u2014 deleted the zodError console.error diagnostic; log removal not traceable to the stated intent (conf=65, P3)",
+   "lens": "metareview-lens/scope-and-alignment",
+   "verdict": "important_non_bug"
+  },
+  {
+   "id": "M39",
+   "text": "packages/app-store/hubspot/lib/CalendarService.ts:177 \u2014 wraps refreshOAuthTokens but never adopts parseRefreshTokenResponse, leaving sync-mode responses unvalidated (conf=55, P3)",
+   "lens": "metareview-lens/scope-and-alignment",
+   "verdict": "bug"
+  },
+  {
+   "id": "M40",
+   "text": "packages/app-store/_utils/oauth/encodeOAuthState.ts:11 \u2014 \"encode state\" helper only round-trips the incoming state, delivering the capability only nominally (conf=60, P3)",
+   "lens": "metareview-lens/scope-and-alignment",
+   "verdict": "hallucination"
+  },
+  {
+   "id": "M41",
+   "text": "packages/app-store/_utils/oauth/parseRefreshTokenResponse.ts:8 \u2014 computed keys collapse to one literal; zod strips every other key so expiry_date/scope/instance_url/refresh_token are lost before being written back to Credential.key (conf=95, P1)",
+   "lens": "metareview-lens/architecture",
+   "verdict": "unjudged"
+  },
+  {
+   "id": "M42",
+   "text": "packages/app-store/_utils/oauth/parseRefreshTokenResponse.ts:25 \u2014 persisting the literal \"refresh_token\" sentinel poisons the credential with no way to distinguish sentinel from real token (conf=90, P1)",
+   "lens": "metareview-lens/architecture",
+   "verdict": "bug"
+  },
+  {
+   "id": "M43",
+   "text": "packages/app-store/_utils/oauth/refreshOAuthTokens.ts:15 \u2014 return type differs by branch (Response vs provider object) with `refreshFunction: () => any`, causing silent credential corruption rather than an error (conf=85, P1)",
+   "lens": "metareview-lens/architecture",
+   "verdict": "bug"
+  },
+  {
+   "id": "M44",
+   "text": "packages/app-store/_utils/oauth/refreshOAuthTokens.ts:8 \u2014 no timeout, no ok check, no retry/circuit breaker on the sync endpoint; a hung self-hoster endpoint stalls every refresh path and exhausts request workers (conf=80, P1)",
+   "lens": "metareview-lens/architecture",
+   "verdict": "important_non_bug"
+  },
+  {
+   "id": "M45",
+   "text": "packages/app-store/_utils/oauth/createOAuthAppCredential.ts:30-59 \u2014 guard inversion makes the admin check a no-op; any accepted member can install or overwrite team-wide app credentials (conf=85, P1)",
+   "lens": "metareview-lens/architecture",
+   "verdict": "unresolved"
+  },
+  {
+   "id": "M46",
+   "text": "apps/web/pages/api/webhook/app-credential.ts:62-90 \u2014 check-then-insert TOCTOU on findFirst\u2192create with no unique index and no idempotency key; concurrent deliveries create duplicates (conf=85, P1)",
+   "lens": "metareview-lens/architecture",
+   "verdict": "unresolved"
+  },
+  {
+   "id": "M47",
+   "text": "packages/app-store/salesforce/lib/CalendarService.ts:106 \u2014 connection still built from the pre-refresh credentialKey.access_token/instance_url, so the refresh has no effect on the actual client (conf=90, P1)",
+   "lens": "metareview-lens/architecture",
+   "verdict": "matched"
+  },
+  {
+   "id": "M48",
+   "text": "packages/app-store/salesforce/lib/CalendarService.ts:75 \u2014 refresh POST on every getClient with no expiry check: token-endpoint rate-limit and credential write amplification per booking op (conf=85, P1)",
+   "lens": "metareview-lens/architecture",
+   "verdict": "important_non_bug"
+  },
+  {
+   "id": "M49",
+   "text": "packages/app-store/googlecalendar/lib/CalendarService.ts:97 \u2014 validates the merged credential object rather than the token response; under sharing the minimum schema keeps only access_token, losing refresh_token/expiry_date/scope (conf=80, P1)",
+   "lens": "metareview-lens/architecture",
+   "verdict": "bug"
+  },
+  {
+   "id": "M50",
+   "text": "packages/app-store/_utils/oauth/createOAuthAppCredential.ts:47,61 \u2014 unconditional credential.create with no uniqueness on (userId,appId)/(teamId,appId); re-installs accumulate duplicate rows that findFirst then picks arbitrarily (conf=80, P2)",
+   "lens": "metareview-lens/architecture",
+   "verdict": "unresolved"
+  },
+  {
+   "id": "M51",
+   "text": "apps/web/pages/api/webhook/app-credential.ts:57 \u2014 decrypted JSON stored straight into Credential.key with no schema validation and an empty-key fallback (conf=80, P2)",
+   "lens": "metareview-lens/architecture",
+   "verdict": "important_non_bug"
+  },
+  {
+   "id": "M52",
+   "text": "apps/web/pages/api/webhook/app-credential.ts:31 \u2014 throwing parse plus no HTTP method check: 500 on malformed body, and GET/DELETE reach the write path (conf=75, P2)",
+   "lens": "metareview-lens/architecture",
+   "verdict": "bug"
+  },
+  {
+   "id": "M53",
+   "text": "packages/app-store/salesforce/lib/CalendarService.ts:86 \u2014 `statusText !== \"OK\"` instead of `!response.ok`; healthy 200s throw and some non-200s slip through (conf=85, P2)",
+   "lens": "metareview-lens/architecture",
+   "verdict": "unjudged"
+  },
+  {
+   "id": "M54",
+   "text": "packages/app-store/office365calendar/lib/CalendarService.ts:263 \u2014 safeParse\u2192throwing helper with the diagnostic removed; under sharing the credential is overwritten with a partially-emptied key and no log (conf=75, P2)",
+   "lens": "metareview-lens/architecture",
+   "verdict": "bug"
+  },
+  {
+   "id": "M55",
+   "text": "packages/app-store/_utils/oauth/encodeOAuthState.ts:9-11 \u2014 parse/stringify no-op that adds a throw; paired with decodeOAuthState.ts:9 any non-JSON state crashes the callback with a 500 (conf=75, P2)",
+   "lens": "metareview-lens/architecture",
+   "verdict": "unresolved"
+  },
+  {
+   "id": "M56",
+   "text": "packages/app-store/office365video/lib/VideoApiAdapter.ts:74 \u2014 magic slug string \"msteams\" vs \"office365-calendar\"/\"google-calendar\" elsewhere; unvalidated duplicated discriminators, a typo silently misroutes sync (conf=75, P2)",
+   "lens": "metareview-lens/architecture",
+   "verdict": "unresolved"
+  },
+  {
+   "id": "M57",
+   "text": "apps/web/pages/api/webhook/app-credential.ts:37-55 \u2014 the DB app row is redundant with appStoreMetadata; an extra query per webhook and a second source of truth that can drift (conf=70, P3)",
+   "lens": "metareview-lens/architecture",
+   "verdict": "important_non_bug"
+  },
+  {
+   "id": "M58",
+   "text": "packages/app-store/salesforce/lib/CalendarService.ts:91-94 \u2014 `if (!accessTokenParsed.success)` is dead code since parseRefreshTokenResponse already throws (conf=90, P3)",
+   "lens": "metareview-lens/architecture",
+   "verdict": "important_non_bug"
+  },
+  {
+   "id": "M59",
+   "text": "packages/app-store/googlecalendar/lib/CalendarService.ts:97 \u2014 credential row now written as {success,data} instead of the flat token object, silently corrupting every stored Google credential on refresh (conf=90, P0)",
+   "lens": "metareview-lens/intent-preservation",
+   "verdict": "bug"
+  },
+  {
+   "id": "M60",
+   "text": "packages/app-store/_utils/oauth/parseRefreshTokenResponse.ts:25 \u2014 spread callers overwrite a valid stored refresh_token with the literal \"refresh_token\"; previously the stored value was preserved (conf=85, P0)",
+   "lens": "metareview-lens/intent-preservation",
+   "verdict": "bug"
+  },
+  {
+   "id": "M61",
+   "text": "packages/app-store/_utils/oauth/createOAuthAppCredential.ts:30-57 \u2014 authorization for team app installs silently drops from admin/owner to any accepted member, not a stated objective (conf=85, P0)",
+   "lens": "metareview-lens/intent-preservation",
+   "verdict": "hallucination"
+  },
+  {
+   "id": "M62",
+   "text": "packages/app-store/office365calendar/lib/CalendarService.ts:263 \u2014 error handling changed from tolerate-and-log (keep old credentials) to fatal throw, and the raw-response diagnostic was deleted (conf=85, P1)",
+   "lens": "metareview-lens/intent-preservation",
+   "verdict": "important_non_bug"
+  },
+  {
+   "id": "M63",
+   "text": "packages/app-store/salesforce/lib/CalendarService.ts:75-99 \u2014 new unconditional refresh + credential write per getClient, and the write replaces the whole key with only the schema fields, dropping other stored properties (conf=80, P1)",
+   "lens": "metareview-lens/intent-preservation",
+   "verdict": "bug"
+  },
+  {
+   "id": "M64",
+   "text": "packages/app-store/salesforce/lib/CalendarService.ts:86 \u2014 new error path introduced by the migration: empty statusText under undici makes successful refreshes throw (conf=75, P1)",
+   "lens": "metareview-lens/intent-preservation",
+   "verdict": "matched"
+  },
+  {
+   "id": "M65",
+   "text": "packages/app-store/salesforce/lib/CalendarService.ts:97 \u2014 prisma used but never imported; the new refresh path is a hard reference/compile error (conf=85, P1)",
+   "lens": "metareview-lens/intent-preservation",
+   "verdict": "unresolved"
+  },
+  {
+   "id": "M66",
+   "text": "packages/app-store/_utils/oauth/parseRefreshTokenResponse.ts:8-10 \u2014 in sharing mode every migrated app's app-specific schema is silently replaced by a near-empty one that never validates expiry (conf=80, P1)",
+   "lens": "metareview-lens/intent-preservation",
+   "verdict": "bug"
+  },
+  {
+   "id": "M67",
+   "text": "packages/app-store/_utils/oauth/refreshOAuthTokens.ts:6-16 \u2014 sharing mode returns a raw Response regardless of refreshFunction, so google and hubspot refresh paths return undefined/wrong shape (conf=75, P1)",
+   "lens": "metareview-lens/intent-preservation",
+   "verdict": "bug"
+  },
+  {
+   "id": "M68",
+   "text": "packages/app-store/zoho-bigin/api/add.ts:17 \u2014 hardcoded slug decouples the redirect URI from config.json, unrelated to the objective (conf=90, P3)",
+   "lens": "metareview-lens/intent-preservation",
+   "verdict": "important_non_bug"
+  },
+  {
+   "id": "M69",
+   "text": "packages/app-store/_utils/oauth/createOAuthAppCredential.ts:59 \u2014 team install gated only by accepted membership; the ADMIN/OWNER check is unreachable, so any member can attach an OAuth credential to the whole team (conf=100, P1)",
+   "lens": "metareview-lens/security",
+   "verdict": "unresolved"
+  },
+  {
+   "id": "M70",
+   "text": "apps/web/pages/api/webhook/app-credential.ts:25 \u2014 unset CALCOM_WEBHOOK_SECRET makes `undefined !== undefined` false, permitting unauthenticated credential overwrite for an arbitrary userId (conf=50, P1)",
+   "lens": "metareview-lens/security",
+   "verdict": "hallucination"
+  },
+  {
+   "id": "M71",
+   "text": "apps/web/pages/api/webhook/app-credential.ts:24 \u2014 non-constant-time compare of a static shared secret, no HMAC over the body, no timestamp/nonce, no rate limit: replayable and brute-forceable (conf=75, P2)",
+   "lens": "metareview-lens/security",
+   "verdict": "bug"
+  },
+  {
+   "id": "M72",
+   "text": "packages/app-store/_utils/oauth/decodeOAuthState.ts:9 \u2014 OAuth state is unsigned, unencrypted and unbound to session/nonce yet trusted for teamId and redirect targets \u2192 CSRF / attacker-chosen teamId (conf=75, P2)",
+   "lens": "metareview-lens/security",
+   "verdict": "unresolved"
+  },
+  {
+   "id": "M73",
+   "text": "apps/web/pages/api/webhook/app-credential.ts:57 \u2014 empty-string encryption-key fallback plus unvalidated decrypted JSON written verbatim into another user's credential.key (conf=75, P2)",
+   "lens": "metareview-lens/security",
+   "verdict": "bug"
+  },
+  {
+   "id": "M74",
+   "text": "packages/app-store/_utils/oauth/refreshOAuthTokens.ts:8 \u2014 POST to the sync endpoint requesting live tokens for an arbitrary calcomUserId carries no authentication, signature, or TLS enforcement (conf=75, P2)",
+   "lens": "metareview-lens/security",
+   "verdict": "bug"
+  },
+  {
+   "id": "M75",
+   "text": "packages/app-store/_utils/oauth/parseRefreshTokenResponse.ts:15 \u2014 under sharing the app-specific schema is discarded, degrading validation to \"has an access_token string\" for everything the external endpoint returns (conf=75, P2)",
+   "lens": "metareview-lens/security",
+   "verdict": "important_non_bug"
+  },
+  {
+   "id": "M76",
+   "text": "packages/app-store/_utils/oauth/parseRefreshTokenResponse.ts:25 \u2014 hardcoded sentinel written over the stored refresh token destroys token integrity and persists a predictable literal (conf=100, P2)",
+   "lens": "metareview-lens/security",
+   "verdict": "bug"
+  },
+  {
+   "id": "M77",
+   "text": "apps/web/pages/api/webhook/app-credential.ts:17 \u2014 no req.method check, so the credential-overwrite mutation is reachable via GET (CSRF/prefetch, cacheable response) (conf=75, P3)",
+   "lens": "metareview-lens/security",
+   "verdict": "bug"
+  },
+  {
+   "id": "M78",
+   "text": "apps/web/pages/api/webhook/app-credential.ts:31 \u2014 unwrapped parse/decrypt yields a 500 with a Zod/crypto stack trace instead of a 400 (conf=50, P3)",
+   "lens": "metareview-lens/security",
+   "verdict": "bug"
+  },
+  {
+   "id": "M79",
+   "text": "No test or spec files exist anywhere in this 30-file diff, so there are no existing tests to evaluate for coverage fidelity",
+   "lens": "metareview-lens/testing-quality",
+   "verdict": "important_non_bug"
+  },
+  {
+   "id": "M80",
+   "text": "packages/app-store/_utils/oauth/parseRefreshTokenResponse.ts:5-10 \u2014 computed-key schema bug that any unit test would have caught; zero coverage (conf=85, P1)",
+   "lens": "metareview-lens/testing-quality",
+   "verdict": "matched"
+  },
+  {
+   "id": "M81",
+   "text": "packages/app-store/_utils/oauth/parseRefreshTokenResponse.ts:26-28 \u2014 sentinel refresh_token injection with no test pinning whether callers treat the sentinel as valid (conf=80, P1)",
+   "lens": "metareview-lens/testing-quality",
+   "verdict": "important_non_bug"
+  },
+  {
+   "id": "M82",
+   "text": "packages/app-store/_utils/oauth/refreshOAuthTokens.ts:4-20 \u2014 two incompatible return shapes across branches, neither branch exercised by any test (conf=80, P1)",
+   "lens": "metareview-lens/testing-quality",
+   "verdict": "bug"
+  },
+  {
+   "id": "M83",
+   "text": "packages/app-store/_utils/oauth/createOAuthAppCredential.ts:32-57 \u2014 untested authorization branch where the admin check is bypassed (conf=75, P1)",
+   "lens": "metareview-lens/testing-quality",
+   "verdict": "hallucination"
+  },
+  {
+   "id": "M84",
+   "text": "apps/web/pages/api/webhook/app-credential.ts:31-63 \u2014 five new error/branch paths plus the update-vs-create fork, none covered (conf=90, P2)",
+   "lens": "metareview-lens/testing-quality",
+   "verdict": "important_non_bug"
+  },
+  {
+   "id": "M85",
+   "text": "packages/app-store/_utils/oauth/decodeOAuthState.ts:9 / encodeOAuthState.ts:9 \u2014 throw path on malformed state untested; encodeOAuthState's only observable behavior is unverified (conf=70, P2)",
+   "lens": "metareview-lens/testing-quality",
+   "verdict": "hallucination"
+  },
+  {
+   "id": "M86",
+   "text": "packages/app-store/_utils/oauth/parseRefreshTokenResponse.ts:25 \u2014 providers omitting refresh_token (Microsoft frequently) have their real stored token overwritten by a placeholder; unrecoverable without full re-auth, no repair path (conf=75, P0)",
+   "lens": "metareview-lens/data-migration",
+   "verdict": "bug"
+  },
+  {
+   "id": "M87",
+   "text": "packages/app-store/_utils/oauth/parseRefreshTokenResponse.ts:5-11 \u2014 non-passthrough z.object strips all but access_token, so callers persisting the parse output destroy expiry_date/scope/token_type/instance_url on pre-existing rows (conf=75, P0)",
+   "lens": "metareview-lens/data-migration",
+   "verdict": "bug"
+  },
+  {
+   "id": "M88",
+   "text": "packages/app-store/_utils/oauth/parseRefreshTokenResponse.ts:8 \u2014 the required computed key means safeParse can never succeed, hard-breaking every OAuth app the moment CALCOM_CREDENTIAL_SYNC_ENDPOINT is set (conf=75, P0)",
+   "lens": "metareview-lens/data-migration",
+   "verdict": "bug"
+  },
+  {
+   "id": "M89",
+   "text": "packages/app-store/hubspot/lib/CalendarService.ts:177-199 \u2014 `key: hubspotRefreshToken as any` persists a serialized Response ({}) with NaN expiry, wiping the credential key; the cast defeats type checking (conf=75, P0)",
+   "lens": "metareview-lens/data-migration",
+   "verdict": "bug"
+  },
+  {
+   "id": "M90",
+   "text": "packages/app-store/_utils/oauth/refreshOAuthTokens.ts:6-17 \u2014 branch shape divergence leads googlecalendar to assign access_token = undefined before persisting (conf=75, P1)",
+   "lens": "metareview-lens/data-migration",
+   "verdict": "bug"
+  },
+  {
+   "id": "M91",
+   "text": "packages/app-store/salesforce/lib/CalendarService.ts:96-99 \u2014 unconditional key rewrite drops any pre-existing field absent from salesforceTokenSchema; no backfill for existing rows (conf=75, P1)",
+   "lens": "metareview-lens/data-migration",
+   "verdict": "bug"
+  },
+  {
+   "id": "M92",
+   "text": "apps/web/pages/api/webhook/app-credential.ts:63-72 \u2014 findFirst picks an arbitrary row when a user has two credentials for the same app, corrupting the other account's credential (conf=75, P1)",
+   "lens": "metareview-lens/data-migration",
+   "verdict": "unresolved"
+  },
+  {
+   "id": "M93",
+   "text": "apps/web/pages/api/webhook/app-credential.ts:56-58 \u2014 empty-key decrypt fallback if the new env var is unset mid-rollout can throw or write junk into Credential.key (conf=50, P1)",
+   "lens": "metareview-lens/data-migration",
+   "verdict": "hallucination"
+  },
+  {
+   "id": "M94",
+   "text": ".env.example:233-243 \u2014 during a rolling deploy, pods with and without CALCOM_CREDENTIAL_SYNC_ENDPOINT write different Credential.key shapes with no reader tolerant of both (conf=75, P1)",
+   "lens": "metareview-lens/data-migration",
+   "verdict": "important_non_bug"
+  },
+  {
+   "id": "M95",
+   "text": "packages/app-store/office365calendar/lib/CalendarService.ts:263-270 \u2014 refreshes that previously degraded gracefully now abort, and the sharing-mode spread merges the placeholder over the real token (conf=50, P1)",
+   "lens": "metareview-lens/data-migration",
+   "verdict": "bug"
+  }
+ ]
+}
