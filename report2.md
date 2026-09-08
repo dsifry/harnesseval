@@ -163,7 +163,7 @@ non-bug, a true hallucination, or unresolved.
 | **incremental recall (incr)** | recall extended over the enlarged truth: `(confirmed goldens + confirmed hidden gold) / (goldens + hidden gold)`. Rewards finding real bugs the goldens missed; 1.00 means "found every golden *and* everything else it claimed real" |
 | **hallucinations (hal)** | v2-adjudicated **true** fabrications — reported "bugs" that are not real (the triage tax). Deliberately *excludes* important non-bug findings, which are counted as hidden value |
 | **tokens/PR** | all review tokens in+out summed across every call the harness makes (orchestrator, lenses, extraction), averaged per PR. The honest cost unit when pricing is a flat fee |
-| **$/PR** | metered cost per PR, computed from measured in/out tokens (cache-adjusted where the model prices cache) at current published list pricing: **GLM-5.3 $1.40 in / $4.40 out, GLM-5.3-flash $0.15 / $0.50** ([docs.z.ai/guides/overview/pricing](https://docs.z.ai/guides/overview/pricing)); **Fable 5.1 $10 / $50; Astra $10 / $50** ([platform.claude.com](https://platform.claude.com/docs/en/about-claude/pricing), [developers.openai.com](https://developers.openai.com/api/docs/models/gpt-6-astra); fetched 2026-09-07). Our runs went through the Lunaroute gateway at a flat fee ($0 billed) — the metered figures are what the same token counts would cost on the public APIs |
+| **$/PR** | metered cost per PR, computed from measured in/out tokens (cache-adjusted where the model prices cache) at current published list pricing: **GLM-5.3 $1.40 in / $4.40 out, GLM-5.3-flash $0.15 / $0.50** ([docs.z.ai/guides/overview/pricing](https://docs.z.ai/guides/overview/pricing)); **Fable 5.1 $10 / $50; Astra $10 / $50; gpt-5.6-terra $2.00 in / $0.20 cache-read / $2.50 cache-write / $12.00 out** ([platform.claude.com](https://platform.claude.com/docs/en/about-claude/pricing), [developers.openai.com/api/docs/pricing](https://developers.openai.com/api/docs/pricing), standard tier; fetched 2026-09-07). Our runs went through the Lunaroute gateway at a flat fee ($0 billed) — the metered figures are what the same token counts would cost on the public APIs |
 
 ---
 
@@ -561,8 +561,8 @@ list prices applied to measured per-call splits (cache-adjusted); "—" = not pr
 | vanilla | sonnet-5 | high | 0.37 | 0.65 | 4.7 | 0.2 | 127K | $0.41 |
 | vanilla | sol | low | 0.52 | 0.69 | 4.5 | 0.0 | 44K | $0.12 |
 | vanilla | sol | high | 0.62 | 0.76 | 4.5 | 0.2 | 1,039K | $0.60 |
-| vanilla | terra | low | 0.39 | 0.56 | 2.5 | 0.2 | 59K | — |
-| vanilla | terra | high | 0.46 | 0.63 | 3.3 | 0.2 | 280K | — |
+| vanilla | terra | low | 0.39 | 0.56 | 2.5 | 0.2 | 59K | $0.08 |
+| vanilla | terra | high | 0.46 | 0.63 | 3.3 | 0.2 | 280K | $0.15 |
 | vanilla | fable-5.1 | low | 0.74 | 0.89 | 7.5 | 1.2 | 85K | $0.73 |
 | vanilla | astra | low | 0.40 | 0.52 | 2.2 | 0.6 | 47K | $0.34 |
 | mrv | opus-5 | low | **0.85** | **0.97** | 28.7 | 6.8 | 3,481K | — |
@@ -571,8 +571,8 @@ list prices applied to measured per-call splits (cache-adjusted); "—" = not pr
 | mrv | sonnet-5 | high | 0.57 | 0.87 | 14.3 | 3.8 | 9,458K | $4.95 |
 | mrv | sol | low | 0.48 | 0.67 | 7.0 | 2.7 | 569K | $0.47 |
 | mrv | sol | high | 0.63 | 0.84 | — | — | 656K | $0.62 |
-| mrv | terra | low | 0.30 | 0.52 | 4.2 | 1.7 | 652K | — |
-| mrv | terra | high | 0.42 | 0.70 | 7.7 | 1.7 | 889K | — |
+| mrv | terra | low | 0.30 | 0.52 | 4.2 | 1.7 | 652K | $0.23 |
+| mrv | terra | high | 0.42 | 0.70 | 7.7 | 1.7 | 889K | $0.30 |
 | mrv | fable-5.1 | low | 0.63 | 0.80 | 33.7 | 5.6 | 2,081K | $7.19 |
 | mrv | astra | low | 0.51 | 0.74 | 6.7 | 0.7 | 774K | $1.38 |
 | ce | opus-5 | low | 0.67 | 0.91 | 20.0 | 7.5 | 2,065K | — |
@@ -581,8 +581,8 @@ list prices applied to measured per-call splits (cache-adjusted); "—" = not pr
 | ce | sonnet-5 | high | 0.29 | 0.56 | 5.8 | 0.7 | 9,992K | $5.65 |
 | ce | sol | low | 0.45 | 0.69 | 8.7 | 1.2 | 544K | $0.43 |
 | ce | sol | high | 0.45 | 0.69 | 7.2 | 0.7 | 1,008K | $0.77 |
-| ce | terra | low | 0.39 | 0.64 | 6.0 | 0.5 | 679K | — |
-| ce | terra | high | 0.56 | 0.84 | 13.5 | 1.0 | 792K | — |
+| ce | terra | low | 0.39 | 0.64 | 6.0 | 0.5 | 679K | $0.28 |
+| ce | terra | high | 0.56 | 0.84 | 13.5 | 1.0 | 792K | $0.25 |
 | ce | fable-5.1 | low | 0.75 | 0.93 | 26.5 | 5.8 | 3,028K | $6.38 |
 | ce | astra | low | 0.49 | 0.78 | 10.0 | 1.5 | 1,246K | $1.89 |
 | vanilla | glm-5.3-background | low | 0.46 | 0.72 | 4.2 | 1.4 | 13K | $0.03 |
