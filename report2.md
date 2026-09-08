@@ -728,9 +728,11 @@ Probes: single calls, glm-5.3-background, same 79K-char review prompt, 65,536-to
   `max` is accepted by both variants and behaves like xhigh — i.e. **xhigh is an alias for
   a max tier**, which we exclude from all cells as impractically slow. Post-fix (upstream,
   2026-09-07) background's medium also tracks high exactly (6.9K/12.0K reasoning vs high's
-  6.3K/11.3K) — three effort names, two behaviors. For flash, reasoning is embedded in
-  `completion_tokens` with no separate accounting field (est. reasoning = completion −
-  content tokens; ~3.5 chars/token).
+  6.3K/11.3K) — three effort names, two behaviors.   For flash, reasoning is billed inside `completion_tokens` but the gateway sends **no
+  separate field** (`completion_tokens_details: null`) — it is estimated by subtraction
+  (content tokens ≈ chars / 3.5), unlike background, which itemizes top-level
+  `usage.reasoning_tokens`. Recorded `tokens_out` includes reasoning for both variants,
+  so cost accounting is unaffected; only the reasoning-vs-answer *attribution* differs.
 
 Repro packaged for Lunaroute (vLLM→SGLang migration suspected; `flash` unaffected at every
 effort). The medium §3 rows should be re-measured once the upstream fix ships.
