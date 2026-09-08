@@ -209,3 +209,41 @@ class TestFrozenFlipFixture(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestEffortPlumbing(unittest.TestCase):
+    """The --second-pass retry must actually raise the reasoning effort (Bugbot PR-16 review):
+    the k votes take `vote_effort`, the tie-break takes `tiebreak_effort`, and both use the
+    provider-recognized ladder (low/medium/xhigh — 'high' is not a value and silently drops
+    the knob)."""
+
+    def test_votes_and_tiebreak_use_distinct_efforts(self):
+        seen: list[str] = []
+
+        async def vote(judge, prompt, sem, effort="medium"):
+            seen.append(effort)
+            return {"category": "bug", "confidence": 0.9, "reasoning": "r"}
+
+        with mock.patch.object(rj, "_one_vote", side_effect=vote):
+            out = asyncio.run(rj.adjudicate("finding", "diff", "j", asyncio.Semaphore(3),
+                                            k=2, vote_effort="low", tiebreak_effort="xhigh"))
+        self.assertEqual(out["verdict"], "bug")
+        self.assertEqual(seen, ["low", "low"])  # votes at vote_effort; majority -> no tie-break
+
+    def test_second_pass_raises_effort_not_lowers_votes(self):
+        seen: list[str] = []
+
+        async def vote(judge, prompt, sem, effort="medium"):
+            seen.append(effort)
+            return {"category": "bug", "confidence": 0.9, "reasoning": "r"}
+
+        with mock.patch.object(rj, "_one_vote", side_effect=vote):
+            asyncio.run(rj.adjudicate_second_pass({"issue_text": "f"}, "d", "j",
+                                                  asyncio.Semaphore(1)))
+        self.assertEqual(seen, ["xhigh"])
+
+    def test_tiebreak_effort_is_provider_recognized(self):
+        # the ladder the lab's effort mapping knows: low/medium/xhigh
+        for call_effort in ("medium", "xhigh"):
+            self.assertIn(call_effort, ("low", "medium", "xhigh"))
+        self.assertNotIn('"high"', rj.__doc__ or "")

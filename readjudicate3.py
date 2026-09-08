@@ -235,15 +235,21 @@ def _majority(votes: list[dict]) -> dict | None:
 
 
 async def adjudicate(candidate: str, diff: str, judge: str, sem: asyncio.Semaphore,
-                     k: int = 3, second_pass_effort: str | None = None) -> dict:
+                     k: int = 3, vote_effort: str = "medium",
+                     tiebreak_effort: str = "xhigh") -> dict:
     """Adjudicate one (provenance-stripped) finding: k votes at temperature 0, majority wins,
     a full disagreement gets one tie-break call that sees all three reasonings.
+
+    `vote_effort` drives the k votes; `tiebreak_effort` the single tie-break call (and is
+    what --second-pass raises). The effort ladder is low/medium/xhigh — "high" is not a
+    provider-recognized value and would silently drop the reasoning-effort knob.
 
     Returns the v2-shaped verdict record: {"verdict", "confidence", "rationale", "votes"}.
     """
     cand = strip_provenance(candidate)
     d = diff[:DIFF_LIMIT]
-    votes = list(await asyncio.gather(*[_one_vote(judge, V2_PROMPT.format(diff=d, candidate=cand), sem)
+    votes = list(await asyncio.gather(*[_one_vote(judge, V2_PROMPT.format(diff=d, candidate=cand), sem,
+                                       effort=vote_effort)
                                        for _ in range(k)]))
     merged = _majority([v for v in votes if "category" in v]) if any("category" in v for v in votes) else None
     if merged is None and any("category" in v for v in votes):
@@ -253,7 +259,7 @@ async def adjudicate(candidate: str, diff: str, judge: str, sem: asyncio.Semapho
             for v in votes)
         try:
             tb = await _one_vote(judge, TIEBREAK_PROMPT.format(diff=d, candidate=cand, votes=vote_lines),
-                                 sem, effort=second_pass_effort or "high")
+                                 sem, effort=tiebreak_effort)
         except Exception as e:
             tb = {"error": f"{type(e).__name__}: {str(e)[:120]}"}
         merged = tb if "category" in tb else None
@@ -272,9 +278,12 @@ async def adjudicate(candidate: str, diff: str, judge: str, sem: asyncio.Semapho
 
 
 async def adjudicate_second_pass(record: dict, diff: str, judge: str, sem: asyncio.Semaphore) -> dict:
-    """Fix 6: one higher-effort retry for an unresolved verdict before it stays unresolved."""
+    """Fix 6: one higher-effort retry for an unresolved verdict before it stays unresolved.
+
+    k=1 at xhigh: the first pass already failed to reach a confident majority, so the
+    retry spends its budget on reasoning depth, not vote count."""
     return await adjudicate(record["issue_text"], diff, judge, sem, k=1,
-                            second_pass_effort="xhigh")
+                            vote_effort="xhigh", tiebreak_effort="xhigh")
 
 
 def latest_pass_summaries(batch: str) -> list[tuple[str, dict]]:
@@ -323,6 +332,8 @@ def _corrected_block(records: list[dict], tp: int, judge: str, diff_chars: int, 
         "judge": judge, "diff_chars": diff_chars, "wall_s": round(wall_s, 1),
     }
     if clusters is not None:
+        # `clusters` is the number of DISTINCT clusters this run's findings map to, so the
+        # savings are this run's judge calls avoided — never the URL-wide cluster count.
         out["n_clusters"] = clusters
         out["dedup_savings"] = len(records) - clusters
     return out
@@ -388,25 +399,34 @@ async def classify_batch_dedup(batch: str, targets: list[tuple[str, dict]], conc
     two efforts can no longer receive opposite verdicts, and the judge-call count drops by
     the dedup savings reported per run.
     """
-    # 1. collect (run, record, text) per url
+    # 1. collect (run, record, text) per url — SKIPPING runs whose output already exists
+    #    (resume safety, as in v2's per-run path: an interrupted batch restarts on the
+    #    missing runs only and never re-adjudicates or overwrites completed ones).
     by_url: dict[str, list[tuple[str, dict, str]]] = {}
     diffs: dict[str, str] = {}
     judges: dict[str, str] = {}
+    skipped = 0
     for rid, s in targets:
+        if Path(f"runs/{rid}/readjudication3.json").exists():
+            skipped += 1
+            continue
         url = s["url"]
         diffs.setdefault(url, fetch_diff(url)["diff"])
         judges.setdefault(url, s.get("adjudicating_judge") or "gpt-5.2")
         for r in s.get("adjudication_records") or []:
             if r.get("primary_judge_verdict") in ("hallucination", "real_but_ungold"):
                 by_url.setdefault(url, []).append((rid, r, r["issue_text"]))
+    if skipped:
+        print(f"[v3] {skipped} runs already adjudicated — resuming on the rest", flush=True)
 
     sem = asyncio.Semaphore(concurrency)
     t0 = time.time()
     total_calls = 0
     for url, items in sorted(by_url.items()):
+      try:  # per-URL isolation: one PR's fetch/judge/write failure must not abort the batch
         texts = [t for _, _, t in items]
         cids = cluster_texts(texts)
-        n_clusters = len(set(cids))
+        url_clusters = len(set(cids))
         rep_idx: dict[int, int] = {}
         for i, cid in enumerate(cids):
             rep_idx.setdefault(cid, i)
@@ -415,11 +435,11 @@ async def classify_batch_dedup(batch: str, targets: list[tuple[str, dict]], conc
         async def do_cluster(cid: int, i: int):
             verdicts[cid] = await adjudicate(texts[i], diffs[url], judges[url], sem, k=k)
 
-        await asyncio.gather(*[do_cluster(cid, i) for cid, i in rep_idx.items() if cid not in verdicts])
+        await asyncio.gather(*[do_cluster(cid, i) for cid, i in rep_idx.items()])
         total_calls += len(rep_idx)
         if second_pass:
-            for cid, v in list(verdicts.items()):
-                if v["verdict"] == "unresolved":
+            for cid in list(verdicts):
+                if verdicts[cid]["verdict"] == "unresolved":
                     verdicts[cid] = await adjudicate_second_pass({"issue_text": texts[rep_idx[cid]]},
                                                                  diffs[url], judges[url], sem)
         sizes: dict[int, int] = {}
@@ -433,24 +453,31 @@ async def classify_batch_dedup(batch: str, targets: list[tuple[str, dict]], conc
         for rid, records in per_run.items():
             s = next(s for r2, s in targets if r2 == rid)
             tp = s["tp"]
+            # this RUN's distinct clusters — the per-run judge-call count and savings,
+            # never the URL-wide cluster count (a run with fewer findings than the PR has
+            # clusters would otherwise report negative savings).
+            run_clusters = len({rec["cluster"]["id"] for rec in records})
             out_path = Path(f"runs/{rid}/readjudication3.json")
             obj = {"run_id": rid, "url": s.get("url"), "framework": s.get("framework"),
                    "model": s.get("model"), "effort": s.get("effort"),
                    "adjudicator_version": 3, "cross_run_dedup": {"batch": batch, "url": url,
-                                                                 "n_clusters": n_clusters},
+                                                                 "n_clusters": url_clusters},
                    "original": {"tp": s.get("tp"), "fn": s.get("fn"),
                                 "n_real_ungold": s.get("n_real_ungold", 0),
                                 "n_hallucination": s.get("n_hallucination", 0),
                                 "adj_p": s.get("adjudicated_precision"), "incr": s.get("incremental_recall")},
                    "corrected": _corrected_block(records, tp, judges[url], len(diffs[url]),
-                                                 time.time() - t0, n_clusters),
+                                                 time.time() - t0, run_clusters),
                    "records": records}
             out_path.write_text(json.dumps(obj, indent=1))
             c = obj["corrected"]
             print(f"  {rid[:8]} {s.get('framework', '?')[:14]}/{s.get('model', '')[:16]}"
-                  f" clusters {n_clusters} for {len(records)} findings"
+                  f" clusters {run_clusters} for {len(records)} findings"
                   f" hal->{c['n_true_hallucination']} bug+{c['n_bug_ungold']}"
                   f" important+{c['n_important']} unres {c['n_unresolved']}", flush=True)
+      except Exception as e:  # noqa: BLE001 — isolation, not silence: reported and skipped
+        print(f"  [url {url}] ERROR {type(e).__name__}: {str(e)[:160]} — skipped, batch continues",
+              flush=True)
     print(f"[v3] {total_calls} cluster adjudications (k={k}) for {sum(len(v) for v in by_url.values())}"
           f" findings across {len(by_url)} PRs in {time.time() - t0:.0f}s", flush=True)
 
