@@ -71,6 +71,7 @@ def main() -> None:
             continue
         entry = {
             "pair_id": int(pid), "ce_id": ce_id, "url": p["url"],
+            "ce_key": f'{p["url"]}#{ce_id}',  # score_flips.py keys its report on this
             "mrv_dir": p["mrv_dir"], "m_idx": m_idx,
             "model": p["model"], "effort": p["eff"],
             "issue_text": s["findings"][m_idx].get("issue_text", ""),

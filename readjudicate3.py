@@ -102,7 +102,7 @@ Respond with ONLY:
 {{"category": "bug|important_non_bug|hallucination", "reasoning": "brief, grounded in the diff; if the verdict is 'hallucination', quote the contradicting diff detail", "confidence": 0.0-1.0}}"""
 
 V2_SYSTEM = "You are a strict code review verifier. Always respond with valid JSON."
-TIEBREAK_PROMPT = """You are verifying a code review finding against a PR diff. Three prior verifiers disagreed:
+TIEBREAK_PROMPT = """You are verifying a code review finding against a PR diff. {n} prior verifiers disagreed:
 
 DIFF (unified):
 ```diff
@@ -112,7 +112,7 @@ DIFF (unified):
 FINDING:
 {candidate}
 
-The three prior verdicts and reasonings:
+The {n} prior verdicts and reasonings:
 {votes}
 
 Categories and ground rules are the same as before:
@@ -120,7 +120,7 @@ Categories and ground rules are the same as before:
 - "important_non_bug": a real, SPECIFIC, substantive review concern grounded in this diff that is not a defect.
 - "hallucination": false, misreads the diff, references behavior that does not exist, pure style/format nit, or too vague to act on. You must quote the specific diff line or detail that CONTRADICTS the finding before you may return it; "cannot verify" routes to "bug" with confidence < 0.5; hedged wording is not evidence of falsity.
 
-Weigh the three reasonings against the diff itself and break the tie. Respond with ONLY:
+Weigh the {n} reasonings against the diff itself and break the tie. Respond with ONLY:
 {{"category": "bug|important_non_bug|hallucination", "reasoning": "brief, grounded in the diff; if 'hallucination', quote the contradicting detail", "confidence": 0.0-1.0}}"""
 
 MAX_TOKENS = 4096
@@ -212,7 +212,12 @@ async def _one_vote(judge: str, prompt: str, sem: asyncio.Semaphore, effort: str
         try:
             conf = float(parsed.get("confidence", 0.0) or 0.0)
         except (TypeError, ValueError):
-            conf = 0.0
+            return {"error": f"non-numeric confidence: {parsed.get('confidence')!r}"}
+        # A confidence outside [0, 1] (a judge returning 30 for "30%") is a malformed vote,
+        # not a verdict: it would clear CONF_FLOOR and skew the majority average. Rejected,
+        # never heuristically converted or clamped.
+        if conf != conf or conf < 0.0 or conf > 1.0:  # NaN check via self-inequality
+            return {"error": f"confidence out of range: {conf}"}
         return {"category": cat, "confidence": conf,
                 "reasoning": str(parsed.get("reasoning", ""))[:600]}
 
@@ -238,7 +243,7 @@ async def adjudicate(candidate: str, diff: str, judge: str, sem: asyncio.Semapho
                      k: int = 3, vote_effort: str = "medium",
                      tiebreak_effort: str = "xhigh") -> dict:
     """Adjudicate one (provenance-stripped) finding: k votes at temperature 0, majority wins,
-    a full disagreement gets one tie-break call that sees all three reasonings.
+    a full disagreement gets one tie-break call that sees every vote's reasoning.
 
     `vote_effort` drives the k votes; `tiebreak_effort` the single tie-break call (and is
     what --second-pass raises). The effort ladder is low/medium/xhigh — "high" is not a
@@ -258,7 +263,8 @@ async def adjudicate(candidate: str, diff: str, judge: str, sem: asyncio.Semapho
             f"- {v.get('category', 'ERROR')} (conf {v.get('confidence', 0):.2f}): {v.get('reasoning', v.get('error', ''))}"
             for v in votes)
         try:
-            tb = await _one_vote(judge, TIEBREAK_PROMPT.format(diff=d, candidate=cand, votes=vote_lines),
+            tb = await _one_vote(judge, TIEBREAK_PROMPT.format(diff=d, candidate=cand,
+                                                                 votes=vote_lines, n=len(votes)),
                                  sem, effort=tiebreak_effort)
         except Exception as e:
             tb = {"error": f"{type(e).__name__}: {str(e)[:120]}"}
@@ -411,8 +417,10 @@ async def classify_batch_dedup(batch: str, targets: list[tuple[str, dict]], conc
             skipped += 1
             continue
         url = s["url"]
-        diffs.setdefault(url, fetch_diff(url)["diff"])
-        judges.setdefault(url, s.get("adjudicating_judge") or "gpt-5.2")
+        if url not in diffs:  # setdefault would re-read + re-parse the cached JSON per run
+            diffs[url] = fetch_diff(url)["diff"]
+        if url not in judges:
+            judges[url] = s.get("adjudicating_judge") or "gpt-5.2"
         for r in s.get("adjudication_records") or []:
             if r.get("primary_judge_verdict") in ("hallucination", "real_but_ungold"):
                 by_url.setdefault(url, []).append((rid, r, r["issue_text"]))

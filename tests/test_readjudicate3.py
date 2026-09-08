@@ -207,6 +207,14 @@ class TestFrozenFlipFixture(unittest.TestCase):
         self.assertEqual(hits[0]["v2_verdict"], "hallucination")
 
 
+
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+
+
 if __name__ == "__main__":
     unittest.main()
 
@@ -247,3 +255,30 @@ class TestEffortPlumbing(unittest.TestCase):
         for call_effort in ("medium", "xhigh"):
             self.assertIn(call_effort, ("low", "medium", "xhigh"))
         self.assertNotIn('"high"', rj.__doc__ or "")
+
+class TestConfidenceValidation(unittest.TestCase):
+    """A malformed confidence (30 for 30%, NaN, 1.5) is a vote ERROR, never a verdict —
+    it would clear CONF_FLOOR and skew the majority average (CodeRabbit PR-16 review)."""
+
+    def test_out_of_range_confidence_is_vote_error(self):
+        # end-to-end through adjudicate: the judge returns 30 for "30%" — every vote errors,
+        # no majority, no tie-break candidates -> unresolved, never a laundered verdict.
+        async def call(judge, system, user, effort="medium", max_tokens=1, execution_mode="api"):
+            return ({"category": "bug", "confidence": 30, "reasoning": "thirty percent?"}, 1, 1, {})
+        with mock.patch.object(rj, "call_model_json", side_effect=call):
+            out = asyncio.run(rj.adjudicate("f", "d", "j", asyncio.Semaphore(1), k=2))
+        self.assertEqual(out["verdict"], "unresolved")
+        self.assertIn("confidence out of range", out["rationale"])
+
+    def test_one_vote_rejects_bad_confidence(self):
+        async def call(judge, system, user, effort="medium", max_tokens=1, execution_mode="api"):
+            return ({"category": "bug", "confidence": 1.5, "reasoning": "x"}, 1, 1, {})
+        async def go():
+            return await rj._one_vote("j", "p", asyncio.Semaphore(1))
+        with mock.patch.object(rj, "call_model_json", side_effect=call):
+            v = asyncio.run(go())
+        self.assertIn("error", v)
+
+    def test_tiebreak_prompt_counts_votes(self):
+        self.assertIn("{n} prior verifiers", rj.TIEBREAK_PROMPT)
+        self.assertIn("The {n} prior verdicts", rj.TIEBREAK_PROMPT)

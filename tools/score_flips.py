@@ -78,10 +78,16 @@ async def main() -> int:
 
     sem = asyncio.Semaphore(args.concurrency)
     verdict_by_norm: dict[tuple[str, str], dict] = {}
+    # HARD GATE 1's evidence: every (url, normalized text) must map to exactly ONE cluster id.
+    # If the clustering ever split identical text, the set below has more than one member and
+    # the gate fails — no dict-overwrite can mask it.
+    clusters_by_norm: dict[tuple[str, str], set[int]] = {}
     n_calls = 0
     for url, texts in sorted(by_url.items()):
         diff = fetch_diff(url)["diff"]
         cids = rj.cluster_texts(texts)
+        for t, cid in zip(texts, cids):
+            clusters_by_norm.setdefault((url, rj.normalize_for_cluster(t)), set()).add(cid)
         rep_idx: dict[int, int] = {}
         for i, cid in enumerate(cids):
             rep_idx.setdefault(cid, i)
@@ -95,8 +101,12 @@ async def main() -> int:
         for t, cid in zip(texts, cids):
             verdict_by_norm[(url, rj.normalize_for_cluster(t))] = results[cid]
 
-    # HARD GATE 1: identical normalized text -> exactly one verdict (checked on OUTPUT)
+    # HARD GATE 1: identical normalized text -> exactly one cluster, exactly one verdict
     gate1_ok = True
+    for key, cids_seen in clusters_by_norm.items():
+        if len(cids_seen) > 1:
+            print(f"GATE 1 VIOLATION: {key[0]} normalized text split across clusters {sorted(cids_seen)}")
+            gate1_ok = False
     per_flip_verdicts = {}
     for f in flips:
         key = (f["url"], rj.normalize_for_cluster(f["issue_text"]))
