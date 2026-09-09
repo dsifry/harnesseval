@@ -22,6 +22,7 @@ Code Review Comment:
 
 Instructions:
 - Extract each distinct code issue, bug, or concern mentioned
+- Preserve any [BUG] or [ADVISORY] tag at the start of an issue verbatim if present in the comment
 - Each issue should be a single, specific problem (not a general observation)
 - Ignore meta-commentary like "I found 2 issues" - extract the actual issues
 - Ignore sign-offs, greetings, or formatting instructions

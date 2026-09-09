@@ -1,0 +1,52 @@
+{
+ "url": "https://github.com/getsentry/sentry/pull/77754",
+ "mrv_adv": 0,
+ "dchars": 16941,
+ "concerns": [
+  {
+   "advisory": "`AssignmentSource.queued` uses `timezone.now()` as a dataclass field default, which is evaluated once at class-definition (import) time, so every instance carries the process's import timestamp rather than a real queue time.",
+   "kind": "other",
+   "why": "src/sentry/integrations/services/assignment_source.py: `queued: datetime = timezone.now()`; `from_integration()` never sets it, and `test_to_dict` only asserts `queued is not None`, so the staleness is not caught."
+  },
+  {
+   "advisory": "The celery task `sync_assignee_outbound` gains a new `assignment_source_dict` kwarg, so during a rolling deploy new producers can enqueue tasks that old workers reject with an unexpected-keyword TypeError.",
+   "kind": "deploy/version-skew risk",
+   "why": "src/sentry/integrations/tasks/sync_assignee_outbound.py adds the kwarg, and src/sentry/integrations/utils/sync.py always includes `assignment_source_dict` in the `apply_async` kwargs dict (even when the value is None)."
+  },
+  {
+   "advisory": "`AssignmentSource` is serialized into task kwargs via `asdict()`, which emits a raw `datetime` for `queued`; this requires the broker serializer to handle datetimes, and on the way back `from_dict` will happily construct an instance whose `queued` is a string with no type validation.",
+   "kind": "api-contract",
+   "why": "`to_dict()` returns `asdict(self)` including `queued`, is passed to `apply_async(kwargs=...)`, and `from_dict` only guards against ValueError/TypeError from `cls(**input_dict)`."
+  },
+  {
+   "advisory": "`should_sync`'s signature changes on the public `IssueBasicIntegration`/`IssueSyncIntegration` mixins, so any subclass (in-repo or out-of-tree) that overrides `should_sync(self, attribute)` will raise TypeError once the new positional argument is passed.",
+   "kind": "api-contract",
+   "why": "src/sentry/integrations/mixins/issues.py changes both `should_sync` definitions, and sync_assignee_outbound.py now calls `installation.should_sync(\"outbound_assignee\", parsed_assignment_source)` positionally."
+  },
+  {
+   "advisory": "The abstract `sync_status_outbound` gains an `assignment_source` parameter, but nothing in this diff passes or consumes it, so the status-sync path has a widened contract that every provider implementation must absorb while gaining no cycle protection.",
+   "kind": "api-contract",
+   "why": "src/sentry/integrations/mixins/issues.py adds `assignment_source: AssignmentSource | None = None` to the abstract `sync_status_outbound`; no call site in the diff supplies it, and `sync_status_inbound` is untouched."
+  },
+  {
+   "advisory": "When `from_dict` fails to parse a persisted `assignment_source_dict`, the task silently falls back to `None` and performs the outbound sync, quietly re-enabling the very sync cycle this change exists to prevent, with no log or metric.",
+   "kind": "observability gap",
+   "why": "`AssignmentSource.from_dict` returns `None` inside a bare `except (ValueError, TypeError)`, and sync_assignee_outbound.py feeds that `None` straight into `should_sync(...)`."
+  },
+  {
+   "advisory": "The stated intent that other integrations should still propagate changes outward is asserted only in a comment \u2014 there is no test where the assignment source is a *different* integration than the target, so a future over-broad guard would not be caught.",
+   "kind": "test-coverage gap",
+   "why": "tests/sentry/models/test_groupassignee.py adds only the matching-integration case (`test_assignee_sync_outbound_assign_with_matching_source_integration`); the deassign path with a source and the non-matching-integration path have no coverage."
+  },
+  {
+   "advisory": "`sentry/models/groupassignee.py` now imports from `sentry.integrations.services` at module top level, breaking the file's existing convention of importing integrations code lazily inside functions and adding a models\u2192integrations import edge.",
+   "kind": "other",
+   "why": "The new top-level `from sentry.integrations.services.assignment_source import AssignmentSource` sits alongside `assign()`/`deassign()` bodies that still deliberately import `sync_group_assignee_outbound` at call time."
+  },
+  {
+   "advisory": "The inbound sync builds a fresh `AssignmentSource.from_integration(integration)` inside per-group loops rather than once outside, doing redundant work proportional to the number of affected groups.",
+   "kind": "performance consideration",
+   "why": "src/sentry/integrations/utils/sync.py constructs the source inside both the `for group in affected_groups` deassign loop and the per-group assign loop."
+  }
+ ]
+}

@@ -1,0 +1,67 @@
+{
+ "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/1",
+ "mrv_adv": 1,
+ "dchars": 3944,
+ "concerns": [
+  {
+   "advisory": "The client-side upload limit is now hardcoded to 10MB instead of reading `Discourse.SiteSettings['max_' + type + '_size_kb']`, so any site whose admin configured a smaller or larger limit will get client-side validation that disagrees with the server, and the `file_too_large` alert will quote 10240 KB rather than the site's real limit.",
+   "kind": "documentation/UX inconsistency",
+   "why": "app/assets/javascripts/discourse/lib/utilities.js:182 replaces the SiteSettings lookup with `var maxSizeKB = 10 * 1024;`"
+  },
+  {
+   "advisory": "The 413 handler now also reports a fixed 10MB limit, which will be wrong for deployments whose reverse proxy (`client_max_body_size`) or site setting caps uploads at a different size, giving users an unactionable error message.",
+   "kind": "documentation/UX inconsistency",
+   "why": "app/assets/javascripts/discourse/lib/utilities.js:246 changes the 413 branch to `var maxSizeKB = 10 * 1024;`"
+  },
+  {
+   "advisory": "The API URL-download path now fetches up to a hardcoded `10.megabytes` regardless of `SiteSetting.max_image_size_kb`, so an admin who deliberately lowered the limit can no longer bound how much data the server will pull from an attacker-supplied URL.",
+   "kind": "security-hardening note",
+   "why": "app/controllers/uploads_controller.rb:55 replaces `SiteSetting.max_image_size_kb.kilobytes` with `10.megabytes` in `FileHelper.download`"
+  },
+  {
+   "advisory": "The new downsize loop shells out to ImageMagick up to five times synchronously inside the upload request, which for a large image can add seconds of CPU-bound work per upload and multiplies worst-case request latency and web-worker occupancy.",
+   "kind": "performance consideration",
+   "why": "app/controllers/uploads_controller.rb:64-70 runs `while attempt > 0 && tempfile.size > ...` calling `OptimizedImage.downsize` in-request"
+  },
+  {
+   "advisory": "If five 80% passes still leave the file over `max_image_size_kb` (or if `convert` fails and `downsize` returns false), the loop exits silently and the oversized/unmodified file is passed to `Upload.create_for` with no log line or metric, so operators cannot tell how often resizing is failing.",
+   "kind": "observability gap",
+   "why": "app/controllers/uploads_controller.rb:65-69 ignores the return value of `OptimizedImage.downsize` and does not log on exhaustion of `attempt`"
+  },
+  {
+   "advisory": "`tempfile.size` is read from a cached `File`/`Tempfile` stat while the file is being rewritten in place by an external `convert` process, so the loop condition and the size ultimately handed to `Upload.create_for` may not reflect the rewritten file unless the object is reopened.",
+   "kind": "other",
+   "why": "app/controllers/uploads_controller.rb:66-71 reuses `tempfile.size` after `OptimizedImage.downsize(tempfile.path, tempfile.path, ...)` overwrites the path"
+  },
+  {
+   "advisory": "The animated-GIF branch in `optimize` is selected by matching `from =~ /\\.GIF$/i` on the source path, but the controller passes a `Tempfile` path that normally has no `.gif` extension, so `allow_animation: SiteSetting.allow_animated_thumbnails` will effectively never take effect on this path and uploaded animated GIFs may lose animation.",
+   "kind": "other",
+   "why": "app/models/optimized_image.rb:152 keys on the source filename extension while app/controllers/uploads_controller.rb:67 passes `tempfile.path`"
+  },
+  {
+   "advisory": "`OptimizedImage.downsize` is defined twice in the same class, so the earlier four-argument `(from, to, max_width, max_height, opts)` form is silently replaced by the three-argument `(from, to, dimensions, opts)` form; any in-tree or plugin caller still using the width/height arity will fail at call time.",
+   "kind": "API-contract or backward-compatibility note",
+   "why": "app/models/optimized_image.rb:145-150 defines `self.downsize` twice with different arities"
+  },
+  {
+   "advisory": "The public helper `OptimizedImage.dimensions(width, height)` is removed and `optimize` changes arity from `(operation, from, to, width, height, opts)` to `(operation, from, to, dimensions, opts)`, both of which are reachable from plugins and would break on upgrade without a deprecation shim.",
+   "kind": "API-contract or backward-compatibility note",
+   "why": "app/models/optimized_image.rb deletes `self.dimensions` and re-signatures `self.optimize`"
+  },
+  {
+   "advisory": "No tests accompany either the new iterative-downsize upload path or the changed `optimize`/`downsize` signatures, so neither the loop's termination behavior nor the ambiguous `downsize` overload is covered by regression tests.",
+   "kind": "test-coverage gap",
+   "why": "the diff touches uploads_controller.rb and optimized_image.rb with no spec changes"
+  },
+  {
+   "advisory": "Uploads are now silently re-encoded and shrunk when they exceed `max_image_size_kb` instead of being rejected, changing long-standing user-visible behavior with no notification that the stored image differs from the one submitted.",
+   "kind": "documentation/UX inconsistency",
+   "why": "the new block in app/controllers/uploads_controller.rb:63-70 is commented \"allow users to upload large images that will be automatically reduced\""
+  },
+  {
+   "advisory": "The server now accepts images far larger than `max_image_size_kb` (up to whatever the proxy allows) before resizing them, so the effective ingress limit and the disk/CPU exposure of the upload endpoint are decoupled from the setting admins use to reason about it.",
+   "kind": "security-hardening note",
+   "why": "the downsize block runs before `Upload.create_for`, converting an oversize rejection into accepted work"
+  }
+ ]
+}

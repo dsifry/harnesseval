@@ -1,0 +1,67 @@
+{
+ "url": "https://github.com/keycloak/keycloak/pull/32918",
+ "mrv_adv": 2,
+ "dchars": 23073,
+ "concerns": [
+  {
+   "advisory": "The change to `LoginFilter.getLoginPredicate()` in server-spi alters behavior for every caller of that shared predicate, not just the new login cache \u2014 org-linked IDPs without `BROKER_PUBLIC=true` are now filtered out everywhere the predicate is used (including JPA/map store `getForLogin` implementations and any extension that calls it).",
+   "kind": "API-contract or backward-compatibility note",
+   "why": "server-spi/.../IdentityProviderStorageProvider.java: `.and(idp -> idp.getOrganizationId() == null || Boolean.parseBoolean(idp.getConfig().get(OrganizationModel.BROKER_PUBLIC)))` added to the public static `getLoginPredicate()`."
+  },
+  {
+   "advisory": "`getForLogin` now returns models resolved via `session.identityProviders().getById(...)` and wrapped as organization-aware, which can flip `isEnabled()`, so the returned stream no longer satisfies the login predicate it was cached under \u2014 callers must re-filter, and only the freemarker bean was updated to do so.",
+   "kind": "API-contract or backward-compatibility note",
+   "why": "OrganizationAwareIdentityProviderBean adds `idp.isEnabled() &&` with the comment \"re-check isEnabled as idp might have been wrapped\", while other consumers of `getForLogin` are unchanged."
+  },
+  {
+   "advisory": "The login cache key is per (realm, FetchMode) but a single `IdentityProviderListQuery` holds per-organization result sets, so querying a not-yet-cached organization invalidates and rebuilds the whole shared entry \u2014 in realms with many organizations this can thrash the cache and repeatedly re-hit the DB.",
+   "kind": "performance consideration",
+   "why": "`getForLogin`: `if (cached == null) { cache.invalidateObject(cacheKey); ... new IdentityProviderListQuery(..., query); }` under `cacheKeyForLogin(realm, mode)` which excludes organizationId."
+  },
+  {
+   "advisory": "Any create/remove/update of a login-qualifying IDP invalidates the login caches for all FetchModes and therefore for every organization in the realm, so a single org's IDP change discards cached login lists for all other orgs.",
+   "kind": "performance consideration",
+   "why": "`registerIDPLoginInvalidation` / `registerIDPLoginInvalidationOnUpdate` loop `for (FetchMode mode : FetchMode.values())` and invalidate `cacheKeyForLogin(getRealm(), mode)` unconditionally."
+  },
+  {
+   "advisory": "`remove(alias)` now performs an unconditional `idpDelegate.getByAlias(alias)` delegate/DB lookup on every removal, including the previously cache-served path that avoided it.",
+   "kind": "performance consideration",
+   "why": "`IdentityProviderModel storedIdp = idpDelegate.getByAlias(alias);` was hoisted above the `if (isInvalid(cacheKey))` branch."
+  },
+  {
+   "advisory": "`create()` invalidates the login caches for all FetchModes before delegating, using a model that cannot yet have an organization link, so newly created realm-level IDPs needlessly discard the ORG_ONLY cached lists.",
+   "kind": "performance consideration",
+   "why": "`create(...)` calls `registerIDPLoginInvalidation(model)` prior to `idpDelegate.create(model)`."
+  },
+  {
+   "advisory": "When a cached internal ID no longer resolves to an IDP, the code silently invalidates and falls back to the delegate with no logging or metric, so a persistently stale login cache degrades into full DB reads on every login page render without any signal.",
+   "kind": "observability gap",
+   "why": "`if (idp == null) { realmCache.registerInvalidation(cacheKey); return idpDelegate.getForLogin(...); }` in `getForLogin`."
+  },
+  {
+   "advisory": "During a rolling upgrade, old nodes use the pre-change login predicate and will not register login-cache invalidations for org-linked non-public IDPs that new nodes consider cache-relevant, so new nodes can serve stale login IDP lists until restart.",
+   "kind": "deploy/version-skew risk",
+   "why": "Invalidation decisions in `registerIDPLoginInvalidation*` depend on the newly redefined `getLoginPredicate()`, while cluster invalidation events are produced by whichever node handles the write."
+  },
+  {
+   "advisory": "The new test's cleanup registers removal of a hard-coded alias `\"alias\"` rather than the aliases actually created, so the ~21 IDPs and org links created by this test are never cleaned up and may leak into other tests in the class.",
+   "kind": "test-coverage gap",
+   "why": "`getCleanup().addCleanup(testRealm().identityProviders().get(\"alias\")::remove);` appears twice while the created aliases are `idp-alias-<i>`."
+  },
+  {
+   "advisory": "The new test never covers removing or creating an IDP that *is* available for login, so the invalidation paths in `create()` and `remove()` (as opposed to `update()`) are unverified.",
+   "kind": "test-coverage gap",
+   "why": "Step 1 only removes `idp-alias-1` (disabled, non-login) and creates a `hideOnLogin=true` IDP, then asserts caches are *not* invalidated; steps 3 and 4 exercise only `update`."
+  },
+  {
+   "advisory": "The test asserts cache state only within a single node/session and does not exercise cross-node invalidation, leaving the clustered behavior of the new `.idp.login` cache keys unverified.",
+   "kind": "test-coverage gap",
+   "why": "All assertions run inside `getTestingClient().server(TEST_REALM_NAME).run(...)` against a single `RealmCacheSession`."
+  },
+  {
+   "advisory": "The javadoc on `registerIDPLoginInvalidationOnUpdate` documents non-invalidation conditions but omits that the login-qualification check itself depends on the `BROKER_PUBLIC` config flag, so a maintainer reading it may not realize toggling that config on an org-linked IDP is what drives invalidation.",
+   "kind": "documentation/UX inconsistency",
+   "why": "The javadoc lists only \"login IDP\" status and organization link, while `getLoginPredicate()` was extended with the `OrganizationModel.BROKER_PUBLIC` condition in the same PR."
+  }
+ ]
+}

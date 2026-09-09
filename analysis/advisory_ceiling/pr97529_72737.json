@@ -1,0 +1,57 @@
+{
+ "url": "https://github.com/grafana/grafana/pull/97529",
+ "mrv_adv": 0,
+ "dchars": 9530,
+ "concerns": [
+  {
+   "advisory": "`NewResourceServer` now calls `s.Init(ctx)` inline, so building the entire search index moves from first-request (lazy) to process construction \u2014 Grafana startup will block for the full index build and any init failure becomes a hard startup failure instead of a per-request error.",
+   "kind": "deploy/version-skew risk",
+   "why": "pkg/storage/unified/resource/server.go: new `err := s.Init(ctx); if err != nil { return nil, err }` block in NewResourceServer, paired with removal of `s.Init(ctx)` from Create/Update/Delete/Read/List/Watch/Search/History/Origin/IsHealthy/PutBlob/GetBlob."
+  },
+  {
+   "advisory": "Init is now driven by the context handed to `NewResourceServer` (a startup/wiring context) rather than a per-request context, so index build cancellation, deadlines, and any auth/tracing values now come from construction scope \u2014 worth confirming that ctx outlives and is permissive enough for a long index build.",
+   "kind": "other",
+   "why": "`s.Init(ctx)` in NewResourceServer replaces the previous per-RPC `s.Init(ctx)` calls that used request contexts."
+  },
+  {
+   "advisory": "The init ordering swap builds the search index before `initWatcher()` starts, so writes landing between the index snapshot and watcher subscription have no path into the index unless the watcher replays from the index's resource version \u2014 the resulting freshness window should be verified.",
+   "kind": "other",
+   "why": "pkg/storage/unified/resource/server.go: the `s.initWatcher()` block was moved from before to after `s.search.init(ctx)`."
+  },
+  {
+   "advisory": "`bleveBackend.BuildIndex` no longer holds `cacheMu` across the build, so two concurrent BuildIndex calls for the same key can both construct an index (duplicate CPU/disk work, duplicate `IndexTenants` metric increments, and one index silently discarded on cache overwrite).",
+   "kind": "performance consideration",
+   "why": "pkg/storage/unified/search/bleve.go: the function-scoped `b.cacheMu.Lock(); defer b.cacheMu.Unlock()` was replaced with a narrow lock around only `b.cache[key] = idx`."
+  },
+  {
+   "advisory": "`IsHealthy` no longer invokes Init, so the health endpoint no longer surfaces initialization errors; with init moved to construction a failed init prevents the server from existing at all, but any future lazy/retry path would report healthy while uninitialized.",
+   "kind": "observability gap",
+   "why": "pkg/storage/unified/resource/server.go: removal of the `s.Init(ctx)` guard from `IsHealthy`."
+  },
+  {
+   "advisory": "The exported `Init` method and its `sync.Once` remain in the public surface but are now effectively internal to construction; external callers that still invoke `Init` get a no-op, which is a silent behavior change for any out-of-tree consumer of `ResourceServer`.",
+   "kind": "API-contract or backward-compatibility note",
+   "why": "`func (s *server) Init(ctx context.Context) error` is retained and unchanged in signature while all in-repo call sites except NewResourceServer are deleted."
+  },
+  {
+   "advisory": "No test accompanies the move of initialization from per-request to construction, so neither the new startup-failure path (`NewResourceServer` returning an error) nor the reordered watcher/index sequence is covered.",
+   "kind": "test-coverage gap",
+   "why": "The diff changes server.go initialization semantics but the only test file touched (module_server_test.go) merely adds a skip."
+  },
+  {
+   "advisory": "An integration test is disabled for postgres with a TODO and no tracking issue, and the stated reason (\"works locally\", fails in Drone) means a real environment-specific failure is being suppressed rather than diagnosed.",
+   "kind": "test-coverage gap",
+   "why": "pkg/server/module_server_test.go: new `if dbType == \"postgres\" { t.Skip(...) }` with `// TODO - fix this test for postgres`."
+  },
+  {
+   "advisory": "The new per-init `s.log.Info(\"search index initialized\", ...)` calls `s.search.TotalDocs()` on the startup path; if that implementation walks or queries every per-tenant index it adds cost to an already blocking startup step.",
+   "kind": "performance consideration",
+   "why": "pkg/storage/unified/resource/search.go: added `s.log.Info(\"search index initialized\", \"duration_secs\", end-start, \"total_docs\", s.search.TotalDocs())`."
+  },
+  {
+   "advisory": "Correcting `_, span :=` to `ctx, span :=` in `searchSupport.init`, `searchSupport.build`, and `backend.GetResourceStats` re-parents all downstream spans under these new spans, which changes existing trace shapes and can increase trace volume/cardinality for anyone with dashboards or sampling rules keyed on the old flat structure.",
+   "kind": "observability gap",
+   "why": "Three `_, span := ...tracer.Start(ctx, ...)` sites changed to `ctx, span := ...` in search.go and sql/backend.go."
+  }
+ ]
+}

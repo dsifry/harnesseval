@@ -1,0 +1,52 @@
+{
+ "url": "https://github.com/calcom/cal.com/pull/14943",
+ "mrv_adv": 0,
+ "dchars": 2971,
+ "concerns": [
+  {
+   "advisory": "The new `deleteMany` OR-branch (`retryCount: { gt: 1 }`) is not scoped by `method`, so the SMS cron will delete any WorkflowReminder row of any method (EMAIL, WHATSAPP, etc.) whose retryCount exceeds 1 \u2014 harmless today only because no other scheduler writes retryCount, but a latent cross-method coupling hazard.",
+   "kind": "other",
+   "why": "The `OR` array's second branch contains only `retryCount: { gt: 1 }`, with no `method: WorkflowMethods.SMS` and no `scheduledDate` bound, unlike the first branch."
+  },
+  {
+   "advisory": "Reminders that exhaust their retries are hard-deleted with only a `console.log(...)` of the error, leaving no metric, alert, or persisted failure state, so a sustained Twilio/provider outage would silently drop customer-facing SMS reminders with no signal.",
+   "kind": "observability gap",
+   "why": "The catch block increments retryCount then only `console.log`s; the delete branch at the top of the handler removes those rows on the next cron run with no record of why."
+  },
+  {
+   "advisory": "retryCount is updated via a read-modify-write (`reminder.retryCount + 1`) rather than an atomic `{ increment: 1 }`, so overlapping or retried cron invocations processing the same reminder can lose increments and let a permanently failing reminder retry more times than intended.",
+   "kind": "performance consideration",
+   "why": "Both new `prisma.workflowReminder.update` calls set `data: { retryCount: reminder.retryCount + 1 }` from the value read earlier in the handler."
+  },
+  {
+   "advisory": "The new `prisma.workflowReminder.update` inside the `catch` block is itself un-guarded and awaited, so a database error while recording the retry will propagate out of the catch and abort processing of all remaining reminders in the batch.",
+   "kind": "other",
+   "why": "The `await prisma.workflowReminder.update(...)` is the first statement in the `catch` and is not wrapped in its own try/catch."
+  },
+  {
+   "advisory": "The retry cap is an unnamed literal `gt: 1` in a delete query far from the two increment sites, meaning the effective policy (two attempts, cleanup deferred to the next cron tick) is undocumented and easy to break when either side is edited.",
+   "kind": "documentation/UX inconsistency",
+   "why": "`retryCount: { gt: 1 }` appears in the `deleteMany` at the top of the handler with no constant, comment, or reference to the increment logic added below."
+  },
+  {
+   "advisory": "The shared `select` object was not extended; instead `retryCount: true` is spliced in at this one call site and the result force-cast to `PartialWorkflowReminder & { retryCount: number }`, so the type no longer derives from the query and will silently go stale if the select or schema changes.",
+   "kind": "API-contract note",
+   "why": "`select: { ...select, retryCount: true }` combined with `as (PartialWorkflowReminder & { retryCount: number })[]`."
+  },
+  {
+   "advisory": "No tests accompany the retry logic, so neither the increment-on-failure path, the increment-on-missing-sid path, nor the deletion-at-threshold path has regression coverage for a change that can permanently discard scheduled customer reminders.",
+   "kind": "test-coverage gap",
+   "why": "The diff adds three new behavioral branches in scheduleSMSReminders.ts and a schema column, with no test files touched."
+  },
+  {
+   "advisory": "The new delete branch filters on `retryCount`, which has no index, so this cron query becomes a full-table scan of WorkflowReminder that grows with table size on every invocation.",
+   "kind": "performance consideration",
+   "why": "The migration adds `retryCount` with no index, and the schema change adds no `@@index([retryCount])` alongside the existing `@@index` entries."
+  },
+  {
+   "advisory": "Deploy ordering matters: application code that reads and writes `retryCount` will fail against a database where the new migration has not yet been applied, so the migration must land strictly before the app rollout.",
+   "kind": "deploy/version-skew risk",
+   "why": "The handler selects and updates `retryCount` while the column is introduced by the new `20240508134359_add_retry_count_to_workflow_reminder` migration."
+  }
+ ]
+}

@@ -1,0 +1,448 @@
+{
+ "run_id": "0add65083ad8",
+ "url": "https://github.com/calcom/cal.com/pull/7232",
+ "framework": "compound-realistic",
+ "model": "glm-5.3-background",
+ "effort": "low",
+ "adjudicator_version": 3,
+ "cross_run_dedup": {
+  "batch": "20260909-ce-bg50-lh",
+  "url": "https://github.com/calcom/cal.com/pull/7232",
+  "n_clusters": 10
+ },
+ "original": {
+  "tp": 3,
+  "fn": 0,
+  "n_real_ungold": 27,
+  "n_hallucination": 4,
+  "adj_p": 0.42857142857142855,
+  "incr": 1.0
+ },
+ "corrected": {
+  "n_unmatched": 31,
+  "rejudged": 31,
+  "n_bug_ungold": 26,
+  "n_important": 4,
+  "n_true_hallucination": 1,
+  "n_unresolved": 0,
+  "n_hidden_findings_unmatched": 30,
+  "waste_precision": 0.75,
+  "flips": {
+   "hallucination->bug": 1,
+   "hallucination->hallucination": 1,
+   "hallucination->important_non_bug": 2,
+   "real_but_ungold->bug": 25,
+   "real_but_ungold->important_non_bug": 2
+  },
+  "judge": "gpt-5.2",
+  "diff_chars": 27899,
+  "wall_s": 406.0,
+  "n_clusters": 10,
+  "dedup_savings": 21
+ },
+ "records": [
+  {
+   "issue_text": "scheduleEmailReminders.ts cancellation loop aborts on null referenceId: query lacks referenceId not-null filter, sends batch_id: null to SendGrid causing 400 that exits the loop and blocks cancellation of all subsequent reminders",
+   "source_lens": "compound-persona/correctness",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.87,
+   "rationale": "In `scheduleEmailReminders.ts`, `remindersToCancel` is fetched with `where: { cancelled: true, scheduledDate: { lte: ... } }` and **does not filter out null `referenceId`**. The cancellation loop then unconditionally calls SendGrid with `batch_id: reminder.referenceId`, so a reminder with `referenceId === null` would send `batch_id: null` and likely error. Because the entire `for (const reminder of remindersToCancel) { await client.request(...) ... }` is wrapped in a single `try { ... } catch { ... }`, the first such error would jump to `catch` and abort processing, preventing cancellation/del",
+   "stripped_text": "scheduleEmailReminders.ts cancellation loop aborts on null referenceId: query lacks referenceId not-null filter, sends batch_id: null to SendGrid causing 400 that exits the loop and blocks cancellation of all subsequent reminders",
+   "cluster": {
+    "id": 9,
+    "size": 9
+   }
+  },
+  {
+   "issue_text": "handleCancelBooking.ts and bookings.tsx: cancellation promises fired without await; request may return before completion and serverless functions killed mid-flight, leaving reminders active",
+   "source_lens": "compound-persona/correctness",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "In both `handleCancelBooking.ts` and `packages/trpc/server/routers/viewer/bookings.tsx`, the code now calls async reminder-cancellation functions inside `forEach` without awaiting them, and it also removed the prior `Promise.all` over reminder delete promises.\n\n- `handleCancelBooking.ts`: replaced collecting `remindersToDelete` + `Promise.all(...)` with direct calls:\n  - `deleteScheduledEmailReminder(reminder.id, reminder.referenceId);` / `deleteScheduledSMSReminder(reminder.id, reminder.referenceId);` inside nested `forEach`, but `prismaPromises` no longer includes reminder work (`const prism",
+   "stripped_text": "handleCancelBooking.ts and bookings.tsx: cancellation promises fired without await; request may return before completion and serverless functions killed mid-flight, leaving reminders active",
+   "cluster": {
+    "id": 7,
+    "size": 12
+   }
+  },
+  {
+   "issue_text": "emailReminderManager.ts non-immediate path only sets cancelled: true in DB and relies on cron to cancel at SendGrid within the final hour; cron outage means emails sent for cancelled bookings",
+   "source_lens": "compound-persona/correctness",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.78,
+   "rationale": "The diff changes `deleteScheduledEmailReminder` so the default (non-`immediateDelete`) path does **not** cancel the SendGrid scheduled send; it only marks the DB row as `cancelled: true` (`emailReminderManager.ts` now does `prisma.workflowReminder.update({ data: { cancelled: true } })`). Actual SendGrid cancellation is deferred to `scheduleEmailReminders.ts`, which periodically finds `workflowReminder` rows with `cancelled: true` and `scheduledDate <= now+1h` and then calls `/v3/user/scheduled_sends` to cancel. This introduces a real failure mode: if that job/endpoint is not run (e.g., cron ou",
+   "stripped_text": "emailReminderManager.ts non-immediate path only sets cancelled: true in DB and relies on cron to cancel at SendGrid within the final hour; cron outage means emails sent for cancelled bookings",
+   "cluster": {
+    "id": 2,
+    "size": 1
+   }
+  },
+  {
+   "issue_text": "prisma.workflowReminder.update failure in emailReminderManager is swallowed by console.log so the cancelled flag can fail to persist with no alert",
+   "source_lens": "compound-persona/correctness",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.84,
+   "rationale": "In `emailReminderManager.ts`, `deleteScheduledEmailReminder` now persists cancellation by calling `await prisma.workflowReminder.update({ where: { id: reminderId }, data: { cancelled: true } })`, but the whole function is wrapped in `try/catch` that only does `console.log(...)` and does not rethrow/return an error. This means a failure of `prisma.workflowReminder.update` (or the SendGrid cancel call in the `immediateDelete` path) will be silently swallowed beyond a log, potentially leaving `cancelled` unset with no surfaced alert to the caller.",
+   "stripped_text": "prisma.workflowReminder.update failure in emailReminderManager is swallowed by console.log so the cancelled flag can fail to persist with no alert",
+   "cluster": {
+    "id": 3,
+    "size": 2
+   }
+  },
+  {
+   "issue_text": "emailReminderManager.ts: all error modes including P2025 collapse into console.log with no rethrow, so genuine failures to mark cancelled leave reminders on track to send silently",
+   "source_lens": "compound-persona/correctness",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.84,
+   "rationale": "In `emailReminderManager.ts`, `deleteScheduledEmailReminder` now persists cancellation by calling `await prisma.workflowReminder.update({ where: { id: reminderId }, data: { cancelled: true } })`, but the whole function is wrapped in `try/catch` that only does `console.log(...)` and does not rethrow/return an error. This means a failure of `prisma.workflowReminder.update` (or the SendGrid cancel call in the `immediateDelete` path) will be silently swallowed beyond a log, potentially leaving `cancelled` unset with no surfaced alert to the caller.",
+   "stripped_text": "emailReminderManager.ts: all error modes including P2025 collapse into console.log with no rethrow, so genuine failures to mark cancelled leave reminders on track to send silently",
+   "cluster": {
+    "id": 3,
+    "size": 2
+   }
+  },
+  {
+   "issue_text": "workflows.tsx disabled-workflow email reminders only flagged cancelled and persist indefinitely in DB since cron only deletes them within the 1-hour window",
+   "source_lens": "compound-persona/correctness",
+   "old_verdict": "hallucination",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.66,
+   "rationale": "In workflows.tsx, many cancellation paths now call `deleteScheduledEmailReminder(reminder.id, reminder.referenceId)` without `immediateDelete` (e.g. disabled event types / edited steps), and `deleteScheduledEmailReminder` was changed to only `update({ data: { cancelled: true } })` when `referenceId` exists and `immediateDelete` is falsy. The only deletion/actual cancel+delete behavior shown is in `scheduleEmailReminders.ts`, which queries `cancelled: true` reminders only when `scheduledDate <= now + 1 hour` and then cancels and deletes them. So cancelled email reminders can remain in the DB fo",
+   "stripped_text": "workflows.tsx disabled-workflow email reminders only flagged cancelled and persist indefinitely in DB since cron only deletes them within the 1-hour window",
+   "cluster": {
+    "id": 5,
+    "size": 1
+   }
+  },
+  {
+   "issue_text": "workflows.tsx ~line 569: remindersToUpdate.forEach(async ...) floating promises; non-immediate email path can leave old scheduled reminders active while new ones are scheduled, sending both old and new reminders",
+   "source_lens": "compound-persona/correctness",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "In both `handleCancelBooking.ts` and `packages/trpc/server/routers/viewer/bookings.tsx`, the code now calls async reminder-cancellation functions inside `forEach` without awaiting them, and it also removed the prior `Promise.all` over reminder delete promises.\n\n- `handleCancelBooking.ts`: replaced collecting `remindersToDelete` + `Promise.all(...)` with direct calls:\n  - `deleteScheduledEmailReminder(reminder.id, reminder.referenceId);` / `deleteScheduledSMSReminder(reminder.id, reminder.referenceId);` inside nested `forEach`, but `prismaPromises` no longer includes reminder work (`const prism",
+   "stripped_text": "workflows.tsx ~line 569: remindersToUpdate.forEach(async ...) floating promises; non-immediate email path can leave old scheduled reminders active while new ones are scheduled, sending both old and new reminders",
+   "cluster": {
+    "id": 7,
+    "size": 12
+   }
+  },
+  {
+   "issue_text": "handleNewBooking.ts reschedule: un-awaited cancel can race with scheduling new reminders for the replacement booking, and failures are silent",
+   "source_lens": "compound-persona/correctness",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "In both `handleCancelBooking.ts` and `packages/trpc/server/routers/viewer/bookings.tsx`, the code now calls async reminder-cancellation functions inside `forEach` without awaiting them, and it also removed the prior `Promise.all` over reminder delete promises.\n\n- `handleCancelBooking.ts`: replaced collecting `remindersToDelete` + `Promise.all(...)` with direct calls:\n  - `deleteScheduledEmailReminder(reminder.id, reminder.referenceId);` / `deleteScheduledSMSReminder(reminder.id, reminder.referenceId);` inside nested `forEach`, but `prismaPromises` no longer includes reminder work (`const prism",
+   "stripped_text": "handleNewBooking.ts reschedule: un-awaited cancel can race with scheduling new reminders for the replacement booking, and failures are silent",
+   "cluster": {
+    "id": 7,
+    "size": 12
+   }
+  },
+  {
+   "issue_text": "scheduleEmailReminders.ts: cancelled reminders with past scheduledDate are only deleted if SendGrid cancel succeeds; on error rows accumulate forever and cancels are retried eternally",
+   "source_lens": "compound-persona/correctness",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.87,
+   "rationale": "In `scheduleEmailReminders.ts`, `remindersToCancel` is fetched with `where: { cancelled: true, scheduledDate: { lte: ... } }` and **does not filter out null `referenceId`**. The cancellation loop then unconditionally calls SendGrid with `batch_id: reminder.referenceId`, so a reminder with `referenceId === null` would send `batch_id: null` and likely error. Because the entire `for (const reminder of remindersToCancel) { await client.request(...) ... }` is wrapped in a single `try { ... } catch { ... }`, the first such error would jump to `catch` and abort processing, preventing cancellation/del",
+   "stripped_text": "scheduleEmailReminders.ts: cancelled reminders with past scheduledDate are only deleted if SendGrid cancel succeeds; on error rows accumulate forever and cancels are retried eternally",
+   "cluster": {
+    "id": 9,
+    "size": 9
+   }
+  },
+  {
+   "issue_text": "Single SendGrid error aborts the loop causing the whole batch to be re-fetched and re-cancelled on the next run, burning API quota",
+   "source_lens": "compound-persona/performance",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.87,
+   "rationale": "In `scheduleEmailReminders.ts`, `remindersToCancel` is fetched with `where: { cancelled: true, scheduledDate: { lte: ... } }` and **does not filter out null `referenceId`**. The cancellation loop then unconditionally calls SendGrid with `batch_id: reminder.referenceId`, so a reminder with `referenceId === null` would send `batch_id: null` and likely error. Because the entire `for (const reminder of remindersToCancel) { await client.request(...) ... }` is wrapped in a single `try { ... } catch { ... }`, the first such error would jump to `catch` and abort processing, preventing cancellation/del",
+   "stripped_text": "Single SendGrid error aborts the loop causing the whole batch to be re-fetched and re-cancelled on the next run, burning API quota",
+   "cluster": {
+    "id": 9,
+    "size": 9
+   }
+  },
+  {
+   "issue_text": "Fire-and-forget async loops in handleNewBooking.ts:964-972 and bookings.tsx:487-494 with no error visibility or retry orchestration",
+   "source_lens": "compound-persona/performance",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "In both `handleCancelBooking.ts` and `packages/trpc/server/routers/viewer/bookings.tsx`, the code now calls async reminder-cancellation functions inside `forEach` without awaiting them, and it also removed the prior `Promise.all` over reminder delete promises.\n\n- `handleCancelBooking.ts`: replaced collecting `remindersToDelete` + `Promise.all(...)` with direct calls:\n  - `deleteScheduledEmailReminder(reminder.id, reminder.referenceId);` / `deleteScheduledSMSReminder(reminder.id, reminder.referenceId);` inside nested `forEach`, but `prismaPromises` no longer includes reminder work (`const prism",
+   "stripped_text": "Fire-and-forget async loops in handleNewBooking.ts:964-972 and bookings.tsx:487-494 with no error visibility or retry orchestration",
+   "cluster": {
+    "id": 7,
+    "size": 12
+   }
+  },
+  {
+   "issue_text": "Per-reminder single-row DELETE queries replace the previously batched deleteMany, multiplying DB round-trips for bookings with many reminders",
+   "source_lens": "compound-persona/performance",
+   "old_verdict": "hallucination",
+   "new_verdict": "hallucination",
+   "confidence": 0.78,
+   "rationale": "The diff does not show a switch from a single batched DB delete to per-reminder deletes. Previously, the code already issued one Prisma query per reminder by doing `prisma.workflowReminder.deleteMany({ where: { id: reminder.id } })` inside the nested `forEach` and then `await Promise.all(remindersToDelete);` (e.g. in `handleCancelBooking.ts` and `viewer/bookings.tsx`). That is still N round-trips for N reminders. The change replaces those per-reminder `deleteMany` calls with per-reminder `deleteScheduled*Reminder(...)` calls, but it does not introduce a new multiplication of DB round-trips com",
+   "stripped_text": "Per-reminder single-row DELETE queries replace the previously batched deleteMany, multiplying DB round-trips for bookings with many reminders",
+   "cluster": {
+    "id": 11,
+    "size": 1
+   }
+  },
+  {
+   "issue_text": "immediateDelete=true path in emailReminderManager.ts cancels SendGrid batch but returns early without deleting or flag-canceling the DB row, leaving orphan rows with cancelled=false",
+   "source_lens": "compound-persona/api-contract",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "In `emailReminderManager.ts`, `deleteScheduledEmailReminder(reminderId, referenceId, immediateDelete?)` has an `if (immediateDelete) { ... cancel send ... return; }` branch that performs the SendGrid cancel but exits without deleting the `WorkflowReminder` row or marking it `cancelled: true`. This is visible in the diff: the non-immediate path does `prisma.workflowReminder.update({ data: { cancelled: true } })`, and the `!referenceId` path deletes the row, but the `immediateDelete` path does neither. That can leave DB rows with `cancelled` still `null/false` even though the external batch was ",
+   "stripped_text": "immediateDelete=true path in emailReminderManager.ts cancels SendGrid batch but returns early without deleting or flag-canceling the DB row, leaving orphan rows with cancelled=false",
+   "cluster": {
+    "id": 12,
+    "size": 2
+   }
+  },
+  {
+   "issue_text": "Useless try/catch around async forEach in handleNewBooking.ts cannot catch anything since promises are never awaited, making the error log dead code",
+   "source_lens": "compound-persona/api-contract",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "In both `handleCancelBooking.ts` and `packages/trpc/server/routers/viewer/bookings.tsx`, the code now calls async reminder-cancellation functions inside `forEach` without awaiting them, and it also removed the prior `Promise.all` over reminder delete promises.\n\n- `handleCancelBooking.ts`: replaced collecting `remindersToDelete` + `Promise.all(...)` with direct calls:\n  - `deleteScheduledEmailReminder(reminder.id, reminder.referenceId);` / `deleteScheduledSMSReminder(reminder.id, reminder.referenceId);` inside nested `forEach`, but `prismaPromises` no longer includes reminder work (`const prism",
+   "stripped_text": "Useless try/catch around async forEach in handleNewBooking.ts cannot catch anything since promises are never awaited, making the error log dead code",
+   "cluster": {
+    "id": 7,
+    "size": 12
+   }
+  },
+  {
+   "issue_text": "If a SendGrid cancel fails mid-loop in scheduleEmailReminders.ts, Promise.all deletes are skipped for already-cancelled entries, leaving partially processed state on retry",
+   "source_lens": "compound-persona/api-contract",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.87,
+   "rationale": "In `scheduleEmailReminders.ts`, `remindersToCancel` is fetched with `where: { cancelled: true, scheduledDate: { lte: ... } }` and **does not filter out null `referenceId`**. The cancellation loop then unconditionally calls SendGrid with `batch_id: reminder.referenceId`, so a reminder with `referenceId === null` would send `batch_id: null` and likely error. Because the entire `for (const reminder of remindersToCancel) { await client.request(...) ... }` is wrapped in a single `try { ... } catch { ... }`, the first such error would jump to `catch` and abort processing, preventing cancellation/del",
+   "stripped_text": "If a SendGrid cancel fails mid-loop in scheduleEmailReminders.ts, Promise.all deletes are skipped for already-cancelled entries, leaving partially processed state on retry",
+   "cluster": {
+    "id": 9,
+    "size": 9
+   }
+  },
+  {
+   "issue_text": "Rows with cancelled=true and null referenceId in scheduleEmailReminders.ts cron will send batch_id: null to SendGrid, throw, and block remaining loop iterations forever",
+   "source_lens": "compound-persona/api-contract",
+   "old_verdict": "hallucination",
+   "new_verdict": "bug",
+   "confidence": 0.87,
+   "rationale": "In `scheduleEmailReminders.ts`, `remindersToCancel` is fetched with `where: { cancelled: true, scheduledDate: { lte: ... } }` and **does not filter out null `referenceId`**. The cancellation loop then unconditionally calls SendGrid with `batch_id: reminder.referenceId`, so a reminder with `referenceId === null` would send `batch_id: null` and likely error. Because the entire `for (const reminder of remindersToCancel) { await client.request(...) ... }` is wrapped in a single `try { ... } catch { ... }`, the first such error would jump to `catch` and abort processing, preventing cancellation/del",
+   "stripped_text": "Rows with cancelled=true and null referenceId in scheduleEmailReminders.ts cron will send batch_id: null to SendGrid, throw, and block remaining loop iterations forever",
+   "cluster": {
+    "id": 9,
+    "size": 9
+   }
+  },
+  {
+   "issue_text": "Error in cancel loop aborts remaining cancellations with no per-reminder try/catch isolation, permanently blocking later cancellations",
+   "source_lens": "compound-persona/reliability",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.87,
+   "rationale": "In `scheduleEmailReminders.ts`, `remindersToCancel` is fetched with `where: { cancelled: true, scheduledDate: { lte: ... } }` and **does not filter out null `referenceId`**. The cancellation loop then unconditionally calls SendGrid with `batch_id: reminder.referenceId`, so a reminder with `referenceId === null` would send `batch_id: null` and likely error. Because the entire `for (const reminder of remindersToCancel) { await client.request(...) ... }` is wrapped in a single `try { ... } catch { ... }`, the first such error would jump to `catch` and abort processing, preventing cancellation/del",
+   "stripped_text": "Error in cancel loop aborts remaining cancellations with no per-reminder try/catch isolation, permanently blocking later cancellations",
+   "cluster": {
+    "id": 9,
+    "size": 9
+   }
+  },
+  {
+   "issue_text": "Fire-and-forget reminder cancellation in forEach async callbacks is never awaited, causing races with response and reschedule flow",
+   "source_lens": "compound-persona/reliability",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "In both `handleCancelBooking.ts` and `packages/trpc/server/routers/viewer/bookings.tsx`, the code now calls async reminder-cancellation functions inside `forEach` without awaiting them, and it also removed the prior `Promise.all` over reminder delete promises.\n\n- `handleCancelBooking.ts`: replaced collecting `remindersToDelete` + `Promise.all(...)` with direct calls:\n  - `deleteScheduledEmailReminder(reminder.id, reminder.referenceId);` / `deleteScheduledSMSReminder(reminder.id, reminder.referenceId);` inside nested `forEach`, but `prismaPromises` no longer includes reminder work (`const prism",
+   "stripped_text": "Fire-and-forget reminder cancellation in forEach async callbacks is never awaited, causing races with response and reschedule flow",
+   "cluster": {
+    "id": 7,
+    "size": 12
+   }
+  },
+  {
+   "issue_text": "Dead try/catch around non-awaited async forEach in handleNewBooking.ts:964-974 gives false error handling",
+   "source_lens": "compound-persona/reliability",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "In both `handleCancelBooking.ts` and `packages/trpc/server/routers/viewer/bookings.tsx`, the code now calls async reminder-cancellation functions inside `forEach` without awaiting them, and it also removed the prior `Promise.all` over reminder delete promises.\n\n- `handleCancelBooking.ts`: replaced collecting `remindersToDelete` + `Promise.all(...)` with direct calls:\n  - `deleteScheduledEmailReminder(reminder.id, reminder.referenceId);` / `deleteScheduledSMSReminder(reminder.id, reminder.referenceId);` inside nested `forEach`, but `prismaPromises` no longer includes reminder work (`const prism",
+   "stripped_text": "Dead try/catch around non-awaited async forEach in handleNewBooking.ts:964-974 gives false error handling",
+   "cluster": {
+    "id": 7,
+    "size": 12
+   }
+  },
+  {
+   "issue_text": "immediateDelete=true path in emailReminderManager.ts cancels the SendGrid batch but never deletes, cancels, or updates the WorkflowReminder DB row, leaving it permanently stale (scheduled: true, cancelled: null) and accumulating zombie rows",
+   "source_lens": "compound-persona/maintainability",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "In `emailReminderManager.ts`, `deleteScheduledEmailReminder(reminderId, referenceId, immediateDelete?)` has an `if (immediateDelete) { ... cancel send ... return; }` branch that performs the SendGrid cancel but exits without deleting the `WorkflowReminder` row or marking it `cancelled: true`. This is visible in the diff: the non-immediate path does `prisma.workflowReminder.update({ data: { cancelled: true } })`, and the `!referenceId` path deletes the row, but the `immediateDelete` path does neither. That can leave DB rows with `cancelled` still `null/false` even though the external batch was ",
+   "stripped_text": "immediateDelete=true path in emailReminderManager.ts cancels the SendGrid batch but never deletes, cancels, or updates the WorkflowReminder DB row, leaving it permanently stale (scheduled: true, cancelled: null) and accumulating zombie rows",
+   "cluster": {
+    "id": 12,
+    "size": 2
+   }
+  },
+  {
+   "issue_text": "In scheduleEmailReminders.ts, the array-of-Promise-values pattern (workflowRemindersToDelete built from already-invoked prisma queries) is a footgun",
+   "source_lens": "compound-persona/maintainability",
+   "old_verdict": "hallucination",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.72,
+   "rationale": "In `scheduleEmailReminders.ts`, inside the `for (const reminder of remindersToCancel)` loop, the code creates Prisma delete promises (`prisma.workflowReminder.delete(...)`) and stores them in `workflowRemindersToDelete`, but doesn\u2019t attach a handler until after the loop (`await Promise.all(workflowRemindersToDelete)`). Because the loop also does `await client.request(...)` on each iteration before reaching `Promise.all`, any delete promise that rejects could sit without a handler across one or more `await` boundaries, which is a known \u201cfootgun\u201d (potential unhandled rejection / late-handling). ",
+   "stripped_text": "In scheduleEmailReminders.ts, the array-of-Promise-values pattern (workflowRemindersToDelete built from already-invoked prisma queries) is a footgun",
+   "cluster": {
+    "id": 20,
+    "size": 1
+   }
+  },
+  {
+   "issue_text": "At workflows.tsx:575-583, remindersToUpdate.forEach(async ...) fires and forgets before the mutation returns (unawaited async forEach pattern)",
+   "source_lens": "compound-persona/maintainability",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "In both `handleCancelBooking.ts` and `packages/trpc/server/routers/viewer/bookings.tsx`, the code now calls async reminder-cancellation functions inside `forEach` without awaiting them, and it also removed the prior `Promise.all` over reminder delete promises.\n\n- `handleCancelBooking.ts`: replaced collecting `remindersToDelete` + `Promise.all(...)` with direct calls:\n  - `deleteScheduledEmailReminder(reminder.id, reminder.referenceId);` / `deleteScheduledSMSReminder(reminder.id, reminder.referenceId);` inside nested `forEach`, but `prismaPromises` no longer includes reminder work (`const prism",
+   "stripped_text": "At workflows.tsx:575-583, remindersToUpdate.forEach(async ...) fires and forgets before the mutation returns (unawaited async forEach pattern)",
+   "cluster": {
+    "id": 7,
+    "size": 12
+   }
+  },
+  {
+   "issue_text": "Cancellation promises in handleCancelBooking.ts and bookings.tsx are never awaited; reminder deletions race with Promise.all and the transaction, and failures are silently lost since the functions swallow errors internally",
+   "source_lens": "compound-persona/maintainability",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "In both `handleCancelBooking.ts` and `packages/trpc/server/routers/viewer/bookings.tsx`, the code now calls async reminder-cancellation functions inside `forEach` without awaiting them, and it also removed the prior `Promise.all` over reminder delete promises.\n\n- `handleCancelBooking.ts`: replaced collecting `remindersToDelete` + `Promise.all(...)` with direct calls:\n  - `deleteScheduledEmailReminder(reminder.id, reminder.referenceId);` / `deleteScheduledSMSReminder(reminder.id, reminder.referenceId);` inside nested `forEach`, but `prismaPromises` no longer includes reminder work (`const prism",
+   "stripped_text": "Cancellation promises in handleCancelBooking.ts and bookings.tsx are never awaited; reminder deletions race with Promise.all and the transaction, and failures are silently lost since the functions swallow errors internally",
+   "cluster": {
+    "id": 7,
+    "size": 12
+   }
+  },
+  {
+   "issue_text": "Cron cancellation loop in scheduleEmailReminders.ts crashes on reminders with null referenceId, causing the outer try/catch to skip all DB deletes and permanently wedge the cron",
+   "source_lens": "compound-persona/data-migration",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.87,
+   "rationale": "In `scheduleEmailReminders.ts`, `remindersToCancel` is fetched with `where: { cancelled: true, scheduledDate: { lte: ... } }` and **does not filter out null `referenceId`**. The cancellation loop then unconditionally calls SendGrid with `batch_id: reminder.referenceId`, so a reminder with `referenceId === null` would send `batch_id: null` and likely error. Because the entire `for (const reminder of remindersToCancel) { await client.request(...) ... }` is wrapped in a single `try { ... } catch { ... }`, the first such error would jump to `catch` and abort processing, preventing cancellation/del",
+   "stripped_text": "Cron cancellation loop in scheduleEmailReminders.ts crashes on reminders with null referenceId, causing the outer try/catch to skip all DB deletes and permanently wedge the cron",
+   "cluster": {
+    "id": 9,
+    "size": 9
+   }
+  },
+  {
+   "issue_text": "Reminder cancellation calls in handleCancelBooking.ts, handleNewBooking.ts, and viewer/bookings.tsx are fire-and-forget (never awaited), so cancellations may never execute in serverless contexts",
+   "source_lens": "compound-persona/data-migration",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "In both `handleCancelBooking.ts` and `packages/trpc/server/routers/viewer/bookings.tsx`, the code now calls async reminder-cancellation functions inside `forEach` without awaiting them, and it also removed the prior `Promise.all` over reminder delete promises.\n\n- `handleCancelBooking.ts`: replaced collecting `remindersToDelete` + `Promise.all(...)` with direct calls:\n  - `deleteScheduledEmailReminder(reminder.id, reminder.referenceId);` / `deleteScheduledSMSReminder(reminder.id, reminder.referenceId);` inside nested `forEach`, but `prismaPromises` no longer includes reminder work (`const prism",
+   "stripped_text": "Reminder cancellation calls in handleCancelBooking.ts, handleNewBooking.ts, and viewer/bookings.tsx are fire-and-forget (never awaited), so cancellations may never execute in serverless contexts",
+   "cluster": {
+    "id": 7,
+    "size": 12
+   }
+  },
+  {
+   "issue_text": "SMS reminder rows are not deleted if Twilio cancelSMS throws, and there is no retry path for SMS reminders, leaving a scheduled SMS live with no recovery mechanism",
+   "source_lens": "compound-persona/data-migration",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "In `smsReminderManager.ts`, `deleteScheduledSMSReminder` wraps both `twilio.cancelSMS(referenceId)` and the Prisma delete in a single `try` block. If `twilio.cancelSMS` throws, execution jumps to `catch` and `prisma.workflowReminder.delete({ where: { id: reminderId } })` is never run, leaving the reminder row undeleted (`catch` only logs). The diff also adds an email-side recovery path via `scheduleEmailReminders.ts` that later cancels `cancelled: true` reminders, but there is no analogous retry/recovery mechanism shown for SMS reminders.",
+   "stripped_text": "SMS reminder rows are not deleted if Twilio cancelSMS throws, and there is no retry path for SMS reminders, leaving a scheduled SMS live with no recovery mechanism",
+   "cluster": {
+    "id": 25,
+    "size": 1
+   }
+  },
+  {
+   "issue_text": "Ownership check dropped in workflows.tsx: deleteScheduledSMSReminder/deleteScheduledEmailReminder delete by bare id with no user ownership scoping, allowing potential cross-user deletion",
+   "source_lens": "compound-persona/data-migration",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.7,
+   "rationale": "In `packages/trpc/server/routers/viewer/workflows.tsx`, the diff removes an explicit ownership-scoped delete:\n\n- Before: `ctx.prisma.workflowReminder.deleteMany({ where: { id: reminder.id, booking: { userId: ctx.user.id }}})`\n- After: it calls `deleteScheduledSMSReminder(reminder.id, ...)` / `deleteScheduledEmailReminder(reminder.id, ...)` without any user scoping.\n\nAnd in the managers, the DB operations are by bare `id`:\n- `deleteScheduledSMSReminder` now does `await prisma.workflowReminder.delete({ where: { id: reminderId } })`.\n- `deleteScheduledEmailReminder` does `prisma.workflowReminder.",
+   "stripped_text": "Ownership check dropped in workflows.tsx: deleteScheduledSMSReminder/deleteScheduledEmailReminder delete by bare id with no user ownership scoping, allowing potential cross-user deletion",
+   "cluster": {
+    "id": 26,
+    "size": 1
+   }
+  },
+  {
+   "issue_text": "async callback inside forEach in workflows.tsx reminder update is fire-and-forget: cancellations race with subsequent DB writes and failures are unhandled while the route returns success",
+   "source_lens": "compound-persona/data-migration",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "In both `handleCancelBooking.ts` and `packages/trpc/server/routers/viewer/bookings.tsx`, the code now calls async reminder-cancellation functions inside `forEach` without awaiting them, and it also removed the prior `Promise.all` over reminder delete promises.\n\n- `handleCancelBooking.ts`: replaced collecting `remindersToDelete` + `Promise.all(...)` with direct calls:\n  - `deleteScheduledEmailReminder(reminder.id, reminder.referenceId);` / `deleteScheduledSMSReminder(reminder.id, reminder.referenceId);` inside nested `forEach`, but `prismaPromises` no longer includes reminder work (`const prism",
+   "stripped_text": "async callback inside forEach in workflows.tsx reminder update is fire-and-forget: cancellations race with subsequent DB writes and failures are unhandled while the route returns success",
+   "cluster": {
+    "id": 7,
+    "size": 12
+   }
+  },
+  {
+   "issue_text": "Cron cancellation loop in scheduleEmailReminders.ts doesn't filter out reminders with null referenceId, causing SendGrid to throw on batch_id: null and abort the entire loop, leaving remaining reminders uncanceled and undeleted",
+   "source_lens": "compound-persona/adversarial",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.87,
+   "rationale": "In `scheduleEmailReminders.ts`, `remindersToCancel` is fetched with `where: { cancelled: true, scheduledDate: { lte: ... } }` and **does not filter out null `referenceId`**. The cancellation loop then unconditionally calls SendGrid with `batch_id: reminder.referenceId`, so a reminder with `referenceId === null` would send `batch_id: null` and likely error. Because the entire `for (const reminder of remindersToCancel) { await client.request(...) ... }` is wrapped in a single `try { ... } catch { ... }`, the first such error would jump to `catch` and abort processing, preventing cancellation/del",
+   "stripped_text": "Cron cancellation loop in scheduleEmailReminders.ts doesn't filter out reminders with null referenceId, causing SendGrid to throw on batch_id: null and abort the entire loop, leaving remaining reminders uncanceled and undeleted",
+   "cluster": {
+    "id": 9,
+    "size": 9
+   }
+  },
+  {
+   "issue_text": "Single SendGrid failure in the cron cancellation loop poisons the rest of the batch so remaining reminders are neither cancelled nor deleted",
+   "source_lens": "compound-persona/adversarial",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.87,
+   "rationale": "In `scheduleEmailReminders.ts`, `remindersToCancel` is fetched with `where: { cancelled: true, scheduledDate: { lte: ... } }` and **does not filter out null `referenceId`**. The cancellation loop then unconditionally calls SendGrid with `batch_id: reminder.referenceId`, so a reminder with `referenceId === null` would send `batch_id: null` and likely error. Because the entire `for (const reminder of remindersToCancel) { await client.request(...) ... }` is wrapped in a single `try { ... } catch { ... }`, the first such error would jump to `catch` and abort processing, preventing cancellation/del",
+   "stripped_text": "Single SendGrid failure in the cron cancellation loop poisons the rest of the batch so remaining reminders are neither cancelled nor deleted",
+   "cluster": {
+    "id": 9,
+    "size": 9
+   }
+  },
+  {
+   "issue_text": "Reschedule path (bookings.tsx, handleCancelBooking.tsx) fires deleteScheduledEmailReminder/deleteScheduledSMSReminder promises via forEach without awaiting, risking old reminders not cancelled while new ones scheduled, causing duplicate reminders",
+   "source_lens": "compound-persona/adversarial",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "In both `handleCancelBooking.ts` and `packages/trpc/server/routers/viewer/bookings.tsx`, the code now calls async reminder-cancellation functions inside `forEach` without awaiting them, and it also removed the prior `Promise.all` over reminder delete promises.\n\n- `handleCancelBooking.ts`: replaced collecting `remindersToDelete` + `Promise.all(...)` with direct calls:\n  - `deleteScheduledEmailReminder(reminder.id, reminder.referenceId);` / `deleteScheduledSMSReminder(reminder.id, reminder.referenceId);` inside nested `forEach`, but `prismaPromises` no longer includes reminder work (`const prism",
+   "stripped_text": "Reschedule path (bookings.tsx, handleCancelBooking.tsx) fires deleteScheduledEmailReminder/deleteScheduledSMSReminder promises via forEach without awaiting, risking old reminders not cancelled while new ones scheduled, causing duplicate reminders",
+   "cluster": {
+    "id": 7,
+    "size": 12
+   }
+  }
+ ]
+}

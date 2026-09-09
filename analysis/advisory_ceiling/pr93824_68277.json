@@ -1,0 +1,77 @@
+{
+ "url": "https://github.com/getsentry/sentry/pull/93824",
+ "mrv_adv": 1,
+ "dchars": 19221,
+ "concerns": [
+  {
+   "advisory": "The new `--flusher-processes` CLI option defaults to 1, while `SpanFlusher.max_processes` falls back to `len(buffer.assigned_shards)` when None, so consumers launched via the CLI keep single-process behavior but any direct `ProcessSpansStrategyFactory`/`SpanFlusher` construction (tests, devservices, other callers) silently fans out to one process per shard.",
+   "kind": "deploy/version-skew risk",
+   "why": "consumers/__init__.py adds `click.Option([\"--flusher-processes\"], default=1)` while flusher.py uses `self.max_processes = max_processes or len(buffer.assigned_shards)`."
+  },
+  {
+   "advisory": "Parallelism is only settable at process start via a CLI flag, with no runtime option (unlike `spans.buffer.flusher.max-unhealthy-seconds` etc.), so rolling back or tuning fan-out requires a deploy/restart of the consumer.",
+   "kind": "deploy/version-skew risk",
+   "why": "`flusher_processes` is threaded from click \u2192 factory \u2192 SpanFlusher constructor; no `options.get(...)` gate was added alongside the existing flusher options."
+  },
+  {
+   "advisory": "Each flusher process constructs its own `SpansBuffer(shards)`, multiplying Redis connections, per-process Sentry app initialization, and resident memory by the number of processes on every consumer pod.",
+   "kind": "performance consideration",
+   "why": "`_create_process_for_shards` calls `shard_buffer = SpansBuffer(shards)` per process index, and spawn context re-initializes the app via `run_with_initialized_sentry`."
+  },
+  {
+   "advisory": "`spans.buffer.flusher_unhealthy` is now emitted once per shard with a new `shard` tag instead of once per unhealthy flusher, so existing dashboards/alerts on that counter will see counts inflated by the shard fan-out and lose comparability across the deploy.",
+   "kind": "observability gap",
+   "why": "the `for shard in shards: metrics.incr(\"spans.buffer.flusher_unhealthy\", tags={\"cause\": cause, \"shard\": shard})` loop replaces a single `metrics.incr`."
+  },
+  {
+   "advisory": "The new metric tags use inconsistent keys \u2014 `tags={\"shard\": shard_tag}` on `flusher.produce` and `segment_size_bytes` but `tags={\"shards\": shard_tag}` on `flusher.wait_produce` \u2014 which will split queries/dashboards that expect one tag name.",
+   "kind": "observability gap",
+   "why": "`metrics.timer(\"spans.buffer.flusher.wait_produce\", tags={\"shards\": shard_tag})` vs `metrics.timer(\"spans.buffer.flusher.produce\", tags={\"shard\": shard_tag})`."
+  },
+  {
+   "advisory": "The shard tag value is a comma-joined list of shard ids whose composition depends on partition assignment and `flusher_processes`, so tag cardinality is unbounded across rebalances/config changes and previously-untagged timers/timings now carry it.",
+   "kind": "observability gap",
+   "why": "`shard_tag = \",\".join(map(str, shards))` is attached to `flusher.produce`, `segment_size_bytes`, and `wait_produce`."
+  },
+  {
+   "advisory": "`MAX_PROCESS_RESTARTS` is now enforced per process index rather than globally, so a consumer with N flusher processes tolerates up to N\u00d7 as many flusher restarts before raising and restarting the consumer.",
+   "kind": "other",
+   "why": "`self.process_restarts` became a per-index dict and the threshold check is inside the per-process loop in `_ensure_processes_alive`."
+  },
+  {
+   "advisory": "Redis memory accounting now sums `get_memory_info()` across every per-process buffer, so when shards map onto the same Redis nodes the same node's used/available bytes are counted multiple times, shifting the effective `spans.buffer.max-memory-percentage` trip point relative to the pre-change behavior.",
+   "kind": "other",
+   "why": "`for buffer in self.buffers.values(): memory_infos.extend(buffer.get_memory_info())` followed by unchanged `sum(x.used ...) / sum(x.available ...)`."
+  },
+  {
+   "advisory": "Backpressure is now triggered if *any* single flusher process is behind, so one slow shard group stalls Redis insertion for all shards on the consumer \u2014 a head-of-line coupling that gets more likely as process count grows.",
+   "kind": "performance consideration",
+   "why": "`for backpressure_since in self.process_backpressure_since.values(): ... raise MessageRejected()` in `submit`."
+  },
+  {
+   "advisory": "`_create_process_for_shard` (singular) is added but never called anywhere in the diff, leaving dead code that implies a per-shard restart path the implementation does not actually use.",
+   "kind": "other",
+   "why": "the new `def _create_process_for_shard(self, shard: int)` method has no call sites; restarts go through `_create_process_for_shards`."
+  },
+  {
+   "advisory": "The new `test_flusher_processes_limit` asserts only structural bookkeeping (process count, map size) and never that spans from all four shards are actually flushed and produced under a process limit, so the shard-sharing data path is untested.",
+   "kind": "test-coverage gap",
+   "why": "the test asserts `len(flusher.processes) == 2` and `total_shards == 4`, then calls `step.join()` without submitting spans or asserting on `messages`."
+  },
+  {
+   "advisory": "No test covers the multi-process unhealthy/restart path (`_ensure_processes_alive` per-process restart, per-process `MAX_PROCESS_RESTARTS`) even though that logic was substantially rewritten.",
+   "kind": "test-coverage gap",
+   "why": "`_ensure_process_alive` \u2192 `_ensure_processes_alive` rewrite with per-index restart counters has no corresponding test added in test_flusher.py or test_consumer.py."
+  },
+  {
+   "advisory": "The consumer tests were switched to `django_db(transaction=True)` and now mix a monkeypatched `time.sleep` with a real `time.sleep(0.1)` wait for background threads, making them timing-dependent and prone to CI flakiness/slowdown.",
+   "kind": "test-coverage gap",
+   "why": "`@pytest.mark.django_db(transaction=True)` plus `monkeypatch.setattr(\"time.sleep\", lambda _: None)` alongside an explicit `time.sleep(0.1)` \"Give flusher threads time to process\"."
+  },
+  {
+   "advisory": "The CLAUDE.md `hasattr` vs `isinstance` guidance is a repo-wide convention change bundled into an unrelated spans-consumer PR, so reviewers focused on the flusher change are likely to land it without scrutiny.",
+   "kind": "documentation/UX inconsistency",
+   "why": "the CLAUDE.md hunk adds a new WRONG/RIGHT pair unrelated to any code in this diff."
+  }
+ ]
+}

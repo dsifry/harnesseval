@@ -1,0 +1,57 @@
+{
+ "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/3",
+ "mrv_adv": 1,
+ "dchars": 10318,
+ "concerns": [
+  {
+   "advisory": "The `create` failure response now echoes back `errors: user.errors.to_hash` and `values: {name, username, email}`, which changes the public registration API contract and reflects user-supplied PII back in the response body (logged/cached by proxies), so any client or integration parsing this endpoint should be re-checked.",
+   "kind": "API-contract or backward-compatibility note",
+   "why": "app/controllers/users_controller.rb: added `errors:` and `values:` keys to the `success: false` JSON payload."
+  },
+  {
+   "advisory": "Distinct error strings for blocked (`user.email.blocked` \u2192 \"is not allowed.\") versus whitelist/blacklist (`not_allowed`) versus uniqueness, now surfaced in a machine-readable `errors` hash, let an unauthenticated caller enumerate which emails/domains are on the blocklist by probing the signup endpoint.",
+   "kind": "security-hardening note",
+   "why": "lib/validators/email_validator.rb adds a unique `blocked` message, and users_controller.rb newly returns `user.errors.to_hash` to the client."
+  },
+  {
+   "advisory": "`BlockedEmail.should_block?` performs a database write (increments `match_count`, sets `last_match_at`) inside a validation, so validation is no longer side-effect-free: any code path that validates a user twice (e.g. `valid?` then `save`) double-counts, and read-only/replica or transaction-rollback contexts will behave surprisingly.",
+   "kind": "performance consideration",
+   "why": "app/models/blocked_email.rb `should_block?` calls `record.save` and is invoked from `EmailValidator#validate_each`."
+  },
+  {
+   "advisory": "There is no admin UI, rake task, or seed path for populating `blocked_emails`; the only documented way to add entries is manual database loading, so the feature ships inert and operators have no supported workflow.",
+   "kind": "documentation/UX inconsistency",
+   "why": "New table and model with no controller/admin route; spec comment in blocked_email_spec.rb reads \"If we manually load the table with some emails...\"."
+  },
+  {
+   "advisory": "The migration declares `action_type` as `null: false` with no database-level default, relying solely on the model's `before_validation :set_defaults`, so bulk/SQL loading of the blocklist \u2014 the intended population method \u2014 will fail unless callers always supply `action_type`.",
+   "kind": "migration/re-run hazard",
+   "why": "db/migrate/20130724201552_create_blocked_emails.rb `t.integer :action_type, null: false` versus `set_defaults` in the model."
+  },
+  {
+   "advisory": "The whitelist/blacklist logic moved verbatim from `User#email_validator` to `EmailValidator`, but the new spec only covers the `should_block?` branch, leaving the migrated domain-restriction behavior (and its precedence over the blocked check) without direct coverage in the new location.",
+   "kind": "test-coverage gap",
+   "why": "spec/components/validators/email_validator_spec.rb contains only the \"blocked email\" context; `email_in_restriction_setting?` paths are untested there."
+  },
+  {
+   "advisory": "The blocked-email check now runs on every `User` save where the email changed \u2014 not just self-service signup \u2014 so admin-created users, invites, imports, and email-change flows are all subject to blocking and will bump match statistics; that broader blast radius should be an intentional decision.",
+   "kind": "other",
+   "why": "app/models/user.rb `validates :email, email: true, if: :email_changed?` applies to all User persistence paths."
+  },
+  {
+   "advisory": "The new client-side `rejectedEmails` behavior (accumulating server-rejected emails and failing validation for them) has no JavaScript test coverage, and it depends on the exact new `result.errors.email` / `result.values.email` response shape, coupling frontend and backend without a regression guard.",
+   "kind": "test-coverage gap",
+   "why": "create_account_controller.js adds `rejectedEmails` handling; no corresponding JS spec is included in the diff."
+  },
+  {
+   "advisory": "`rejectedEmails: Em.A([])` is declared as a prototype-level mutable array on the controller class, so pushed values are shared for the lifetime of the class rather than scoped to a single modal session; maintainers should confirm this singleton-controller assumption holds.",
+   "kind": "other",
+   "why": "create_account_controller.js line adding `rejectedEmails: Em.A([])` to the `extend({...})` hash."
+  },
+  {
+   "advisory": "Blocked-email hits are recorded only as a per-row `match_count`/`last_match_at` with no logging or metric emitted, so operators cannot see blocking activity in real time or distinguish `:block` from `:do_nothing` (audit-only) outcomes without querying the table.",
+   "kind": "observability gap",
+   "why": "app/models/blocked_email.rb updates counters silently; `actions[:do_nothing]` records match but produce no signal anywhere."
+  }
+ ]
+}
