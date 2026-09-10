@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import sys
 import time
 from pathlib import Path
 
@@ -342,7 +343,14 @@ def main():
                 try:
                     res = await _run_cell_async(pr, fw, model, effort, judge, mode=args.mode)
                 except Exception as e:
-                    res = {"error": str(e)[:120]}
+                    # capture the failing call site, not just the truncated message — the
+                    # bare-400 poison hunt needed three attempts because str(e)[:120] hides origin
+                    tb = e.__traceback__
+                    origin = "?"
+                    while tb is not None:
+                        origin = tb.tb_frame.f_code.co_name
+                        tb = tb.tb_next
+                    res = {"error": f"{type(e).__name__} in {origin}: {e}"[:400]}
                 dt = time.time() - t0
                 if "error" in res and res.get("tp") is None:
                     print(f"[mx] {tag} ERR {dt:.0f}s: {res['error'][:70]}", flush=True)
@@ -390,6 +398,18 @@ def main():
                 rec=tp/(tp+fn) if (tp+fn) else 0; ap_=tp/(tp+hal) if (tp+hal) else 0
                 ir=(tp+ru)/((tp+fn+ru)) if (tp+fn+ru) else 0
                 print(f"{fw:18s} {model:30s} {effort:5s} {tp:>3} {fp:>4} {fn:>3} {rec:>5.2f} {ap_:>5.2f} {ir:>6.2f} {ru:>4} {hal:>4} {tok:>8,}")
+
+    # poison guard: a sweep that leaves errored/zero-token cells has NOT succeeded,
+    # no matter how many cells printed metrics. Fail loudly (nonzero exit) so chain
+    # scripts and humans cannot mistake a partial batch for a complete one.
+    from harnesseval.validate import scan_batch
+    _, poisoned = scan_batch(batch_id)
+    if poisoned:
+        print(f"\n[mx] *** POISON: {len(poisoned)} cell(s) errored or zero-token — batch INCOMPLETE ***")
+        for p in poisoned:
+            print(f"[mx] ***   {p['url']} — {p['why']}")
+        print("[mx] *** repair via --fill specs above, or rerun; refusing to report success ***", flush=True)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,956 @@
+{
+  "tp": 2,
+  "fp": 28,
+  "fn": 1,
+  "precision": 0.06666666666666667,
+  "recall": 0.6666666666666666,
+  "n_findings": 31,
+  "n_golden": 3,
+  "tokens_in": 73174,
+  "tokens_out": 6318,
+  "wall_ms": 173619.19784545898,
+  "per_model_usage": {},
+  "total_cost_usd": 0.0,
+  "resolved_model": "glm-5.3-background",
+  "adjudicated_precision": 0.5,
+  "incremental_recall": 0.9230769230769231,
+  "n_bug_ungold": 10,
+  "n_important_non_bug": 15,
+  "n_true_hallucination": 2,
+  "n_unresolved": 1,
+  "n_real_ungold": 10,
+  "n_hallucination": 2,
+  "decomposition": {
+    "deterministic_tp": 0,
+    "llm_lens_tp": 2,
+    "deterministic_gate_recall": 0.0,
+    "llm_lens_recall": 0.6666666666666666
+  },
+  "findings": [
+    {
+      "issue_text": "[BUG] The new denial cache is written (service.go Check, `s.permDenialCache.Set(ctx, permDenialKey, true)`) but no invalidation path anywhere in this diff deletes those keys, so a stale denial survives permission grants until the TTL expires. When an admin grants a user access to a dashboard (or any resource), the existing permission-change invalidation flow deletes `namespace + \".perm_\" + uid + \"_\" + action` in the permission cache, but the denial key `userPermDenialCacheKey(...)` (which appends `name` and `parent`) is never deleted, so Check at lines ~116-121 returns `{Allowed: false}` from the denial entry before ever consulting the refreshed permissions \u2014 the user is denied access for up to shortCacheTTL (30s-class, longer with clock/local-cache variance) after being granted access, and since the denial hit short-circuits before `getIdentityPermissions`, the perm cache is never even consulted.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] The denial key is built from `checkReq.UserUID` before identity resolution, while the permission cache key path resolves the user via `s.GetUserIdentifiers` and keys on `userIdentifiers.UID`, so the two caches use different subjects whenever the request's UserUID is not already the canonical UID. When a Check arrives with a UserUID that resolves (via idCache/store lookup) to a different canonical UID, the denial entry is written under the raw request UID while the permission cache lives under the resolved UID; the denial is then never covered by any subject-keyed invalidation and can deny a user whose permissions were just changed, and conversely misses dedup opportunities.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] The new permDenialCache has no invalidation path anywhere in this diff, so a denial entry survives until shortCacheTTL expiry even after the underlying permission is granted. A user who is granted access to a resource (or has a dashboard moved out of a denied folder) continues to receive Allowed:false from Check for up to shortCacheTTL; the diff's own test suite never exercises permission-change invalidation against the denial cache, so this window is unverified \u2014 bitten by any end user whose permissions are edited mid-session.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] Check increments permissionCacheUsage with label \"false\" (cache miss) even when getCachedIdentityPermissions returned a cache hit whose scopes simply did not allow the request, mislabeling the cache-hit metric. The perm cache hit-rate metric reported to operators is understated for every cached-but-denied check (the 'outdated cache' test scenario hits exactly this path), corrupting the dashboards used to evaluate whether this caching change worked.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] Non-ErrNotFound errors from getCachedIdentityPermissions (e.g., GetUserIdentifiers store failure, or the default 'unsupported identity type' error) are silently swallowed with no log line before the full DB path is retried. An outage of the identifier store produces a doubled DB load (identifiers fetched once in getCachedIdentityPermissions, again in getIdentityPermissions) and no diagnostic log for the first failure, degrading the operator's ability to see partial store failures; anyone debugging a degraded authz service during a DB incident is bitten.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The new cache tests cover only the TypeUser identity path; the getCachedIdentityPermissions branches for TypeAnonymous (cache hit -> allow) and the default unsupported-identity error path have no test through Check or List. A regression in the anonymous branch (e.g., the anonymousPermCacheKey lookup returning a stale Viewer permission set) would ship unverified, since no test in the diff populates anonymousPermCacheKey and issues a Check; anonymous dashboard viewers across all orgs are the population bitten.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The test 'should return permissions from cache if available' for getUserPermissions was deleted rather than replaced with an equivalent test of the new getCachedIdentityPermissions cache-hit path at the unit level. The cache-hit behavior of the permission lookup is now only covered indirectly through the Check integration test; a future refactor of getCachedIdentityPermissions that breaks cache retrieval for List specifically (no List cache-hit test beyond one happy case) would lose the safety net the deleted test provided.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] The new negative (denial) result cache has no invalidation path anywhere in the diff, so a grant of permission after a denial keeps the user locked out for the full shortCacheTTL window. An admin grants a user access (or a permission is edited) after the user was denied once for (namespace, user, action, name, folder); every subsequent Check for that resource keeps returning {Allowed: false} from permDenialCache until the TTL expires, because no permission-change/invalidation hook in this diff deletes userPermDenialCacheKey entries \u2014 the existing invalidation paths only know about userPermCacheKey. This is under-scoping of the stated caching intent: caching was added without the invalidation requirement that already applies to the positive-permission cache.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] The denial cache is consulted before the subject is resolved/validated, so it returns a deny for key components taken directly from the request (Namespace.Value, checkReq.UserUID, checkReq.ParentFolder) without the UID resolution the positive path performs via GetUserIdentifiers. Two Check requests that resolve to different actual users but carry colliding raw UserUID/folder strings in the same namespace would share a denial entry; more practically, the deny path never verifies the identity mapping, so the code path enforces a weaker invariant than the allow path it sits beside. Operators debugging 'user denied despite correct role' are bitten when the pre-identity denial short-circuits.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The PR deletes the only test covering getUserPermissions returning from cache (the 'should return permissions from cache if available' case) and does not replace it, while simultaneously removing the cache-read from that function \u2014 the deletion is work not traceable to any requirement and quietly narrows coverage of the code being changed. A future regression in the singleflight/permCache write path (which this diff touches by relocating reads) has no test guarding the round trip store\u2192Set\u2192read; the next change to permission caching gets riskier because the harness that exercised the cache lifecycle in this function is gone.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] NoopCache is defined as an exported type in the top-level rbac.go with an unexported-style receiver name (lc), placed far from the other cache-related code in the package's rbac/cache.go where cache key and cache-adjacent helpers live. Maintainers adding the next cache behavior (e.g., an invalidation hook for the new denial cache, or replacing NoopCache with a real cache when the remote path also needs it) must discover and modify a type bolted onto the end of a wiring file; the next change gets harder because cache logic is now split across rbac.go and rbac/cache.go.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The new cached-allow fast path in Check and the cached path in List read the permission cache directly, creating a parallel hand-maintained read path next to the singleflight-backed getIdentityPermissions/getUserPermissions writers, with the cache-read logic now existing in two shapes (getCachedIdentityPermissions vs the Set sites in getIdentityPermissions). Cache key construction, hit semantics, and metric labeling are duplicated across getCachedIdentityPermissions and the writers in getUserPermissions/getAnonymousPermissions; when someone changes the key format or adds a new identity type, they must update both shapes or the reader and writer silently disagree (reader returns ErrNotFound forever, fast path goes dead). This already shows drift: the reader handles TypeRenderService explicitly while the writer's switch does not, and the metric increment moved out of getUserPermissions into three separate call sites with subtly different label ordering.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] permDenialCache is written on deny but no code path anywhere in the diff deletes or invalidates denial entries, and its key format (namespace, userUID, action, name, parent) cannot be reconstructed by existing permission-change invalidation, so a user who is denied once stays denied for the full shortCacheTTL even after their permissions are granted. A user granted access to a resource mid-TTL continues to receive Allowed:false for that resource until the entry expires; because the denial-cache hit at the top of Check returns before any DB or permCache consultation (the 'Should deny on explicit cache deny entry' test proves it overrides an allowing permCache), the grant is invisible \u2014 lockout window per resource of up to the full TTL with no invalidation hook to shorten it.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] The ProvideAuthZClient path silently swaps its 30-second local permission cache for a NoopCache, converting every authz Check from every consumer of this client into an uncached RPC. Any deployment relying on this client for hot-path authorization (every dashboard API request through the remote authz path) now incurs a full round-trip per check with zero client-side caching; if the intent was only that the server-side cache now suffices, this is fine, but if not, latency and authz server load increase unboundedly with traffic and there is no flag to re-enable the local cache.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] When cached permissions exist but checkPermission denies, Check increments permissionCacheUsage(\"false\") and falls through to the DB, so a genuine cache hit that denied is recorded as a cache miss, and the same logical request can inflate permissionCacheUsage twice in one call path when the cached layer denies and the DB layer is then consulted. Operators watching permissionCacheUsage to judge cache effectiveness see artificially low hit rates and cannot distinguish 'cached and denied' from 'not cached'; dashboards alerting on cache-miss ratio fire spuriously on workloads dominated by denied checks.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] userPermDenialCacheKey builds keys by naive underscore concatenation of userUID, action, name, and parent, so two different (name, parent) pairs containing underscores collide into the same cache key (name=\"a_b\", parent=\"c\" vs name=\"a\", parent=\"b_c\"), and the same occurs against userPermCacheKey's prefix space for adversarially-shaped identifiers. A colliding key returns a cached denial computed for a different resource, denying a user access to a resource they are entitled to (or, once the check falls through, poisoning the wrong key); anyone with control over dashboard or folder UIDs containing underscores \u2014 which is the normal UID alphabet in Grafana \u2014 can hit this, and it is silent.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] The new permDenialCache short-circuits Check to Allowed:false, but nothing anywhere in the diff deletes denial entries when permissions change \u2014 existing invalidation paths delete keys built by userPermCacheKey/basicRoleCacheKey, and the new userPermDenialCacheKey entries survive them. A user who is granted a new permission (role/permission updated, existing invalidation fires) is still denied on Check for up to shortCacheTTL because the stale denial entry is checked before the permission cache or DB; previously the same invalidation immediately restored access.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] The cached-denial short-circuit and the cached-permission allow path both return before consulting s.identityStore-based freshness or running the singleflight/DB path, but the denial Set at lines 153-155 fires even when the deny came from a stale/outdated permCache fallback that already hit the DB \u2014 meaning a deny is cached under a key that mixes namespace+user+action+name+parent while the DB result it was derived from was authoritative, yet the earlier cache-miss path in the same request may have returned an allow from stale cache in a prior request, producing inconsistent cached allow/deny states for the same resource within the TTL window. Within shortCacheTTL, two identical Check requests for the same resource can return contradictory results (allowed from stale permCache vs denied from denial cache populated by a later DB check), and callers cannot tell which is authoritative; anyone relying on monotonic permission changes within the TTL window gets flapping authorization decisions.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] The new permDenialCache is written but never invalidated anywhere in the diff, creating an authorization-cache asymmetry where grants are revalidated (existing permission-change code paths delete permCache entries keyed by userPermCacheKey) while denials served from permDenialCache are not rechecked. When an admin grants a user access to a resource, existing invalidation deletes the permCache entry so the grant is recomputed from the DB, but the permDenialCache entry (a different key format, userPermDenialCacheKey) survives and is checked first in Check, so the user is denied access the database says they have, for up to shortCacheTTL after the grant. Conversely, the one-case tests only cover cache behavior, never invalidation, so this will not be caught by tests.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] The denial is cached keyed on the raw checkReq.UserUID, but the grant cache (permCache) is keyed on the resolved userIdentifiers.UID from GetUserIdentifiers, so a request whose UserUID maps to a different stored UID records denials under a key that the grant cache never uses and invalidation never targets. A user whose subject UID differs from their stored identifier gets denials cached under the raw subject value; those entries can never be invalidated by any permission-change hook that deletes by resolved-UID permCache keys, extending the stale-denial window indefinitely for that key and making the invalidation asymmetry permanent rather than TTL-bounded.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] The denial-cache hit path returns Allowed:false without consulting fresh grant state even though the cached-permission grant path and the fresh-database path both run afterwards, meaning a cached denial overrides everything, including permission state fetched from the store in the same request if the store changed. A revocation that arrives as a grant-path permission update cannot be honored within the TTL window, and any bug or race that writes a spurious denial entry (e.g., a transient failure of checkPermission to see folder-tree permissions) is amplified into a hard denial for the full shortCacheTTL; who gets bitten is end users of the authz gRPC service, immediately after this ships.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] userPermDenialCacheKey concatenates unbounded user-supplied components (name, parent from the CheckRequest) into a cache key with a fixed '.'/'_' separator scheme that can collide with userPermCacheKey's format when fields contain underscores. Two distinct (name, parent) pairs such as ('a_b','c') and ('a','b_c') map to the same key, so a denial recorded for one resource denies a different resource for the same user until TTL expiry \u2014 a correctness/security drift an attacker controlling dashboard or folder names can trigger to deny access to other resources in their org.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] The 'Should deny on explicit cache deny entry' subtest is tautological: it seeds permCache with {\"dashboards:uid:dash1\": false}, which causes checkPermission to deny on its own, so the assertion passes even if the permDenialCache lookup is deleted from Check. The only test of the new negative-cache path proves nothing \u2014 a regression that removes the permDenialCache Get (or the whole feature) still passes the suite, giving false confidence that denial caching works.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] No test exercises the deny-path cache write: the new s.permDenialCache.Set(ctx, permDenialKey, true) after a DB-backed deny (nor its interplay with invalidation via SetPermissions/BasicRole changes) is never triggered and asserted in TestService_CacheCheck or anywhere else in the diff. The negative-cache write path ships unverified: if Set is called with a wrong key (e.g. mismatched ParentFolder formatting vs the Get key) or is never reached due to an early return, all tests still pass, and stale denials after a permission grant silently lock users out for the shortCacheTTL window.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] getCachedIdentityPermissions is new non-trivial branching logic (TypeAnonymous cache read, TypeRenderService bypass, default error) and the only tests added cover the TypeUser branch; checked service_test.go \u2014 TestService_CacheCheck and TestService_CacheList both use user:test-uid subjects only. The anonymous-identity cache hit in Check and the render-service ErrNotFound bypass are uncovered: a regression that returns cached Viewer permissions for render/service-account identities, or panics on the default branch with an empty identity type, would not be caught by this diff's tests.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The new permDenialCache is never tied to any invalidation path, so a denial written after a DB check survives permission grants until the short TTL expires. A user (or an operator applying a permission change to unblock a locked-out user) is still denied for up to the denial-cache TTL after the grant, because the grant invalidates permCache/basicRoleCache entries but nothing deletes permDenialCache keys; the deny branch short-circuits before any permission data is consulted.",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The denial cache lookup and set run for every identity type, including TypeAnonymous, where checkReq.UserUID is empty, so the denial key degenerates to namespace+action+name+parent with no subject. For anonymous requests a single resource-level denial is cached org-wide against the empty UID and applied to all subsequent anonymous checks for that resource, and nothing distinguishes callers \u2014 anonymous users who would otherwise receive a different verdict through the folder-tree logic in checkPermission get the cached deny.",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The permissionCacheUsage metric is incremented with label \"false\" (miss) whenever cached permissions exist but deny, misclassifying cache hits as misses, and the getIdentityPermissions fallback in getUserPermissions no longer records this metric at all after its cache-read block was removed. Operators watching permissionCacheUsage to validate this PR's caching improvement see inflated miss rates for deny-heavy traffic and no data for the remaining getUserPermissions callers, skewing the dashboards used to judge rollout success.",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] permDenialCache entries are written on every denial but never deleted, and their key format (namespace.perm_uid_action_name_parent) does not match the exact userPermCacheKey keys (namespace.perm_uid_action) that existing invalidation paths delete, so denial entries survive permission changes. When an admin grants a user access to a specific resource, the permission cache is invalidated but the per-resource denial entry is not \u2014 the user receives Allowed:false from Check (service.go:118-122) for up to shortCacheTTL after the grant, with no error surfaced; the denial cache test even proves permCache is bypassed entirely when a denial entry exists.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] userPermDenialCacheKey concatenates name and parent with an unescaped '_' delimiter, so (name=\"a_b\", parent=\"c\") and (name=\"a\", parent=\"b_c\") produce the identical key \"ns.perm_uid_act_a_b_c\". A denial cached for resource \"a_b\" in folder \"c\" is returned as a denial for resource \"a\" in folder \"b_c\" (and vice versa), denying access to a resource the user is entitled to with no error or log \u2014 a wrong negative authorization decision from key collision.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] The cached-permission allow path in Check returns early without refreshing or validating that the cached permission set is newer than any concurrent write, and the metric line counts this as a non-error, cache-hit success (\"false\",\"true\",...), so a stale grant served from permCache is indistinguishable in metrics from a correct one. Operators debugging 'user can still access a revoked dashboard' see requestCount/cache-usage metrics indicating healthy cached authorizations, lengthening time-to-diagnosis during the shortCacheTTL window; the pre-existing getUserPermissions cache had the same staleness but this diff newly makes Check serve it before any singleflight dedup, so concurrent first-checks after invalidation all read the same possibly-stale snapshot.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    }
+  ],
+  "goldens": [
+    {
+      "comment": "The Check operation exhibits asymmetric cache trust logic: cached permission grants are trusted and returned immediately, but cached denials from the same permission cache are ignored, leading to a fresh database lookup. This allows stale cached grants to provide access to revoked resources, posing a security risk. ",
+      "severity": "High",
+      "category": "security"
+    },
+    {
+      "comment": "The test comment says the cached permissions 'allow access', but the map stores false for dashboards:uid:dash1, so checkPermission will still treat this scope as not allowed.",
+      "severity": "Low",
+      "category": "doc_defect"
+    },
+    {
+      "comment": "The cache key construction in `userPermDenialCacheKey` uses simple string concatenation with underscores, which can lead to ambiguous keys and collision risks when any component contains underscores or is empty. This could result in incorrect denial cache hits, affecting user permissions.",
+      "severity": "Medium",
+      "category": "data"
+    }
+  ],
+  "per_golden_matches": [
+    {
+      "golden_comment": "The test comment says the cached permissions 'allow access', but the map stores false for dashboards:uid:dash1, so checkPermission will still treat this scope as not allowed.",
+      "severity": "Low",
+      "category": "doc_defect",
+      "matched_candidate": "[BUG] The 'Should deny on explicit cache deny entry' subtest is tautological: it seeds permCache with {\"dashboards:uid:dash1\": false}, which causes checkPermission to deny on its own, so the assertion passes even if the permDenialCache lookup is deleted from Check. The only test of the new negative-cache path proves nothing \u2014 a regression that removes the permDenialCache Get (or the whole feature) still passes the suite, giving false confidence that denial caching works.",
+      "confidence": 0.86,
+      "reasoning": "Both point to the same core problem: the test setup seeds the permission cache with `dashboards:uid:dash1: false`, so `checkPermission` will deny access regardless of any separate denial/negative-cache logic. This contradicts the test\u2019s stated intent (\u201callow access\u201d / testing negative-cache behavior) and makes the test effectively meaningless/tautological."
+    },
+    {
+      "golden_comment": "The cache key construction in `userPermDenialCacheKey` uses simple string concatenation with underscores, which can lead to ambiguous keys and collision risks when any component contains underscores or is empty. This could result in incorrect denial cache hits, affecting user permissions.",
+      "severity": "Medium",
+      "category": "data",
+      "matched_candidate": "[BUG] userPermDenialCacheKey concatenates name and parent with an unescaped '_' delimiter, so (name=\"a_b\", parent=\"c\") and (name=\"a\", parent=\"b_c\") produce the identical key \"ns.perm_uid_act_a_b_c\". A denial cached for resource \"a_b\" in folder \"c\" is returned as a denial for resource \"a\" in folder \"b_c\" (and vice versa), denying access to a resource the user is entitled to with no error or log \u2014 a wrong negative authorization decision from key collision.",
+      "confidence": 0.97,
+      "reasoning": "The candidate describes the same underlying issue: cache key construction via simple underscore-delimited string concatenation can create ambiguous/colliding keys when components contain underscores, leading to incorrect denial cache hits and wrong authorization decisions."
+    },
+    {
+      "golden_comment": "The Check operation exhibits asymmetric cache trust logic: cached permission grants are trusted and returned immediately, but cached denials from the same permission cache are ignored, leading to a fresh database lookup. This allows stale cached grants to provide access to revoked resources, posing a security risk. ",
+      "severity": "High",
+      "category": "security"
+    }
+  ],
+  "adjudication_records": [
+    {
+      "issue_text": "[BUG] The new denial cache is written (service.go Check, `s.permDenialCache.Set(ctx, permDenialKey, true)`) but no invalidation path anywhere in this diff deletes those keys, so a stale denial survives permission grants until the TTL expires. When an admin grants a user access to a dashboard (or any resource), the existing permission-change invalidation flow deletes `namespace + \".perm_\" + uid + \"_\" + action` in the permission cache, but the denial key `userPermDenialCacheKey(...)` (which appends `name` and `parent`) is never deleted, so Check at lines ~116-121 returns `{Allowed: false}` from the denial entry before ever consulting the refreshed permissions \u2014 the user is denied access for up to shortCacheTTL (30s-class, longer with clock/local-cache variance) after being granted access, and since the denial hit short-circuits before `getIdentityPermissions`, the perm cache is never even consulted.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.78,
+        "rationale": "In `Service.Check`, the new `permDenialCache` is consulted first and short-circuits to `Allowed: false` if the key exists (`if _, ok := s.permDenialCache.Get(...); ok { return ...Allowed: false }`). A denial entry is written on any computed deny (`if !allowed { s.permDenialCache.Set(ctx, permDenialKey, true) }`). Within this diff there is no corresponding deletion/invalidation path for `userPermDenialCacheKey(...)` entries (only key constructors are added; no `Delete` calls or purge logic). Therefore, if permissions change from deny\u2192allow, the stale denial key can continue to force denials until TTL expiry, and the short-circuit prevents consulting refreshed permissions.",
+        "diff_context_hash": "a5ffd38b06edec5bdae43bbc0d8d98aa9ff4c4b2"
+      }
+    },
+    {
+      "issue_text": "[BUG] The denial key is built from `checkReq.UserUID` before identity resolution, while the permission cache key path resolves the user via `s.GetUserIdentifiers` and keys on `userIdentifiers.UID`, so the two caches use different subjects whenever the request's UserUID is not already the canonical UID. When a Check arrives with a UserUID that resolves (via idCache/store lookup) to a different canonical UID, the denial entry is written under the raw request UID while the permission cache lives under the resolved UID; the denial is then never covered by any subject-keyed invalidation and can deny a user whose permissions were just changed, and conversely misses dedup opportunities.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.72,
+        "rationale": "In `Service.Check`, the denial cache key is constructed immediately from `checkReq.UserUID` (`userPermDenialCacheKey(checkReq.Namespace.Value, checkReq.UserUID, ...)`). However, the permission-cache path (`getCachedIdentityPermissions`) resolves the subject via `s.GetUserIdentifiers(...)` and then keys permissions on `userIdentifiers.UID` (`userPermCacheKey(ns.Value, userIdentifiers.UID, action)`). This is a real inconsistency introduced/exposed by the diff: if `checkReq.UserUID` can differ from the resolved canonical `userIdentifiers.UID`, the deny cache and allow/permission cache will not align for the same identity, leading to missed deny hits and duplicated/incorrectly-scoped cache entries.",
+        "diff_context_hash": "a5ffd38b06edec5bdae43bbc0d8d98aa9ff4c4b2"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The new permDenialCache has no invalidation path anywhere in this diff, so a denial entry survives until shortCacheTTL expiry even after the underlying permission is granted. A user who is granted access to a resource (or has a dashboard moved out of a denied folder) continues to receive Allowed:false from Check for up to shortCacheTTL; the diff's own test suite never exercises permission-change invalidation against the denial cache, so this window is unverified \u2014 bitten by any end user whose permissions are edited mid-session.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.66,
+        "rationale": "In `Service.Check`, a denial is cached via `s.permDenialCache.Set(ctx, permDenialKey, true)` and on subsequent calls the code short-circuits immediately (`if _, ok := s.permDenialCache.Get(...); ok { return Allowed:false }`) without re-checking DB/permissions. The diff shows no invalidation/overwrite mechanism for `permDenialCache`, so if the underlying permission changes from denied->allowed, `Check` can still return `Allowed:false` until `shortCacheTTL` expiry for that exact key. This is stale-negative caching behavior introduced by the diff and can cause incorrect authorization results after a grant.",
+        "diff_context_hash": "a5ffd38b06edec5bdae43bbc0d8d98aa9ff4c4b2"
+      }
+    },
+    {
+      "issue_text": "[BUG] Check increments permissionCacheUsage with label \"false\" (cache miss) even when getCachedIdentityPermissions returned a cache hit whose scopes simply did not allow the request, mislabeling the cache-hit metric. The perm cache hit-rate metric reported to operators is understated for every cached-but-denied check (the 'outdated cache' test scenario hits exactly this path), corrupting the dashboards used to evaluate whether this caching change worked.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.93,
+        "rationale": "In `Service.Check`, a cache hit is only counted (`permissionCacheUsage` label \"true\") when the cached permissions *allow* the request and the function returns early. If `getCachedIdentityPermissions` returns cached permissions (cache hit) but `checkPermission` returns `allowed == false`, execution falls through and unconditionally increments `permissionCacheUsage` with label \"false\" (cache miss) before querying the DB. This mislabels cache hits as misses for cached-but-denied checks, exactly matching the described \u201coutdated cache\u201d scenario where the cache contains permissions but not the requested scope.",
+        "diff_context_hash": "a5ffd38b06edec5bdae43bbc0d8d98aa9ff4c4b2"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] Non-ErrNotFound errors from getCachedIdentityPermissions (e.g., GetUserIdentifiers store failure, or the default 'unsupported identity type' error) are silently swallowed with no log line before the full DB path is retried. An outage of the identifier store produces a doubled DB load (identifiers fetched once in getCachedIdentityPermissions, again in getIdentityPermissions) and no diagnostic log for the first failure, degrading the operator's ability to see partial store failures; anyone debugging a degraded authz service during a DB incident is bitten.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.83,
+        "rationale": "In both `Service.Check` and `Service.List`, any non-nil error from `getCachedIdentityPermissions` is treated as a cache miss and the code falls through to `getIdentityPermissions` without logging the initial failure (e.g., `Check`: `cachedPerms, err := ...; if err == nil { ... }` then unconditional fallback; `List`: `if err == nil { ... } else { ... permissions, err = s.getIdentityPermissions(...) }`). Also, `getCachedIdentityPermissions` calls `s.GetUserIdentifiers(...)` to form the cache key for user/service-account identities; on cache miss it then calls `getIdentityPermissions`, which will fetch identifiers again, creating the \u201cdouble hit\u201d the finding describes. This is a real, diff-introduced operational/perf/diagnostic concern, but it doesn\u2019t by itself break correctness.",
+        "diff_context_hash": "a5ffd38b06edec5bdae43bbc0d8d98aa9ff4c4b2"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The new cache tests cover only the TypeUser identity path; the getCachedIdentityPermissions branches for TypeAnonymous (cache hit -> allow) and the default unsupported-identity error path have no test through Check or List. A regression in the anonymous branch (e.g., the anonymousPermCacheKey lookup returning a stale Viewer permission set) would ship unverified, since no test in the diff populates anonymousPermCacheKey and issues a Check; anonymous dashboard viewers across all orgs are the population bitten.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.84,
+        "rationale": "The diff introduces new cached fast paths via getCachedIdentityPermissions() (service.go) with explicit branches for types.TypeAnonymous (anonymousPermCacheKey cache lookup) and a default \"unsupported identity type\" error. The newly added tests (TestService_CacheCheck, TestService_CacheList) only exercise the TypeUser path by setting idCache and userPermCacheKey; none populate anonymousPermCacheKey and run Check/List, and none drive the unsupported-identity branch. This is a concrete, diff-grounded test gap for newly added logic, not a demonstrated functional defect.",
+        "diff_context_hash": "a5ffd38b06edec5bdae43bbc0d8d98aa9ff4c4b2"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The test 'should return permissions from cache if available' for getUserPermissions was deleted rather than replaced with an equivalent test of the new getCachedIdentityPermissions cache-hit path at the unit level. The cache-hit behavior of the permission lookup is now only covered indirectly through the Check integration test; a future refactor of getCachedIdentityPermissions that breaks cache retrieval for List specifically (no List cache-hit test beyond one happy case) would lose the safety net the deleted test provided.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.78,
+        "rationale": "The diff deletes the cache-hit test case from `TestService_getUserPermissions` (the `cacheHit: true` case is removed) while moving cache-hit logic out of `getUserPermissions`/`getAnonymousPermissions` into the new helper `getCachedIdentityPermissions` (`service.go` adds `getCachedIdentityPermissions` and removes the prior cache check in `getUserPermissions`). New coverage is added via `TestService_CacheCheck` and `TestService_CacheList`, but there is no unit-level test that directly exercises `getCachedIdentityPermissions` across identity types/keys; List has only a single happy-path cache-hit test. This is a concrete testing gap tied to the refactor, not a functional defect shown in the diff.",
+        "diff_context_hash": "a5ffd38b06edec5bdae43bbc0d8d98aa9ff4c4b2"
+      }
+    },
+    {
+      "issue_text": "[BUG] The new negative (denial) result cache has no invalidation path anywhere in the diff, so a grant of permission after a denial keeps the user locked out for the full shortCacheTTL window. An admin grants a user access (or a permission is edited) after the user was denied once for (namespace, user, action, name, folder); every subsequent Check for that resource keeps returning {Allowed: false} from permDenialCache until the TTL expires, because no permission-change/invalidation hook in this diff deletes userPermDenialCacheKey entries \u2014 the existing invalidation paths only know about userPermCacheKey. This is under-scoping of the stated caching intent: caching was added without the invalidation requirement that already applies to the positive-permission cache.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.72,
+        "rationale": "In `Service.Check`, the new `permDenialCache` is consulted first and causes an immediate deny without consulting the DB/permission store (`if _, ok := s.permDenialCache.Get(...); ok { ... return &authzv1.CheckResponse{Allowed: false}, nil }`). Denial entries are added after a DB-backed check (`if !allowed { s.permDenialCache.Set(ctx, permDenialKey, true) }`). Within this diff, there is no corresponding deletion/invalidation of `userPermDenialCacheKey(...)` entries\u2014only `Set`/`Get` are used\u2014so a permission grant after a prior denial will still be incorrectly denied until the cache TTL expires.",
+        "diff_context_hash": "a5ffd38b06edec5bdae43bbc0d8d98aa9ff4c4b2"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The denial cache is consulted before the subject is resolved/validated, so it returns a deny for key components taken directly from the request (Namespace.Value, checkReq.UserUID, checkReq.ParentFolder) without the UID resolution the positive path performs via GetUserIdentifiers. Two Check requests that resolve to different actual users but carry colliding raw UserUID/folder strings in the same namespace would share a denial entry; more practically, the deny path never verifies the identity mapping, so the code path enforces a weaker invariant than the allow path it sits beside. Operators debugging 'user denied despite correct role' are bitten when the pre-identity denial short-circuits.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.67,
+        "rationale": "In Service.Check, the new denial cache is checked and can immediately return Allowed:false based on permDenialKey built from request-derived fields (checkReq.Namespace.Value, checkReq.UserUID, checkReq.ParentFolder, etc.) before any identity resolution/validation occurs. The positive/cached-permissions path later canonicalizes the user via GetUserIdentifiers and keys permCache by userIdentifiers.UID, but the denial cache never does. This asymmetry is verifiable in the diff and can cause incorrect denials (e.g., a denial entry keyed by a non-canonical/ambiguous UserUID string, or a denial cached for a UID that would fail/resolve differently through GetUserIdentifiers) to short-circuit checks.",
+        "diff_context_hash": "a5ffd38b06edec5bdae43bbc0d8d98aa9ff4c4b2"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The PR deletes the only test covering getUserPermissions returning from cache (the 'should return permissions from cache if available' case) and does not replace it, while simultaneously removing the cache-read from that function \u2014 the deletion is work not traceable to any requirement and quietly narrows coverage of the code being changed. A future regression in the singleflight/permCache write path (which this diff touches by relocating reads) has no test guarding the round trip store\u2192Set\u2192read; the next change to permission caching gets riskier because the harness that exercised the cache lifecycle in this function is gone.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.84,
+        "rationale": "The diff removes the cache-read branch from `getUserPermissions` (deleted `permCache.Get` + metrics) and deletes the corresponding unit test case in `TestService_getUserPermissions` that asserted returning permissions from cache. Although new tests (`TestService_CacheCheck`, `TestService_CacheList`) cover serving from cache at the `Check`/`List` layer via the new `getCachedIdentityPermissions`, they do not exercise the store\u2192`permCache.Set` (in `getUserPermissions`/`getAnonymousPermissions`) \u2192 subsequent read path. This narrows test coverage around the cache lifecycle after the refactor, which is a concrete, diff-grounded testing gap but not a functional defect proven by the diff alone.",
+        "diff_context_hash": "a5ffd38b06edec5bdae43bbc0d8d98aa9ff4c4b2"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] NoopCache is defined as an exported type in the top-level rbac.go with an unexported-style receiver name (lc), placed far from the other cache-related code in the package's rbac/cache.go where cache key and cache-adjacent helpers live. Maintainers adding the next cache behavior (e.g., an invalidation hook for the new denial cache, or replacing NoopCache with a real cache when the remote path also needs it) must discover and modify a type bolted onto the end of a wiring file; the next change gets harder because cache logic is now split across rbac.go and rbac/cache.go.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.7,
+        "rationale": "The diff adds an exported `type NoopCache struct{}` at the end of `pkg/services/authz/rbac.go` (a wiring/provider file) and uses it in `ProvideAuthZClient` via `authzlib.WithCacheClientOption(&NoopCache{})`. Cache-related helpers (e.g., cache key functions) live in `pkg/services/authz/rbac/cache.go`, so introducing a cache implementation in `rbac.go` does split cache-adjacent logic across files and makes future cache changes harder to discover. This is a maintainability/organization concern, not a correctness defect. The note about the receiver name `lc` being unexported-style is also verifiable (`func (lc *NoopCache) ...`), though largely stylistic.",
+        "diff_context_hash": "a5ffd38b06edec5bdae43bbc0d8d98aa9ff4c4b2"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The new cached-allow fast path in Check and the cached path in List read the permission cache directly, creating a parallel hand-maintained read path next to the singleflight-backed getIdentityPermissions/getUserPermissions writers, with the cache-read logic now existing in two shapes (getCachedIdentityPermissions vs the Set sites in getIdentityPermissions). Cache key construction, hit semantics, and metric labeling are duplicated across getCachedIdentityPermissions and the writers in getUserPermissions/getAnonymousPermissions; when someone changes the key format or adds a new identity type, they must update both shapes or the reader and writer silently disagree (reader returns ErrNotFound forever, fast path goes dead). This already shows drift: the reader handles TypeRenderService explicitly while the writer's switch does not, and the metric increment moved out of getUserPermissions into three separate call sites with subtly different label ordering.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.62,
+        "rationale": "The diff adds a new cache-read fast path via `getCachedIdentityPermissions` (used in `Check` and `List`) that reconstructs cache keys and identity-type branching separately from the existing permission fetch/write flow (`getIdentityPermissions` -> `getUserPermissions`/`getAnonymousPermissions`, which previously also did cache reads but now no longer do). This creates two hand-maintained \u201cshapes\u201d of the caching contract: the reader (`getCachedIdentityPermissions` building `anonymousPermCacheKey`/`userPermCacheKey`) and the writer side (cache `Set` sites inside the non-shown `getIdentityPermissions` path), plus duplicated metric increments now spread across `Check`/`List` rather than centralized (e.g., removal from `getUserPermissions`, and new increments in `Check`/`List`). That\u2019s a concrete maintainability/architecture risk: future key/identity-type changes must be kept consistent across both paths or the fast path can silently become ineffective. However, the finding\u2019s claim of an *existing* drift in identity-type handling or \u201csubtly different label ordering\u201d is not fully verifiable from the shown diff.",
+        "diff_context_hash": "a5ffd38b06edec5bdae43bbc0d8d98aa9ff4c4b2"
+      }
+    },
+    {
+      "issue_text": "[BUG] permDenialCache is written on deny but no code path anywhere in the diff deletes or invalidates denial entries, and its key format (namespace, userUID, action, name, parent) cannot be reconstructed by existing permission-change invalidation, so a user who is denied once stays denied for the full shortCacheTTL even after their permissions are granted. A user granted access to a resource mid-TTL continues to receive Allowed:false for that resource until the entry expires; because the denial-cache hit at the top of Check returns before any DB or permCache consultation (the 'Should deny on explicit cache deny entry' test proves it overrides an allowing permCache), the grant is invisible \u2014 lockout window per resource of up to the full TTL with no invalidation hook to shorten it.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.77,
+        "rationale": "In `Service.Check`, a denial is cached (`s.permDenialCache.Set(...)`) whenever `allowed` is false (service.go around the new `if !allowed { ... }`). On subsequent checks, the very first thing `Check` does is consult `permDenialCache` and immediately return `Allowed: false` on a hit, before consulting `permCache` or querying the DB (`getIdentityPermissions`). The diff shows no deletion/invalidation path for `permDenialCache` entries (only `Get`/`Set` usage is added), so if permissions change to allow access during the cache TTL, this code will still deny until expiry. The added test `Should deny on explicit cache deny entry` demonstrates that the denial cache overrides other permission sources.",
+        "diff_context_hash": "a5ffd38b06edec5bdae43bbc0d8d98aa9ff4c4b2"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The ProvideAuthZClient path silently swaps its 30-second local permission cache for a NoopCache, converting every authz Check from every consumer of this client into an uncached RPC. Any deployment relying on this client for hot-path authorization (every dashboard API request through the remote authz path) now incurs a full round-trip per check with zero client-side caching; if the intent was only that the server-side cache now suffices, this is fine, but if not, latency and authz server load increase unboundedly with traffic and there is no flag to re-enable the local cache.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.86,
+        "rationale": "The diff shows ProvideAuthZClient no longer uses the prior helper that configured a local cache, and instead constructs an authzlib.NewClient with authzlib.WithCacheClientOption(&NoopCache{}) (rbac.go around the ProvideAuthZClient change). NoopCache.Get always returns cache.ErrNotFound, so this path effectively disables client-side caching for that client instance. Meanwhile, the remote client path (newRemoteRBACClient) still configures cache.NewLocalCache with a 30s expiry. This is a real, diff-grounded performance/architecture concern (potential increased RPCs/latency/load), not a correctness defect.",
+        "diff_context_hash": "a5ffd38b06edec5bdae43bbc0d8d98aa9ff4c4b2"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] When cached permissions exist but checkPermission denies, Check increments permissionCacheUsage(\"false\") and falls through to the DB, so a genuine cache hit that denied is recorded as a cache miss, and the same logical request can inflate permissionCacheUsage twice in one call path when the cached layer denies and the DB layer is then consulted. Operators watching permissionCacheUsage to judge cache effectiveness see artificially low hit rates and cannot distinguish 'cached and denied' from 'not cached'; dashboards alerting on cache-miss ratio fire spuriously on workloads dominated by denied checks.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.78,
+        "rationale": "In `Service.Check`, a cached permissions lookup that succeeds (`getCachedIdentityPermissions` returns `err == nil`) but results in `allowed == false` from `s.checkPermission` is not counted as a cache hit. Instead, execution falls through and unconditionally increments `permissionCacheUsage.WithLabelValues(\"false\", ...)` before querying the DB (`getIdentityPermissions`). This makes denied decisions from cached permission maps appear as cache misses in metrics. However, the finding\u2019s claim about inflating `permissionCacheUsage` twice in the same call path is not supported by the diff: the old per-call increments inside `getUserPermissions`/`getAnonymousPermissions` were removed, so in this path only the single \"false\" increment occurs.",
+        "diff_context_hash": "a5ffd38b06edec5bdae43bbc0d8d98aa9ff4c4b2"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] userPermDenialCacheKey builds keys by naive underscore concatenation of userUID, action, name, and parent, so two different (name, parent) pairs containing underscores collide into the same cache key (name=\"a_b\", parent=\"c\" vs name=\"a\", parent=\"b_c\"), and the same occurs against userPermCacheKey's prefix space for adversarially-shaped identifiers. A colliding key returns a cached denial computed for a different resource, denying a user access to a resource they are entitled to (or, once the check falls through, poisoning the wrong key); anyone with control over dashboard or folder UIDs containing underscores \u2014 which is the normal UID alphabet in Grafana \u2014 can hit this, and it is silent.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "unjudged",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "unjudged",
+        "adjudicating_judge": null,
+        "confidence": null,
+        "rationale": null,
+        "diff_context_hash": "a5ffd38b06edec5bdae43bbc0d8d98aa9ff4c4b2"
+      }
+    },
+    {
+      "issue_text": "[BUG] The new permDenialCache short-circuits Check to Allowed:false, but nothing anywhere in the diff deletes denial entries when permissions change \u2014 existing invalidation paths delete keys built by userPermCacheKey/basicRoleCacheKey, and the new userPermDenialCacheKey entries survive them. A user who is granted a new permission (role/permission updated, existing invalidation fires) is still denied on Check for up to shortCacheTTL because the stale denial entry is checked before the permission cache or DB; previously the same invalidation immediately restored access.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.66,
+        "rationale": "In Service.Check, a cached denial is consulted first and immediately returns Allowed:false (`if _, ok := s.permDenialCache.Get(...); ok { ... return &authzv1.CheckResponse{Allowed: false}, nil }`). Denial entries are written whenever the DB-backed check yields `!allowed` (`s.permDenialCache.Set(...)`). Within this diff there is no corresponding deletion/invalidating of `permDenialCache` entries when permissions/roles change, so a previously-denied (name,parentfolder)-scoped check will remain denied until `shortCacheTTL` even if the underlying permissions are updated to allow it, because the denial short-circuit happens before consulting cached permissions or the DB.",
+        "diff_context_hash": "a5ffd38b06edec5bdae43bbc0d8d98aa9ff4c4b2"
+      }
+    },
+    {
+      "issue_text": "[BUG] The cached-denial short-circuit and the cached-permission allow path both return before consulting s.identityStore-based freshness or running the singleflight/DB path, but the denial Set at lines 153-155 fires even when the deny came from a stale/outdated permCache fallback that already hit the DB \u2014 meaning a deny is cached under a key that mixes namespace+user+action+name+parent while the DB result it was derived from was authoritative, yet the earlier cache-miss path in the same request may have returned an allow from stale cache in a prior request, producing inconsistent cached allow/deny states for the same resource within the TTL window. Within shortCacheTTL, two identical Check requests for the same resource can return contradictory results (allowed from stale permCache vs denied from denial cache populated by a later DB check), and callers cannot tell which is authoritative; anyone relying on monotonic permission changes within the TTL window gets flapping authorization decisions.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "hallucination",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "hallucination",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.62,
+        "rationale": "In `Service.Check`, the new `permDenialCache` is only populated after the DB-backed path runs and computes `allowed` (`if !allowed { s.permDenialCache.Set(...) }`), not \u201cwhen the deny came from a stale/outdated permCache fallback\u201d. Also, the cached-permission early return happens only when `allowed` is true from `checkPermission(cachedPerms, ...)`; when cached perms yield a deny/absence, the code falls through to `getIdentityPermissions` (DB) and does not return early. The claimed within-TTL flip/flapping between a stale cached allow and a denial-cache short-circuit for the *same* request isn\u2019t directly supported by the diff because the denial cache can\u2019t be populated while the allow short-circuit continues to be taken, unless external eviction/expiry behavior (not shown here) changes the cache state.",
+        "diff_context_hash": "a5ffd38b06edec5bdae43bbc0d8d98aa9ff4c4b2"
+      }
+    },
+    {
+      "issue_text": "[BUG] The new permDenialCache is written but never invalidated anywhere in the diff, creating an authorization-cache asymmetry where grants are revalidated (existing permission-change code paths delete permCache entries keyed by userPermCacheKey) while denials served from permDenialCache are not rechecked. When an admin grants a user access to a resource, existing invalidation deletes the permCache entry so the grant is recomputed from the DB, but the permDenialCache entry (a different key format, userPermDenialCacheKey) survives and is checked first in Check, so the user is denied access the database says they have, for up to shortCacheTTL after the grant. Conversely, the one-case tests only cover cache behavior, never invalidation, so this will not be caught by tests.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.78,
+        "rationale": "In `Service.Check`, the new `permDenialCache` is consulted first (`if _, ok := s.permDenialCache.Get(...); ok { return Allowed:false }`) and is populated on any computed denial (`if !allowed { s.permDenialCache.Set(..., true) }`). Unlike the regular `permCache` path, stale cached permissions that would deny are not relied on (the code falls back to DB if cached perms don\u2019t allow), but a stale `permDenialCache` entry is a hard deny that prevents the DB re-check. The diff shows no corresponding deletion/invalidating of `permDenialCache` entries anywhere (no `Delete` usage), so a permissions grant after a prior deny can be incorrectly blocked until `shortCacheTTL` expires.",
+        "diff_context_hash": "a5ffd38b06edec5bdae43bbc0d8d98aa9ff4c4b2"
+      }
+    },
+    {
+      "issue_text": "[BUG] The denial is cached keyed on the raw checkReq.UserUID, but the grant cache (permCache) is keyed on the resolved userIdentifiers.UID from GetUserIdentifiers, so a request whose UserUID maps to a different stored UID records denials under a key that the grant cache never uses and invalidation never targets. A user whose subject UID differs from their stored identifier gets denials cached under the raw subject value; those entries can never be invalidated by any permission-change hook that deletes by resolved-UID permCache keys, extending the stale-denial window indefinitely for that key and making the invalidation asymmetry permanent rather than TTL-bounded.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.58,
+        "rationale": "The diff shows a real keying inconsistency: in Service.Check the denial cache key is built with the raw `checkReq.UserUID` (`userPermDenialCacheKey(checkReq.Namespace.Value, checkReq.UserUID, ...)`), while cached permission grants are looked up using the resolved canonical `userIdentifiers.UID` from `GetUserIdentifiers` (`userPermCacheKey(ns.Value, userIdentifiers.UID, action)` in `getCachedIdentityPermissions`). This can lead to fragmented caching for the same logical user if `checkReq.UserUID` is not already the canonical UID, and any external invalidation that operates on canonical UID-based keys would not naturally align with these denial keys. However, the finding\u2019s stronger claim about invalidation hooks \u201cnever targeting\u201d these keys and stale denials becoming \u201cindefinite\u201d is not verifiable from this diff (the denial cache uses `shortCacheTTL`, implying TTL-bounded entries).",
+        "diff_context_hash": "a5ffd38b06edec5bdae43bbc0d8d98aa9ff4c4b2"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The denial-cache hit path returns Allowed:false without consulting fresh grant state even though the cached-permission grant path and the fresh-database path both run afterwards, meaning a cached denial overrides everything, including permission state fetched from the store in the same request if the store changed. A revocation that arrives as a grant-path permission update cannot be honored within the TTL window, and any bug or race that writes a spurious denial entry (e.g., a transient failure of checkPermission to see folder-tree permissions) is amplified into a hard denial for the full shortCacheTTL; who gets bitten is end users of the authz gRPC service, immediately after this ships.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.76,
+        "rationale": "In Service.Check, a permDenialCache hit (keyed by namespace/user/action/name/parent) short-circuits the request and immediately returns `Allowed: false` before any cached-permission evaluation or fresh store lookup (`if _, ok := s.permDenialCache.Get(...); ok { ... return &authzv1.CheckResponse{Allowed: false}, nil }`). The denial entry is written after a computed denial (`if !allowed { s.permDenialCache.Set(..., true) }`). This means a denial can persist for `shortCacheTTL` even if the underlying permission state changes to allow during that window, and any erroneous denial computation would be amplified into repeated hard denies until TTL expiry. However, this behavior is directly implied by the caching design (fail-closed) rather than a provable defect from the diff alone.",
+        "diff_context_hash": "a5ffd38b06edec5bdae43bbc0d8d98aa9ff4c4b2"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] userPermDenialCacheKey concatenates unbounded user-supplied components (name, parent from the CheckRequest) into a cache key with a fixed '.'/'_' separator scheme that can collide with userPermCacheKey's format when fields contain underscores. Two distinct (name, parent) pairs such as ('a_b','c') and ('a','b_c') map to the same key, so a denial recorded for one resource denies a different resource for the same user until TTL expiry \u2014 a correctness/security drift an attacker controlling dashboard or folder names can trigger to deny access to other resources in their org.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.82,
+        "rationale": "The diff introduces userPermDenialCacheKey(namespace, userUID, action, name, parent) which builds a cache key via raw string concatenation with \"_\" separators: `... + \"_\" + name + \"_\" + parent` (pkg/services/authz/rbac/cache.go). Since `name` and `parent` are unescaped/free-form, different (name,parent) pairs can produce identical keys when underscores are present (e.g., name=\"a_b\", parent=\"c\" vs name=\"a\", parent=\"b_c\" both yield the same suffix \"a_b_c\"). In service.Check, this key is used to short-circuit deny (`permDenialCache.Get` -> return Allowed:false) and to record denies (`permDenialCache.Set` when `!allowed`) (pkg/services/authz/rbac/service.go), so a denial for one resource can incorrectly deny another resource until TTL expires. The finding\u2019s claim about colliding with userPermCacheKey specifically is not supported (perm keys have fewer components), but the intra-denial-key collision is real and introduced here.",
+        "diff_context_hash": "a5ffd38b06edec5bdae43bbc0d8d98aa9ff4c4b2"
+      }
+    },
+    {
+      "issue_text": "[BUG] The 'Should deny on explicit cache deny entry' subtest is tautological: it seeds permCache with {\"dashboards:uid:dash1\": false}, which causes checkPermission to deny on its own, so the assertion passes even if the permDenialCache lookup is deleted from Check. The only test of the new negative-cache path proves nothing \u2014 a regression that removes the permDenialCache Get (or the whole feature) still passes the suite, giving false confidence that denial caching works.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": [
+        "The test comment says the cached permissions 'allow access', but the map stores false for dashboards:uid:dash1, so checkPermission will still treat this scope as not allowed."
+      ],
+      "primary_judge_verdict": "matched",
+      "primary_judge": "gpt-5.2",
+      "primary_judge_confidence": 0.86,
+      "primary_judge_reasoning": "Both point to the same core problem: the test setup seeds the permission cache with `dashboards:uid:dash1: false`, so `checkPermission` will deny access regardless of any separate denial/negative-cache logic. This contradicts the test\u2019s stated intent (\u201callow access\u201d / testing negative-cache behavior) and makes the test effectively meaningless/tautological.",
+      "adjudication": {
+        "verdict": "matched",
+        "adjudicating_judge": null,
+        "confidence": null,
+        "rationale": null,
+        "diff_context_hash": "a5ffd38b06edec5bdae43bbc0d8d98aa9ff4c4b2"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] No test exercises the deny-path cache write: the new s.permDenialCache.Set(ctx, permDenialKey, true) after a DB-backed deny (nor its interplay with invalidation via SetPermissions/BasicRole changes) is never triggered and asserted in TestService_CacheCheck or anywhere else in the diff. The negative-cache write path ships unverified: if Set is called with a wrong key (e.g. mismatched ParentFolder formatting vs the Get key) or is never reached due to an early return, all tests still pass, and stale denials after a permission grant silently lock users out for the shortCacheTTL window.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.88,
+        "rationale": "The diff adds a new negative-cache write in Service.Check: `if !allowed { s.permDenialCache.Set(ctx, permDenialKey, true) }` after the DB-backed permission evaluation. The added tests in `TestService_CacheCheck` cover (a) allow via cached perms, (b) DB fallback on cache miss/outdated cache, and (c) deny via a pre-seeded `permDenialCache` entry \u2014 but none of them trigger a DB-backed deny and then assert that the denial was written to `permDenialCache` with the same key used by the earlier `Get` path (`userPermDenialCacheKey(..., checkReq.Name, checkReq.ParentFolder)`). So the new negative-cache write path is indeed unverified by tests in this diff.",
+        "diff_context_hash": "a5ffd38b06edec5bdae43bbc0d8d98aa9ff4c4b2"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] getCachedIdentityPermissions is new non-trivial branching logic (TypeAnonymous cache read, TypeRenderService bypass, default error) and the only tests added cover the TypeUser branch; checked service_test.go \u2014 TestService_CacheCheck and TestService_CacheList both use user:test-uid subjects only. The anonymous-identity cache hit in Check and the render-service ErrNotFound bypass are uncovered: a regression that returns cached Viewer permissions for render/service-account identities, or panics on the default branch with an empty identity type, would not be caught by this diff's tests.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.78,
+        "rationale": "The diff introduces new branching logic in `getCachedIdentityPermissions` (anonymous cache read via `anonymousPermCacheKey`, `TypeRenderService` hard-bypass returning `cache.ErrNotFound`, and a `default` unsupported-type error). The newly added tests `TestService_CacheCheck` and `TestService_CacheList` only exercise the `TypeUser` path (subjects are `user:test-uid`), and do not cover the anonymous or render-service branches. One part of the finding is overstated: the `default` branch returns an error (`fmt.Errorf`) and does not \u201cpanic\u201d per the shown code. Still, the core review issue\u2014missing coverage for newly added non-trivial branches used by `Check`/`List`\u2014is specific and grounded in this diff.",
+        "diff_context_hash": "a5ffd38b06edec5bdae43bbc0d8d98aa9ff4c4b2"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The new permDenialCache is never tied to any invalidation path, so a denial written after a DB check survives permission grants until the short TTL expires. A user (or an operator applying a permission change to unblock a locked-out user) is still denied for up to the denial-cache TTL after the grant, because the grant invalidates permCache/basicRoleCache entries but nothing deletes permDenialCache keys; the deny branch short-circuits before any permission data is consulted.",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.75,
+        "rationale": "The diff adds a new `permDenialCache` and in `Service.Check` it short-circuits to `Allowed: false` if the denial key exists (see the early `permDenialCache.Get` branch). Denials are also written after a DB-backed check (`if !allowed { s.permDenialCache.Set(...) }`). Within this diff there is no corresponding deletion/invalidating logic for `permDenialCache` keys (only `Set`/`Get` usage is shown), so a cached deny will persist until TTL even if underlying permissions change. The finding\u2019s broader claim about other caches being invalidated elsewhere cannot be verified from this diff, but the core concern (deny cache can outlive a later grant until expiry and bypasses permission re-check) is grounded in the shown code.",
+        "diff_context_hash": "a5ffd38b06edec5bdae43bbc0d8d98aa9ff4c4b2"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The denial cache lookup and set run for every identity type, including TypeAnonymous, where checkReq.UserUID is empty, so the denial key degenerates to namespace+action+name+parent with no subject. For anonymous requests a single resource-level denial is cached org-wide against the empty UID and applied to all subsequent anonymous checks for that resource, and nothing distinguishes callers \u2014 anonymous users who would otherwise receive a different verdict through the folder-tree logic in checkPermission get the cached deny.",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "unresolved",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "unresolved",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.46,
+        "rationale": "In `Service.Check`, the denial-cache key is computed and consulted unconditionally for all requests: `permDenialKey := userPermDenialCacheKey(..., checkReq.UserUID, ...)` and `s.permDenialCache.Get/Set(...)` runs before any identity-type branching. The diff does not show how `checkReq.UserUID` is populated for `TypeAnonymous` (or other identities), so the claim that it is definitely empty and therefore causes org-wide anonymous deny collisions is not strictly verifiable from the diff alone. However, the concern is diff-grounded: if `UserUID` can be empty (e.g., anonymous), the key collapses to namespace+action+name+parent and the denial cache would be shared broadly, which is an important edge-case/design issue to review.",
+        "diff_context_hash": "a5ffd38b06edec5bdae43bbc0d8d98aa9ff4c4b2"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The permissionCacheUsage metric is incremented with label \"false\" (miss) whenever cached permissions exist but deny, misclassifying cache hits as misses, and the getIdentityPermissions fallback in getUserPermissions no longer records this metric at all after its cache-read block was removed. Operators watching permissionCacheUsage to validate this PR's caching improvement see inflated miss rates for deny-heavy traffic and no data for the remaining getUserPermissions callers, skewing the dashboards used to judge rollout success.",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.8,
+        "rationale": "In `Service.Check`, after successfully reading cached permissions (`cachedPerms, err := s.getCachedIdentityPermissions(...)`), the code only increments `permissionCacheUsage` with label `\"true\"` when `allowed` is true; if the cache read succeeds but the cached perms deny the specific object, it falls through and later increments `permissionCacheUsage` with label `\"false\"` (miss) (`s.metrics.permissionCacheUsage.WithLabelValues(\"false\", checkReq.Action).Inc()`), misclassifying a cache hit as a miss. Also, `getUserPermissions` previously had a cache-read block that both returned cached data and recorded `permissionCacheUsage`; that block (and its metric increments) was removed, and `getUserPermissions` now records no `permissionCacheUsage` at all, so any call paths that invoke `getUserPermissions` without going through the new `Check`/`List` cache logic would stop emitting this metric.",
+        "diff_context_hash": "a5ffd38b06edec5bdae43bbc0d8d98aa9ff4c4b2"
+      }
+    },
+    {
+      "issue_text": "[BUG] permDenialCache entries are written on every denial but never deleted, and their key format (namespace.perm_uid_action_name_parent) does not match the exact userPermCacheKey keys (namespace.perm_uid_action) that existing invalidation paths delete, so denial entries survive permission changes. When an admin grants a user access to a specific resource, the permission cache is invalidated but the per-resource denial entry is not \u2014 the user receives Allowed:false from Check (service.go:118-122) for up to shortCacheTTL after the grant, with no error surfaced; the denial cache test even proves permCache is bypassed entirely when a denial entry exists.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.62,
+        "rationale": "The diff clearly adds a new negative-cache path: `Check` first looks up `permDenialCache` using `userPermDenialCacheKey(namespace,userUID,action,name,parent)` and immediately returns `Allowed:false` if present (service.go, new block before `getCachedIdentityPermissions`). It also writes to this cache on any denial (`if !allowed { s.permDenialCache.Set(...) }`). This means a previously cached denial will override later permission evaluation (including `permCache`) until it expires via `shortCacheTTL`. However, the finding\u2019s stronger claim that \u201cexisting invalidation paths delete only `userPermCacheKey` so denials survive permission changes\u201d is not verifiable from the provided diff because no invalidation code is shown. The concern is real and diff-grounded (stale negative decisions for up to TTL), but whether it is a definite bug depends on unstated invalidation/consistency requirements outside the diff.",
+        "diff_context_hash": "a5ffd38b06edec5bdae43bbc0d8d98aa9ff4c4b2"
+      }
+    },
+    {
+      "issue_text": "[BUG] userPermDenialCacheKey concatenates name and parent with an unescaped '_' delimiter, so (name=\"a_b\", parent=\"c\") and (name=\"a\", parent=\"b_c\") produce the identical key \"ns.perm_uid_act_a_b_c\". A denial cached for resource \"a_b\" in folder \"c\" is returned as a denial for resource \"a\" in folder \"b_c\" (and vice versa), denying access to a resource the user is entitled to with no error or log \u2014 a wrong negative authorization decision from key collision.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": [
+        "The cache key construction in `userPermDenialCacheKey` uses simple string concatenation with underscores, which can lead to ambiguous keys and collision risks when any component contains underscores or is empty. This could result in incorrect denial cache hits, affecting user permissions."
+      ],
+      "primary_judge_verdict": "matched",
+      "primary_judge": "gpt-5.2",
+      "primary_judge_confidence": 0.97,
+      "primary_judge_reasoning": "The candidate describes the same underlying issue: cache key construction via simple underscore-delimited string concatenation can create ambiguous/colliding keys when components contain underscores, leading to incorrect denial cache hits and wrong authorization decisions.",
+      "adjudication": {
+        "verdict": "matched",
+        "adjudicating_judge": null,
+        "confidence": null,
+        "rationale": null,
+        "diff_context_hash": "a5ffd38b06edec5bdae43bbc0d8d98aa9ff4c4b2"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The cached-permission allow path in Check returns early without refreshing or validating that the cached permission set is newer than any concurrent write, and the metric line counts this as a non-error, cache-hit success (\"false\",\"true\",...), so a stale grant served from permCache is indistinguishable in metrics from a correct one. Operators debugging 'user can still access a revoked dashboard' see requestCount/cache-usage metrics indicating healthy cached authorizations, lengthening time-to-diagnosis during the shortCacheTTL window; the pre-existing getUserPermissions cache had the same staleness but this diff newly makes Check serve it before any singleflight dedup, so concurrent first-checks after invalidation all read the same possibly-stale snapshot.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "hallucination",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "hallucination",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.72,
+        "rationale": "The diff does add an explicit cached-permissions fast path in `Service.Check` via `getCachedIdentityPermissions`, but the core behavior (serving a potentially-stale `permCache` snapshot for up to `shortCacheTTL`) already existed: previously `Check -> getIdentityPermissions -> getUserPermissions/getAnonymousPermissions` would return early on a `permCache.Get` hit (before the `singleflight` call) and then `checkPermission` could allow based on that cached map. So the claim that this diff \u201cnewly makes Check serve it before any singleflight dedup\u201d is not supported by the shown code. The metrics point (cached allow counted as non-error success) is true but not a verifiable defect introduced here, and there is no mechanism in the diff to \u201crefresh/validate newer than concurrent write\u201d either before or after.",
+        "diff_context_hash": "a5ffd38b06edec5bdae43bbc0d8d98aa9ff4c4b2"
+      }
+    }
+  ],
+  "diff_context_hash": "a5ffd38b06edec5bdae43bbc0d8d98aa9ff4c4b2",
+  "primary_judge": "gpt-5.2",
+  "adjudicating_judge": "gpt-5.2",
+  "url": "https://github.com/grafana/grafana/pull/103633",
+  "framework": "metareview-realistic",
+  "model": "glm-5.3-background",
+  "effort": "low",
+  "judge": "gpt-5.2",
+  "wall_s": 341.7192351818085,
+  "execution_mode": "api",
+  "run_batch": "20260909-mrv0112-lens1"
+}

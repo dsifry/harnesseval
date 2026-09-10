@@ -1,0 +1,447 @@
+{
+ "run_id": "705ae83a182b",
+ "url": "https://github.com/getsentry/sentry/pull/95633",
+ "framework": "metareview-realistic",
+ "model": "glm-5.3-background",
+ "effort": "low",
+ "adjudicator_version": 3,
+ "cross_run_dedup": {
+  "batch": "20260909-mrv0112-lens1",
+  "url": "https://github.com/getsentry/sentry/pull/95633",
+  "n_clusters": 17
+ },
+ "original": {
+  "tp": 0,
+  "fn": 2,
+  "n_real_ungold": 26,
+  "n_hallucination": 5,
+  "adj_p": 0.0,
+  "incr": 0.9285714285714286
+ },
+ "corrected": {
+  "n_unmatched": 31,
+  "rejudged": 31,
+  "n_bug_ungold": 25,
+  "n_important": 2,
+  "n_true_hallucination": 4,
+  "n_unresolved": 0,
+  "n_hidden_findings_unmatched": 27,
+  "waste_precision": 0.0,
+  "flips": {
+   "hallucination->hallucination": 4,
+   "hallucination->important_non_bug": 1,
+   "real_but_ungold->bug": 25,
+   "real_but_ungold->important_non_bug": 1
+  },
+  "judge": "gpt-5.2",
+  "diff_chars": 55464,
+  "wall_s": 815.0,
+  "n_clusters": 17,
+  "dedup_savings": 14
+ },
+ "records": [
+  {
+   "issue_text": "[ADVISORY] The new code depends on queue.Queue.shutdown() and the queue.ShutDown exception, both of which were only added to the stdlib in Python 3.13, and are used unconditionally at runtime (OrderedQueueWorker.run catches queue.ShutDown, FixedQueuePool.shutdown calls q.shutdown(immediate=False)). On any deployment or CI image running Python < 3.13 (the repo's supported interpreter floor), importing/running this consumer path fails with AttributeError: 'module queue has no attribute ShutDown' at class-definition/first-shutdown time, and q.shutdown() raises AttributeError inside the except-handler's original failure, so graceful shutdown of the thread-queue-parallel uptime consumer breaks entirely; verify the repo's python_requires before merge and pin or gate this mode.",
+   "source_lens": "metareview-lens/feasibility",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.75,
+   "rationale": "The new consumer code unconditionally relies on `queue.ShutDown` and `Queue.shutdown()`: `OrderedQueueWorker.run` has `except queue.ShutDown:` (new file `queue_consumer.py`, worker loop), and `FixedQueuePool.shutdown` calls `q.shutdown(immediate=False)` for each `queue.Queue` instance. If running on Python versions where these stdlib APIs don\u2019t exist, this path will raise `AttributeError` at runtime and break shutdown/worker operation for the new `thread-queue-parallel` mode added in `ResultsStrategyFactory`.",
+   "stripped_text": "[ADVISORY] The new code depends on queue.Queue.shutdown() and the queue.ShutDown exception, both of which were only added to the stdlib in Python 3.13, and are used unconditionally at runtime (OrderedQueueWorker.run catches queue.ShutDown, FixedQueuePool.shutdown calls q.shutdown(immediate=False)). On any deployment or CI image running Python < 3.13 (the repo's supported interpreter floor), importing/running this consumer path fails with AttributeError: 'module queue has no attribute ShutDown' at class-definition/first-shutdown time, and q.shutdown() raises AttributeError inside the except-handler's original failure, so graceful shutdown of the thread-queue-parallel uptime consumer breaks entirely; verify the repo's python_requires before merge and pin or gate this mode.",
+   "cluster": {
+    "id": 0,
+    "size": 1
+   }
+  },
+  {
+   "issue_text": "[ADVISORY] FixedQueuePool.shutdown calls q.shutdown(immediate=False) after setting worker.shutdown = True, but workers block in work_queue.get() with no timeout, so with the Python 3.13 semantics they only observe the ShutDown exception after the queue fully drains, and the subsequent worker.join(timeout=5.0) is best-effort only. If a result_processor hangs (e.g. a slow DB call), close()/terminate() in SimpleQueueProcessingStrategy returns with workers still alive and offsets uncommitted after the 5s join timeout, so an operator restarting the uptime consumer sees processing re-run from the last committed offset \u2014 duplicate result processing on every restart while a stuck worker exists.",
+   "source_lens": "metareview-lens/feasibility",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.74,
+   "rationale": "The diff adds a new shutdown path where `FixedQueuePool.shutdown()` sets `worker.shutdown = True` and then calls `q.shutdown(immediate=False)` for each queue, but `OrderedQueueWorker.run()` blocks on `work_queue.get()` with no timeout and only exits on `queue.ShutDown`/loop condition (new file `queue_consumer.py`, `run()` + `shutdown()`). Additionally, `SimpleQueueProcessingStrategy.close()` stops the commit loop first (`self.shutdown_event.set(); self.commit_thread.join(...)`) and then shuts down the pool, so if any worker is still processing/hung, offsets may remain outstanding with no furth",
+   "stripped_text": "[ADVISORY] FixedQueuePool.shutdown calls q.shutdown(immediate=False) after setting worker.shutdown = True, but workers block in work_queue.get() with no timeout, so with the Python 3.13 semantics they only observe the ShutDown exception after the queue fully drains, and the subsequent worker.join(timeout=5.0) is best-effort only. If a result_processor hangs (e.g. a slow DB call), close()/terminate() in SimpleQueueProcessingStrategy returns with workers still alive and offsets uncommitted after the 5s join timeout, so an operator restarting the uptime consumer sees processing re-run from the last committed offset \u2014 duplicate result processing on every restart while a stuck worker exists.",
+   "cluster": {
+    "id": 1,
+    "size": 1
+   }
+  },
+  {
+   "issue_text": "[ADVISORY] In thread-queue-parallel mode, FixedQueuePool (and its 20 daemon worker threads plus the commit thread) is constructed in ResultsStrategyFactory.__init__ and started at import/consumer-startup time, but no strategy using it may ever be created via create_with_partitions if the runtime mode string is 'serial' \u2014 the pool is only built when mode is thread-queue-parallel, so this is gated correctly, yet shutdown() at line 183 nulls self.queue_pool while create_with_partitions at line 241 asserts self.queue_pool is not None, so a factory reused after shutdown crashes. Any code path that calls factory.shutdown() and then factory.create_with_partitions again (e.g. StreamProcessor recreating strategies on partition rebalance, which arroyo does on rebalances) hits AssertionError: self.queue_pool is not None, taking the uptime consumer worker down during a routine Kafka rebalance.",
+   "source_lens": "metareview-lens/feasibility",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.78,
+   "rationale": "The diff shows `ResultsStrategyFactory.shutdown()` now calls `self.queue_pool.shutdown()` and then sets `self.queue_pool = None` (result_consumer.py, shutdown block added around lines ~180-186). However, `self.thread_queue_parallel` is set to `True` in `__init__` when mode == \"thread-queue-parallel\" and is never reset in `shutdown()`. Later, `create_with_partitions()` checks `if self.thread_queue_parallel:` and then calls `create_thread_queue_parallel_worker()`, which contains `assert self.queue_pool is not None` (around lines ~206-214 and ~241-248). Therefore, if the factory instance is reuse",
+   "stripped_text": "[ADVISORY] In thread-queue-parallel mode, FixedQueuePool (and its 20 daemon worker threads plus the commit thread) is constructed in ResultsStrategyFactory.__init__ and started at import/consumer-startup time, but no strategy using it may ever be created via create_with_partitions if the runtime mode string is 'serial' \u2014 the pool is only built when mode is thread-queue-parallel, so this is gated correctly, yet shutdown() at line 183 nulls self.queue_pool while create_with_partitions at line 241 asserts self.queue_pool is not None, so a factory reused after shutdown crashes. Any code path that calls factory.shutdown() and then factory.create_with_partitions again (e.g. StreamProcessor recreating strategies on partition rebalance, which arroyo does on rebalances) hits AssertionError: self.queue_pool is not None, taking the uptime consumer worker down during a routine Kafka rebalance.",
+   "cluster": {
+    "id": 2,
+    "size": 1
+   }
+  },
+  {
+   "issue_text": "[BUG] OrderedQueueWorker.run() marks an offset complete in the finally block even when result_processor raised, so the commit loop advances the Kafka offset past messages whose processing failed. The class docstring and strategy guarantee \"Only commits offsets after successful processing\" is violated: any transient failure (DB error, timeout) in result_processor permanently drops that uptime result with no retry and no dead-letter, because the failed offset is immediately committable; the test_thread_queue_parallel_error_handling test even encodes this silent data loss without asserting it. A crash-retry loop that the serial mode provides is silently removed in this mode.",
+   "source_lens": "metareview-lens/completeness",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "In `OrderedQueueWorker.run`, the `finally` block always calls `self.offset_tracker.complete_offset(work_item.partition, work_item.offset)` even if `result_processor(...)` raised an exception (it is caught/logged in the `except Exception:` block). Since `OffsetTracker.get_committable_offsets()` treats any offset that is no longer \u201coutstanding\u201d as processed, the commit loop in `SimpleQueueProcessingStrategy._commit_loop` can advance commits past failed messages with no retry/DLQ, contradicting the strategy docstring guarantee \u201cOnly commits offsets after successful processing.\u201d",
+   "stripped_text": "[BUG] OrderedQueueWorker.run() marks an offset complete in the finally block even when result_processor raised, so the commit loop advances the Kafka offset past messages whose processing failed. The class docstring and strategy guarantee \"Only commits offsets after successful processing\" is violated: any transient failure (DB error, timeout) in result_processor permanently drops that uptime result with no retry and no dead-letter, because the failed offset is immediately committable; the test_thread_queue_parallel_error_handling test even encodes this silent data loss without asserting it. A crash-retry loop that the serial mode provides is silently removed in this mode.",
+   "cluster": {
+    "id": 3,
+    "size": 8
+   }
+  },
+  {
+   "issue_text": "[BUG] SimpleQueueProcessingStrategy.close() and terminate() shut down the FixedQueuePool that is owned by the shared ResultsStrategyFactory, permanently killing the workers and queues that any subsequently created strategy still uses. On every partition rebalance Arroyo tears down the old strategy and calls create_with_partitions again on the same factory; the old strategy's close() runs queue_pool.shutdown() (setting worker.shutdown and calling q.shutdown() on every queue), so the new strategy's submit() puts into a shut-down queue.Queue and raises ValueError, and its workers are stopped \u2014 the consumer permanently stops processing after the first rebalance, and since q.shutdown(immediate=False) drains asynchronously, in-flight items can also be dropped. No test in the diff exercises a second create_with_partitions call, so this is completely uncovered.",
+   "source_lens": "metareview-lens/completeness",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "In `ResultsStrategyFactory.__init__`, the `FixedQueuePool` is created once and stored on the factory (`self.queue_pool = FixedQueuePool(...)` when `mode == \"thread-queue-parallel\"`). `create_thread_queue_parallel_worker` then passes that same shared instance into each new `SimpleQueueProcessingStrategy` (`queue_pool=self.queue_pool`). However, `SimpleQueueProcessingStrategy.close()` and `terminate()` both call `self.queue_pool.shutdown()`, which shuts down the shared queues/workers (`FixedQueuePool.shutdown()` sets `worker.shutdown = True` and calls `q.shutdown(immediate=False)` on every queue",
+   "stripped_text": "[BUG] SimpleQueueProcessingStrategy.close() and terminate() shut down the FixedQueuePool that is owned by the shared ResultsStrategyFactory, permanently killing the workers and queues that any subsequently created strategy still uses. On every partition rebalance Arroyo tears down the old strategy and calls create_with_partitions again on the same factory; the old strategy's close() runs queue_pool.shutdown() (setting worker.shutdown and calling q.shutdown() on every queue), so the new strategy's submit() puts into a shut-down queue.Queue and raises ValueError, and its workers are stopped \u2014 the consumer permanently stops processing after the first rebalance, and since q.shutdown(immediate=False) drains asynchronously, in-flight items can also be dropped. No test in the diff exercises a second create_with_partitions call, so this is completely uncovered.",
+   "cluster": {
+    "id": 4,
+    "size": 3
+   }
+  },
+  {
+   "issue_text": "[BUG] OffsetTracker._get_partition_lock has a check-then-setdefault race: two threads calling it concurrently for a new partition can each obtain a different Lock object (dict.get returns None for both before either setdefault lands, or setdefault returns the other's lock only sometimes), so mutual exclusion is not guaranteed. Concurrent add_offset/complete_offset/mark_committed calls for the same partition can interleave on different locks and corrupt all_offsets/outstanding/last_committed, producing skipped or duplicated Kafka commits (offset committed while an item is still outstanding \u2192 data loss on restart). Every existing test uses sequential or low-contention access, so this race is unverified.",
+   "source_lens": "metareview-lens/completeness",
+   "old_verdict": "hallucination",
+   "new_verdict": "hallucination",
+   "confidence": 0.85,
+   "rationale": "The described race (\u201ctwo threads \u2026 can each obtain a different Lock object \u2026 so mutual exclusion is not guaranteed\u201d) is contradicted by the actual implementation of `_get_partition_lock`:\n\n```py\nlock = self.partition_locks.get(partition)\nif lock:\n    return lock\nreturn self.partition_locks.setdefault(partition, threading.Lock())\n```\n\nEven if two threads concurrently reach `setdefault`, `dict.setdefault` will return the *already-stored* value when the key exists; at worst an extra `threading.Lock()` is created and discarded, but both callers will receive the same lock object stored in `self.par",
+   "stripped_text": "[BUG] OffsetTracker._get_partition_lock has a check-then-setdefault race: two threads calling it concurrently for a new partition can each obtain a different Lock object (dict.get returns None for both before either setdefault lands, or setdefault returns the other's lock only sometimes), so mutual exclusion is not guaranteed. Concurrent add_offset/complete_offset/mark_committed calls for the same partition can interleave on different locks and corrupt all_offsets/outstanding/last_committed, producing skipped or duplicated Kafka commits (offset committed while an item is still outstanding \u2192 data loss on restart). Every existing test uses sequential or low-contention access, so this race is unverified.",
+   "cluster": {
+    "id": 5,
+    "size": 2
+   }
+  },
+  {
+   "issue_text": "[ADVISORY] num_queues=max_workers or 20 is passed with no validation, so a negative --max-workers value creates zero workers and zero queues (range(-1) is empty), and get_queue_for_group then does hash % -1 and indexes an empty list. An operator passing --max-workers -1 (or 0 combined with a falsy-num_queues path change) gets a consumer that crashes on the first submitted message with IndexError/ZeroDivisionError instead of a startup validation error; the CLI accepts any int with no guard and no test covers non-positive max_workers.",
+   "source_lens": "metareview-lens/completeness",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.92,
+   "rationale": "In the new `thread-queue-parallel` mode, `ResultsStrategyFactory.__init__` constructs `FixedQueuePool(..., num_queues=max_workers or 20)`. If `--max-workers` is a negative int (truthy), `num_queues` becomes negative. In `FixedQueuePool.__init__`, `for i in range(num_queues):` will create zero queues/workers for negative values, leaving `self.queues` empty, while `get_queue_for_group` does `hash(group_key) % self.num_queues` and `submit` indexes `self.queues[queue_index]`, which will crash (e.g., `IndexError` for -1, `ZeroDivisionError` for 0). There is no validation on the click `--max-workers",
+   "stripped_text": "[ADVISORY] num_queues=max_workers or 20 is passed with no validation, so a negative --max-workers value creates zero workers and zero queues (range(-1) is empty), and get_queue_for_group then does hash % -1 and indexes an empty list. An operator passing --max-workers -1 (or 0 combined with a falsy-num_queues path change) gets a consumer that crashes on the first submitted message with IndexError/ZeroDivisionError instead of a startup validation error; the CLI accepts any int with no guard and no test covers non-positive max_workers.",
+   "cluster": {
+    "id": 6,
+    "size": 2
+   }
+  },
+  {
+   "issue_text": "[ADVISORY] join(timeout) accepts a timeout parameter and then unconditionally calls close(), which ignores the timeout entirely (commit thread joined with hardcoded 5.0, workers joined with 5.0 each, serially). An Arroyo caller invoking join(timeout=1) during a stall (e.g., a stuck result_processor) blocks for up to 5 + 5*num_queues seconds instead of honoring the deadline, converting a graceful rebalance into a consumer-group timeout; the parameter is a silent no-op that misleads the next maintainer.",
+   "source_lens": "metareview-lens/completeness",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "In `SimpleQueueProcessingStrategy.join(self, timeout: float | None = None)`, the `timeout` parameter is ignored and it unconditionally calls `self.close()` (see `def join(...): self.close()`). `close()` then joins `self.commit_thread` with a hardcoded `timeout=5.0`, and `FixedQueuePool.shutdown()` joins each worker with `timeout=5.0` serially. This makes `join(timeout=...)` a silent no-op and can block far longer than the caller-supplied timeout, matching the finding\u2019s mechanism.",
+   "stripped_text": "[ADVISORY] join(timeout) accepts a timeout parameter and then unconditionally calls close(), which ignores the timeout entirely (commit thread joined with hardcoded 5.0, workers joined with 5.0 each, serially). An Arroyo caller invoking join(timeout=1) during a stall (e.g., a stuck result_processor) blocks for up to 5 + 5*num_queues seconds instead of honoring the deadline, converting a graceful rebalance into a consumer-group timeout; the parameter is a silent no-op that misleads the next maintainer.",
+   "cluster": {
+    "id": 7,
+    "size": 2
+   }
+  },
+  {
+   "issue_text": "[BUG] OrderedQueueWorker.run marks the offset complete in the `finally` block even when `result_processor` raised, so failed messages are treated as successfully processed. A message whose processing raises (e.g. transient DB error handling an uptime result) still has its offset completed by the OffsetTracker, the commit thread then commits past it, and the message is permanently lost \u2014 directly violating the class's stated guarantee \"Only commits offsets after successful processing\"; the diff's own test_thread_queue_parallel_error_handling asserts no commit happens on error, so that test fails or flakes because the worker actually allows the commit.",
+   "source_lens": "metareview-lens/scope",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "In `OrderedQueueWorker.run`, the `finally` block always calls `self.offset_tracker.complete_offset(work_item.partition, work_item.offset)` even if `result_processor(...)` raised an exception (it is caught/logged in the `except Exception:` block). Since `OffsetTracker.get_committable_offsets()` treats any offset that is no longer \u201coutstanding\u201d as processed, the commit loop in `SimpleQueueProcessingStrategy._commit_loop` can advance commits past failed messages with no retry/DLQ, contradicting the strategy docstring guarantee \u201cOnly commits offsets after successful processing.\u201d",
+   "stripped_text": "[BUG] OrderedQueueWorker.run marks the offset complete in the `finally` block even when `result_processor` raised, so failed messages are treated as successfully processed. A message whose processing raises (e.g. transient DB error handling an uptime result) still has its offset completed by the OffsetTracker, the commit thread then commits past it, and the message is permanently lost \u2014 directly violating the class's stated guarantee \"Only commits offsets after successful processing\"; the diff's own test_thread_queue_parallel_error_handling asserts no commit happens on error, so that test fails or flakes because the worker actually allows the commit.",
+   "cluster": {
+    "id": 3,
+    "size": 8
+   }
+  },
+  {
+   "issue_text": "[ADVISORY] FixedQueuePool uses unbounded queue.Queue instances, so the docstring claim of \"Natural backpressure when queues fill up\" is not enforced anywhere. If result processing falls behind consumption (Kafka lag spike, slow handle_result), submit() keeps enqueueing without bound and the process grows memory until OOM; operators of uptime consumers running thread-queue-parallel get killed workers instead of the backpressure the design promises.",
+   "source_lens": "metareview-lens/scope",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.86,
+   "rationale": "The new `FixedQueuePool` constructs each work queue as `queue.Queue()` with no `maxsize` (unbounded) (`work_queue: queue.Queue[...] = queue.Queue()`), and `submit()` always does `work_queue.put(work_item)` with no capacity checks/blocking. However, `SimpleQueueProcessingStrategy`\u2019s docstring explicitly claims \u201cNatural backpressure when queues fill up\u201d. With unbounded queues, they never \u201cfill up\u201d, so consumption can enqueue indefinitely if workers fall behind, leading to unbounded memory growth/OOM. This is a verifiable behavior mismatch introduced by this diff.",
+   "stripped_text": "[ADVISORY] FixedQueuePool uses unbounded queue.Queue instances, so the docstring claim of \"Natural backpressure when queues fill up\" is not enforced anywhere. If result processing falls behind consumption (Kafka lag spike, slow handle_result), submit() keeps enqueueing without bound and the process grows memory until OOM; operators of uptime consumers running thread-queue-parallel get killed workers instead of the backpressure the design promises.",
+   "cluster": {
+    "id": 9,
+    "size": 3
+   }
+  },
+  {
+   "issue_text": "[BUG] OrderedQueueWorker.run completes the offset in a finally block even when result_processor raises, so failed messages are marked processed and their offsets get committed, permanently dropping the message instead of retrying it. A transient DB/Redis failure while handling an uptime result causes the result to be logged and discarded; the commit loop then advances the Kafka consumer past it, so the check result is never reprocessed and the uptime status silently diverges from reality. The docstring claim 'Only commits offsets after successful processing' and the diff's own test_thread_queue_parallel_error_handling (which asserts no commit on failure) are both contradicted by this code \u2014 the test will go red against the implementation, or if it passes it is only due to commit-loop timing.",
+   "source_lens": "metareview-lens/architecture",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "In `OrderedQueueWorker.run`, the `finally` block always calls `self.offset_tracker.complete_offset(work_item.partition, work_item.offset)` even if `result_processor(...)` raised an exception (it is caught/logged in the `except Exception:` block). Since `OffsetTracker.get_committable_offsets()` treats any offset that is no longer \u201coutstanding\u201d as processed, the commit loop in `SimpleQueueProcessingStrategy._commit_loop` can advance commits past failed messages with no retry/DLQ, contradicting the strategy docstring guarantee \u201cOnly commits offsets after successful processing.\u201d",
+   "stripped_text": "[BUG] OrderedQueueWorker.run completes the offset in a finally block even when result_processor raises, so failed messages are marked processed and their offsets get committed, permanently dropping the message instead of retrying it. A transient DB/Redis failure while handling an uptime result causes the result to be logged and discarded; the commit loop then advances the Kafka consumer past it, so the check result is never reprocessed and the uptime status silently diverges from reality. The docstring claim 'Only commits offsets after successful processing' and the diff's own test_thread_queue_parallel_error_handling (which asserts no commit on failure) are both contradicted by this code \u2014 the test will go red against the implementation, or if it passes it is only due to commit-loop timing.",
+   "cluster": {
+    "id": 3,
+    "size": 8
+   }
+  },
+  {
+   "issue_text": "[BUG] SimpleQueueProcessingStrategy.submit's except block marks the offset add+complete for any message that fails decoding or grouping, committing poison/undecodable messages as successfully processed. A malformed payload or a grouping_fn exception is swallowed and the offset is committed on the next 1-second commit tick, so the bad message is silently dropped from the topic with no dead-letter path and no operator-visible failure beyond a log line \u2014 data loss by design in the error path.",
+   "source_lens": "metareview-lens/architecture",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.88,
+   "rationale": "In `SimpleQueueProcessingStrategy.submit`, the broad `except Exception:` handler logs and then **always** calls `add_offset` + `complete_offset` for any `BrokerValue` message:\n\n```py\nexcept Exception:\n    logger.exception(\"Error submitting message to queue\")\n    if isinstance(message.value, BrokerValue):\n        self.queue_pool.offset_tracker.add_offset(message.value.partition, message.value.offset)\n        self.queue_pool.offset_tracker.complete_offset(message.value.partition, message.value.offset)\n```\n\nSince the background commit loop commits any offsets that are no longer outstanding (`get_",
+   "stripped_text": "[BUG] SimpleQueueProcessingStrategy.submit's except block marks the offset add+complete for any message that fails decoding or grouping, committing poison/undecodable messages as successfully processed. A malformed payload or a grouping_fn exception is swallowed and the offset is committed on the next 1-second commit tick, so the bad message is silently dropped from the topic with no dead-letter path and no operator-visible failure beyond a log line \u2014 data loss by design in the error path.",
+   "cluster": {
+    "id": 11,
+    "size": 1
+   }
+  },
+  {
+   "issue_text": "[ADVISORY] FixedQueuePool uses unbounded queue.Queue objects, so the docstring guarantee 'Natural backpressure when queues fill up' is false \u2014 there is no maxsize and submit never blocks. If result processing is slower than Kafka consumption (e.g. a DB incident), the arroyo consumer keeps polling and enqueueing without bound; memory grows with raw decoded payloads until the process is OOM-killed, taking down the whole consumer and its in-flight uncommitted work. The next maintainer trusting the docstring will not add a bound.",
+   "source_lens": "metareview-lens/architecture",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.86,
+   "rationale": "The new `FixedQueuePool` constructs each work queue as `queue.Queue()` with no `maxsize` (unbounded) (`work_queue: queue.Queue[...] = queue.Queue()`), and `submit()` always does `work_queue.put(work_item)` with no capacity checks/blocking. However, `SimpleQueueProcessingStrategy`\u2019s docstring explicitly claims \u201cNatural backpressure when queues fill up\u201d. With unbounded queues, they never \u201cfill up\u201d, so consumption can enqueue indefinitely if workers fall behind, leading to unbounded memory growth/OOM. This is a verifiable behavior mismatch introduced by this diff.",
+   "stripped_text": "[ADVISORY] FixedQueuePool uses unbounded queue.Queue objects, so the docstring guarantee 'Natural backpressure when queues fill up' is false \u2014 there is no maxsize and submit never blocks. If result processing is slower than Kafka consumption (e.g. a DB incident), the arroyo consumer keeps polling and enqueueing without bound; memory grows with raw decoded payloads until the process is OOM-killed, taking down the whole consumer and its in-flight uncommitted work. The next maintainer trusting the docstring will not add a bound.",
+   "cluster": {
+    "id": 9,
+    "size": 3
+   }
+  },
+  {
+   "issue_text": "[ADVISORY] close() sets shutdown_event and joins the commit thread before draining the queue pool, so offsets completed by workers during the drain are never committed, and worker.shutdown=True lets workers exit the loop with items still in their queues. On every rebalance or deploy, messages processed during the final drain window are re-consumed by the next owner (at-least-once reduplication is safe here but doubles work per deploy), and messages left in queues when a worker checks self.shutdown at loop top are dropped from memory and redelivered \u2014 operators see a burst of duplicate result processing on every restart. Note the commit loop does at most one final commit iteration after the event is set, racing the drain.",
+   "source_lens": "metareview-lens/architecture",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "The finding matches the shutdown/commit ordering in the diff. In `SimpleQueueProcessingStrategy.close()`, it sets `shutdown_event` and *joins the commit thread before shutting down/draining the queue pool* (`self.shutdown_event.set(); self.commit_thread.join(...); self.queue_pool.shutdown()`). This means any offsets completed by workers after the commit thread stops will not be committed. Separately, `FixedQueuePool.shutdown()` sets `worker.shutdown = True` before calling `q.shutdown(immediate=False)`, but `OrderedQueueWorker.run()` loops with `while not self.shutdown:` at the top, so a worker",
+   "stripped_text": "[ADVISORY] close() sets shutdown_event and joins the commit thread before draining the queue pool, so offsets completed by workers during the drain are never committed, and worker.shutdown=True lets workers exit the loop with items still in their queues. On every rebalance or deploy, messages processed during the final drain window are re-consumed by the next owner (at-least-once reduplication is safe here but doubles work per deploy), and messages left in queues when a worker checks self.shutdown at loop top are dropped from memory and redelivered \u2014 operators see a burst of duplicate result processing on every restart. Note the commit loop does at most one final commit iteration after the event is set, racing the drain.",
+   "cluster": {
+    "id": 13,
+    "size": 1
+   }
+  },
+  {
+   "issue_text": "[ADVISORY] OrderedQueueWorker.run breaks out of the processing try on queue.ShutDown after having dequeued the work item, leaving that offset permanently outstanding in the OffsetTracker. During shutdown, a worker that dequeues an item and receives ShutDown from the queue inside the processing block exits without completing the offset; combined with finding above, the partition's committable offset freezes at that point, so on restart the consumer resumes from an older offset than the work actually performed \u2014 harmless redelivery, but the tracker's own invariant (every added offset is eventually completed or committed) is broken and the committable-offset scan for that partition stalls forever in a unit that survives.",
+   "source_lens": "metareview-lens/architecture",
+   "old_verdict": "hallucination",
+   "new_verdict": "hallucination",
+   "confidence": 0.83,
+   "rationale": "The diff shows that even when `queue.ShutDown` is raised during processing, the offset is still completed because `complete_offset` is in a `finally` block that executes regardless of the `except ...: break`. Specifically, in `OrderedQueueWorker.run`: `except queue.ShutDown: break` is followed by `finally: self.offset_tracker.complete_offset(work_item.partition, work_item.offset)`, so a dequeued item\u2019s offset is not left outstanding as the finding claims.",
+   "stripped_text": "[ADVISORY] OrderedQueueWorker.run breaks out of the processing try on queue.ShutDown after having dequeued the work item, leaving that offset permanently outstanding in the OffsetTracker. During shutdown, a worker that dequeues an item and receives ShutDown from the queue inside the processing block exits without completing the offset; combined with finding above, the partition's committable offset freezes at that point, so on restart the consumer resumes from an older offset than the work actually performed \u2014 harmless redelivery, but the tracker's own invariant (every added offset is eventually completed or committed) is broken and the committable-offset scan for that partition stalls forever in a unit that survives.",
+   "cluster": {
+    "id": 14,
+    "size": 1
+   }
+  },
+  {
+   "issue_text": "[BUG] The class docstring's core guarantee 'Only commits offsets after successful processing' is false: OrderedQueueWorker.run completes the offset in a finally block regardless of whether result_processor raised. When the result processor throws (e.g., a DB outage processing an uptime check result), the message's offset is marked complete anyway and committed by the commit loop, so the failed message is silently dropped \u2014 the new mode delivers at-most-once semantics where the existing serial/parallel modes deliver at-least-once, permanently losing uptime check results with only a log line.",
+   "source_lens": "metareview-lens/intent",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "In `OrderedQueueWorker.run`, the `finally` block always calls `self.offset_tracker.complete_offset(work_item.partition, work_item.offset)` even if `result_processor(...)` raised an exception (it is caught/logged in the `except Exception:` block). Since `OffsetTracker.get_committable_offsets()` treats any offset that is no longer \u201coutstanding\u201d as processed, the commit loop in `SimpleQueueProcessingStrategy._commit_loop` can advance commits past failed messages with no retry/DLQ, contradicting the strategy docstring guarantee \u201cOnly commits offsets after successful processing.\u201d",
+   "stripped_text": "[BUG] The class docstring's core guarantee 'Only commits offsets after successful processing' is false: OrderedQueueWorker.run completes the offset in a finally block regardless of whether result_processor raised. When the result processor throws (e.g., a DB outage processing an uptime check result), the message's offset is marked complete anyway and committed by the commit loop, so the failed message is silently dropped \u2014 the new mode delivers at-most-once semantics where the existing serial/parallel modes deliver at-least-once, permanently losing uptime check results with only a log line.",
+   "cluster": {
+    "id": 3,
+    "size": 8
+   }
+  },
+  {
+   "issue_text": "[BUG] The error-handling test's assertion `len(committed_offsets) == 0 or test_partition not in committed_offsets` is a self-negating disjunction that passes in every possible state, including the state where the failed message's offset IS committed. The test was written expecting failed messages to block commits, but the implementation commits them (offsets completed in the finally block); the `or` clause was added so the test passes anyway, concealing the intent drift from no-commit-on-failure to commit-on-failure \u2014 a future reader sees a green test and believes error semantics are verified when they are not.",
+   "source_lens": "metareview-lens/intent",
+   "old_verdict": "hallucination",
+   "new_verdict": "hallucination",
+   "confidence": 0.84,
+   "rationale": "The claim that the assertion is a \u201cself-negating disjunction that passes in every possible state\u201d is contradicted by the test itself. The line `assert len(committed_offsets) == 0 or test_partition not in committed_offsets` will **fail** if `committed_offsets` is non-empty **and** contains `test_partition` (both disjuncts become false). So it does not pass \u201cin every possible state,\u201d including the state where the failed message\u2019s partition offset is committed. The additional speculation about the `or` being added to conceal intent drift is also not verifiable from the diff.",
+   "stripped_text": "[BUG] The error-handling test's assertion `len(committed_offsets) == 0 or test_partition not in committed_offsets` is a self-negating disjunction that passes in every possible state, including the state where the failed message's offset IS committed. The test was written expecting failed messages to block commits, but the implementation commits them (offsets completed in the finally block); the `or` clause was added so the test passes anyway, concealing the intent drift from no-commit-on-failure to commit-on-failure \u2014 a future reader sees a green test and believes error semantics are verified when they are not.",
+   "cluster": {
+    "id": 16,
+    "size": 1
+   }
+  },
+  {
+   "issue_text": "[ADVISORY] SimpleQueueProcessingStrategy.join() is implemented as close(), collapsing arroyo's distinct join/wait-for-drain phase into a shutdown that stops the commit thread and shuts down the queue pool. During a rebalance or processor stop, arroyo calls join() to wait for in-flight messages to finish; here join immediately terminates the commit loop before queued items drain, so in-flight work items are discarded without a final offset commit, causing reprocessing at startup \u2014 inconsistent with the other strategies' drain semantics and a behavior change nobody explicitly accepted.",
+   "source_lens": "metareview-lens/intent",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "In `SimpleQueueProcessingStrategy.join(self, timeout: float | None = None)`, the `timeout` parameter is ignored and it unconditionally calls `self.close()` (see `def join(...): self.close()`). `close()` then joins `self.commit_thread` with a hardcoded `timeout=5.0`, and `FixedQueuePool.shutdown()` joins each worker with `timeout=5.0` serially. This makes `join(timeout=...)` a silent no-op and can block far longer than the caller-supplied timeout, matching the finding\u2019s mechanism.",
+   "stripped_text": "[ADVISORY] SimpleQueueProcessingStrategy.join() is implemented as close(), collapsing arroyo's distinct join/wait-for-drain phase into a shutdown that stops the commit thread and shuts down the queue pool. During a rebalance or processor stop, arroyo calls join() to wait for in-flight messages to finish; here join immediately terminates the commit loop before queued items drain, so in-flight work items are discarded without a final offset commit, causing reprocessing at startup \u2014 inconsistent with the other strategies' drain semantics and a behavior change nobody explicitly accepted.",
+   "cluster": {
+    "id": 7,
+    "size": 2
+   }
+  },
+  {
+   "issue_text": "[BUG] OrderedQueueWorker.run marks an offset complete in the finally block even when result_processor raised, so failed messages have their offsets committed and are permanently dropped. A transient DB/network error (or a poison payload) during uptime result processing causes the message to be logged and its offset committed; on restart the consumer resumes past it, so the check result is silently lost with no retry and no dead-letter path \u2014 the 'Only commits offsets after successful processing' guarantee stated in SimpleQueueProcessingStrategy's docstring is false.",
+   "source_lens": "metareview-lens/security",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "In `OrderedQueueWorker.run`, the `finally` block always calls `self.offset_tracker.complete_offset(work_item.partition, work_item.offset)` even if `result_processor(...)` raised an exception (it is caught/logged in the `except Exception:` block). Since `OffsetTracker.get_committable_offsets()` treats any offset that is no longer \u201coutstanding\u201d as processed, the commit loop in `SimpleQueueProcessingStrategy._commit_loop` can advance commits past failed messages with no retry/DLQ, contradicting the strategy docstring guarantee \u201cOnly commits offsets after successful processing.\u201d",
+   "stripped_text": "[BUG] OrderedQueueWorker.run marks an offset complete in the finally block even when result_processor raised, so failed messages have their offsets committed and are permanently dropped. A transient DB/network error (or a poison payload) during uptime result processing causes the message to be logged and its offset committed; on restart the consumer resumes past it, so the check result is silently lost with no retry and no dead-letter path \u2014 the 'Only commits offsets after successful processing' guarantee stated in SimpleQueueProcessingStrategy's docstring is false.",
+   "cluster": {
+    "id": 3,
+    "size": 8
+   }
+  },
+  {
+   "issue_text": "[ADVISORY] OffsetTracker._get_partition_lock has a check-then-set race: two threads calling it concurrently for a new partition can each construct a different Lock, with partition_locks.setdefault keeping only one, so one thread proceeds with an unlocked guard. During consumer startup or rebalance, concurrent add_offset/complete_offset calls for a newly-seen partition can mutate the offset sets without mutual exclusion, producing a corrupted outstanding set and an incorrectly computed committable offset (over-commit \u2192 message loss). Rebuttal: callers mostly hit the same partition repeatedly after the first insert, so the window is narrow \u2014 but the first two messages on a partition arrive via separate worker threads and strategy submit simultaneously, so the trigger exists in this diff's own call pattern.",
+   "source_lens": "metareview-lens/security",
+   "old_verdict": "hallucination",
+   "new_verdict": "hallucination",
+   "confidence": 0.85,
+   "rationale": "The described race (\u201ctwo threads \u2026 can each obtain a different Lock object \u2026 so mutual exclusion is not guaranteed\u201d) is contradicted by the actual implementation of `_get_partition_lock`:\n\n```py\nlock = self.partition_locks.get(partition)\nif lock:\n    return lock\nreturn self.partition_locks.setdefault(partition, threading.Lock())\n```\n\nEven if two threads concurrently reach `setdefault`, `dict.setdefault` will return the *already-stored* value when the key exists; at worst an extra `threading.Lock()` is created and discarded, but both callers will receive the same lock object stored in `self.par",
+   "stripped_text": "[ADVISORY] OffsetTracker._get_partition_lock has a check-then-set race: two threads calling it concurrently for a new partition can each construct a different Lock, with partition_locks.setdefault keeping only one, so one thread proceeds with an unlocked guard. During consumer startup or rebalance, concurrent add_offset/complete_offset calls for a newly-seen partition can mutate the offset sets without mutual exclusion, producing a corrupted outstanding set and an incorrectly computed committable offset (over-commit \u2192 message loss). Rebuttal: callers mostly hit the same partition repeatedly after the first insert, so the window is narrow \u2014 but the first two messages on a partition arrive via separate worker threads and strategy submit simultaneously, so the trigger exists in this diff's own call pattern.",
+   "cluster": {
+    "id": 5,
+    "size": 2
+   }
+  },
+  {
+   "issue_text": "[ADVISORY] OrderedQueueWorker.run executes result_processor with sentry_sdk.start_transaction but no isolation/scope handling, and worker exceptions are swallowed with only a log, so a worker thread that dies is never replaced. The thread is a daemon with no supervisor; if run() exits other than via the shutdown flag (e.g., an unexpected BaseException or future edit), all messages for the groups hashed to that queue block forever while the offset tracker never completes them, stalling all offset commits for those partitions with only an exception log as forensics \u2014 operators see the consumer as healthy-but-stuck.",
+   "source_lens": "metareview-lens/security",
+   "old_verdict": "hallucination",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.74,
+   "rationale": "The diff introduces daemon worker threads (`OrderedQueueWorker(..., daemon=True)`) with no supervision/restart mechanism; `FixedQueuePool` never replaces workers if a thread exits. `run()` only catches `Exception` (not `BaseException`), so an unhandled `BaseException` (or future edit introducing an early `return`) could terminate a worker permanently, leaving that queue\u2019s groups unprocessed and the `OffsetTracker`\u2019s outstanding offsets never completed, which would stall commits in `_commit_loop`. However, the finding overstates one part: for ordinary exceptions in `result_processor`, offsets a",
+   "stripped_text": "[ADVISORY] OrderedQueueWorker.run executes result_processor with sentry_sdk.start_transaction but no isolation/scope handling, and worker exceptions are swallowed with only a log, so a worker thread that dies is never replaced. The thread is a daemon with no supervisor; if run() exits other than via the shutdown flag (e.g., an unexpected BaseException or future edit), all messages for the groups hashed to that queue block forever while the offset tracker never completes them, stalling all offset commits for those partitions with only an exception log as forensics \u2014 operators see the consumer as healthy-but-stuck.",
+   "cluster": {
+    "id": 20,
+    "size": 1
+   }
+  },
+  {
+   "issue_text": "[BUG] test_thread_queue_parallel_error_handling asserts that no offsets are committed after a processing failure, but the implementation commits them anyway, so the test can only pass by winning a race against the 1-second commit loop. OrderedQueueWorker.run completes the offset in a finally block even when result_processor raises, so the errored message's offset becomes committable and _commit_loop (waking every 1.0s) will commit past it. The test's final assertion `len(committed_offsets) == 0 or test_partition not in committed_offsets` is checked only ~0.2s after processing finishes \u2014 it passes only when the commit loop hasn't fired yet, so the suite gives false confidence that errors block commits while the code actually commits past failures (which for uptime results means silently losing the failed message). On a slow CI box the commit thread fires first and the test flakes; on the code's real semantics the assertion is simply wrong.",
+   "source_lens": "metareview-lens/testing-quality",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "In `OrderedQueueWorker.run`, the `finally` block always calls `self.offset_tracker.complete_offset(work_item.partition, work_item.offset)` even if `result_processor(...)` raised an exception (it is caught/logged in the `except Exception:` block). Since `OffsetTracker.get_committable_offsets()` treats any offset that is no longer \u201coutstanding\u201d as processed, the commit loop in `SimpleQueueProcessingStrategy._commit_loop` can advance commits past failed messages with no retry/DLQ, contradicting the strategy docstring guarantee \u201cOnly commits offsets after successful processing.\u201d",
+   "stripped_text": "[BUG] test_thread_queue_parallel_error_handling asserts that no offsets are committed after a processing failure, but the implementation commits them anyway, so the test can only pass by winning a race against the 1-second commit loop. OrderedQueueWorker.run completes the offset in a finally block even when result_processor raises, so the errored message's offset becomes committable and _commit_loop (waking every 1.0s) will commit past it. The test's final assertion `len(committed_offsets) == 0 or test_partition not in committed_offsets` is checked only ~0.2s after processing finishes \u2014 it passes only when the commit loop hasn't fired yet, so the suite gives false confidence that errors block commits while the code actually commits past failures (which for uptime results means silently losing the failed message). On a slow CI box the commit thread fires first and the test flakes; on the code's real semantics the assertion is simply wrong.",
+   "cluster": {
+    "id": 3,
+    "size": 8
+   }
+  },
+  {
+   "issue_text": "[ADVISORY] test_different_groups_distributed asserts `len(queue_indices) == 3` based on Python's per-process randomized str hash, making the test flaky across PYTHONHASHSEED values. get_queue_for_group uses built-in hash() on strings, which is salted per process; the 20 group keys could all collide into 2 (or 1) of the 3 queues for some seeds (probability \u2248 2\u00b7(2/3)^20 \u2248 0.5% per run), producing an intermittent CI failure that no code change explains. More importantly, the assertion verifies an accidental hash-distribution property rather than the ordering guarantee, so it tests the mock-machinery of hashing rather than the spec.",
+   "source_lens": "metareview-lens/testing-quality",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "The diff shows `FixedQueuePool.get_queue_for_group` uses Python\u2019s built-in `hash(group_key) % self.num_queues` (in `queue_consumer.py`), and the new test `test_different_groups_distributed` asserts `len(queue_indices) == 3` after hashing 20 different string keys (in `test_queue_consumer.py`). Because Python string hashing is salted per-process (varies with `PYTHONHASHSEED`) and can map all 20 keys into only 1\u20132 of 3 buckets for some seeds, the test can intermittently fail without any code change, i.e., it is flaky and asserts a non-guaranteed distribution property.",
+   "stripped_text": "[ADVISORY] test_different_groups_distributed asserts `len(queue_indices) == 3` based on Python's per-process randomized str hash, making the test flaky across PYTHONHASHSEED values. get_queue_for_group uses built-in hash() on strings, which is salted per process; the 20 group keys could all collide into 2 (or 1) of the 3 queues for some seeds (probability \u2248 2\u00b7(2/3)^20 \u2248 0.5% per run), producing an intermittent CI failure that no code change explains. More importantly, the assertion verifies an accidental hash-distribution property rather than the ordering guarantee, so it tests the mock-machinery of hashing rather than the spec.",
+   "cluster": {
+    "id": 22,
+    "size": 1
+   }
+  },
+  {
+   "issue_text": "[ADVISORY] test_stats_reporting asserts `stats['total_items'] > 0` immediately after submitting 10 items with already-running workers, so the queue can legitimately be empty by the time get_stats is called and the first assertion fails flakily. The three worker threads start in FixedQueuePool.__init__ and consume items as soon as they are put; there is no synchronization between submit and the stats snapshot, so on a fast machine all 10 items can be dequeued before the test reads stats, failing `total_items > 0` intermittently. The second half (total_items == 0 after processing) is fine, but the first assertion is a timing race that will flake CI without any code defect.",
+   "source_lens": "metareview-lens/testing-quality",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.9,
+   "rationale": "The race described is directly supported by the diff. In `FixedQueuePool.__init__`, worker threads are started immediately (`worker.start()` inside the constructor loop), so they can consume items as soon as `submit()` does `work_queue.put(work_item)`. In `tests/.../test_queue_consumer.py::TestFixedQueuePool.test_stats_reporting`, after submitting 10 items it immediately snapshots `stats = self.pool.get_stats()` and asserts `stats[\"total_items\"] > 0` before waiting for processing completion. Since there is no synchronization between the last `submit()` and the stats read, it is possible for wo",
+   "stripped_text": "[ADVISORY] test_stats_reporting asserts `stats['total_items'] > 0` immediately after submitting 10 items with already-running workers, so the queue can legitimately be empty by the time get_stats is called and the first assertion fails flakily. The three worker threads start in FixedQueuePool.__init__ and consume items as soon as they are put; there is no synchronization between submit and the stats snapshot, so on a fast machine all 10 items can be dequeued before the test reads stats, failing `total_items > 0` intermittently. The second half (total_items == 0 after processing) is fine, but the first assertion is a timing race that will flake CI without any code defect.",
+   "cluster": {
+    "id": 23,
+    "size": 1
+   }
+  },
+  {
+   "issue_text": "[BUG] OrderedQueueWorker.run() marks an offset complete in the finally block even when result_processor raised, so the commit loop commits past failed messages and they are permanently lost. Any exception during uptime-result processing (DB error, transient failure) is swallowed with only a log line; the offset is committed as if processed, so the Kafka message is never retried and the uptime check result is silently dropped \u2014 permanent data loss with no reprocessing path.",
+   "source_lens": "metareview-lens/data-migration",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "In `OrderedQueueWorker.run`, the `finally` block always calls `self.offset_tracker.complete_offset(work_item.partition, work_item.offset)` even if `result_processor(...)` raised an exception (it is caught/logged in the `except Exception:` block). Since `OffsetTracker.get_committable_offsets()` treats any offset that is no longer \u201coutstanding\u201d as processed, the commit loop in `SimpleQueueProcessingStrategy._commit_loop` can advance commits past failed messages with no retry/DLQ, contradicting the strategy docstring guarantee \u201cOnly commits offsets after successful processing.\u201d",
+   "stripped_text": "[BUG] OrderedQueueWorker.run() marks an offset complete in the finally block even when result_processor raised, so the commit loop commits past failed messages and they are permanently lost. Any exception during uptime-result processing (DB error, transient failure) is swallowed with only a log line; the offset is committed as if processed, so the Kafka message is never retried and the uptime check result is silently dropped \u2014 permanent data loss with no reprocessing path.",
+   "cluster": {
+    "id": 3,
+    "size": 8
+   }
+  },
+  {
+   "issue_text": "[BUG] SimpleQueueProcessingStrategy.close()/terminate() shut down the entire FixedQueuePool, but the pool is owned by the factory and shared across strategies created on partition rebalance, so a new strategy built after a rebalance runs against dead workers and shut-down queues. On consumer group rebalance, arroyo closes the old strategy (killing all worker threads and calling q.shutdown) and then create_with_partitions returns a new SimpleQueueProcessingStrategy referencing the same shut-down pool; submitted messages sit in a closed queue with no worker, offsets never advance, and the consumer stalls until process restart \u2014 while uncommitted messages are reprocessed only after a full restart.",
+   "source_lens": "metareview-lens/data-migration",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "In `ResultsStrategyFactory.__init__`, the `FixedQueuePool` is created once and stored on the factory (`self.queue_pool = FixedQueuePool(...)` when `mode == \"thread-queue-parallel\"`). `create_thread_queue_parallel_worker` then passes that same shared instance into each new `SimpleQueueProcessingStrategy` (`queue_pool=self.queue_pool`). However, `SimpleQueueProcessingStrategy.close()` and `terminate()` both call `self.queue_pool.shutdown()`, which shuts down the shared queues/workers (`FixedQueuePool.shutdown()` sets `worker.shutdown = True` and calls `q.shutdown(immediate=False)` on every queue",
+   "stripped_text": "[BUG] SimpleQueueProcessingStrategy.close()/terminate() shut down the entire FixedQueuePool, but the pool is owned by the factory and shared across strategies created on partition rebalance, so a new strategy built after a rebalance runs against dead workers and shut-down queues. On consumer group rebalance, arroyo closes the old strategy (killing all worker threads and calling q.shutdown) and then create_with_partitions returns a new SimpleQueueProcessingStrategy referencing the same shut-down pool; submitted messages sit in a closed queue with no worker, offsets never advance, and the consumer stalls until process restart \u2014 while uncommitted messages are reprocessed only after a full restart.",
+   "cluster": {
+    "id": 4,
+    "size": 3
+   }
+  },
+  {
+   "issue_text": "[BUG] A message whose processing raises is still marked completed and its offset committed, silently dropping the message while Kafka records it as processed. When result_processor raises (DB error, bad subscription data), the worker's `except Exception: logger.exception(...)` is followed by `finally: self.offset_tracker.complete_offset(...)`, so the failed offset becomes committable and is committed within 1s by the commit loop. The uptime check result is permanently lost with no retry and no dead-letter \u2014 the docstring's guarantee \"Only commits offsets after successful processing\" is false. The diff's own error-handling test only passes because it checks committed_offsets before the 1s commit tick fires.",
+   "source_lens": "metareview-lens/runtime-reliability",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "In `OrderedQueueWorker.run`, the `finally` block always calls `self.offset_tracker.complete_offset(work_item.partition, work_item.offset)` even if `result_processor(...)` raised an exception (it is caught/logged in the `except Exception:` block). Since `OffsetTracker.get_committable_offsets()` treats any offset that is no longer \u201coutstanding\u201d as processed, the commit loop in `SimpleQueueProcessingStrategy._commit_loop` can advance commits past failed messages with no retry/DLQ, contradicting the strategy docstring guarantee \u201cOnly commits offsets after successful processing.\u201d",
+   "stripped_text": "[BUG] A message whose processing raises is still marked completed and its offset committed, silently dropping the message while Kafka records it as processed. When result_processor raises (DB error, bad subscription data), the worker's `except Exception: logger.exception(...)` is followed by `finally: self.offset_tracker.complete_offset(...)`, so the failed offset becomes committable and is committed within 1s by the commit loop. The uptime check result is permanently lost with no retry and no dead-letter \u2014 the docstring's guarantee \"Only commits offsets after successful processing\" is false. The diff's own error-handling test only passes because it checks committed_offsets before the 1s commit tick fires.",
+   "cluster": {
+    "id": 3,
+    "size": 8
+   }
+  },
+  {
+   "issue_text": "[BUG] The docstring claims \"Natural backpressure when queues fill up\" but every queue is constructed with `queue.Queue()` (no maxsize), so there is no backpressure and memory grows without bound. If result processing is slower than Kafka consumption (slow DB, incident on one hot subscription serializing behind one worker), submit() never blocks, arroyo keeps polling, and WorkItems (including full decoded payloads) accumulate in unbounded in-process queues until the consumer OOMs \u2014 with offsets uncommitted, so restart replays the whole backlog.",
+   "source_lens": "metareview-lens/runtime-reliability",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.86,
+   "rationale": "The new `FixedQueuePool` constructs each work queue as `queue.Queue()` with no `maxsize` (unbounded) (`work_queue: queue.Queue[...] = queue.Queue()`), and `submit()` always does `work_queue.put(work_item)` with no capacity checks/blocking. However, `SimpleQueueProcessingStrategy`\u2019s docstring explicitly claims \u201cNatural backpressure when queues fill up\u201d. With unbounded queues, they never \u201cfill up\u201d, so consumption can enqueue indefinitely if workers fall behind, leading to unbounded memory growth/OOM. This is a verifiable behavior mismatch introduced by this diff.",
+   "stripped_text": "[BUG] The docstring claims \"Natural backpressure when queues fill up\" but every queue is constructed with `queue.Queue()` (no maxsize), so there is no backpressure and memory grows without bound. If result processing is slower than Kafka consumption (slow DB, incident on one hot subscription serializing behind one worker), submit() never blocks, arroyo keeps polling, and WorkItems (including full decoded payloads) accumulate in unbounded in-process queues until the consumer OOMs \u2014 with offsets uncommitted, so restart replays the whole backlog.",
+   "cluster": {
+    "id": 9,
+    "size": 3
+   }
+  },
+  {
+   "issue_text": "[BUG] The FixedQueuePool is created once in __init__ and shared, but SimpleQueueProcessingStrategy.close() shuts the pool down, so after a Kafka rebalance the new strategy created by create_with_partitions reuses a dead pool. On any partition rebalance, arroyo closes/terminates the old strategy (calling queue_pool.shutdown(), killing all worker threads and calling q.shutdown() on every queue), then calls create_with_partitions again, which builds a new SimpleQueueProcessingStrategy over the same dead pool. Every subsequent submit() raises RuntimeError on `work_queue.put` of a shut-down queue, which the broad `except Exception` swallows while marking the offset complete \u2014 every message after a rebalance is silently dropped and committed as processed.",
+   "source_lens": "metareview-lens/runtime-reliability",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "In `ResultsStrategyFactory.__init__`, the `FixedQueuePool` is created once and stored on the factory (`self.queue_pool = FixedQueuePool(...)` when `mode == \"thread-queue-parallel\"`). `create_thread_queue_parallel_worker` then passes that same shared instance into each new `SimpleQueueProcessingStrategy` (`queue_pool=self.queue_pool`). However, `SimpleQueueProcessingStrategy.close()` and `terminate()` both call `self.queue_pool.shutdown()`, which shuts down the shared queues/workers (`FixedQueuePool.shutdown()` sets `worker.shutdown = True` and calls `q.shutdown(immediate=False)` on every queue",
+   "stripped_text": "[BUG] The FixedQueuePool is created once in __init__ and shared, but SimpleQueueProcessingStrategy.close() shuts the pool down, so after a Kafka rebalance the new strategy created by create_with_partitions reuses a dead pool. On any partition rebalance, arroyo closes/terminates the old strategy (calling queue_pool.shutdown(), killing all worker threads and calling q.shutdown() on every queue), then calls create_with_partitions again, which builds a new SimpleQueueProcessingStrategy over the same dead pool. Every subsequent submit() raises RuntimeError on `work_queue.put` of a shut-down queue, which the broad `except Exception` swallows while marking the offset complete \u2014 every message after a rebalance is silently dropped and committed as processed.",
+   "cluster": {
+    "id": 4,
+    "size": 3
+   }
+  },
+  {
+   "issue_text": "[ADVISORY] Worker threads run result_processor (Django ORM work) in long-lived threads with no per-thread connection hygiene (`close_old_connections`) and no connection cleanup on shutdown. Each of the 20 worker threads holds its own persistent Django DB connection that is never closed or refreshed; after a database restart/failover the connections go stale and every subsequent result on those workers raises, which combined with the finally-completes-offset behavior converts a transient DB blip into permanent message loss. Also multiplied DB connection counts per consumer process.",
+   "source_lens": "metareview-lens/runtime-reliability",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.9,
+   "rationale": "In the new `OrderedQueueWorker.run`, `self.result_processor(...)` is wrapped in a `try/except Exception`, but the `finally` block *always* calls `self.offset_tracker.complete_offset(work_item.partition, work_item.offset)` even when processing raised (and the exception is only logged). The commit loop in `SimpleQueueProcessingStrategy._commit_loop` then commits any offsets that are no longer outstanding, so failures (e.g., DB/ORM errors) can still lead to offsets being marked complete and subsequently committed, causing message loss. Additionally, these long-lived worker threads call the result",
+   "stripped_text": "[ADVISORY] Worker threads run result_processor (Django ORM work) in long-lived threads with no per-thread connection hygiene (`close_old_connections`) and no connection cleanup on shutdown. Each of the 20 worker threads holds its own persistent Django DB connection that is never closed or refreshed; after a database restart/failover the connections go stale and every subsequent result on those workers raises, which combined with the finally-completes-offset behavior converts a transient DB blip into permanent message loss. Also multiplied DB connection counts per consumer process.",
+   "cluster": {
+    "id": 29,
+    "size": 1
+   }
+  },
+  {
+   "issue_text": "[ADVISORY] `num_queues=max_workers or 20` treats an explicitly-passed max_workers of 0 as absent, silently running 20 queues instead of failing fast on an invalid configuration. An operator setting --max-workers 0 (a typo or a deliberate 'disable parallelism' attempt) gets 20 worker threads silently; the misconfiguration is invisible until thread/connection counts are inspected.",
+   "source_lens": "metareview-lens/runtime-reliability",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "bug",
+   "confidence": 0.92,
+   "rationale": "In the new `thread-queue-parallel` mode, `ResultsStrategyFactory.__init__` constructs `FixedQueuePool(..., num_queues=max_workers or 20)`. If `--max-workers` is a negative int (truthy), `num_queues` becomes negative. In `FixedQueuePool.__init__`, `for i in range(num_queues):` will create zero queues/workers for negative values, leaving `self.queues` empty, while `get_queue_for_group` does `hash(group_key) % self.num_queues` and `submit` indexes `self.queues[queue_index]`, which will crash (e.g., `IndexError` for -1, `ZeroDivisionError` for 0). There is no validation on the click `--max-workers",
+   "stripped_text": "[ADVISORY] `num_queues=max_workers or 20` treats an explicitly-passed max_workers of 0 as absent, silently running 20 queues instead of failing fast on an invalid configuration. An operator setting --max-workers 0 (a typo or a deliberate 'disable parallelism' attempt) gets 20 worker threads silently; the misconfiguration is invisible until thread/connection counts are inspected.",
+   "cluster": {
+    "id": 6,
+    "size": 2
+   }
+  }
+ ]
+}

@@ -184,8 +184,23 @@ async def call_model_json(model: str, system: str, user: str, *, effort: str = "
     OR unparseable text — under concurrent load they intermittently emit empty/prose instead of
     JSON, which silently yields 0 findings downstream. The retry is cheap insurance against a
     0-recall cell. Native OpenAI/Anthropic don't hit this.
+
+    Output-cap 400s ("Could not finish the message because max_tokens or model output limit was
+    reached") are retried once at 4x the cap: Lunaroute 400s instead of truncating, and an
+    unhandled raise here poisons whole cells (observed: judge.py's max_tokens=256 matcher calls
+    crashing PR-7 cells and discarding all findings). This is transport headroom only — completed
+    calls are byte-identical, so frozen instruments (official matcher, rj3 adjudicator) are
+    unaffected; only would-be crashes become measurements.
     """
-    text, tin, tout, per_model = await call_model(model, system, user, effort=effort, max_tokens=max_tokens, execution_mode=execution_mode)
+    try:
+        text, tin, tout, per_model = await call_model(model, system, user, effort=effort, max_tokens=max_tokens, execution_mode=execution_mode)
+    except Exception as e:
+        if "max_tokens or model output limit" in str(e):
+            text, tin, tout, per_model = await call_model(model, system, user, effort=effort,
+                                                          max_tokens=max(8192, max_tokens * 4),
+                                                          execution_mode=execution_mode)
+        else:
+            raise
     def _try_parse(t):
         try:
             return json.loads(_strip_fences(t))

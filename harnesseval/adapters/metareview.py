@@ -193,6 +193,7 @@ def _extract_verdict(md: str) -> str:
 async def _run_lens(model: str, lens: str, prompt_body: str, effort: str = "medium") -> tuple[dict, int, int, dict]:
     prompt = f"{LENS_PROMPTS[lens]}\n\n{prompt_body}"
     from harnesseval.model_router import call_model_json
+    # output-cap 400s are retried at 4x cap inside call_model_json (transport headroom)
     return await call_model_json(model, system=LENS_SYSTEM,
                                  user=prompt, effort=effort, max_tokens=4096)
 

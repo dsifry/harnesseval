@@ -1,0 +1,297 @@
+{
+  "tp": 1,
+  "fp": 7,
+  "fn": 1,
+  "precision": 0.125,
+  "recall": 0.5,
+  "n_findings": 8,
+  "n_golden": 2,
+  "tokens_in": 22254,
+  "tokens_out": 1320,
+  "wall_ms": 40115.638971328735,
+  "per_model_usage": {},
+  "total_cost_usd": 0.0,
+  "resolved_model": "glm-5.3-vision-background",
+  "adjudicated_precision": 1.0,
+  "incremental_recall": 0.5,
+  "n_bug_ungold": 0,
+  "n_important_non_bug": 6,
+  "n_true_hallucination": 0,
+  "n_unresolved": 1,
+  "n_real_ungold": 0,
+  "n_hallucination": 0,
+  "decomposition": {
+    "deterministic_tp": 0,
+    "llm_lens_tp": 1,
+    "deterministic_gate_recall": 0.0,
+    "llm_lens_recall": 0.5
+  },
+  "findings": [
+    {
+      "issue_text": "[BUG] The double-checked locking pattern is missing its second check: after acquiring the write lock, the code never re-reads entryPointAssetsCache, so every concurrent caller that saw nil proceeds to rebuild the asset bundle under the lock. On a cold server (or after any cache invalidation), N concurrent first requests serialize one-by-one through the exclusive lock, each performing the full entry-point asset scan that only the first needed to do \u2014 a start-up thundering herd where the intended 'build once, cache' semantic degrades to 'build once per concurrent requester', adding (N-1)\u00d7 build time to first-page-load latency.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] In Dev mode the function acquires the exclusive write lock on every request (the fast path only skips the build when cfg.Env != setting.Dev), and the write lock is held for the entire asset scan, blocking all readers via RLock. Dev-mode page loads under any concurrency serialize behind a global mutex held during the on-disk asset enumeration; developers running multiple browser tabs or a hot-reload loop see stalled /api/assets responses where the old code rebuilt concurrently without any lock.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The diff adds mutex synchronization but leaves the cache-until-populated race in place: a second goroutine calling GetWebAssets in Dev or on an error path blocks on the write lock and re-executes the full asset scan even though the first caller already populated the cache. Concurrent first requests (or every Dev request) serialize on the write lock and each performs the expensive directory walk, reintroducing under lock the very cost the cache existed to avoid; the mutex converts concurrent misses from parallel to sequential, and on error the cache is never populated so the write lock is taken on every request \u2014 but this is behavior-preserving relative to the pre-diff code, so it is advisory: the threading fix is incomplete rather than wrong.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The double-checked locking pattern is incomplete: after acquiring the write lock the function never re-checks entryPointAssetsCache, so every concurrent miss rebuilds the assets and overwrites the cache. Under concurrent cold-start (e.g. many requests arriving after a process restart in prod), N goroutines each serialize on the mutex and each perform the full filesystem asset-scan/build N times instead of once, adding avoidable latency and I/O load precisely at the moment the process is busiest; the second check inside the write lock would eliminate it.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The cache stores and returns a shared *dtos.EntryPointAssets pointer to all callers with no copy or immutability guarantee, so any handler that mutates the returned struct (or its nested slices/maps) corrupts the cache for every subsequent request. A single handler or middleware that appends to or edits the returned asset list poisons the process-wide cache in prod (where the cache is never invalidated), so all subsequent requests serve corrupted asset data until restart; previously the same hazard existed but the new mutex makes the shared mutable state look deliberately managed, inviting mutation.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The rewrite drops the cache re-check after acquiring the write lock, so the cache never prevents redundant recomputation under concurrency and the exclusive lock is held across all file I/O. On a cold start or in Dev mode, concurrent requests for web assets serialize on entryPointAssetsCacheMu and each one re-reads/rebuilds the asset manifest while holding the lock, stalling every other request \u2014 the opposite of the optimization this PR's title promises; the next maintainer measuring 'optimization' will find the hot path slower than the single-goroutine original under load.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The write-lock path does not re-check the cache after acquiring the mutex, so concurrent first requests each perform the full asset-scan/build while holding the lock. On a cold start (or first request after a cache invalidation) N concurrent requests serialize: the first builds and populates the cache, then every waiter re-runs the same expensive build inside the lock, blocking all readers for the duration \u2014 a slow asset scan multiplied by request count on the startup burst; fixing it is a re-read of entryPointAssetsCache immediately after Lock().",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The write lock is held across the entire result-building block (file reads/scan) via defer, turning a previously-concurrent operation into fully serialized I/O for all request handlers. In Dev, where the read-side cache is bypassed by design, every request takes the exclusive Lock and the defer holds it for the whole build \u2014 concurrent dev-mode requests no longer overlap their asset scans at all, a regression from the lock-free prior behavior; the fix is to build outside the lock and only take it (with a re-check) to store the result.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    }
+  ],
+  "goldens": [
+    {
+      "comment": "The GetWebAssets function implements an incomplete double-checked locking pattern for caching web assets. The function first checks if the cache is populated using a read lock (RLock), and if the cache is empty, it acquires a write lock to populate it. However, it fails to re-check whether the cache was populated by another goroutine while waiting to acquire the write lock.",
+      "severity": "Medium",
+      "category": "concurrency"
+    },
+    {
+      "comment": "In addition to the missing double-check, the function has a critical flaw in its error handling: it unconditionally assigns the fetch result to the cache (line 69: entryPointAssetsCache = result) regardless of whether the fetch succeeded or failed. When an error occurs during asset fetching, result is nil, and this nil value overwrites any previously valid cache entry.",
+      "severity": "High",
+      "category": "bug"
+    }
+  ],
+  "per_golden_matches": [
+    {
+      "golden_comment": "The GetWebAssets function implements an incomplete double-checked locking pattern for caching web assets. The function first checks if the cache is populated using a read lock (RLock), and if the cache is empty, it acquires a write lock to populate it. However, it fails to re-check whether the cache was populated by another goroutine while waiting to acquire the write lock.",
+      "severity": "Medium",
+      "category": "concurrency",
+      "matched_candidate": "[BUG] The double-checked locking pattern is missing its second check: after acquiring the write lock, the code never re-reads entryPointAssetsCache, so every concurrent caller that saw nil proceeds to rebuild the asset bundle under the lock. On a cold server (or after any cache invalidation), N concurrent first requests serialize one-by-one through the exclusive lock, each performing the full entry-point asset scan that only the first needed to do \u2014 a start-up thundering herd where the intended 'build once, cache' semantic degrades to 'build once per concurrent requester', adding (N-1)\u00d7 build time to first-page-load latency.",
+      "confidence": 0.97,
+      "reasoning": "The candidate describes the same incomplete double-checked locking bug: it notes the code checks the cache under a read lock, then acquires a write lock but fails to re-check the cache after acquiring it, causing concurrent goroutines to rebuild unnecessarily."
+    },
+    {
+      "golden_comment": "In addition to the missing double-check, the function has a critical flaw in its error handling: it unconditionally assigns the fetch result to the cache (line 69: entryPointAssetsCache = result) regardless of whether the fetch succeeded or failed. When an error occurs during asset fetching, result is nil, and this nil value overwrites any previously valid cache entry.",
+      "severity": "High",
+      "category": "bug"
+    }
+  ],
+  "adjudication_records": [
+    {
+      "issue_text": "[BUG] The double-checked locking pattern is missing its second check: after acquiring the write lock, the code never re-reads entryPointAssetsCache, so every concurrent caller that saw nil proceeds to rebuild the asset bundle under the lock. On a cold server (or after any cache invalidation), N concurrent first requests serialize one-by-one through the exclusive lock, each performing the full entry-point asset scan that only the first needed to do \u2014 a start-up thundering herd where the intended 'build once, cache' semantic degrades to 'build once per concurrent requester', adding (N-1)\u00d7 build time to first-page-load latency.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": [
+        "The GetWebAssets function implements an incomplete double-checked locking pattern for caching web assets. The function first checks if the cache is populated using a read lock (RLock), and if the cache is empty, it acquires a write lock to populate it. However, it fails to re-check whether the cache was populated by another goroutine while waiting to acquire the write lock."
+      ],
+      "primary_judge_verdict": "matched",
+      "primary_judge": "gpt-5.2",
+      "primary_judge_confidence": 0.97,
+      "primary_judge_reasoning": "The candidate describes the same incomplete double-checked locking bug: it notes the code checks the cache under a read lock, then acquires a write lock but fails to re-check the cache after acquiring it, causing concurrent goroutines to rebuild unnecessarily.",
+      "adjudication": {
+        "verdict": "matched",
+        "adjudicating_judge": null,
+        "confidence": null,
+        "rationale": null,
+        "diff_context_hash": "c15f95fa27db21b3cac82af402d4747fc242cbaa"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] In Dev mode the function acquires the exclusive write lock on every request (the fast path only skips the build when cfg.Env != setting.Dev), and the write lock is held for the entire asset scan, blocking all readers via RLock. Dev-mode page loads under any concurrency serialize behind a global mutex held during the on-disk asset enumeration; developers running multiple browser tabs or a hot-reload loop see stalled /api/assets responses where the old code rebuilt concurrently without any lock.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.78,
+        "rationale": "The diff introduces a global RWMutex and, on any request that doesn't hit the non-Dev cached fast path, it takes entryPointAssetsCacheMu.Lock() and defers Unlock(). In Dev mode (cfg.Env == setting.Dev), the fast path never returns, so every request will take the exclusive lock and hold it until the function returns, which likely includes the on-disk asset enumeration/work done to produce result. This serializes concurrent Dev-mode requests behind a global write lock and blocks all readers, matching the finding as a performance/concurrency regression rather than a functional defect.",
+        "diff_context_hash": "c15f95fa27db21b3cac82af402d4747fc242cbaa"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The diff adds mutex synchronization but leaves the cache-until-populated race in place: a second goroutine calling GetWebAssets in Dev or on an error path blocks on the write lock and re-executes the full asset scan even though the first caller already populated the cache. Concurrent first requests (or every Dev request) serialize on the write lock and each performs the expensive directory walk, reintroducing under lock the very cost the cache existed to avoid; the mutex converts concurrent misses from parallel to sequential, and on error the cache is never populated so the write lock is taken on every request \u2014 but this is behavior-preserving relative to the pre-diff code, so it is advisory: the threading fix is incomplete rather than wrong.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.84,
+        "rationale": "The diff adds an RWMutex and does a read-check of `entryPointAssetsCache` before taking the write lock, but after `Lock()` it does not re-check whether another goroutine populated the cache while this goroutine was waiting. From the shown code, multiple concurrent callers can all observe `ret == nil`, then serialize on the write lock and each proceed to recompute. In `setting.Dev` it will always take the write lock and recompute, serializing all callers. This is a diff-grounded concurrency/perf completeness issue rather than a correctness defect.",
+        "diff_context_hash": "c15f95fa27db21b3cac82af402d4747fc242cbaa"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The double-checked locking pattern is incomplete: after acquiring the write lock the function never re-checks entryPointAssetsCache, so every concurrent miss rebuilds the assets and overwrites the cache. Under concurrent cold-start (e.g. many requests arriving after a process restart in prod), N goroutines each serialize on the mutex and each perform the full filesystem asset-scan/build N times instead of once, adding avoidable latency and I/O load precisely at the moment the process is busiest; the second check inside the write lock would eliminate it.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.7,
+        "rationale": "The diff adds an RWMutex and does an initial read-locked check (ret := entryPointAssetsCache; if non-dev and ret != nil return). On a cold cache miss it then unconditionally takes the write lock and proceeds to build without any second cache check shown after acquiring the write lock. This means concurrent goroutines that all observe nil before the first one populates the cache will each serialize on the write lock and potentially rebuild/overwrite the cache redundantly. This is a performance/latency issue under concurrent cold start, not a functional correctness defect.",
+        "diff_context_hash": "c15f95fa27db21b3cac82af402d4747fc242cbaa"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The cache stores and returns a shared *dtos.EntryPointAssets pointer to all callers with no copy or immutability guarantee, so any handler that mutates the returned struct (or its nested slices/maps) corrupts the cache for every subsequent request. A single handler or middleware that appends to or edits the returned asset list poisons the process-wide cache in prod (where the cache is never invalidated), so all subsequent requests serve corrupted asset data until restart; previously the same hazard existed but the new mutex makes the shared mutable state look deliberately managed, inviting mutation.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "unresolved",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "unresolved",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.45,
+        "rationale": "The diff shows `GetWebAssets` returning the cached `*dtos.EntryPointAssets` pointer directly (`ret := entryPointAssetsCache` then `return ret, nil`) with no copying or immutability guarantee, and the cache is global process state (`entryPointAssetsCache`), so the API does expose shared mutable state. However, the finding\u2019s claim that handlers/middleware actually mutate it and that this will corrupt subsequent requests is hypothetical and not verifiable from the diff alone; this risk also pre-existed before the mutex change.",
+        "diff_context_hash": "c15f95fa27db21b3cac82af402d4747fc242cbaa"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The rewrite drops the cache re-check after acquiring the write lock, so the cache never prevents redundant recomputation under concurrency and the exclusive lock is held across all file I/O. On a cold start or in Dev mode, concurrent requests for web assets serialize on entryPointAssetsCacheMu and each one re-reads/rebuilds the asset manifest while holding the lock, stalling every other request \u2014 the opposite of the optimization this PR's title promises; the next maintainer measuring 'optimization' will find the hot path slower than the single-goroutine original under load.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.78,
+        "rationale": "The diff shows a new global RWMutex guarding `entryPointAssetsCache`. `GetWebAssets` now takes an `RLock` to read the cache, but on a miss it immediately takes the write `Lock()` with `defer Unlock()` and (from what\u2019s shown) does not re-check `entryPointAssetsCache` after acquiring the write lock. This pattern can cause redundant recomputation under concurrency (multiple goroutines can observe `nil` under the read lock, then serialize on the write lock and each proceed). Also, in `setting.Dev` the early return is never taken, so every call will take the exclusive lock for the remainder of the function, potentially serializing all work (including any I/O performed later) compared to the previous lock-free behavior. This is a concrete performance/architecture issue grounded in the shown locking structure, not a correctness defect proven by the diff alone.",
+        "diff_context_hash": "c15f95fa27db21b3cac82af402d4747fc242cbaa"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The write-lock path does not re-check the cache after acquiring the mutex, so concurrent first requests each perform the full asset-scan/build while holding the lock. On a cold start (or first request after a cache invalidation) N concurrent requests serialize: the first builds and populates the cache, then every waiter re-runs the same expensive build inside the lock, blocking all readers for the duration \u2014 a slow asset scan multiplied by request count on the startup burst; fixing it is a re-read of entryPointAssetsCache immediately after Lock().",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.66,
+        "rationale": "In `GetWebAssets`, the code does an initial `RLock` read into `ret` and returns if non-nil, but after falling through it unconditionally takes the write lock (`entryPointAssetsCacheMu.Lock()`) and proceeds without re-checking `entryPointAssetsCache` under the lock. From the diff shown, multiple concurrent callers can all observe `ret == nil` before any cache population occurs and then serialize through the write lock, each potentially performing the expensive build work. This is a performance/concurrency efficiency issue rather than a functional correctness defect.",
+        "diff_context_hash": "c15f95fa27db21b3cac82af402d4747fc242cbaa"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The write lock is held across the entire result-building block (file reads/scan) via defer, turning a previously-concurrent operation into fully serialized I/O for all request handlers. In Dev, where the read-side cache is bypassed by design, every request takes the exclusive Lock and the defer holds it for the whole build \u2014 concurrent dev-mode requests no longer overlap their asset scans at all, a regression from the lock-free prior behavior; the fix is to build outside the lock and only take it (with a re-check) to store the result.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.86,
+        "rationale": "The diff adds a global RWMutex and takes `entryPointAssetsCacheMu.Lock()` with a `defer Unlock()` immediately before the (not-shown) result-building logic. From the diff, that write lock is held for the remainder of `GetWebAssets`, so any I/O/work done to build `result` will be serialized across concurrent callers. In `Dev` (`cfg.Env == setting.Dev`), the early return is bypassed, so every call will take the exclusive lock and block other calls until it finishes, unlike the prior lock-free behavior. This is a concrete performance/concurrency regression implied by the lock placement, not necessarily a correctness bug.",
+        "diff_context_hash": "c15f95fa27db21b3cac82af402d4747fc242cbaa"
+      }
+    }
+  ],
+  "diff_context_hash": "c15f95fa27db21b3cac82af402d4747fc242cbaa",
+  "primary_judge": "gpt-5.2",
+  "adjudicating_judge": "gpt-5.2",
+  "url": "https://github.com/grafana/grafana/pull/90939",
+  "framework": "metareview-realistic",
+  "model": "glm-5.3-vision-background",
+  "effort": "low",
+  "judge": "gpt-5.2",
+  "wall_s": 67.29981112480164,
+  "execution_mode": "api",
+  "run_batch": "20260909-mrv0112-lens3"
+}
