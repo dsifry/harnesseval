@@ -26,8 +26,25 @@ def scan_batch(batch: str) -> tuple[list[dict], list[dict]]:
 
     A cell is one summary.json. Healthy cells may still be low-quality; poisoned
     cells carry an error or zero tokens and must not be scored.
+
+    A poisoned summary is NOT counted as batch-poison when a healthy sibling for the
+    SAME (framework, model, effort, url) exists: scoring dedups to the healthy run,
+    so the batch's numbers are unaffected. This is what distinguishes 'cell failed'
+    (must refill) from 'cell has a dead duplicate' (harmless residue).
     """
     healthy, poisoned = [], []
+    # first pass: index healthy (framework, model, effort, url) keys
+    healthy_keys = set()
+    for f in glob.glob("runs/*/summary.json"):
+        try:
+            s = json.load(open(f))
+        except Exception:
+            continue
+        if s.get("run_batch") != batch or not s.get("url"):
+            continue
+        tok = (s.get("tokens_in") or 0) + (s.get("tokens_out") or 0)
+        if not s.get("error") and tok > 0:
+            healthy_keys.add((s.get("framework"), s.get("model"), s.get("effort"), s.get("url")))
     for f in glob.glob("runs/*/summary.json"):
         try:
             s = json.load(open(f))
@@ -39,6 +56,9 @@ def scan_batch(batch: str) -> tuple[list[dict], list[dict]]:
         err = s.get("error")
         tok = (s.get("tokens_in") or 0) + (s.get("tokens_out") or 0)
         if err or tok == 0:
+            key = (s.get("framework"), s.get("model"), s.get("effort"), s.get("url"))
+            if key in healthy_keys:
+                continue  # dead duplicate; a healthy sibling covers this cell
             poisoned.append({
                 "file": f,
                 "url": s.get("url"),
