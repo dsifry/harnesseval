@@ -80,6 +80,24 @@ vanilla/CE cells with existing full-50 generation = reuse (methodology unchanged
 vanilla/CE cells lacking full-50 generation = run to full-50 (incomplete cells get completed,
 not skipped). Every batch poison-guarded (validate_batch) before scoring.
 
+## Phase 2.5 — CE cell completion to full-50 (tracked follow-up, user-flagged 2026-09-10)
+CE (compound-realistic) cells are partial almost everywhere — comparisons must be 50-vs-50.
+Gap census (as of v0.12.0 release, low/med/high campaign scope only):
+
+| model | low | medium | high | runs needed |
+|---|---:|---:|---:|---:|
+| claude-opus-5 | 12/50 | 29/50 | 23/50 | +86 |
+| claude-sonnet-5 | 14/50 | 14/50 | 16/50 | +106 |
+| gpt-5.6-sol | 6/50 | 20/50 | 6/50 | +118 |
+| gpt-5.6-terra | 7/50 | 8/50 | 6/50 | +129 |
+| glm-5.3-vision-background | 0/50 | 0/50 | 0/50 | +150 (no CE cells exist) |
+| glm-5.3-flash-background | 6/50 | 6/50 | 6/50 | +132 |
+| **total** | | | | **~721 runs** |
+
+Sequencing: after mrv regeneration (Phase 2) — CE completes WITHOUT regenerating
+existing runs (additive cells via --skip-batch). Vanilla cells get the same completion
+treatment (census at that point). Then Phase 3 uniform re-judging covers everything.
+
 ## Original open items (superseded above)
 1. Fable 5.1 and Astra GPT 5.6: triad or vanilla-only? Effort levels (they differ from
    low/med/high — their native vocab / premium tiers)? Registry shows fable vanilla low
