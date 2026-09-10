@@ -98,6 +98,23 @@ Sequencing: after mrv regeneration (Phase 2) — CE completes WITHOUT regenerati
 existing runs (additive cells via --skip-batch). Vanilla cells get the same completion
 treatment (census at that point). Then Phase 3 uniform re-judging covers everything.
 
+Vanilla completion census (same date, vanilla-engineered, campaign scope):
+
+| model | low | medium | high | runs needed |
+|---|---:|---:|---:|---:|
+| claude-opus-5 | 12/50 | 20/50 | 13/50 | +105 |
+| claude-sonnet-5 | 15/50 | 15/50 | 14/50 | +116 |
+| gpt-5.6-sol | 6/50 | 20/50 | 6/50 | +118 |
+| gpt-5.6-terra | 6/50 | 6/50 | 6/50 | +132 |
+| glm-5.3-vision-background | 0/50 | 0/50 | 0/50 | +150 |
+| glm-5.3-flash-background | 6/50 | 6/50 | 6/50 | +132 |
+| fable-5.1 low | 50/50 | — | — | 0 (complete) |
+| astra low | 51/50 | — | — | 0 (complete) |
+| **total vanilla** | | | | **+743** |
+
+Campaign generation totals: mrv regeneration ~900 (running) + CE +721 + vanilla +743
+≈ 2,360 generation runs, then uniform re-judging (rj3 k=1 + stratified k=3 sample).
+
 ## Original open items (superseded above)
 1. Fable 5.1 and Astra GPT 5.6: triad or vanilla-only? Effort levels (they differ from
    low/med/high — their native vocab / premium tiers)? Registry shows fable vanilla low
