@@ -45,7 +45,35 @@ For unchanged harnesses (vanilla-engineered, compound-realistic/CE) — keep gen
       auxiliaries, exact binary tag + lab commit — fully replicable
 - [ ] All run data + scripts committed; validate_batch green on every batch cited
 
-## Open items (confirm before Phase 2 launch)
+## Open items — RESOLVED (user, 2026-09-10)
+1. **Scale**: full-50 for ALL cells. Fable 5.1 and Astra GPT 5.6: vanilla only, low effort,
+   k=1 (both already have full-50 vanilla-low generation in the registry — reuse, re-judge).
+2. **The flex slot**: the model is **glm-5.3-flash-background** (not "flex" — registry name).
+3. **Adjudication for the campaign**: rj3 at **k=1** (cost decision for the full-50 × manifold
+   scale; the gpt-5.2 medium instrument with v3.1 clustering, single vote). NOTE: formal
+   acceptance gates (ship decisions) remain k=3 per the cross-family rule; this k=1 applies
+   to the manifold publication campaign.
+4. **Judges**: rj3 (gpt-5.2 k=1, v3.1 clustering) + the calibrated in-harness judge, with the
+   **anchor-corroborated matcher as the third auxiliary instrument** on official misses.
+
+## Campaign cell matrix (locked)
+| model | host | harnesses | efforts | adjudication |
+|---|---|---|---|---|
+| Opus 5 | Claude Code | vanilla + CE-r + mrv-r | low/med/high | rj3 k=1 |
+| Sonnet 5 | Claude Code | vanilla + CE-r + mrv-r | low/med/high | rj3 k=1 |
+| Sol 5.6 | Codex | vanilla + CE-r + mrv-r | low/med/high | rj3 k=1 |
+| Terra 5.6 | Codex | vanilla + CE-r + mrv-r | low/med/high | rj3 k=1 |
+| glm-5.3-vision-background | pi | vanilla + CE-r + mrv-r | low/med/high | rj3 k=1 |
+| glm-5.3-flash-background | (api) | vanilla + CE-r + mrv-r | low/med/high | rj3 k=1 |
+| Fable 5.1 | Claude Code | vanilla only | low | rj3 k=1 (reuse full-50 gen) |
+| Astra (gpt-6) | Codex | vanilla only | low | rj3 k=1 (reuse full-50 gen) |
+
+Generation rules: mrv-realistic cells = full rerun with the 0.12.0 binary (HARNESS_MRV_BIN).
+vanilla/CE cells with existing full-50 generation = reuse (methodology unchanged), re-judge only.
+vanilla/CE cells lacking full-50 generation = run to full-50 (incomplete cells get completed,
+not skipped). Every batch poison-guarded (validate_batch) before scoring.
+
+## Original open items (superseded above)
 1. Fable 5.1 and Astra GPT 5.6: triad or vanilla-only? Effort levels (they differ from
    low/med/high — their native vocab / premium tiers)? Registry shows fable vanilla low
    full-50 + mrv-realistic low (8, partial); astra vanilla low full-50 + mrv low (6, partial).
