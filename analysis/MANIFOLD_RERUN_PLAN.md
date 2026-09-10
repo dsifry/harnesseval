@@ -50,9 +50,16 @@ For unchanged harnesses (vanilla-engineered, compound-realistic/CE) — keep gen
    k=1 (both already have full-50 vanilla-low generation in the registry — reuse, re-judge).
 2. **The flex slot**: the model is **glm-5.3-flash-background** (not "flex" — registry name).
 3. **Adjudication for the campaign**: rj3 at **k=1** (cost decision for the full-50 × manifold
-   scale; the gpt-5.2 medium instrument with v3.1 clustering, single vote). NOTE: formal
-   acceptance gates (ship decisions) remain k=3 per the cross-family rule; this k=1 applies
-   to the manifold publication campaign.
+   scale; the gpt-5.2 medium instrument with v3.1 clustering, single vote) — **validated by a
+   stratified k=3 sample**: ~500 clusters across a few cells including borderline-heavy ones
+   (e.g. cells with high FP/adjP churn), reporting the k=1↔k=3 agreement rate in the methodology
+   section. Expected ≥95% (within-run temp-0 votes are near-identical per the concluded k=3
+   study); if below, escalate only the affected cells to k=3 before publishing. Rationale: the
+   k=3 study showed majority voting adds ~no signal (within-run votes near-identical; churn is
+   between-run nondeterminism, which k=3 doesn't fix) at 3× the judge calls — k=1 + a measured
+   agreement rate gets k=3's credibility at ~3% of its cost. NOTE: formal acceptance gates (ship
+   decisions) remain k=3 per the cross-family rule; this k=1 + stratified-validation applies to
+   the manifold publication campaign.
 4. **Judges**: rj3 (gpt-5.2 k=1, v3.1 clustering) + the calibrated in-harness judge, with the
    **anchor-corroborated matcher as the third auxiliary instrument** on official misses.
 
