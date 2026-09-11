@@ -170,20 +170,23 @@ PL = (VW - 3) // 2   # left panel width  (between the │ separators)
 PR = VW - 3 - PL     # right panel width — identical math, no drift
 out.append(f"{D}│{'─' * PL}┬{'─' * PR}│{X}")
 
-def panel(row, w, active, eta="", trend="", last=""):
+def panel(row, w, active, eta="", trend="", last_mins=None):
     name, n, rec, ap, poison = row
-    barw = w - 47
+    barw = w - 52  # sized for the widest suffix: " 6:23/2h37" (last-pass/eta)
     filled = n * barw // 50
     empty = barw - filled
     color = G if n >= 50 else (R if n == 0 else Y)
     # the in-flight cell sits immediately AFTER the last completed cell, not at the
     # bar's right edge — it marks the frontier of the fill
-    if n < 50 and active and empty > 0:
-        l1 = pad(f"{name:<22s} {color}{'█' * filled}{C}▓{D}{'░' * empty}{X} {n:>3}/50{Y}{eta}{X}", w)
-    else:
-        l1 = pad(f"{name:<22s} {color}{'█' * filled}{D}{'░' * empty}{X} {n:>3}/50{Y}{eta}{X}", w)
+    cursor = f"{C}▓{D}" if (n < 50 and active and empty > 0) else ""
+    suffix = eta
+    if last_mins is not None:
+        ld = fmt_mins(last_mins)
+        es = eta.strip()
+        suffix = f" {ld}/{es}" if es and es != "—" else f" {ld}/No ETA"
+    l1 = pad(f"{name:<22s} {color}{'█' * filled}{cursor}{D}{'░' * empty}{X} {n:>3}/50{Y}{suffix}{X}", w)
     f1v = 2 * rec * ap / max(rec + ap, 1e-9)
-    l2 = pad(f"{HD}rec {rec:.2f}  adjP {ap:.2f}  F1 {f1v:.2f}{trend}  ✗{poison:<3d}{X}{D}{last}{X}", w)
+    l2 = pad(f"{HD}rec {rec:.2f}  adjP {ap:.2f}  F1 {f1v:.2f}{trend}  ✗{poison:<3d}{X}", w)
     return [l1, l2]
 
 def is_active(row):
@@ -249,8 +252,8 @@ try:
 except Exception:
     pass
 for i in range(half):
-    lp = panel(left[i], PL, is_active(left[i]), eta_by_name.get(left[i][0], ("", None))[0], trend_by_name.get(left[i][0], ""), f" last {fmt_mins(last_pass[left[i][0]])}" if left[i][0] in last_pass else "") if i < len(left) else [pad("", PL), pad("", PL)]
-    rp = panel(right[i], PR, is_active(right[i]), eta_by_name.get(right[i][0], ("", None))[0], trend_by_name.get(right[i][0], ""), f" last {fmt_mins(last_pass[right[i][0]])}" if right[i][0] in last_pass else "") if right[i] else [pad("", PR), pad("", PR)]
+    lp = panel(left[i], PL, is_active(left[i]), eta_by_name.get(left[i][0], ("", None))[0], trend_by_name.get(left[i][0], ""), last_pass.get(left[i][0])) if i < len(left) else [pad("", PL), pad("", PL)]
+    rp = panel(right[i], PR, is_active(right[i]), eta_by_name.get(right[i][0], ("", None))[0], trend_by_name.get(right[i][0], ""), last_pass.get(right[i][0])) if right[i] else [pad("", PR), pad("", PR)]
     out.append(f"{D}│{X}{lp[0]}{D}│{X}{rp[0]}{D}│{X}")
     out.append(f"{D}│{X}{lp[1]}{D}│{X}{rp[1]}{D}│{X}")
 out.append(f"{D}└{'─' * PL}┴{'─' * PR}┘{X}")
