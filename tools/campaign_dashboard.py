@@ -20,7 +20,7 @@ W = _pane_width()
 G = "\033[38;5;114m"; Y = "\033[38;5;179m"; R = "\033[38;5;203m"
 D = "\033[38;5;240m"; HD = "\033[38;5;250m"; X = "\033[0m"; BO = "\033[1m"
 
-cells = defaultdict(lambda: {"healthy": set(), "poison": 0, "tp": 0, "fn": 0, "hal": 0})
+cells = defaultdict(lambda: {"healthy": set(), "poison": 0, "tp": 0, "fn": 0, "hal": 0, "times": []})
 for f in glob.glob("runs/*/summary.json"):
     try:
         s = json.load(open(f))
@@ -38,6 +38,10 @@ for f in glob.glob("runs/*/summary.json"):
         c["tp"] += s.get("tp", 0) or 0
         c["fn"] += s.get("fn", 0) or 0
         c["hal"] += s.get("n_hallucination", 0) or 0
+        try:
+            c["times"].append(os.path.getmtime(f))
+        except OSError:
+            pass
     else:
         c["poison"] += 1
 
@@ -63,6 +67,25 @@ try:
             active_keys.add((m.group(1), m.group(2), m.group(3)))
 except Exception:
     pass
+
+NOW = time.time()
+def eta_str(c, n, active):
+    # expected time to 50/50: recent 30-min completion rate first, cell-span average as fallback
+    if n >= 50:
+        return ""
+    if not active:
+        return " —"
+    recent = [t for t in c["times"] if t > NOW - 1800]
+    if len(recent) >= 2:
+        rate = len(recent) / 30.0  # runs per minute over the last half hour
+    elif len(c["times"]) >= 2:
+        rate = len(c["times"]) / max(1.0, (max(c["times"]) - min(c["times"])) / 60.0)
+    else:
+        return " ?"  # active but not enough history to estimate
+    mins = (50 - n) / max(rate, 1e-9)
+    if mins >= 100:
+        return f" {int(mins // 60)}h{int(mins % 60):02d}"
+    return f" {int(mins):02d}:{int((mins % 1) * 60):02d}"
 
 rows = []
 total = 0
@@ -128,20 +151,18 @@ PL = (VW - 3) // 2   # left panel width  (between the │ separators)
 PR = VW - 3 - PL     # right panel width — identical math, no drift
 out.append(f"{D}│{'─' * PL}┬{'─' * PR}│{X}")
 
-def panel(row, w, active):
+def panel(row, w, active, eta=""):
     name, n, rec, ap, poison = row
-    barw = w - 40
+    barw = w - 47
     filled = n * barw // 50
     empty = barw - filled
     color = G if n >= 50 else (R if n == 0 else Y)
     # the in-flight cell sits immediately AFTER the last completed cell, not at the
     # bar's right edge — it marks the frontier of the fill
-    cursor = ""
     if n < 50 and active and empty > 0:
-        cursor = C + "▓" + D
-        l1 = pad(f"{name:<22s} {color}{'█' * filled}{cursor}{D}{'░' * empty}{X} {n:>3}/50", w)
+        l1 = pad(f"{name:<22s} {color}{'█' * filled}{C}▓{D}{'░' * empty}{X} {n:>3}/50{Y}{eta}{X}", w)
     else:
-        l1 = pad(f"{name:<22s} {color}{'█' * filled}{D}{'░' * empty}{X} {n:>3}/50", w)
+        l1 = pad(f"{name:<22s} {color}{'█' * filled}{D}{'░' * empty}{X} {n:>3}/50{Y}{eta}{X}", w)
     l2 = pad(f"{D}rec {rec:.2f}  adjP {ap:.2f}  ✗{poison:<3d}{X}", w)
     return [l1, l2]
 
@@ -155,9 +176,11 @@ def is_active(row):
 half = (len(rows) + 1) // 2
 left, right = rows[:half], rows[half:]
 right += [None] * (half - len(right))
+eta_by_name = {r[0]: eta_str(cells[(k)], r[1], is_active(r)) for r, k in
+               [(r, key) for r, key in zip(rows, keys)]}
 for i in range(half):
-    lp = panel(left[i], PL, is_active(left[i])) if i < len(left) else [pad("", PL), pad("", PL)]
-    rp = panel(right[i], PR, is_active(right[i])) if right[i] else [pad("", PR), pad("", PR)]
+    lp = panel(left[i], PL, is_active(left[i]), eta_by_name.get(left[i][0], "")) if i < len(left) else [pad("", PL), pad("", PL)]
+    rp = panel(right[i], PR, is_active(right[i]), eta_by_name.get(right[i][0], "")) if right[i] else [pad("", PR), pad("", PR)]
     out.append(f"{D}│{X}{lp[0]}{D}│{X}{rp[0]}{D}│{X}")
     out.append(f"{D}│{X}{lp[1]}{D}│{X}{rp[1]}{D}│{X}")
 out.append(f"{D}└{'─' * PL}┴{'─' * PR}┘{X}")
