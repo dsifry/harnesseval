@@ -126,6 +126,7 @@ def pad(s, w):
     return s + " " * max(0, w - len(s))
 
 C = "\033[38;5;33m"  # blue cursor: marks the in-flight cell at the fill frontier
+TY = "\033[38;5;220m"  # saturated yellow for trend glyphs (179 is too pale to read as yellow)
 def cell_panel(name, n, rec, ap, poison, w, active=False):
     filled = n * (w - 40) // 50
     empty = (w - 40) - filled
@@ -246,12 +247,12 @@ for name, n, rec, ap, poison in rows:
         trend_by_name[name] = f"{D}.{X}"        # no baseline yet (first poll)
         new_state[name] = {"n": n, "f1": [rec, ap]}
     elif n == st["n"]:
-        trend_by_name[name] = f"{Y}-{X}"        # no results landed since the baseline: flat
+        trend_by_name[name] = f"{TY}-{X}"        # no results landed since the baseline: flat
         new_state[name] = st                    # keep the pre-batch baseline (arrows persist)
     else:
         d = f1c - f1(*st["f1"])                 # results landed: compare vs where we were before them
         if abs(d) < 0.005:
-            trend_by_name[name] = f"{Y}-{X}"
+            trend_by_name[name] = f"{TY}-{X}"
         elif d > 0:
             trend_by_name[name] = f"{G}▲{X}"
         else:
