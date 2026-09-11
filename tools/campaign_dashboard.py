@@ -183,9 +183,16 @@ def panel(row, w, active, eta="", trend="", last_mins=None):
     cursor = f"{C}▓{D}" if (n < 50 and active and empty > 0) else ""
     suffix = eta
     if last_mins is not None:
-        ld = fmt_mins(last_mins)
+        mins, inflight = last_mins
+        ld = fmt_mins(mins)
         es = eta.strip()
-        suffix = f" {ld}/{es}" if es and es != "—" else f" {ld}/No ETA"
+        if inflight:
+            # an in-flight pass shows elapsed-so-far — label it so it can't be
+            # mistaken for a completed pass duration
+            tail = es if es and es != "—" else "No ETA"
+            suffix = f" {ld} elapsed/{tail} left"
+        else:
+            suffix = f" {ld}/{es}" if es and es != "—" else f" {ld}/No ETA"
     l1 = pad(f"{name:<22s} {color}{'█' * filled}{cursor}{D}{'░' * empty}{X} {n:>3}/50{Y}{suffix}{X}", w)
     f1v = 2 * rec * ap / max(rec + ap, 1e-9)
     l2 = pad(f"{HD}rec {rec:.2f}  adjP {ap:.2f}  F1 {f1v:.2f}{trend}{D}  ✗{poison:<3d}{X}", w)
@@ -216,7 +223,7 @@ def last_pass_minutes():
     def emit(start_min, key, done_min):
         d = done_min - start_min
         if d < 0: d += 1440  # midnight wrap
-        out[name_for(*key)] = d
+        out[name_for(*key)] = (d, False)
     for path, kind in [("logs/campaign_final_refill.log", "sweep"),
                        ("logs/campaign_ce_codex.log", "chain"),
                        ("logs/campaign_ce_claude.log", "chain"),
@@ -281,7 +288,7 @@ def last_pass_minutes():
                 _lt = time.localtime(NOW)
                 d = (_lt.tm_hour * 60 + _lt.tm_min) - pend[0]  # minutes-of-day elapsed
                 if d < 0: d += 1440
-                out[name] = d
+                out[name] = (d, True)
     return out
 last_pass = last_pass_minutes()
 
