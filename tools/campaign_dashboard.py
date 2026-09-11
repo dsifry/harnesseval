@@ -466,17 +466,46 @@ try:
         _a["s"] += _r.get("s", 0) or 0
         _a["in"] += _r.get("in", 0); _a["out"] += _r.get("out", 0); _a["cached"] += _r.get("cached", 0)
         _a["models"][_r.get("model", "?")] = _a["models"].get(_r.get("model", "?"), 0) + 1
+        # concurrency tracking: each record occupies [ts-s, ts] — reconstruct live/peak/avg
+        _iv = getattr(_kagg.setdefault("__intervals__", {}), "setdefault", None)
+        _kagg.setdefault("__intervals__", {}).setdefault(_r.get("key", 9), []).append(
+            (_r["ts"] - (_r.get("s", 0) or 0), _r["ts"]))
 except OSError:
     pass
+_intervals = _kagg.pop("__intervals__", {})
+BUDGET_PER_KEY = 12  # flat-fee plan concurrency cap per key
+
+def _conc_stats(ivs, window_s=3600.0):
+    """(now_inflight, peak, avg, util%) over the trailing window from busy intervals."""
+    now = time.time()
+    now_n = sum(1 for s0, s1 in ivs if s0 <= now < s1)
+    pts = []
+    for s0, s1 in ivs:
+        if s1 < now - window_s: continue
+        pts.append((max(s0, now - window_s), 1)); pts.append((min(s1, now), -1))
+    pts.sort()
+    peak = cur = 0; busy = 0.0; last_t = now - window_s
+    for t, dv in pts:
+        busy += cur * (t - last_t); last_t = t
+        cur = max(0, cur + dv); peak = max(peak, cur)
+    busy += cur * (now - last_t)
+    avg = busy / window_s
+    return now_n, peak, avg, 100.0 * busy / window_s
 if _kagg:
     out.append(f"{D}├{'─' * (VW - 2)}┤{X}")
     out.append(f"{D}│{X}{BO}{HD}{pad(' KEY POOL — 24h utilization (key0 = bench file, key1 = interactive file)', VW - 2)}{X}{D}│{X}")
+    _tot_n = _tot_peak = 0; _tot_util = 0.0
     for _k in sorted(_kagg):
         _a = _kagg[_k]
         _ms = ", ".join(f"{_m}×{_c}" for _m, _c in sorted(_a["models"].items()))
-        _row = (f"key{_k}: {_a['ok']}ok/{_a['fail']}fail  {_a['s']/60:.0f}m busy  "
-                f"in {_a['in']:,} (cached {_a['cached']:,})  out {_a['out']:,}  {_ms}")
+        _now, _peak, _avg, _util = _conc_stats(_intervals.get(_k, []))
+        _tot_n += _now; _tot_peak = max(_tot_peak, _peak); _tot_util += _util
+        _row = (f"key{_k}: {_a['ok']}ok/{_a['fail']}fail  now {_now}/{BUDGET_PER_KEY}  peak {_peak}  "
+                f"avg {_avg:.1f} ({_util:.0f}% of budget)  in {_a['in']:,} (cached {_a['cached']:,})  out {_a['out']:,}")
         out.append(f"{D}│{X}{pad(_row, VW - 2)}{X}{D}│{X}")
+        _mr = ", ".join(f"{_m}×{_c}" for _m, _c in sorted(_a["models"].items()))
+        out.append(f"{D}│{X}{pad(f'      models: {_mr}', VW - 2)}{X}{D}│{X}")
+    out.append(f"{D}│{X}{pad(f'POOL: {_tot_n} calls in flight now (budget {BUDGET_PER_KEY * 2}) · peak {_tot_peak} · pool utilization {_tot_util:.0f}% — headroom {100 - _tot_util:.0f}%', VW - 2)}{X}{D}│{X}")
     out.append(f"{D}└{'─' * (VW - 2)}┘{X}")
 
 # btop-style panel draw: address absolute rows, clear each line to EOL, clear below.
