@@ -41,8 +41,14 @@ For unchanged harnesses (vanilla-engineered, compound-realistic/CE) — keep gen
 ## Phase 4 — The report
 - [ ] Full manifold table: model × harness × effort × {recall (both conventions), adjP, F1}
       under both judge instruments
-- [ ] Methodology section: frozen instruments, k=3 adjudication, poison guards, versioned
-      auxiliaries, exact binary tag + lab commit — fully replicable
+- [ ] **Elapsed wall time is a reported axis everywhere** (user requirement): per-PR
+      mean/median/max and cell-total hours per cell — the runner already records `wall_s`
+      per run; the analysis pass aggregates it. Early shape (sol host, 0.12.0 binary):
+      mrv low ≈ 335s/PR, medium ≈ 452s, high ≈ 689s; glm-vision low ≈ 298s; CE low ≈ 254s;
+      vanilla low ≈ 84s — wall time is the campaign-scheduling constraint (CLI hosts),
+      tokens are the cost constraint (api hosts)
+- [ ] Methodology section: frozen instruments, k=1 adjudication + stratified k=3 sample,
+      poison guards, versioned auxiliaries, exact binary tag + lab commit — fully replicable
 - [ ] All run data + scripts committed; validate_batch green on every batch cited
 
 ## Open items — RESOLVED (user, 2026-09-10)
