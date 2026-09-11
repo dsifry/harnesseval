@@ -165,7 +165,7 @@ PL = (VW - 3) // 2   # left panel width  (between the │ separators)
 PR = VW - 3 - PL     # right panel width — identical math, no drift
 out.append(f"{D}│{'─' * PL}┬{'─' * PR}│{X}")
 
-def panel(row, w, active, eta=""):
+def panel(row, w, active, eta="", trend=""):
     name, n, rec, ap, poison = row
     barw = w - 47
     filled = n * barw // 50
@@ -177,8 +177,8 @@ def panel(row, w, active, eta=""):
         l1 = pad(f"{name:<22s} {color}{'█' * filled}{C}▓{D}{'░' * empty}{X} {n:>3}/50{Y}{eta}{X}", w)
     else:
         l1 = pad(f"{name:<22s} {color}{'█' * filled}{D}{'░' * empty}{X} {n:>3}/50{Y}{eta}{X}", w)
-    f1 = 2 * rec * ap / max(rec + ap, 1e-9)
-    l2 = pad(f"{HD}rec {rec:.2f}  adjP {ap:.2f}  F1 {f1:.2f}  ✗{poison:<3d}{X}", w)
+    f1v = 2 * rec * ap / max(rec + ap, 1e-9)
+    l2 = pad(f"{HD}rec {rec:.2f}  adjP {ap:.2f}  F1 {f1v:.2f}{trend}  ✗{poison:<3d}{X}", w)
     return [l1, l2]
 
 def is_active(row):
@@ -193,9 +193,35 @@ left, right = rows[:half], rows[half:]
 right += [None] * (half - len(right))
 eta_by_name = {r[0]: eta_str(cells[(k)], r[1], is_active(r)) for r, k in
                [(r, key) for r, key in zip(rows, keys)]}
+
+# F1 trend vs the previous poll (state persisted across refreshes in /tmp)
+STATE = "/tmp/campaign_f1_state.json"
+f1 = lambda rec, ap: 2 * rec * ap / max(rec + ap, 1e-9)
+try:
+    prev_state = json.load(open(STATE))
+except Exception:
+    prev_state = {}
+trend_by_name = {}
+for name, n, rec, ap, poison in rows:
+    f1c = f1(rec, ap)
+    if name in prev_state:
+        d = f1c - f1(*prev_state[name])
+        if abs(d) < 0.005:
+            trend_by_name[name] = f"{Y}→{X}"   # no meaningful change
+        elif d > 0:
+            trend_by_name[name] = f"{G}▲{X}"   # rising since the last result landed
+        else:
+            trend_by_name[name] = f"{R}▼{X}"   # falling
+    else:
+        trend_by_name[name] = f"{D}·{X}"        # no baseline yet (first poll)
+prev_state = {name: [rec, ap] for name, n, rec, ap, poison in rows}
+try:
+    json.dump(prev_state, open(STATE, "w"))
+except Exception:
+    pass
 for i in range(half):
-    lp = panel(left[i], PL, is_active(left[i]), eta_by_name.get(left[i][0], "")) if i < len(left) else [pad("", PL), pad("", PL)]
-    rp = panel(right[i], PR, is_active(right[i]), eta_by_name.get(right[i][0], "")) if right[i] else [pad("", PR), pad("", PR)]
+    lp = panel(left[i], PL, is_active(left[i]), eta_by_name.get(left[i][0], ""), trend_by_name.get(left[i][0], "")) if i < len(left) else [pad("", PL), pad("", PL)]
+    rp = panel(right[i], PR, is_active(right[i]), eta_by_name.get(right[i][0], ""), trend_by_name.get(right[i][0], "")) if right[i] else [pad("", PR), pad("", PR)]
     out.append(f"{D}│{X}{lp[0]}{D}│{X}{rp[0]}{D}│{X}")
     out.append(f"{D}│{X}{lp[1]}{D}│{X}{rp[1]}{D}│{X}")
 out.append(f"{D}└{'─' * PL}┴{'─' * PR}┘{X}")
