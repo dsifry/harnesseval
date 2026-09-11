@@ -136,6 +136,14 @@ _KEY_SESSION: _cv.ContextVar = _cv.ContextVar("key_pool_session", default=None)
 _KEY_STICKY: dict[str, int] = {}    # session -> key index (cache affinity: a review run's
                                     # ~10 lens calls share long prefixes; keeping them on one
                                     # key maximizes prompt-cache hits on that key's account)
+# per-key campaign budgets: HARNESS_KEY_BUDGETS="12,6" -> key0 may use 12 concurrent calls,
+# key1 only 6 (the interactive key reserves a lane for interactive use). Selection is by
+# LOAD FACTOR (in-flight/budget): key0 fills to its full budget before key1 takes overflow.
+_KEY_BUDGETS: list[int] = [int(x) for x in
+                           os.environ.get("HARNESS_KEY_BUDGETS", "").replace(",", " ").split() if x]
+
+def _budget(i: int) -> int:
+    return _KEY_BUDGETS[i] if i < len(_KEY_BUDGETS) else 12
 
 
 def set_session(session_id: str) -> None:
@@ -213,7 +221,7 @@ async def _call_openai_compat(model, system, user, effort, max_tokens, temperatu
                 idx = _KEY_STICKY[sess]
             else:
                 idx = min((i for i in range(len(clients)) if i not in tried),
-                          key=lambda i: _KEY_INFLIGHT.get(i, 0))
+                          key=lambda i: _KEY_INFLIGHT.get(i, 0) / _budget(i))
             if sess is not None and len(_KEY_STICKY) > 512:
                 for _old in list(_KEY_STICKY)[: len(_KEY_STICKY) - 512]:
                     _KEY_STICKY.pop(_old, None)

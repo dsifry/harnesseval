@@ -8,6 +8,7 @@ cd "$(dirname "$0")/.."
 LOG=logs/campaign_glm_final.log
 log() { echo "$(date +%H:%M) $*" | tee -a "$LOG"; }
 export HARNESS_KEYS_FILE=~/.config/harnesseval/keys.env.bench
+export HARNESS_KEY_BUDGETS=12,6
 export HARNESS_LUNAROUTE_KEY_FILES=~/.config/harnesseval/keys.env.bench:~/.config/harnesseval/keys.env
 BATCH=20260910-mrv0120-manifold
 
@@ -84,7 +85,7 @@ run_cell() {  # model effort
     log "cell $model/$eff attempt $try"
     .venv/bin/python -c "$PYCLEAN" "$model" "$eff"
     .venv/bin/python -u -m harnesseval.run_model_matrix --prs 50 --frameworks metareview-realistic \
-      --models $model --efforts $eff --mode api --concurrency 2 \
+      --models $model --efforts $eff --mode api --concurrency 12  # full bench-key budget; overflow spills to key1's campaign share \
       --run-batch $BATCH --skip-batch $BATCH --fill "$(missing_specs "$model" "$eff")" >> logs/mx_campaign_${model}_${eff}.log 2>&1
     local LEFT; LEFT=$(missing_specs "$model" "$eff" | tr ',' '\n' | grep -c . || true)
     if [ -z "$LEFT" ] || [ "$LEFT" = "0" ]; then
