@@ -1,0 +1,806 @@
+{
+  "tp": 2,
+  "fp": 23,
+  "fn": 0,
+  "precision": 0.08,
+  "recall": 1.0,
+  "n_findings": 26,
+  "n_golden": 2,
+  "tokens_in": 30341,
+  "tokens_out": 4436,
+  "wall_ms": 223734.89999771118,
+  "per_model_usage": {},
+  "total_cost_usd": 0.0,
+  "resolved_model": "glm-5.3-vision-background",
+  "adjudicated_precision": 0.5,
+  "incremental_recall": 1.0,
+  "n_bug_ungold": 16,
+  "n_important_non_bug": 5,
+  "n_true_hallucination": 2,
+  "n_unresolved": 0,
+  "n_real_ungold": 16,
+  "n_hallucination": 2,
+  "decomposition": {
+    "deterministic_tp": 0,
+    "llm_lens_tp": 2,
+    "deterministic_gate_recall": 0.0,
+    "llm_lens_recall": 1.0
+  },
+  "findings": [
+    {
+      "issue_text": "[BUG] The new `OR: [{ method: SMS, scheduledDate lte now }, { retryCount gt 1 }]` deleteMany drops the method filter from the retryCount branch, so it deletes any WorkflowReminder of any method with retryCount > 1. The second OR branch matches rows without restricting to `WorkflowMethods.SMS` and without any scheduledDate bound; any future-dated reminder (email/SMS) whose retryCount exceeds 1 is hard-deleted on the next scheduler run, permanently canceling reminders that were never sent and leaving the Twilio `referenceId` dangling for any already-dispatched send.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] Incrementing retryCount in the catch block happens even for non-retryable errors, and the deleteMany at lines 31-42 then hard-deletes the row on the next scheduler pass, discarding the reminder instead of marking it failed. After two failed scheduling attempts (e.g., persistent Twilio auth failure or invalid phone number), the reminder row is destroyed rather than retained/marked, so the booking silently loses its SMS reminder with no audit trail and no way to distinguish 'gave up after retries' from 'reminder cancelled' \u2014 a data-loss path on a recurring error condition.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] The deleteMany OR clause drops the method: WorkflowMethods.SMS filter from the retryCount>1 condition, so it deletes EMAIL and other non-SMS workflow reminders whose retryCount exceeds 1. Running this SMS reminder scheduler deletes pending email reminders from other workflows' steps that happen to share the WorkflowReminder table with retryCount>1, silently cancelling notifications attendees were promised; the migration defaults retryCount to 0 so existing rows are safe today, but any future writer of retryCount on email reminders gets its pending reminders wiped by the SMS cron.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] The catch block's unconditional prisma.workflowReminder.update throws a second unhandled error when the reminder row was already deleted, because the deleteMany at the top of the same cron tick removes past-due SMS reminders before scheduling runs. When Twilio scheduling throws for a reminder whose row no longer exists (race with the deleteMany or a prior tick), the catch block's update fails with P2025 RecordNotFound, aborting the whole loop iteration chain via an unhandled promise rejection in the for loop and preventing subsequent reminders in the batch from being scheduled.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] Successful scheduling after a prior failure never resets retryCount, and a reminder that reaches retryCount 1 is permanently stuck below the >1 delete threshold only while retryCount stays 1 \u2014 but any reminder that succeeds once then the next run re-selects it (scheduledDate unchanged) increments retryCount again. A reminder that succeeds scheduling (twilioStatus set, referenceId written) keeps its stale scheduledDate <= now, so the next cron tick re-selects it (the query filters only scheduledDate lte +7d, not on twilioStatus), sends a duplicate SMS, and doubles retryCount; recipients get repeated SMS spam every 5 minutes until retryCount exceeds 1 and the row is deleted.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The retry semantics are untested and the retry-count increment/skip logic has no coverage anywhere in the diff, which contains no spec or test files. No test asserts that a failed SMS scheduling increments retryCount, that a reminder with retryCount 2 is dropped, or that the deleteMany OR clause only targets SMS rows; the cross-method deletion bug and duplicate-send bug above would have been caught by any such test, and future refactors of the threshold (gt 1 vs gt 2 in two places) will drift silently.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] The new OR branch in deleteMany has no method: WorkflowMethods.SMS filter, so the deletion matches WorkflowReminder rows of every method, not just SMS. Any EMAIL or other-method reminder whose retryCount exceeds 1 is silently hard-deleted by this SMS-scheduling handler, permanently destroying those reminders' scheduling state across the feature boundary.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] The pre-existing deleteMany branch still deletes every SMS reminder with scheduledDate <= now before the select, so a reminder that just failed scheduling and had its retryCount incremented is deleted on the next run before it can ever be retried. For any failed SMS reminder whose scheduled time has passed, the retryCount increment written in this diff is dead state: the row is destroyed at the start of the next invocation and never re-scheduled, so the retry feature the PR claims to deliver does not fire for exactly the reminders that need retrying.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] The retryCount increment block is duplicated verbatim in the success-false branch and the catch branch, and in the catch branch the update targets a row that the earlier deleteMany in a concurrent invocation may already have removed, throwing Prisma P2025 out of the catch handler. The next editor changing the retry policy (e.g. capping attempts, adding backoff) must update two hand-maintained copies that will drift; and a concurrent run deleting the reminder between select and this update makes the handler throw P2025 instead of logging and continuing, aborting scheduling for the remaining reminders in the loop.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] The new `OR` branch in the deleteMany drops the `method: WorkflowMethods.SMS` filter, so the handler deletes ANY WorkflowReminder row (email, calendar, any future method) whose retryCount exceeds 1, not just SMS reminders. The first non-SMS code path that ever increments retryCount (or any future feature reusing the column) has its reminder rows silently hard-deleted by this SMS-only cron handler on its next run, cancelling reminders with no audit trail and no way to disable it per-method.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] Retry exhaustion is enforced by deleting the reminder row outright (retryCount > 1 matches the deleteMany) rather than excluding exhausted reminders from scheduling, and the OR branch ignores scheduledDate entirely. Once a reminder fails twice, the row is destroyed at the start of the next run \u2014 the booking loses all record that a reminder was ever due, downstream readers of WorkflowReminder (audit, admin views, seatReferenceId/cancelled state) see the reminder vanish instead of a terminal 'failed' state; an operator investigating 'patient got no SMS' finds nothing to inspect.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] retryCount is incremented via non-atomic read-modify-write (`retryCount: reminder.retryCount + 1`) in two duplicated blocks (else branch and catch branch) instead of Prisma's `{ increment: 1 }`. Two overlapping invocations of this handler (cron overlap or manual + cron) both read the same retryCount and both write the same value, losing an increment so a reminder can be retried more times than the cap intends; the duplicated increment blocks also drift independently when one is edited and the other is not.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The retry cap is a bare literal `gt: 1` with no named constant or config, and the migration/schema define no CHECK or bound on retryCount. The max-retry policy exists only as an unnamed integer whose provenance and unit (attempts? failures? allowed retries?) are unreviewable; the next editor changing the retry policy in one of the two places that encode it (delete threshold here, increment logic below) silently diverges the cap from the enforcement.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] The deleteMany's new OR branch drops both the method filter and the date guard for rows with retryCount > 1, so failed reminders are hard-deleted by the next handler run instead of being tracked or marked failed. An SMS reminder whose send failed twice (e.g. Twilio error, missing phone) is silently destroyed \u2014 along with its scheduledDate and booking linkage \u2014 before its scheduled date if that date is still in the future, and the OR applies to any WorkflowReminder method, not just SMS, so any future writer of retryCount on email reminders would have those rows deleted too; users never receive the reminder and no record survives to audit the failure.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] retryCount is incremented with a non-atomic read-then-write (data: { retryCount: reminder.retryCount + 1 }) from a value read earlier in the same request. Two concurrent invocations of this handler (the endpoint is a cron-triggered API route with no locking) both read retryCount=1, both write 2, and both attempt the SMS send \u2014 the reminder is retried far more times than the intended cap of 1 and the stored count understates actual send attempts, defeating the retry-limiting intent the migration column exists to enforce.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] The new deleteMany OR branch deletes WorkflowReminder rows with retryCount > 1 without any method or scheduledDate filter, so the SMS scheduling cron will destroy any reminder row of any method (email, future SMS schedules) once its retryCount exceeds 1. Operators of other reminder methods (or future code paths) that set retryCount will have their reminders silently hard-deleted by this SMS-only job before they are ever sent; today the trigger requires retryCount > 1 on a non-SMS row, which only a code path added later needs to hit \u2014 the next maintainer of email reminders gets bitten because this delete already shipped without the method: SMS scope.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] The deleteMany OR clause deletes workflow reminders of ANY method (EMAIL, SMS, whatever) whose retryCount > 1, not just SMS reminders past their scheduled date. When this SMS scheduling handler runs, email reminders that have been retried twice are silently deleted from the WorkflowReminder table, so those reminders are never sent \u2014 data loss with no error logged; the previous method: SMS filter no longer constrains the second OR branch.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p0",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] The else-branch and the catch-branch increment retryCount using reminder.retryCount read before the loop's mutations, and after an increment the reminder is not skipped, so a reminder whose Twilio send failed is retried on the very next scheduling run after retryCount reaches 2 only because deleteMany then removes it \u2014 meaning failed sends are silently retried exactly once more with no test or code path asserting the retry limit semantics. Operators see reminders vanish (deleted via retryCount > 1) after only two attempts instead of an explicit retry policy, and a reminder that throws in the catch path still continues to console.log-only, leaving failures invisible; there is no test in this diff covering either the increment path or the deletion-by-retryCount path, so a regression in the retry counter (e.g. incrementing on success-path failure of the update itself) would go undetected.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] The new `retryCount > 1` branch of the deleteMany OR deletes reminders with no `method` filter and no `scheduledDate` guard, so it destroys rows that the old query never touched. Any WorkflowReminder with retryCount > 1 \u2014 including ones already scheduled in the future for SMS or any other method (this branch has no `method: WorkflowMethods.SMS` condition) \u2014 is unconditionally deleted on every cron run, silently losing the reminder record so the booking's reminder is never sent and there is no audit trail or backup of the deleted rows.",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] A reminder that fails to schedule twice reaches retryCount 2 and is then permanently deleted by the retryCount > 1 deleteMany on the next run, with the data destroyed rather than parked/cancelled. A transient Twilio outage across two cron runs silently and irreversibly deletes the pending reminder row: the attendee never gets the SMS and the operator has no record that a reminder was attempted, because the retry limit is enforced by row deletion instead of a state flag.",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] The new code paths (deleteMany on retryCount, select of retryCount) run against a column that only exists after this migration, so the deploy must apply the migration before any new-code pod serves the scheduleSMSReminders cron. If application pods deploy before `migrate deploy` runs (or a pod from the new build runs on a DB where the migration hasn't been applied), Prisma throws 'column WorkflowReminder.retryCount does not exist' and the whole reminder-scheduling cron errors out, skipping all reminders for that run; standard Prisma ordering avoids this, but the cron should not assume it.",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The identical retryCount-incrementing update block is duplicated verbatim in the else branch and in the catch block. A future change to retry semantics (e.g., capping at a max, recording the failure reason) must be made in two places and will drift if one is missed; the next change gets riskier because the two blocks are not obviously coupled.",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] The new OR branch of the deleteMany drops both the method filter and any scheduledDate bound, so any WorkflowReminder row with retryCount > 1 is deleted regardless of method or date. An email/other-method reminder (or a future-dated SMS reminder whose window hasn't arrived) that has somehow accrued retryCount > 1 is hard-deleted by this SMS-scheduling handler, permanently losing the reminder with no log and no error \u2014 the API returns {ok:true} while dropping scheduled work.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] The retry mechanism terminates in silent deletion: after two failures retryCount reaches 2 and the next invocation's deleteMany removes the reminder entirely, and the handler still responds {ok:true} with only a console.log per failure. A booking attendee whose SMS reminder fails twice (Twilio outage, invalid phone) never receives the reminder, no error result or log record beyond console.log surfaces the drop, and the operator sees a successful cron run while the work was lost.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] The catch block swallows the scheduling error, bumps retryCount, and lets the overall handler report success, so every failed send is invisible except for a bare console.log with no reminder id, booking uid, or error shape. Operators debugging missed reminders get only `Error scheduling SMS with error ...` in server logs with no correlation to the affected booking/reminder, and monitoring keyed on the API response cannot detect that sends are failing.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The else branch increments retryCount even when no scheduling attempt was made (the guarded success condition simply didn't hold), conflating 'skipped' with 'failed' in the same counter the deleteMany uses for purge decisions. A reminder repeatedly skipped by the branch condition is purged by the retryCount>1 delete as if it had failed twice, so valid reminders are silently dropped on a counter that no longer means 'send attempts failed'.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    }
+  ],
+  "goldens": [
+    {
+      "comment": "Using retryCount: reminder.retryCount + 1 reads a possibly stale value and can lose increments under concurrency; consider an atomic increment via Prisma (increment: 1) to avoid race conditions (also applies to the similar update in the catch block).",
+      "severity": "High",
+      "category": "concurrency"
+    },
+    {
+      "comment": "The deletion logic in scheduleSMSReminders.ts incorrectly deletes non-SMS workflow reminders (e.g., Email, WhatsApp) that have retryCount > 1. This occurs because the retryCount condition within the OR clause for deletion lacks a method: WorkflowMethods.SMS filter, causing it to apply to all reminder types instead of only SMS reminders, which is the intended scope of this function.",
+      "severity": "High",
+      "category": "bug"
+    }
+  ],
+  "per_golden_matches": [
+    {
+      "golden_comment": "Using retryCount: reminder.retryCount + 1 reads a possibly stale value and can lose increments under concurrency; consider an atomic increment via Prisma (increment: 1) to avoid race conditions (also applies to the similar update in the catch block).",
+      "severity": "High",
+      "category": "concurrency",
+      "matched_candidate": "[ADVISORY] retryCount is incremented via non-atomic read-modify-write (`retryCount: reminder.retryCount + 1`) in two duplicated blocks (else branch and catch branch) instead of Prisma's `{ increment: 1 }`. Two overlapping invocations of this handler (cron overlap or manual + cron) both read the same retryCount and both write the same value, losing an increment so a reminder can be retried more times than the cap intends; the duplicated increment blocks also drift independently when one is edited and the other is not.",
+      "confidence": 0.95,
+      "reasoning": "The candidate flags the same race condition: retryCount is updated via a non-atomic read-modify-write (reminder.retryCount + 1), which can lose increments under concurrent executions, and it recommends using Prisma's atomic { increment: 1 }. It also notes this occurs in both the else and catch blocks, matching the golden comment\u2019s scope."
+    },
+    {
+      "golden_comment": "The deletion logic in scheduleSMSReminders.ts incorrectly deletes non-SMS workflow reminders (e.g., Email, WhatsApp) that have retryCount > 1. This occurs because the retryCount condition within the OR clause for deletion lacks a method: WorkflowMethods.SMS filter, causing it to apply to all reminder types instead of only SMS reminders, which is the intended scope of this function.",
+      "severity": "High",
+      "category": "bug",
+      "matched_candidate": "[BUG] The deleteMany OR clause drops the method: WorkflowMethods.SMS filter from the retryCount>1 condition, so it deletes EMAIL and other non-SMS workflow reminders whose retryCount exceeds 1. Running this SMS reminder scheduler deletes pending email reminders from other workflows' steps that happen to share the WorkflowReminder table with retryCount>1, silently cancelling notifications attendees were promised; the migration defaults retryCount to 0 so existing rows are safe today, but any future writer of retryCount on email reminders gets its pending reminders wiped by the SMS cron.",
+      "confidence": 0.97,
+      "reasoning": "The candidate describes the same bug: in scheduleSMSReminders.ts the deleteMany OR clause applies the retryCount > 1 condition without restricting to method: WorkflowMethods.SMS, which causes non-SMS reminders (Email/other) with retryCount > 1 to be deleted unintentionally."
+    }
+  ],
+  "adjudication_records": [
+    {
+      "issue_text": "[BUG] The new `OR: [{ method: SMS, scheduledDate lte now }, { retryCount gt 1 }]` deleteMany drops the method filter from the retryCount branch, so it deletes any WorkflowReminder of any method with retryCount > 1. The second OR branch matches rows without restricting to `WorkflowMethods.SMS` and without any scheduledDate bound; any future-dated reminder (email/SMS) whose retryCount exceeds 1 is hard-deleted on the next scheduler run, permanently canceling reminders that were never sent and leaving the Twilio `referenceId` dangling for any already-dispatched send.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "unjudged",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "unjudged",
+        "adjudicating_judge": null,
+        "confidence": null,
+        "rationale": null,
+        "diff_context_hash": "a96390c58b0c3de2fd7a62f8903885959937385d"
+      }
+    },
+    {
+      "issue_text": "[BUG] Incrementing retryCount in the catch block happens even for non-retryable errors, and the deleteMany at lines 31-42 then hard-deletes the row on the next scheduler pass, discarding the reminder instead of marking it failed. After two failed scheduling attempts (e.g., persistent Twilio auth failure or invalid phone number), the reminder row is destroyed rather than retained/marked, so the booking silently loses its SMS reminder with no audit trail and no way to distinguish 'gave up after retries' from 'reminder cancelled' \u2014 a data-loss path on a recurring error condition.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.82,
+        "rationale": "The diff adds `retryCount` and increments it both when `scheduledSMS` is falsy (new `else` block) and in the `catch` block. It also changes the cleanup `deleteMany` to hard-delete any `WorkflowReminder` with `retryCount > 1` (regardless of SMS method/date) via the new `OR` clause. This creates a verifiable data-loss path: after two failed scheduling attempts, the reminder row will be deleted on a subsequent scheduler pass rather than being retained/marked failed. The claim about \u201cnon-retryable errors\u201d is not directly verifiable from the diff, but the hard-delete-after-retries behavior is.",
+        "diff_context_hash": "a96390c58b0c3de2fd7a62f8903885959937385d"
+      }
+    },
+    {
+      "issue_text": "[BUG] The deleteMany OR clause drops the method: WorkflowMethods.SMS filter from the retryCount>1 condition, so it deletes EMAIL and other non-SMS workflow reminders whose retryCount exceeds 1. Running this SMS reminder scheduler deletes pending email reminders from other workflows' steps that happen to share the WorkflowReminder table with retryCount>1, silently cancelling notifications attendees were promised; the migration defaults retryCount to 0 so existing rows are safe today, but any future writer of retryCount on email reminders gets its pending reminders wiped by the SMS cron.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug",
+      "matched_golden_ids": [
+        "The deletion logic in scheduleSMSReminders.ts incorrectly deletes non-SMS workflow reminders (e.g., Email, WhatsApp) that have retryCount > 1. This occurs because the retryCount condition within the OR clause for deletion lacks a method: WorkflowMethods.SMS filter, causing it to apply to all reminder types instead of only SMS reminders, which is the intended scope of this function."
+      ],
+      "primary_judge_verdict": "matched",
+      "primary_judge": "gpt-5.2",
+      "primary_judge_confidence": 0.97,
+      "primary_judge_reasoning": "The candidate describes the same bug: in scheduleSMSReminders.ts the deleteMany OR clause applies the retryCount > 1 condition without restricting to method: WorkflowMethods.SMS, which causes non-SMS reminders (Email/other) with retryCount > 1 to be deleted unintentionally.",
+      "adjudication": {
+        "verdict": "matched",
+        "adjudicating_judge": null,
+        "confidence": null,
+        "rationale": null,
+        "diff_context_hash": "a96390c58b0c3de2fd7a62f8903885959937385d"
+      }
+    },
+    {
+      "issue_text": "[BUG] The catch block's unconditional prisma.workflowReminder.update throws a second unhandled error when the reminder row was already deleted, because the deleteMany at the top of the same cron tick removes past-due SMS reminders before scheduling runs. When Twilio scheduling throws for a reminder whose row no longer exists (race with the deleteMany or a prior tick), the catch block's update fails with P2025 RecordNotFound, aborting the whole loop iteration chain via an unhandled promise rejection in the for loop and preventing subsequent reminders in the batch from being scheduled.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "hallucination",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "hallucination",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.7,
+        "rationale": "The diff shows `deleteMany` runs before the `findMany` that produces `unscheduledReminders`, so reminders deleted by that `deleteMany` in the same handler invocation would not be iterated/scheduled, contradicting the finding\u2019s claimed race with the top-of-tick deletion. While the new unconditional `update` in the `catch` could theoretically throw `P2025` if the row were deleted concurrently by some other process, that concurrency/deletion path is not shown or verifiable from this diff, and the specific mechanism cited (the handler\u2019s own `deleteMany`) doesn\u2019t apply.",
+        "diff_context_hash": "a96390c58b0c3de2fd7a62f8903885959937385d"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] Successful scheduling after a prior failure never resets retryCount, and a reminder that reaches retryCount 1 is permanently stuck below the >1 delete threshold only while retryCount stays 1 \u2014 but any reminder that succeeds once then the next run re-selects it (scheduledDate unchanged) increments retryCount again. A reminder that succeeds scheduling (twilioStatus set, referenceId written) keeps its stale scheduledDate <= now, so the next cron tick re-selects it (the query filters only scheduledDate lte +7d, not on twilioStatus), sends a duplicate SMS, and doubles retryCount; recipients get repeated SMS spam every 5 minutes until retryCount exceeds 1 and the row is deleted.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.56,
+        "rationale": "The diff adds retryCount handling but does not show any guard that prevents already-scheduled reminders from being selected again. The findMany query shown filters by scheduledDate <= now+7d and now selects retryCount, but the success path only updates twilioStatus/referenceId and does not change scheduledDate or otherwise mark the row as \u201cdone\u201d for selection. If twilioStatus/referenceId are not part of the where-clause (not shown in this hunk), the same reminder can be re-selected on subsequent cron runs and scheduled again, causing duplicate SMS. However, parts of the finding misread the diff: retryCount is only incremented on failure/catch, not after a successful schedule, and rows with scheduledDate <= now are deleted at the start, so the described retryCount-driven deletion loop is not fully supported by the diff.",
+        "diff_context_hash": "a96390c58b0c3de2fd7a62f8903885959937385d"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The retry semantics are untested and the retry-count increment/skip logic has no coverage anywhere in the diff, which contains no spec or test files. No test asserts that a failed SMS scheduling increments retryCount, that a reminder with retryCount 2 is dropped, or that the deleteMany OR clause only targets SMS rows; the cross-method deletion bug and duplicate-send bug above would have been caught by any such test, and future refactors of the threshold (gt 1 vs gt 2 in two places) will drift silently.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.82,
+        "rationale": "The diff changes `deleteMany` to `where: { OR: [...] }` such that the second branch deletes any `WorkflowReminder` with `retryCount > 1` regardless of `method` (no `WorkflowMethods.SMS` filter in that OR arm). This is a verifiable cross-method deletion/data-loss defect introduced by the diff. While the finding also notes missing tests (true but non-bug), it correctly points to this concrete bug in the new retry/delete logic.",
+        "diff_context_hash": "a96390c58b0c3de2fd7a62f8903885959937385d"
+      }
+    },
+    {
+      "issue_text": "[BUG] The new OR branch in deleteMany has no method: WorkflowMethods.SMS filter, so the deletion matches WorkflowReminder rows of every method, not just SMS. Any EMAIL or other-method reminder whose retryCount exceeds 1 is silently hard-deleted by this SMS-scheduling handler, permanently destroying those reminders' scheduling state across the feature boundary.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.93,
+        "rationale": "In scheduleSMSReminders.ts, deleteMany now uses `where: { OR: [ { method: SMS, scheduledDate: { lte: now } }, { retryCount: { gt: 1 } } ] }`. The second OR branch lacks `method: WorkflowMethods.SMS`, so it will match (and hard-delete) any `WorkflowReminder` row of any method with `retryCount > 1`, including EMAIL or other methods, causing unintended data loss outside the SMS feature scope.",
+        "diff_context_hash": "a96390c58b0c3de2fd7a62f8903885959937385d"
+      }
+    },
+    {
+      "issue_text": "[BUG] The pre-existing deleteMany branch still deletes every SMS reminder with scheduledDate <= now before the select, so a reminder that just failed scheduling and had its retryCount incremented is deleted on the next run before it can ever be retried. For any failed SMS reminder whose scheduled time has passed, the retryCount increment written in this diff is dead state: the row is destroyed at the start of the next invocation and never re-scheduled, so the retry feature the PR claims to deliver does not fire for exactly the reminders that need retrying.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.78,
+        "rationale": "The diff keeps (and broadens) the initial `deleteMany` to delete any `WorkflowReminder` with `method: SMS` and `scheduledDate <= now` (now wrapped in an `OR`). Meanwhile, reminders to process are fetched with `scheduledDate >= now` (`gte: dayjs().toISOString()`). If scheduling fails and `retryCount` is incremented, once that reminder\u2019s `scheduledDate` passes before the next invocation, it will be deleted at the start of the next run and never retried. The new `retryCount` state can therefore be lost for past-due failed reminders due to the unchanged delete condition.",
+        "diff_context_hash": "a96390c58b0c3de2fd7a62f8903885959937385d"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The retryCount increment block is duplicated verbatim in the success-false branch and the catch branch, and in the catch branch the update targets a row that the earlier deleteMany in a concurrent invocation may already have removed, throwing Prisma P2025 out of the catch handler. The next editor changing the retry policy (e.g. capping attempts, adding backoff) must update two hand-maintained copies that will drift; and a concurrent run deleting the reminder between select and this update makes the handler throw P2025 instead of logging and continuing, aborting scheduling for the remaining reminders in the loop.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.72,
+        "rationale": "The diff introduces two identical `prisma.workflowReminder.update({ where: { id: reminder.id }, data: { retryCount: reminder.retryCount + 1 } })` blocks (one in the `else` branch when `scheduledSMS` is falsy, and one in `catch`). Neither update handles the case where the reminder row no longer exists; Prisma `update` will throw (e.g., P2025). Given the same handler now also does a `deleteMany` that can remove reminders based on `retryCount` and can run concurrently in multiple invocations, a reminder could be deleted between the earlier `findMany` and these updates, causing the catch handler itself to throw and abort processing the rest of the loop.",
+        "diff_context_hash": "a96390c58b0c3de2fd7a62f8903885959937385d"
+      }
+    },
+    {
+      "issue_text": "[BUG] The new `OR` branch in the deleteMany drops the `method: WorkflowMethods.SMS` filter, so the handler deletes ANY WorkflowReminder row (email, calendar, any future method) whose retryCount exceeds 1, not just SMS reminders. The first non-SMS code path that ever increments retryCount (or any future feature reusing the column) has its reminder rows silently hard-deleted by this SMS-only cron handler on its next run, cancelling reminders with no audit trail and no way to disable it per-method.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.9,
+        "rationale": "In scheduleSMSReminders.ts, the deleteMany `where` was changed to an `OR` with a second branch `{ retryCount: { gt: 1 } }` that does not include `method: WorkflowMethods.SMS`. As written, this handler will delete *any* `WorkflowReminder` row (regardless of method) whose `retryCount` exceeds 1. That\u2019s a correctness/data-loss issue because this API is SMS-specific but can now hard-delete non-SMS reminders if they ever have `retryCount > 1`.",
+        "diff_context_hash": "a96390c58b0c3de2fd7a62f8903885959937385d"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] Retry exhaustion is enforced by deleting the reminder row outright (retryCount > 1 matches the deleteMany) rather than excluding exhausted reminders from scheduling, and the OR branch ignores scheduledDate entirely. Once a reminder fails twice, the row is destroyed at the start of the next run \u2014 the booking loses all record that a reminder was ever due, downstream readers of WorkflowReminder (audit, admin views, seatReferenceId/cancelled state) see the reminder vanish instead of a terminal 'failed' state; an operator investigating 'patient got no SMS' finds nothing to inspect.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.9,
+        "rationale": "The diff changes the initial cleanup deleteMany to `OR: [{ method: SMS, scheduledDate <= now }, { retryCount: { gt: 1 } }]`, which will delete any `WorkflowReminder` row with `retryCount > 1` regardless of `scheduledDate` (and regardless of `method`). This enforces retry exhaustion by destroying the row at the start of a run rather than leaving a terminal state, and the OR branch indeed ignores `scheduledDate` entirely, matching the finding\u2019s data-loss/auditability concern.",
+        "diff_context_hash": "a96390c58b0c3de2fd7a62f8903885959937385d"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] retryCount is incremented via non-atomic read-modify-write (`retryCount: reminder.retryCount + 1`) in two duplicated blocks (else branch and catch branch) instead of Prisma's `{ increment: 1 }`. Two overlapping invocations of this handler (cron overlap or manual + cron) both read the same retryCount and both write the same value, losing an increment so a reminder can be retried more times than the cap intends; the duplicated increment blocks also drift independently when one is edited and the other is not.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": [
+        "Using retryCount: reminder.retryCount + 1 reads a possibly stale value and can lose increments under concurrency; consider an atomic increment via Prisma (increment: 1) to avoid race conditions (also applies to the similar update in the catch block)."
+      ],
+      "primary_judge_verdict": "matched",
+      "primary_judge": "gpt-5.2",
+      "primary_judge_confidence": 0.95,
+      "primary_judge_reasoning": "The candidate flags the same race condition: retryCount is updated via a non-atomic read-modify-write (reminder.retryCount + 1), which can lose increments under concurrent executions, and it recommends using Prisma's atomic { increment: 1 }. It also notes this occurs in both the else and catch blocks, matching the golden comment\u2019s scope.",
+      "adjudication": {
+        "verdict": "matched",
+        "adjudicating_judge": null,
+        "confidence": null,
+        "rationale": null,
+        "diff_context_hash": "a96390c58b0c3de2fd7a62f8903885959937385d"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The retry cap is a bare literal `gt: 1` with no named constant or config, and the migration/schema define no CHECK or bound on retryCount. The max-retry policy exists only as an unnamed integer whose provenance and unit (attempts? failures? allowed retries?) are unreviewable; the next editor changing the retry policy in one of the two places that encode it (delete threshold here, increment logic below) silently diverges the cap from the enforcement.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.72,
+        "rationale": "The diff hard-codes a retry policy via `retryCount: { gt: 1 }` in the deleteMany OR-clause, while retryCount is incremented elsewhere (`retryCount: reminder.retryCount + 1`) with no shared constant/config tying the intended cap to enforcement. The schema/migration add `retryCount` with a default but no DB-level bound/check. This is a real, diff-grounded maintainability/policy clarity issue, not a directly verifiable functional defect from the diff alone.",
+        "diff_context_hash": "a96390c58b0c3de2fd7a62f8903885959937385d"
+      }
+    },
+    {
+      "issue_text": "[BUG] The deleteMany's new OR branch drops both the method filter and the date guard for rows with retryCount > 1, so failed reminders are hard-deleted by the next handler run instead of being tracked or marked failed. An SMS reminder whose send failed twice (e.g. Twilio error, missing phone) is silently destroyed \u2014 along with its scheduledDate and booking linkage \u2014 before its scheduled date if that date is still in the future, and the OR applies to any WorkflowReminder method, not just SMS, so any future writer of retryCount on email reminders would have those rows deleted too; users never receive the reminder and no record survives to audit the failure.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.86,
+        "rationale": "The diff changes `deleteMany` to `where: { OR: [ { method: SMS, scheduledDate: { lte: now } }, { retryCount: { gt: 1 } } ] }`, which will delete any `WorkflowReminder` row with `retryCount > 1` regardless of `method` and regardless of whether `scheduledDate` is in the future. This contradicts the comment/previous behavior (only delete past-due SMS) and can hard-delete future reminders (and potentially non-SMS reminders) after retries, losing audit/history.",
+        "diff_context_hash": "a96390c58b0c3de2fd7a62f8903885959937385d"
+      }
+    },
+    {
+      "issue_text": "[BUG] retryCount is incremented with a non-atomic read-then-write (data: { retryCount: reminder.retryCount + 1 }) from a value read earlier in the same request. Two concurrent invocations of this handler (the endpoint is a cron-triggered API route with no locking) both read retryCount=1, both write 2, and both attempt the SMS send \u2014 the reminder is retried far more times than the intended cap of 1 and the stored count understates actual send attempts, defeating the retry-limiting intent the migration column exists to enforce.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.8,
+        "rationale": "The diff shows retryCount is read from the earlier `findMany` result (`reminder.retryCount`) and then written back via `update` as `retryCount: reminder.retryCount + 1` in both the `else` branch and the `catch`. This is a non-atomic read-modify-write; with concurrent handler executions, increments can be lost (both write the same next value), which undermines retry tracking/limiting that `retryCount` is intended to enforce. The diff does not use an atomic increment operation (e.g., Prisma `increment`).",
+        "diff_context_hash": "a96390c58b0c3de2fd7a62f8903885959937385d"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The new deleteMany OR branch deletes WorkflowReminder rows with retryCount > 1 without any method or scheduledDate filter, so the SMS scheduling cron will destroy any reminder row of any method (email, future SMS schedules) once its retryCount exceeds 1. Operators of other reminder methods (or future code paths) that set retryCount will have their reminders silently hard-deleted by this SMS-only job before they are ever sent; today the trigger requires retryCount > 1 on a non-SMS row, which only a code path added later needs to hit \u2014 the next maintainer of email reminders gets bitten because this delete already shipped without the method: SMS scope.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.9,
+        "rationale": "In scheduleSMSReminders.ts the deleteMany `where` clause was changed to `OR: [{ method: SMS, scheduledDate <= now }, { retryCount: { gt: 1 } }]`. The second OR branch has no `method: WorkflowMethods.SMS` (or any other scoping), so it will delete *any* WorkflowReminder row with `retryCount > 1` regardless of method or scheduledDate. That is a correctness/data-loss issue introduced by this diff, since this SMS cron can now hard-delete non-SMS reminders if their retryCount ever exceeds 1.",
+        "diff_context_hash": "a96390c58b0c3de2fd7a62f8903885959937385d"
+      }
+    },
+    {
+      "issue_text": "[BUG] The deleteMany OR clause deletes workflow reminders of ANY method (EMAIL, SMS, whatever) whose retryCount > 1, not just SMS reminders past their scheduled date. When this SMS scheduling handler runs, email reminders that have been retried twice are silently deleted from the WorkflowReminder table, so those reminders are never sent \u2014 data loss with no error logged; the previous method: SMS filter no longer constrains the second OR branch.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p0",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.92,
+        "rationale": "In scheduleSMSReminders.ts the prisma.workflowReminder.deleteMany() filter was changed to an OR with two branches: (1) { method: SMS, scheduledDate <= now } and (2) { retryCount > 1 }. The second branch has no method constraint, so it will delete WorkflowReminder rows of any method (e.g., EMAIL) once retryCount exceeds 1, causing unintended cross-method data loss when this SMS handler runs.",
+        "diff_context_hash": "a96390c58b0c3de2fd7a62f8903885959937385d"
+      }
+    },
+    {
+      "issue_text": "[BUG] The else-branch and the catch-branch increment retryCount using reminder.retryCount read before the loop's mutations, and after an increment the reminder is not skipped, so a reminder whose Twilio send failed is retried on the very next scheduling run after retryCount reaches 2 only because deleteMany then removes it \u2014 meaning failed sends are silently retried exactly once more with no test or code path asserting the retry limit semantics. Operators see reminders vanish (deleted via retryCount > 1) after only two attempts instead of an explicit retry policy, and a reminder that throws in the catch path still continues to console.log-only, leaving failures invisible; there is no test in this diff covering either the increment path or the deletion-by-retryCount path, so a regression in the retry counter (e.g. incrementing on success-path failure of the update itself) would go undetected.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.66,
+        "rationale": "The diff clearly introduces a retry mechanism: on failure it increments `retryCount` (using `retryCount: reminder.retryCount + 1`) and then the next run will attempt again because `findMany` does not filter out high `retryCount`, while `deleteMany` at the start deletes any reminders with `retryCount > 1`. This means failures are retried up to two attempts and then silently deleted. That behavior is explicit in the diff (OR condition in `deleteMany` plus the increment paths) but it\u2019s not inherently a verifiable defect\u2014rather it\u2019s a potentially questionable/undocumented retry policy and observability/testing gap tied to this change (no tests shown, and failures are only `console.log`\u2019d).",
+        "diff_context_hash": "a96390c58b0c3de2fd7a62f8903885959937385d"
+      }
+    },
+    {
+      "issue_text": "[BUG] The new `retryCount > 1` branch of the deleteMany OR deletes reminders with no `method` filter and no `scheduledDate` guard, so it destroys rows that the old query never touched. Any WorkflowReminder with retryCount > 1 \u2014 including ones already scheduled in the future for SMS or any other method (this branch has no `method: WorkflowMethods.SMS` condition) \u2014 is unconditionally deleted on every cron run, silently losing the reminder record so the booking's reminder is never sent and there is no audit trail or backup of the deleted rows.",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.78,
+        "rationale": "The diff changes `deleteMany` to `where: { OR: [ { method: SMS, scheduledDate <= now }, { retryCount: { gt: 1 } } ] }`. The second OR branch has no `method` or `scheduledDate` constraint, so *any* `WorkflowReminder` row with `retryCount > 1` will be deleted, including non-SMS reminders or reminders not past-due. That is a real behavioral widening compared to the old query and can cause unintended record deletion/data loss.",
+        "diff_context_hash": "a96390c58b0c3de2fd7a62f8903885959937385d"
+      }
+    },
+    {
+      "issue_text": "[BUG] A reminder that fails to schedule twice reaches retryCount 2 and is then permanently deleted by the retryCount > 1 deleteMany on the next run, with the data destroyed rather than parked/cancelled. A transient Twilio outage across two cron runs silently and irreversibly deletes the pending reminder row: the attendee never gets the SMS and the operator has no record that a reminder was attempted, because the retry limit is enforced by row deletion instead of a state flag.",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.92,
+        "rationale": "The diff adds a `retryCount` column and increments it on scheduling failure (`retryCount: reminder.retryCount + 1` in both the `else` branch and `catch`). On the next cron run, the initial `deleteMany` now deletes any `WorkflowReminder` row where `retryCount > 1` via the new `OR` clause, regardless of schedule/method. Therefore a reminder that fails twice (retryCount becomes 2) will be permanently deleted on the next run, losing the pending reminder record rather than marking it cancelled/failed.",
+        "diff_context_hash": "a96390c58b0c3de2fd7a62f8903885959937385d"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The new code paths (deleteMany on retryCount, select of retryCount) run against a column that only exists after this migration, so the deploy must apply the migration before any new-code pod serves the scheduleSMSReminders cron. If application pods deploy before `migrate deploy` runs (or a pod from the new build runs on a DB where the migration hasn't been applied), Prisma throws 'column WorkflowReminder.retryCount does not exist' and the whole reminder-scheduling cron errors out, skipping all reminders for that run; standard Prisma ordering avoids this, but the cron should not assume it.",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.82,
+        "rationale": "The diff adds a new `retryCount` column via migration and immediately uses it in runtime queries (`deleteMany` OR clause with `retryCount: { gt: 1 }` and `findMany` `select` including `retryCount`). If the code runs against a database where the migration hasn\u2019t been applied yet, Prisma would fail due to the missing column, causing this cron handler to error. This is a real, diff-grounded deploy/rollout sequencing concern rather than an inherent logic bug when schema and code are in sync.",
+        "diff_context_hash": "a96390c58b0c3de2fd7a62f8903885959937385d"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The identical retryCount-incrementing update block is duplicated verbatim in the else branch and in the catch block. A future change to retry semantics (e.g., capping at a max, recording the failure reason) must be made in two places and will drift if one is missed; the next change gets riskier because the two blocks are not obviously coupled.",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.9,
+        "rationale": "The diff shows the same Prisma update to increment `retryCount` is duplicated: once in the `else` branch after attempting to schedule (`data: { retryCount: reminder.retryCount + 1 }`) and again in the `catch` block with identical `update({ where: { id: reminder.id }, data: { retryCount: reminder.retryCount + 1 } })`. This is a maintainability issue (DRY violation) that could cause future retry-logic changes to diverge, but it is not itself a functional defect.",
+        "diff_context_hash": "a96390c58b0c3de2fd7a62f8903885959937385d"
+      }
+    },
+    {
+      "issue_text": "[BUG] The new OR branch of the deleteMany drops both the method filter and any scheduledDate bound, so any WorkflowReminder row with retryCount > 1 is deleted regardless of method or date. An email/other-method reminder (or a future-dated SMS reminder whose window hasn't arrived) that has somehow accrued retryCount > 1 is hard-deleted by this SMS-scheduling handler, permanently losing the reminder with no log and no error \u2014 the API returns {ok:true} while dropping scheduled work.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.9,
+        "rationale": "The diff changes `deleteMany` to use `where: { OR: [ { method: SMS, scheduledDate: { lte: now } }, { retryCount: { gt: 1 } } ] }`. That second OR branch has no `method` or `scheduledDate` constraint, so it will delete *any* `WorkflowReminder` row with `retryCount > 1`, including non-SMS reminders or future-dated reminders. This is a correctness/data-loss risk introduced by the diff.",
+        "diff_context_hash": "a96390c58b0c3de2fd7a62f8903885959937385d"
+      }
+    },
+    {
+      "issue_text": "[BUG] The retry mechanism terminates in silent deletion: after two failures retryCount reaches 2 and the next invocation's deleteMany removes the reminder entirely, and the handler still responds {ok:true} with only a console.log per failure. A booking attendee whose SMS reminder fails twice (Twilio outage, invalid phone) never receives the reminder, no error result or log record beyond console.log surfaces the drop, and the operator sees a successful cron run while the work was lost.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.82,
+        "rationale": "The diff makes `deleteMany` remove any `WorkflowReminder` with `retryCount > 1` via an `OR` clause, before attempting scheduling (`await prisma.workflowReminder.deleteMany({ where: { OR: [...] { retryCount: { gt: 1 } } ] } })`). Since failures increment `retryCount` (`retryCount: reminder.retryCount + 1` in both the `else` branch and `catch`), a reminder that fails twice will reach `retryCount === 2` and be deleted on the next run, with no logging/record at deletion time. This can drop unsent reminders silently (and the handler can still return `{ ok: true }` when nothing remains to schedule).",
+        "diff_context_hash": "a96390c58b0c3de2fd7a62f8903885959937385d"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The catch block swallows the scheduling error, bumps retryCount, and lets the overall handler report success, so every failed send is invisible except for a bare console.log with no reminder id, booking uid, or error shape. Operators debugging missed reminders get only `Error scheduling SMS with error ...` in server logs with no correlation to the affected booking/reminder, and monitoring keyed on the API response cannot detect that sends are failing.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.72,
+        "rationale": "The diff shows errors during scheduling are caught inside the per-reminder loop and not rethrown; instead it increments `retryCount` and only logs `console.log(`Error scheduling SMS with error ${error}`)` without including `reminder.id` or other identifiers (new retry logic in both the `else` branch and `catch`). While this is primarily an observability/operability concern rather than a definite correctness bug (the handler may intentionally continue and later respond success), the lack of correlation data in logs and lack of surfaced failure signal is a specific, diff-grounded issue.",
+        "diff_context_hash": "a96390c58b0c3de2fd7a62f8903885959937385d"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The else branch increments retryCount even when no scheduling attempt was made (the guarded success condition simply didn't hold), conflating 'skipped' with 'failed' in the same counter the deleteMany uses for purge decisions. A reminder repeatedly skipped by the branch condition is purged by the retryCount>1 delete as if it had failed twice, so valid reminders are silently dropped on a counter that no longer means 'send attempts failed'.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "hallucination",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "hallucination",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.66,
+        "rationale": "In the diff, the new `else` branch is directly tied to `if (scheduledSMS.sid) { ... } else { retryCount++ }`, which reads as \u201ca scheduling call happened but didn\u2019t return a SID\u201d rather than \u201cno scheduling attempt was made / reminder was skipped.\u201d The diff does not show any prior guard that would skip making the scheduling attempt and still enter this `else`. While `deleteMany` now purges any record with `retryCount > 1`, the specific claim that the counter conflates \u201cskipped\u201d with \u201cfailed\u201d is not verifiable from the shown changes.",
+        "diff_context_hash": "a96390c58b0c3de2fd7a62f8903885959937385d"
+      }
+    }
+  ],
+  "diff_context_hash": "a96390c58b0c3de2fd7a62f8903885959937385d",
+  "primary_judge": "gpt-5.2",
+  "adjudicating_judge": "gpt-5.2",
+  "url": "https://github.com/calcom/cal.com/pull/14943",
+  "framework": "metareview-realistic",
+  "model": "glm-5.3-vision-background",
+  "effort": "low",
+  "judge": "gpt-5.2",
+  "wall_s": 261.91976022720337,
+  "execution_mode": "api",
+  "run_batch": "20260910-mrv0120-manifold"
+}
