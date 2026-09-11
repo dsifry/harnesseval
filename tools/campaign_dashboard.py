@@ -6,6 +6,20 @@ from collections import defaultdict
 # width ground truth: tmux's pane_width — the tty itself can carry a stale client size
 # (326 reported vs 170 visible observed), and $COLUMNS lies independently
 import sys as _sys, subprocess as _sp
+def _pane_size():
+    if os.environ.get("TMUX"):
+        r = _sp.run(["tmux", "display-message", "-p", "#{pane_width} #{pane_height}"],
+                    capture_output=True, text=True)
+        if r.returncode == 0:
+            parts = r.stdout.split()
+            if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
+                return int(parts[0]), int(parts[1])
+    try:
+        sz = os.get_terminal_size(_sys.stdout.fileno())
+        return sz.columns, sz.lines
+    except Exception:
+        return 164, 46
+W, H = _pane_size()
 def _pane_width():
     if os.environ.get("TMUX"):
         r = _sp.run(["tmux", "display-message", "-p", "#{pane_width}"],
@@ -16,7 +30,7 @@ def _pane_width():
         return os.get_terminal_size(_sys.stdout.fileno()).columns
     except Exception:
         return 164
-W = _pane_width()
+
 G = "\033[38;5;114m"; Y = "\033[38;5;179m"; R = "\033[38;5;203m"
 D = "\033[38;5;240m"; HD = "\033[38;5;250m"; X = "\033[0m"; BO = "\033[1m"
 
@@ -221,7 +235,7 @@ for path, tag, col in SOURCES:
 events.sort(key=lambda e: e[0])
 BAD = ("fail", "err ", "error", "poison", "timeout")
 GOOD = ("clean", "done", "complete", "stable", "refill pass done")
-LOGN = max(4, min(14, 46 - (len(out) + 4)))
+LOGN = max(3, min(14, H - 2 - (len(out) + 4)))  # fit the pane: panels never scroll
 out.append(f"{D}├{'─' * (PL)}┴{'─' * PR}┤{X}")
 out.append(f"{D}│{X}{BO}{HD}{pad(' RECENT EVENTS — newest last', VW - 2)}{X}{D}│{X}")
 for _, ts, tag, col, msg in events[-LOGN:]:
@@ -229,5 +243,14 @@ for _, ts, tag, col, msg in events[-LOGN:]:
     out.append(f"{D}│{X}{pad(f'{D}{ts}{X} {col}[{tag}]{X} {lc}{msg[:VW - 16]}{X}', VW - 2)}{X}{D}│{X}")
 out.append(f"{D}└{'─' * (VW - 2)}┘{X}")
 
-for line in out:
-    print(line)
+# btop-style panel draw: address absolute rows, clear each line to EOL, clear below.
+# The upper (cells) panel is never overwritten because every row is addressed explicitly
+# and the total block is sized to fit the pane.
+buf = ["\033[2J\033[H"]
+for i, line in enumerate(out, start=1):
+    if i > H - 1:
+        break
+    buf.append(f"\033[{i};1H{line}\033[K")
+buf.append(f"\033[{min(len(out) + 1, H)};1H\033[J")
+sys.stdout.write("".join(buf) + "\n")
+sys.stdout.flush()
