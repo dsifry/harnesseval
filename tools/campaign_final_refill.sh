@@ -7,6 +7,7 @@ cd "$(dirname "$0")/.."
 LOG=logs/campaign_final_refill.log
 log() { echo "$(date +%H:%M) $*" | tee -a "$LOG"; }
 BATCH=20260910-mrv0120-manifold
+export HARNESS_LUNAROUTE_KEY_FILES=~/.config/harnesseval/keys.env.bench:~/.config/harnesseval/keys.env
 MAX_ROUNDS=6
 
 missing_specs() {  # fw model eff -> comma-sep fw/model/eff/url-suffix for PRs lacking a healthy run

@@ -94,6 +94,30 @@ def openai_client():
     return OpenAI(api_key=load_keys()["HARNESS_OPENAI_API_KEY"], timeout=REQUEST_TIMEOUT_S)
 
 
+def lunaroute_clients() -> list:
+    """All Lunaroute clients: the primary HARNESS_KEYS_FILE plus any extra key files named in
+    HARNESS_LUNAROUTE_KEY_FILES (colon/comma-separated). Each key carries its own concurrency
+    budget (12 calls/key on the flat-fee plan), so the pool doubles effective capacity.
+
+    The API key multiplexer in model_router picks least-in-flight and fails over on
+    429/5xx/timeout — a blind alternation would route calls into a cold/queued key.
+    """
+    from openai import OpenAI
+    files: list[Path] = [KEYS_FILE]
+    extra = os.environ.get("HARNESS_LUNAROUTE_KEY_FILES", "")
+    for p in [x.strip() for x in extra.replace(",", ":").split(":") if x.strip()]:
+        pth = Path(p).expanduser()
+        if pth not in files:
+            files.append(pth)
+    out = []
+    for pth in files:
+        k = load_keys(pth)
+        if k.get("HARNESS_LUNAROUTE_API_KEY"):
+            out.append(OpenAI(api_key=k["HARNESS_LUNAROUTE_API_KEY"], base_url=k["LUNAROUTE_BASE_URL"],
+                              timeout=LUNAROUTE_TIMEOUT_S))
+    return out
+
+
 def lunaroute_client():
     """Construct an OpenAI-compatible client pointed at the Lunaroute gateway (GLM/Kimi).
 

@@ -128,14 +128,17 @@ async def _call_anthropic(model, system, user, effort, max_tokens, temperature) 
            sum(u.get("output_tokens", 0) for u in per_model.values()), per_model
 
 
+_KEY_INFLIGHT: dict[int, int] = {}  # live requests per key-pool index (least-loaded selection)
+
+
 async def _call_openai_compat(model, system, user, effort, max_tokens, temperature) -> tuple[str, int, int, dict]:
     from harnesseval.usage import from_openai_api, grand_total
     # Lunaroute (glm/kimi) or native OpenAI (gpt) — both OpenAI-compat
     is_lunaroute = "glm" in model.lower() or "kimi" in model.lower()
     if is_lunaroute:
-        client = keys.lunaroute_client()
+        clients = keys.lunaroute_clients()  # key pool: least-in-flight + failover (see below)
     else:
-        client = keys.openai_client()
+        clients = [keys.openai_client()]
     kwargs = openai_effort_kwargs(effort, model=model)
     # OpenAI reasoning models need max_completion_tokens, not max_tokens.
     # Lunaroute GLM/Kimi (reasoning models) return EMPTY content (finish_reason=length,
@@ -155,13 +158,41 @@ async def _call_openai_compat(model, system, user, effort, max_tokens, temperatu
     # Lunaroute GLM/Kimi: retry once on APITimeoutError (the gateway intermittently stalls/queues
     # a call past the per-request timeout — a flat-fee plan's concurrency limit). One retry,
     # bounded. Native OpenAI (gpt) doesn't stall this way (no concurrency-queue), so only Lunaroute.
-    if is_lunaroute:
+    if is_lunaroute and len(clients) > 1:
+        # key multiplexer: least in-flight first; fail over to the next key on transport-class
+        # errors (429 CONCURRENT_REQUEST_LIMIT, 5xx, timeout, connection). Real request errors
+        # (4xx) fail loud — they mean the call itself is bad, not the key.
+        from openai import APIConnectionError, APIStatusError, RateLimitError
+        resp = None
+        last_exc: Exception | None = None
+        tried: set[int] = set()
+        for _attempt in range(len(clients)):
+            idx = min((i for i in range(len(clients)) if i not in tried),
+                      key=lambda i: _KEY_INFLIGHT.get(i, 0))
+            tried.add(idx)
+            _KEY_INFLIGHT[idx] = _KEY_INFLIGHT.get(idx, 0) + 1
+            try:
+                resp = await asyncio.to_thread(clients[idx].chat.completions.create, **call_kwargs)
+                break
+            except (APITimeoutError, APIConnectionError, RateLimitError) as e:
+                last_exc = e
+            except APIStatusError as e:
+                if e.status_code is not None and (e.status_code >= 500 or e.status_code == 429):
+                    last_exc = e
+                else:
+                    raise
+            finally:
+                _KEY_INFLIGHT[idx] = max(0, _KEY_INFLIGHT.get(idx, 1) - 1)
+        if resp is None:
+            assert last_exc is not None
+            raise last_exc
+    elif is_lunaroute:
         try:
-            resp = await asyncio.to_thread(client.chat.completions.create, **call_kwargs)
+            resp = await asyncio.to_thread(clients[0].chat.completions.create, **call_kwargs)
         except APITimeoutError:
-            resp = await asyncio.to_thread(client.chat.completions.create, **call_kwargs)
+            resp = await asyncio.to_thread(clients[0].chat.completions.create, **call_kwargs)
     else:
-        resp = await asyncio.to_thread(client.chat.completions.create, **call_kwargs)
+        resp = await asyncio.to_thread(clients[0].chat.completions.create, **call_kwargs)
     text = resp.choices[0].message.content or ""
     # Lunaroute GLM/Kimi can also non-deterministically return empty content even at the 16384
     # floor (reasoning finished but content not emitted, or a transient finish=length). Retry

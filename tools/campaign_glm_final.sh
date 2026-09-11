@@ -8,6 +8,7 @@ cd "$(dirname "$0")/.."
 LOG=logs/campaign_glm_final.log
 log() { echo "$(date +%H:%M) $*" | tee -a "$LOG"; }
 export HARNESS_KEYS_FILE=~/.config/harnesseval/keys.env.bench
+export HARNESS_LUNAROUTE_KEY_FILES=~/.config/harnesseval/keys.env.bench:~/.config/harnesseval/keys.env
 BATCH=20260910-mrv0120-manifold
 
 probe_up() {
