@@ -202,6 +202,8 @@ def panel(row, w, active, eta="", trend="", last_mins=None):
                 suffix = f" {ld} elapsed/{rem} left/{est} est"
             else:
                 suffix = f" {ld} elapsed/{rem} left/? est"
+        elif n >= 50:
+            suffix = f" {ld} last"  # complete cell: pass history, nothing left to estimate
         else:
             suffix = f" {ld}/{es}" if es and es != "—" else f" {ld}/No ETA"
     l1 = pad(f"{name:<22s} {color}{'█' * filled}{cursor}{D}{'░' * empty}{X} {n:>3}/50{Y}{suffix}{X}", w)
@@ -261,12 +263,13 @@ def last_pass_minutes():
                     if ms: pend = (t, (ms.group(1), ms.group(2), ms.group(3)), int(ms.group(4)))
                     elif md and pend and pend[1] == (md.group(1), md.group(2), md.group(3)):
                         emit(pend[0], pend[1], t, pend[2]); pend = None
-                else:  # glm chain: attempt N for cell X -> the next distinct event ends the pass
-                    ma = _re3.match(r"cell (\S+)/(\S+)/(\S+) attempt", msg)
+                else:  # glm chain: "cell model/eff attempt N" (mrv implied; 3-part also tolerated)
+                    ma = _re3.match(r"cell (\S+)/(\S+)/(\S+) attempt", msg) or _re3.match(r"cell (\S+)/(\S+) attempt", msg)
                     if ma:
-                        if pend and pend[1] != (ma.group(1), ma.group(2), ma.group(3)):
+                        key = (ma.group(1), ma.group(2), ma.group(3)) if ma.lastindex == 3 else ("metareview-realistic", ma.group(1), ma.group(2))
+                        if pend and pend[1] != key:
                             emit(pend[0], pend[1], t, None)
-                        pend = (t, (ma.group(1), ma.group(2), ma.group(3)), None)
+                        pend = (t, key, None)
         except OSError:
             pass
     # in-flight passes: report elapsed-so-far for cells with no completed pass yet
@@ -292,8 +295,10 @@ def last_pass_minutes():
                     if ms: pend = (t, (ms.group(1), ms.group(2), ms.group(3)), int(ms.group(4)))
                     elif md: pend = None
                 else:
-                    ma = _re3.match(r"cell (\S+)/(\S+)/(\S+) attempt", msg)
-                    if ma: pend = (t, (ma.group(1), ma.group(2), ma.group(3)), None)
+                    ma = _re3.match(r"cell (\S+)/(\S+)/(\S+) attempt", msg) or _re3.match(r"cell (\S+)/(\S+) attempt", msg)
+                    if ma:
+                        key = (ma.group(1), ma.group(2), ma.group(3)) if ma.lastindex == 3 else ("metareview-realistic", ma.group(1), ma.group(2))
+                        pend = (t, key, None)
         except OSError:
             pass
         if pend:
