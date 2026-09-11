@@ -191,19 +191,15 @@ def panel(row, w, active, eta="", trend="", last_mins=None, pace=None):
         ld = fmt_mins(mins)
         es = eta.strip()
         if inflight:
-            done_this_pass = n - (50 - (last_mins[2] or 0)) if last_mins[2] else 0
-            avg = mins / done_this_pass if done_this_pass >= 2 else None
-            if avg is None and name in last_completed:
-                d0, n0 = last_completed[name]
-                avg = d0 / n0 if n0 else None
             rem = 50 - n
-            if avg is not None:
-                # true countdown: estimated pass total (pace x targeted runs) minus elapsed.
-                # ticks DOWN every refresh; goes NEGATIVE when the pass overruns the estimate
-                # (slow runs / hangs), and re-bases upward when slow runs finally land and
-                # lift the live pace.
+            pace0 = last_mins[4] if len(last_mins) > 4 else None
+            if pace0 is not None:
+                # countdown from the estimate FROZEN at pass start (last completed pass's
+                # realized pace x targeted runs) minus elapsed. Ticks down every refresh,
+                # goes negative on overrun; the pace only updates when the pass COMPLETES,
+                # from its actual duration (never re-based mid-pass).
                 n_t = last_mins[2] or rem
-                est = fmt_signed(avg * n_t - mins)
+                est = fmt_signed(pace0 * n_t - mins)
                 suffix = f" {ld} elapsed/{rem} left/{est} est"
             else:
                 suffix = f" {ld} elapsed/{rem} left/? est"
@@ -243,7 +239,7 @@ def last_pass_minutes():
     def emit(start_min, key, done_min, n_target):
         d = done_min - start_min
         if d < 0: d += 1440  # midnight wrap
-        out[name_for(*key)] = (d, False, n_target, start_min)
+        out[name_for(*key)] = (d, False, n_target, start_min, None)
         if n_target:
             completed[name_for(*key)] = (d, n_target)
     for path, kind in [("logs/campaign_final_refill.log", "sweep"),
@@ -260,22 +256,30 @@ def last_pass_minutes():
                 if kind == "sweep":
                     ms = _re3.match(r"cell (\S+)/(\S+)/(\S+) — refilling (\d+)", msg)
                     md = _re3.match(r"cell (\S+)/(\S+)/(\S+) refill pass done", msg)
-                    if ms: pend = (t, (ms.group(1), ms.group(2), ms.group(3)), int(ms.group(4)))
+                    if ms:
+                        _nm = name_for(*ms.groups()[:3])
+                        _p0 = (completed[_nm][0] / completed[_nm][1]) if _nm in completed and completed[_nm][1] else None
+                        pend = (t, (ms.group(1), ms.group(2), ms.group(3)), int(ms.group(4)), _p0)
                     elif md and pend and pend[1] == (md.group(1), md.group(2), md.group(3)):
                         emit(pend[0], pend[1], t, pend[2]); pend = None
                 elif kind == "chain":
                     ms = _re3.match(r"cell (\S+)/(\S+)/(\S+) filling (\d+) missing", msg)
                     md = _re3.match(r"cell (\S+)/(\S+)/(\S+) (?:done|still missing)", msg)
-                    if ms: pend = (t, (ms.group(1), ms.group(2), ms.group(3)), int(ms.group(4)))
+                    if ms:
+                        _nm = name_for(*ms.groups()[:3])
+                        _p0 = (completed[_nm][0] / completed[_nm][1]) if _nm in completed and completed[_nm][1] else None
+                        pend = (t, (ms.group(1), ms.group(2), ms.group(3)), int(ms.group(4)), _p0)
                     elif md and pend and pend[1] == (md.group(1), md.group(2), md.group(3)):
                         emit(pend[0], pend[1], t, pend[2]); pend = None
                 else:  # glm chain: "cell model/eff attempt N" (mrv implied; 3-part also tolerated)
                     ma = _re3.match(r"cell (\S+)/(\S+)/(\S+) attempt", msg) or _re3.match(r"cell (\S+)/(\S+) attempt", msg)
                     if ma:
                         key = (ma.group(1), ma.group(2), ma.group(3)) if ma.lastindex == 3 else ("metareview-realistic", ma.group(1), ma.group(2))
+                        _nm = name_for(*key)
+                        _p0 = (completed[_nm][0] / completed[_nm][1]) if _nm in completed and completed[_nm][1] else None
                         if pend and pend[1] != key:
                             emit(pend[0], pend[1], t, None)
-                        pend = (t, key, None)
+                        pend = (t, key, None, _p0)
         except OSError:
             pass
     # in-flight passes: report elapsed-so-far for cells with no completed pass yet
@@ -312,7 +316,7 @@ def last_pass_minutes():
             _lt = time.localtime(NOW)
             now_s = _lt.tm_hour * 3600 + _lt.tm_min * 60 + _lt.tm_sec
             d = ((now_s - pend[0] * 60) % 86400) / 60.0  # elapsed in float minutes (ticks every refresh)
-            cand = (d, True, pend[2], pend[0])
+            cand = (d, True, pend[2], pend[0], pend[3])  # pend[3] = pace basis frozen at pass start
             # the most RECENT pass wins: a live in-flight pass must not be hidden by a
             # stale completed entry from a dead chain's log (sonnet-high 02:00 bug)
             if name not in out or cand[3] > out[name][3]:
@@ -323,22 +327,14 @@ last_pass, last_completed = last_pass_minutes()
 def pace_by_name_factory():
     def pace_for(name, n):
         e = last_pass.get(name)
-        avg = None
-        if e:
-            mins, inflight, n_target = e[0], e[1], e[2]
-            if inflight:
-                done = n - (50 - n_target) if n_target else 0
-                if done >= 2:
-                    avg = mins / done  # this pass's live pace
-                elif name in last_completed and last_completed[name][1]:
-                    d0, n0 = last_completed[name]
-                    avg = d0 / n0
-            elif n_target:
-                avg = mins / n_target  # completed pass: duration / runs filled
-        if avg is None and name in last_completed and last_completed[name][1]:
+        if e and len(e) > 4 and e[4] is not None:
+            return e[4]  # in-flight: the pace basis the running estimate is built on
+        if e and not e[1] and e[2]:
+            return e[0] / e[2]  # completed pass: realized pace (actual duration / actual runs)
+        if name in last_completed and last_completed[name][1]:
             d0, n0 = last_completed[name]
-            avg = d0 / n0
-        return avg
+            return d0 / n0
+        return None
     return pace_for
 pace_for = pace_by_name_factory()
 
