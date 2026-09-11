@@ -282,18 +282,18 @@ def last_pass_minutes():
                 t = int(m.group(1)) * 60 + int(m.group(2))
                 msg = m.group(3)
                 if kind == "sweep":
-                    ms = _re3.match(r"cell (\S+)/(\S+)/(\S+) — refilling", msg)
+                    ms = _re3.match(r"cell (\S+)/(\S+)/(\S+) — refilling (\d+)", msg)
                     md = _re3.match(r"cell (\S+)/(\S+)/(\S+) refill pass done", msg)
-                    if ms: pend = (t, (ms.group(1), ms.group(2), ms.group(3)))
+                    if ms: pend = (t, (ms.group(1), ms.group(2), ms.group(3)), int(ms.group(4)))
                     elif md: pend = None
                 elif kind == "chain":
-                    ms = _re3.match(r"cell (\S+)/(\S+)/(\S+) filling \d+ missing", msg)
+                    ms = _re3.match(r"cell (\S+)/(\S+)/(\S+) filling (\d+) missing", msg)
                     md = _re3.match(r"cell (\S+)/(\S+)/(\S+) (?:done|still missing)", msg)
-                    if ms: pend = (t, (ms.group(1), ms.group(2), ms.group(3)))
+                    if ms: pend = (t, (ms.group(1), ms.group(2), ms.group(3)), int(ms.group(4)))
                     elif md: pend = None
                 else:
                     ma = _re3.match(r"cell (\S+)/(\S+)/(\S+) attempt", msg)
-                    if ma: pend = (t, (ma.group(1), ma.group(2), ma.group(3)))
+                    if ma: pend = (t, (ma.group(1), ma.group(2), ma.group(3)), None)
         except OSError:
             pass
         if pend:
