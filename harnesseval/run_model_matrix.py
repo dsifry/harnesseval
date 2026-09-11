@@ -367,8 +367,13 @@ def main():
                 register(phase="B", model=model, framework=fw, effort=effort, run_n=0,
                          # zero-token "pass" is laundering: a swallowed adapter failure returns
                          # a clean-looking run (tp=0) with no tokens — the #159 poison class.
+                         # Second laundering form: 0 findings + >100k tokens = a mid-review
+                         # failure whose empty-content loop consumed a full budget (observed
+                         # on vision-medium: 723k tokens -> zero findings, registered pass).
                          status=("pass" if (res.get("tp") is not None
-                                            and (res.get("tokens_in",0) or 0)+(res.get("tokens_out",0) or 0) > 0)
+                                            and (res.get("tokens_in",0) or 0)+(res.get("tokens_out",0) or 0) > 0
+                                            and not ((res.get("tokens_in",0) or 0) > 100000
+                                                     and len(res.get("findings",[])) == 0))
                                  else "fail"),
                          metrics={"tp": res.get("tp",0), "fp": res.get("fp",0), "fn": res.get("fn",0),
                                   "precision": res.get("precision",0), "recall": res.get("recall",0),

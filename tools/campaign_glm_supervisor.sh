@@ -87,7 +87,31 @@ PYEOF
     if [ "$NEED_N" = "0" ]; then
       log "supervisor: cell $model/$eff effectively complete (healthy run for every PR; residue only)"; return 0
     fi
-    log "supervisor: cell $model/$eff missing $NEED_N healthy PRs — refilling exactly those"
+    log "supervisor: cell $model/$eff missing $NEED_N healthy PRs — scrubbing laundered registry entries, then refilling"
+    .venv/bin/python - <<'PYSCRUB'
+import json, glob, os, sys
+model, eff = "$model", "$eff"
+bad = set()
+for f in glob.glob("runs/*/summary.json"):
+    try: s = json.load(open(f))
+    except Exception: continue
+    if (s.get("run_batch") == "20260910-mrv0120-manifold" and s.get("model") == model and s.get("effort") == eff):
+        if len(s.get("findings", [])) == 0 and (s.get("tokens_in", 0) or 0) + (s.get("tokens_out", 0) or 0) > 0:
+            bad.add(os.path.abspath(f))
+rows, n = [], 0
+for line in open("runs/registry.jsonl"):
+    try: r = json.loads(line)
+    except Exception: rows.append(line.rstrip("
+")); continue
+    sp = os.path.abspath(r.get("summary_path") or "")
+    if r.get("status") == "pass" and sp in bad:
+        r["status"] = "fail"; n += 1
+    rows.append(json.dumps(r))
+open("runs/registry.jsonl", "w").write("
+".join(rows) + "
+")
+print(f"scrubbed {n} laundered registry entries")
+PYSCRUB
     .venv/bin/python -u -m harnesseval.run_model_matrix --prs 50 --frameworks metareview-realistic \
       --models $model --efforts $eff --mode api --concurrency 1 \
       --run-batch $BATCH --skip-batch $BATCH --fill "$FILL_SPECS" >> logs/mx_campaign_${model}_${eff}.log 2>&1
