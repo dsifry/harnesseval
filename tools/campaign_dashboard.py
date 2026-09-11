@@ -106,6 +106,10 @@ def fmt_mins(mins):
         return f"{int(mins // 60)}h{int(mins % 60):02d}"
     return f"{int(mins):02d}:{int((mins % 1) * 60):02d}"
 
+def fmt_signed(mins):
+    sign = "-" if mins < 0 else ""
+    return sign + fmt_mins(abs(mins))
+
 rows = []
 total = 0
 for fw, m, e in keys:
@@ -183,14 +187,21 @@ def panel(row, w, active, eta="", trend="", last_mins=None):
     cursor = f"{C}▓{D}" if (n < 50 and active and empty > 0) else ""
     suffix = eta
     if last_mins is not None:
-        mins, inflight = last_mins
+        mins, inflight = last_mins[0], last_mins[1]
         ld = fmt_mins(mins)
         es = eta.strip()
         if inflight:
-            # an in-flight pass shows elapsed-so-far — label it so it can't be
-            # mistaken for a completed pass duration
-            tail = es if es and es != "—" else "No ETA"
-            suffix = f" {ld} elapsed/{tail} left"
+            done_this_pass = n - (50 - (last_mins[2] or 0)) if last_mins[2] else 0
+            avg = mins / done_this_pass if done_this_pass >= 2 else None
+            if avg is None and name in last_completed:
+                d0, n0 = last_completed[name]
+                avg = d0 / n0 if n0 else None
+            rem = 50 - n
+            if avg is not None:
+                est = fmt_signed(avg * 50 - mins)  # countdown vs estimated pass total; negative = overrunning
+                suffix = f" {ld} elapsed/{rem} left/{est} est"
+            else:
+                suffix = f" {ld} elapsed/{rem} left/? est"
         else:
             suffix = f" {ld}/{es}" if es and es != "—" else f" {ld}/No ETA"
     l1 = pad(f"{name:<22s} {color}{'█' * filled}{cursor}{D}{'░' * empty}{X} {n:>3}/50{Y}{suffix}{X}", w)
@@ -220,10 +231,13 @@ def last_pass_minutes():
     def name_for(fw, model, eff):
         fw = FW_ALIAS.get(fw, fw)
         return f"{fw_short.get(fw, fw)} {m_short.get(model, model)} {eff}"
-    def emit(start_min, key, done_min):
+    completed = {}  # name -> (duration, N) of the last COMPLETED pass (avg-per-run fallback)
+    def emit(start_min, key, done_min, n_target):
         d = done_min - start_min
         if d < 0: d += 1440  # midnight wrap
-        out[name_for(*key)] = (d, False)
+        out[name_for(*key)] = (d, False, n_target)
+        if n_target:
+            completed[name_for(*key)] = (d, n_target)
     for path, kind in [("logs/campaign_final_refill.log", "sweep"),
                        ("logs/campaign_ce_codex.log", "chain"),
                        ("logs/campaign_ce_claude.log", "chain"),
@@ -236,23 +250,23 @@ def last_pass_minutes():
                 t = int(m.group(1)) * 60 + int(m.group(2))
                 msg = m.group(3)
                 if kind == "sweep":
-                    ms = _re3.match(r"cell (\S+)/(\S+)/(\S+) — refilling", msg)
+                    ms = _re3.match(r"cell (\S+)/(\S+)/(\S+) — refilling (\d+)", msg)
                     md = _re3.match(r"cell (\S+)/(\S+)/(\S+) refill pass done", msg)
-                    if ms: pend = (t, (ms.group(1), ms.group(2), ms.group(3)))
+                    if ms: pend = (t, (ms.group(1), ms.group(2), ms.group(3)), int(ms.group(4)))
                     elif md and pend and pend[1] == (md.group(1), md.group(2), md.group(3)):
-                        emit(pend[0], pend[1], t); pend = None
+                        emit(pend[0], pend[1], t, pend[2]); pend = None
                 elif kind == "chain":
-                    ms = _re3.match(r"cell (\S+)/(\S+)/(\S+) filling \d+ missing", msg)
+                    ms = _re3.match(r"cell (\S+)/(\S+)/(\S+) filling (\d+) missing", msg)
                     md = _re3.match(r"cell (\S+)/(\S+)/(\S+) (?:done|still missing)", msg)
-                    if ms: pend = (t, (ms.group(1), ms.group(2), ms.group(3)))
+                    if ms: pend = (t, (ms.group(1), ms.group(2), ms.group(3)), int(ms.group(4)))
                     elif md and pend and pend[1] == (md.group(1), md.group(2), md.group(3)):
-                        emit(pend[0], pend[1], t); pend = None
+                        emit(pend[0], pend[1], t, pend[2]); pend = None
                 else:  # glm chain: attempt N for cell X -> the next distinct event ends the pass
                     ma = _re3.match(r"cell (\S+)/(\S+)/(\S+) attempt", msg)
                     if ma:
                         if pend and pend[1] != (ma.group(1), ma.group(2), ma.group(3)):
-                            emit(pend[0], pend[1], t)
-                        pend = (t, (ma.group(1), ma.group(2), ma.group(3)))
+                            emit(pend[0], pend[1], t, None)
+                        pend = (t, (ma.group(1), ma.group(2), ma.group(3)), None)
         except OSError:
             pass
     # in-flight passes: report elapsed-so-far for cells with no completed pass yet
@@ -288,9 +302,9 @@ def last_pass_minutes():
                 _lt = time.localtime(NOW)
                 d = (_lt.tm_hour * 60 + _lt.tm_min) - pend[0]  # minutes-of-day elapsed
                 if d < 0: d += 1440
-                out[name] = (d, True)
-    return out
-last_pass = last_pass_minutes()
+                out[name] = (d, True, pend[2])
+    return out, completed
+last_pass, last_completed = last_pass_minutes()
 
 # F1 trend vs the previous poll (state persisted across refreshes in /tmp)
 STATE = "/tmp/campaign_f1_state.json"
