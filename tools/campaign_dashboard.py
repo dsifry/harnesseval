@@ -297,18 +297,29 @@ def last_pass_minutes():
                 if kind == "sweep":
                     ms = _re3.match(r"cell (\S+)/(\S+)/(\S+) — refilling (\d+)", msg)
                     md = _re3.match(r"cell (\S+)/(\S+)/(\S+) refill pass done", msg)
-                    if ms: pend = (t, (ms.group(1), ms.group(2), ms.group(3)), int(ms.group(4)))
+                    if ms:
+                        _nm = name_for(*ms.groups()[:3])
+                        _c = completed.get(_nm)
+                        _p0 = (_c[0] / _c[1]) if _c and _c[1] else None
+                        pend = (t, (ms.group(1), ms.group(2), ms.group(3)), int(ms.group(4)), _p0)
                     elif md: pend = None
                 elif kind == "chain":
                     ms = _re3.match(r"cell (\S+)/(\S+)/(\S+) filling (\d+) missing", msg)
                     md = _re3.match(r"cell (\S+)/(\S+)/(\S+) (?:done|still missing)", msg)
-                    if ms: pend = (t, (ms.group(1), ms.group(2), ms.group(3)), int(ms.group(4)))
+                    if ms:
+                        _nm = name_for(*ms.groups()[:3])
+                        _c = completed.get(_nm)
+                        _p0 = (_c[0] / _c[1]) if _c and _c[1] else None
+                        pend = (t, (ms.group(1), ms.group(2), ms.group(3)), int(ms.group(4)), _p0)
                     elif md: pend = None
                 else:
                     ma = _re3.match(r"cell (\S+)/(\S+)/(\S+) attempt", msg) or _re3.match(r"cell (\S+)/(\S+) attempt", msg)
                     if ma:
                         key = (ma.group(1), ma.group(2), ma.group(3)) if ma.lastindex == 3 else ("metareview-realistic", ma.group(1), ma.group(2))
-                        pend = (t, key, None)
+                        _nm = name_for(*key)
+                        _c = completed.get(_nm)
+                        _p0 = (_c[0] / _c[1]) if _c and _c[1] else None
+                        pend = (t, key, None, _p0)
         except OSError:
             pass
         if pend:
