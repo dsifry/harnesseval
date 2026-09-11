@@ -204,27 +204,52 @@ right += [None] * (half - len(right))
 eta_by_name = {r[0]: eta_str(cells[(k)], r[1], is_active(r)) for r, k in
                [(r, key) for r, key in zip(rows, keys)]}
 
-# last completed refill-pass wall clock per cell, from the sweeper log
+# last completed fill-pass wall clock per cell, across ALL fill sources:
+# sweeper (refilling -> refill pass done), CE chains (filling -> done/still missing), GLM chain (attempt N -> next event)
 def last_pass_minutes():
     import re as _re3
     out = {}
-    pend = None
-    try:
-        for ln in open("logs/campaign_final_refill.log", errors="replace"):
-            m = _re3.match(r"^(\d{2}):(\d{2}) cell (\S+)/ (\S+)", ln)
-            m_start = _re3.match(r"^(\d{2}):(\d{2}) cell (\S+)/(\S+)/(\S+) — refilling", ln)
-            m_done = _re3.match(r"^(\d{2}):(\d{2}) cell (\S+)/(\S+)/(\S+) refill pass done", ln)
-            if m_start:
-                pend = (int(m_start.group(1)) * 60 + int(m_start.group(2)),
-                        (m_start.group(3), m_start.group(4), m_start.group(5)))
-            elif m_done and pend and pend[1] == (m_done.group(3), m_done.group(4), m_done.group(5)):
-                d = (int(m_done.group(1)) * 60 + int(m_done.group(2))) - pend[0]
-                if d < 0: d += 1440  # midnight wrap
-                name = f"{fw_short.get(pend[1][0], pend[1][0])} {m_short.get(pend[1][1], pend[1][1])} {pend[1][2]}"
-                out[name] = d
-                pend = None
-    except OSError:
-        pass
+    FW_ALIAS = {"CE": "compound-realistic", "mrv": "metareview-realistic", "van": "vanilla-engineered"}
+    def name_for(fw, model, eff):
+        fw = FW_ALIAS.get(fw, fw)
+        return f"{fw_short.get(fw, fw)} {m_short.get(model, model)} {eff}"
+    def emit(start_min, key, done_min):
+        d = done_min - start_min
+        if d < 0: d += 1440  # midnight wrap
+        out[name_for(*key)] = d
+    for path, kind in [("logs/campaign_final_refill.log", "sweep"),
+                       ("logs/campaign_ce_codex.log", "chain"),
+                       ("logs/campaign_ce_claude.log", "chain"),
+                       ("logs/campaign_glm_final.log", "glm")]:
+        pend = None
+        try:
+            for ln in open(path, errors="replace"):
+                m = _re3.match(r"^(\d{2}):(\d{2})\s+(.*)", ln)
+                if not m: continue
+                t = int(m.group(1)) * 60 + int(m.group(2))
+                msg = m.group(3)
+                if kind == "sweep":
+                    ms = _re3.match(r"cell (\S+)/(\S+)/(\S+) — refilling", msg)
+                    md = _re3.match(r"cell (\S+)/(\S+)/(\S+) refill pass done", msg)
+                    if ms: pend = (t, (ms.group(1), ms.group(2), ms.group(3)))
+                    elif md and pend and pend[1] == (md.group(1), md.group(2), md.group(3)):
+                        emit(pend[0], pend[1], t); pend = None
+                elif kind == "chain":
+                    ms = _re3.match(r"cell (\S+)/(\S+)/(\S+) filling \d+ missing", msg)
+                    md = _re3.match(r"cell (\S+)/(\S+)/(\S+) (?:done|still missing)", msg)
+                    if ms: pend = (t, (ms.group(1), ms.group(2), ms.group(3)))
+                    elif md and pend and pend[1] == (md.group(1), md.group(2), md.group(3)):
+                        emit(pend[0], pend[1], t); pend = None
+                else:  # glm chain: attempt N for cell X -> the next distinct event ends the pass
+                    ma = _re3.match(r"cell (\S+)/(\S+)/(\S+) attempt", msg)
+                    if ma:
+                        if pend and pend[1] != (ma.group(1), ma.group(2), ma.group(3)):
+                            emit(pend[0], pend[1], t)
+                        pend = (t, (ma.group(1), ma.group(2), ma.group(3)))
+            if pend and kind == "glm":  # a still-running attempt has no end yet — skip
+                pass
+        except OSError:
+            pass
     return out
 last_pass = last_pass_minutes()
 
