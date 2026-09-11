@@ -175,7 +175,7 @@ PL = (VW - 3) // 2   # left panel width  (between the │ separators)
 PR = VW - 3 - PL     # right panel width — identical math, no drift
 out.append(f"{D}│{'─' * PL}┬{'─' * PR}│{X}")
 
-def panel(row, w, active, eta="", trend="", last_mins=None):
+def panel(row, w, active, eta="", trend="", last_mins=None, pace=None):
     name, n, rec, ap, poison = row
     barw = 50  # one slot per PR — the cursor sits exactly at run n+1 (user spec:
                # "leftmost 12 green, 13th next to it"); pane-derived widths broke 1:1
@@ -210,7 +210,8 @@ def panel(row, w, active, eta="", trend="", last_mins=None):
             suffix = f" {ld}/{es}" if es and es != "—" else f" {ld}/No ETA"
     l1 = pad(f"{name:<22s} {color}{'█' * filled}{cursor}{D}{'░' * empty}{X} {n:>3}/50{Y}{suffix}{X}", w)
     f1v = 2 * rec * ap / max(rec + ap, 1e-9)
-    l2 = pad(f"{HD}rec {rec:.2f}  adjP {ap:.2f}  F1 {f1v:.2f}{trend}{D}  ✗{poison:<3d}{X}", w)
+    _pace = f"{HD}  ·  {fmt_mins(pace)} per run{X}" if pace else ""
+    l2 = pad(f"{HD}rec {rec:.2f}  adjP {ap:.2f}  F1 {f1v:.2f}{trend}{D}  ✗{poison:<3d}{X}{_pace}", w)
     return [l1, l2]
 
 def is_active(row):
@@ -316,6 +317,28 @@ def last_pass_minutes():
     return out, completed
 last_pass, last_completed = last_pass_minutes()
 
+def pace_by_name_factory():
+    def pace_for(name, n):
+        e = last_pass.get(name)
+        avg = None
+        if e:
+            mins, inflight, n_target = e[0], e[1], e[2]
+            if inflight:
+                done = n - (50 - n_target) if n_target else 0
+                if done >= 2:
+                    avg = mins / done  # this pass's live pace
+                elif name in last_completed and last_completed[name][1]:
+                    d0, n0 = last_completed[name]
+                    avg = d0 / n0
+            elif n_target:
+                avg = mins / n_target  # completed pass: duration / runs filled
+        if avg is None and name in last_completed and last_completed[name][1]:
+            d0, n0 = last_completed[name]
+            avg = d0 / n0
+        return avg
+    return pace_for
+pace_for = pace_by_name_factory()
+
 # F1 trend vs the previous poll (state persisted across refreshes in /tmp)
 STATE = "/tmp/campaign_f1_state.json"
 f1 = lambda rec, ap: 2 * rec * ap / max(rec + ap, 1e-9)
@@ -356,8 +379,8 @@ try:
 except Exception:
     pass
 for i in range(half):
-    lp = panel(left[i], PL, is_active(left[i]), eta_by_name.get(left[i][0], ("", None))[0], trend_by_name.get(left[i][0], ""), last_pass.get(left[i][0])) if i < len(left) else [pad("", PL), pad("", PL)]
-    rp = panel(right[i], PR, is_active(right[i]), eta_by_name.get(right[i][0], ("", None))[0], trend_by_name.get(right[i][0], ""), last_pass.get(right[i][0])) if right[i] else [pad("", PR), pad("", PR)]
+    lp = panel(left[i], PL, is_active(left[i]), eta_by_name.get(left[i][0], ("", None))[0], trend_by_name.get(left[i][0], ""), last_pass.get(left[i][0]), pace_for(left[i][0], left[i][1])) if i < len(left) else [pad("", PL), pad("", PL)]
+    rp = panel(right[i], PR, is_active(right[i]), eta_by_name.get(right[i][0], ("", None))[0], trend_by_name.get(right[i][0], ""), last_pass.get(right[i][0]), pace_for(right[i][0], right[i][1])) if right[i] else [pad("", PR), pad("", PR)]
     out.append(f"{D}│{X}{lp[0]}{D}│{X}{rp[0]}{D}│{X}")
     out.append(f"{D}│{X}{lp[1]}{D}│{X}{rp[1]}{D}│{X}")
 out.append(f"{D}└{'─' * PL}┴{'─' * PR}┘{X}")
