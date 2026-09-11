@@ -187,7 +187,7 @@ def panel(row, w, active, eta="", trend="", last_mins=None):
         suffix = f" {ld}/{es}" if es and es != "—" else f" {ld}/No ETA"
     l1 = pad(f"{name:<22s} {color}{'█' * filled}{cursor}{D}{'░' * empty}{X} {n:>3}/50{Y}{suffix}{X}", w)
     f1v = 2 * rec * ap / max(rec + ap, 1e-9)
-    l2 = pad(f"{HD}rec {rec:.2f}  adjP {ap:.2f}  F1 {f1v:.2f}{trend}  ✗{poison:<3d}{X}", w)
+    l2 = pad(f"{HD}rec {rec:.2f}  adjP {ap:.2f}  F1 {f1v:.2f}{trend}{D}  ✗{poison:<3d}{X}", w)
     return [l1, l2]
 
 def is_active(row):
@@ -235,21 +235,27 @@ try:
 except Exception:
     prev_state = {}
 trend_by_name = {}
+new_state = {}
 for name, n, rec, ap, poison in rows:
     f1c = f1(rec, ap)
-    if name in prev_state:
-        d = f1c - f1(*prev_state[name])
-        if abs(d) < 0.005:
-            trend_by_name[name] = f"{Y}-{X}"   # no meaningful change (ASCII: U+2192 is ambiguous-width)
-        elif d > 0:
-            trend_by_name[name] = f"{G}▲{X}"   # rising since the last result landed
-        else:
-            trend_by_name[name] = f"{R}▼{X}"   # falling
+    st = prev_state.get(name)
+    if st is None:
+        trend_by_name[name] = f"{D}.{X}"        # no baseline yet (first poll)
+        new_state[name] = {"n": n, "f1": [rec, ap]}
+    elif n == st["n"]:
+        trend_by_name[name] = f"{Y}-{X}"        # no results landed since the baseline: flat
+        new_state[name] = st                    # keep the pre-batch baseline (arrows persist)
     else:
-        trend_by_name[name] = f"{D}.{X}"        # no baseline yet (first poll; ASCII — width-safe)
-prev_state = {name: [rec, ap] for name, n, rec, ap, poison in rows}
+        d = f1c - f1(*st["f1"])                 # results landed: compare vs where we were before them
+        if abs(d) < 0.005:
+            trend_by_name[name] = f"{Y}-{X}"
+        elif d > 0:
+            trend_by_name[name] = f"{G}▲{X}"
+        else:
+            trend_by_name[name] = f"{R}▼{X}"
+        new_state[name] = {"n": n, "f1": [rec, ap]}  # ratchet the baseline to now
 try:
-    json.dump(prev_state, open(STATE, "w"))
+    json.dump(new_state, open(STATE, "w"))
 except Exception:
     pass
 for i in range(half):
