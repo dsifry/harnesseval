@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import time
 
 from harnesseval import keys
 from harnesseval.effort import anthropic_effort_body, openai_effort_kwargs, is_anthropic, is_openai_compat
@@ -131,6 +133,33 @@ async def _call_anthropic(model, system, user, effort, max_tokens, temperature) 
 _KEY_INFLIGHT: dict[int, int] = {}  # live requests per key-pool index (least-loaded selection)
 
 
+def _log_key_usage(idx: int, model: str, seconds: float, resp, ok: bool) -> None:
+    """Append one utilization record per key-pool attempt to the key-usage ledger (JSONL).
+
+    The ledger is what makes key utilization observable from OUTSIDE the runner processes:
+    per key — which model, how long, tokens in/out/cached. The campaign dashboard and
+    tools/key_usage_report.py aggregate it. Logging must never break the call path.
+    """
+    try:
+        import json as _json
+        path = os.environ.get("HARNESS_KEY_USAGE_FILE", "logs/key_usage.jsonl")
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        u = getattr(resp, "usage", None) if resp is not None else None
+        rec = {"ts": time.time(), "key": idx, "model": model, "s": round(seconds, 1), "ok": ok}
+        if u is not None:
+            rec["in"] = getattr(u, "prompt_tokens", 0) or 0
+            rec["out"] = getattr(u, "completion_tokens", 0) or 0
+            det = getattr(u, "prompt_tokens_details", None)
+            rec["cached"] = (getattr(det, "cached_tokens", 0) or 0) if det else 0
+            extra = getattr(u, "model_extra", None) or {}
+            if not rec["cached"]:
+                rec["cached"] = extra.get("cached_tokens", 0) or extra.get("prompt_cache_hit_tokens", 0) or 0
+        with open(path, "a") as f:
+            f.write(_json.dumps(rec) + "\n")
+    except Exception:
+        pass
+
+
 async def _call_openai_compat(model, system, user, effort, max_tokens, temperature) -> tuple[str, int, int, dict]:
     from harnesseval.usage import from_openai_api, grand_total
     # Lunaroute (glm/kimi) or native OpenAI (gpt) — both OpenAI-compat
@@ -171,8 +200,11 @@ async def _call_openai_compat(model, system, user, effort, max_tokens, temperatu
                       key=lambda i: _KEY_INFLIGHT.get(i, 0))
             tried.add(idx)
             _KEY_INFLIGHT[idx] = _KEY_INFLIGHT.get(idx, 0) + 1
+            t0 = time.time()
+            ok = False
             try:
                 resp = await asyncio.to_thread(clients[idx].chat.completions.create, **call_kwargs)
+                ok = True
                 break
             except (APITimeoutError, APIConnectionError, RateLimitError) as e:
                 last_exc = e
@@ -180,17 +212,23 @@ async def _call_openai_compat(model, system, user, effort, max_tokens, temperatu
                 if e.status_code is not None and (e.status_code >= 500 or e.status_code == 429):
                     last_exc = e
                 else:
+                    _KEY_INFLIGHT[idx] = max(0, _KEY_INFLIGHT.get(idx, 1) - 1)
                     raise
             finally:
                 _KEY_INFLIGHT[idx] = max(0, _KEY_INFLIGHT.get(idx, 1) - 1)
+                _log_key_usage(idx, model, time.time() - t0, resp, ok)
         if resp is None:
             assert last_exc is not None
             raise last_exc
     elif is_lunaroute:
+        t0 = time.time()
         try:
             resp = await asyncio.to_thread(clients[0].chat.completions.create, **call_kwargs)
+            _log_key_usage(0, model, time.time() - t0, resp, True)
         except APITimeoutError:
+            _log_key_usage(0, model, time.time() - t0, None, False)
             resp = await asyncio.to_thread(clients[0].chat.completions.create, **call_kwargs)
+            _log_key_usage(0, model, time.time() - t0, resp, True)
     else:
         resp = await asyncio.to_thread(clients[0].chat.completions.create, **call_kwargs)
     text = resp.choices[0].message.content or ""
