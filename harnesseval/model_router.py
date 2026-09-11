@@ -245,7 +245,16 @@ async def _call_openai_compat(model, system, user, effort, max_tokens, temperatu
         # as the output-cap ladder: transport headroom only, the prompt is untouched.
         for _raise in range(2):
             call_kwargs["max_completion_tokens"] = max(call_kwargs["max_completion_tokens"], 16384) * (2 ** (_raise + 1))
-            resp = await asyncio.to_thread(client.chat.completions.create, **call_kwargs)
+            # go through the key pool's least-in-flight pick — a stale `client` reference
+            # here (pre-multiplexer name) crashed every empty-content retry with
+            # NameError: name 'client' is not defined, killing whole cells (2026-09-11)
+            _ki = min(range(len(clients)), key=lambda i: _KEY_INFLIGHT.get(i, 0))
+            _KEY_INFLIGHT[_ki] = _KEY_INFLIGHT.get(_ki, 0) + 1
+            try:
+                resp = await asyncio.to_thread(clients[_ki].chat.completions.create, **call_kwargs)
+            finally:
+                _KEY_INFLIGHT[_ki] = max(0, _KEY_INFLIGHT.get(_ki, 1) - 1)
+            _log_key_usage(_ki, model, 0.0, resp, True)
             text = resp.choices[0].message.content or ""
             if text.strip():
                 break
