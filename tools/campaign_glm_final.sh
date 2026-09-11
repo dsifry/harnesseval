@@ -95,7 +95,9 @@ run_cell() {  # model effort
   return 1
 }
 
-run_cell glm-5.3-flash-background high
+# flash-high moved LAST (2026-09-11): the flash pool is wedged (1h+ hangs, 429s)
+# while vision serves fine — don't let one wedged cell block the vision refills
 run_cell glm-5.3-vision-background medium
 run_cell glm-5.3-vision-background high
+run_cell glm-5.3-flash-background high
 log "GLM legs complete"
