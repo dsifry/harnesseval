@@ -172,8 +172,9 @@ out.append(f"{D}│{'─' * PL}┬{'─' * PR}│{X}")
 
 def panel(row, w, active, eta="", trend="", last_mins=None):
     name, n, rec, ap, poison = row
-    barw = w - 52  # sized for the widest suffix: " 6:23/2h37" (last-pass/eta)
-    filled = n * barw // 50
+    barw = 50  # one slot per PR — the cursor sits exactly at run n+1 (user spec:
+               # "leftmost 12 green, 13th next to it"); pane-derived widths broke 1:1
+    filled = n
     empty = barw - filled
     color = G if n >= 50 else (R if n == 0 else Y)
     # the in-flight cell sits immediately AFTER the last completed cell, not at the
