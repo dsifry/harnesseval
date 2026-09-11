@@ -198,7 +198,9 @@ def panel(row, w, active, eta="", trend="", last_mins=None):
                 avg = d0 / n0 if n0 else None
             rem = 50 - n
             if avg is not None:
-                est = fmt_signed(avg * 50 - mins)  # countdown vs estimated pass total; negative = overrunning
+                # the estimate covers THIS pass's remaining runs at the observed pace —
+                # not a hypothetical full 50-run pass (the old x50 form was wrong for top-ups)
+                est = fmt_signed(avg * rem)
                 suffix = f" {ld} elapsed/{rem} left/{est} est"
             else:
                 suffix = f" {ld} elapsed/{rem} left/? est"
