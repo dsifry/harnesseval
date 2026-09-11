@@ -25,7 +25,7 @@ run_cell() {  # model effort
   for try in 1 2 3; do
     log "cell $model/$eff attempt $try"
     .venv/bin/python -u -m harnesseval.run_model_matrix --prs 50 --frameworks metareview-realistic \
-      --models $model --efforts $eff --mode api --concurrency 3 \
+      --models $model --efforts $eff --mode api --concurrency 5 \
       --run-batch $batch --skip-batch $batch >> logs/mx_campaign_${model}_${eff}.log 2>&1
     if .venv/bin/python -m harnesseval.validate --batch $batch >/dev/null 2>&1; then
       log "cell $model/$eff CLEAN"; return 0
