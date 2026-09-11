@@ -198,9 +198,12 @@ def panel(row, w, active, eta="", trend="", last_mins=None, pace=None):
                 avg = d0 / n0 if n0 else None
             rem = 50 - n
             if avg is not None:
-                # the estimate covers THIS pass's remaining runs at the observed pace —
-                # not a hypothetical full 50-run pass (the old x50 form was wrong for top-ups)
-                est = fmt_signed(avg * rem)
+                # true countdown: estimated pass total (pace x targeted runs) minus elapsed.
+                # ticks DOWN every refresh; goes NEGATIVE when the pass overruns the estimate
+                # (slow runs / hangs), and re-bases upward when slow runs finally land and
+                # lift the live pace.
+                n_t = last_mins[2] or rem
+                est = fmt_signed(avg * n_t - mins)
                 suffix = f" {ld} elapsed/{rem} left/{est} est"
             else:
                 suffix = f" {ld} elapsed/{rem} left/? est"
