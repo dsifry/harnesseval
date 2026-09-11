@@ -83,7 +83,7 @@ def pad(s, w):
                                            # from the old list, shortening padded cursor rows
     return s + " " * max(0, w - len(s))
 
-C = "\033[38;5;51m"  # cyan cursor: marks the rightmost dot of actively-refilling cells
+C = "\033[38;5;33m"  # blue cursor: marks the in-flight cell at the fill frontier
 def cell_panel(name, n, rec, ap, poison, w, active=False):
     filled = n * (w - 40) // 50
     empty = (w - 40) - filled
