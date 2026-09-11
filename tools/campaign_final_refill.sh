@@ -38,6 +38,29 @@ print(",".join(f"{fw}/{model}/{eff}/{u.rsplit('/', 1)[-1]}" for u in missing))
 PYEOF
 }
 
+cli_ok() {  # cheap OAuth probe before burning a cell's attempts against a capped CLI
+  case "$2" in
+    glm-*) return 0 ;;  # api models: the GLM chain has its own gate
+  esac
+  .venv/bin/python - "$2" <<'PYEOF'
+import sys, asyncio
+sys.path.insert(0, '.')
+from harnesseval import cli_backends
+model = sys.argv[1]
+async def t():
+    try:
+        if model.startswith("gpt"):
+            fn = cli_backends._codex_cli
+        else:
+            fn = cli_backends._claude_cli
+        text, _, _ = await fn(model, 'low', 'Reply with the single word ok')
+        sys.exit(0 if text.strip() else 1)
+    except SystemExit: raise
+    except Exception: sys.exit(1)
+asyncio.run(t())
+PYEOF
+}
+
 for round in $(seq 1 $MAX_ROUNDS); do
   log "=== refill round $round"
   INCOMPLETE=0
@@ -48,6 +71,10 @@ for round in $(seq 1 $MAX_ROUNDS); do
         [ -z "$SPECS" ] && continue
         N=$(echo "$SPECS" | tr ',' '\n' | wc -l | tr -d ' ')
         INCOMPLETE=$((INCOMPLETE + 1))
+        if ! cli_ok "$fw" "$model"; then
+          log "cell $fw/$model/$eff — SKIPPED this round: CLI probe failed (rate-cap guard, prevents attempt storm)"
+          continue
+        fi
         log "cell $fw/$model/$eff — refilling $N"
         # CLI-hosted premium models (claude/gpt slugs) run via the CLI (OAuth); GLM via the API
         case "$model" in
