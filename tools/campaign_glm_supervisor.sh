@@ -59,17 +59,20 @@ for f in glob.glob("runs/*/summary.json"):
         bad = (s.get("tokens_in", 0) or 0) + (s.get("tokens_out", 0) or 0) == 0 or bool(s.get("error"))
         u = s.get("url")
         have[u] = have.get(u, False) or (not bad)
-print(len([u for u, ok in have.items() if not ok]))
+missing = [u for u, ok in have.items() if not ok]
+print(len(missing))
+print(",".join(f"metareview-realistic/{model}/{eff}/{u.rsplit('/',1)[-1]}" for u in missing), end="")
 PYEOF
 )
-    if [ "$NEED" = "0" ]; then
+    NEED_N=$(echo "$NEED" | head -1)
+    FILL_SPECS=$(echo "$NEED" | tail -1)
+    if [ "$NEED_N" = "0" ]; then
       log "supervisor: cell $model/$eff effectively complete (healthy run for every PR; residue only)"; return 0
     fi
-    log "supervisor: cell $model/$eff missing $NEED healthy PRs — cleaning and refilling"
-    .venv/bin/python -c "$PYCLEAN" "$model" "$eff" 2>/dev/null || CELL_MODEL=$model CELL_EFF=$eff .venv/bin/python -c "$PYCLEAN"
+    log "supervisor: cell $model/$eff missing $NEED_N healthy PRs — refilling exactly those"
     .venv/bin/python -u -m harnesseval.run_model_matrix --prs 50 --frameworks metareview-realistic \
       --models $model --efforts $eff --mode api --concurrency 1 \
-      --run-batch $BATCH --skip-batch $BATCH --fill "$(poison_specs "$model" "$eff" | tr '\n' ',')" >> logs/mx_campaign_${model}_${eff}.log 2>&1
+      --run-batch $BATCH --skip-batch $BATCH --fill "$FILL_SPECS" >> logs/mx_campaign_${model}_${eff}.log 2>&1
   done
   log "supervisor: cell $model/$eff FAILED after 5 attempts"
   return 1
