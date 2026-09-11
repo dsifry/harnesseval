@@ -524,10 +524,12 @@ async def review_realistic_async(pr: PRSample, model: str, effort: str = "medium
             # claude/codex extractor path.
             if work_root is not None:
                 shutil.rmtree(work_root, ignore_errors=True)
+            # propagate r.error: a failed api-direct review must NOT launder through as a
+            # clean-looking empty run (that class poisoned 38+ cells during the flap window)
             return ReviewRun(framework=name, model=model, effort=effort, execution_mode="api-fallback",
                              raw_output=r.raw_output, findings=_skip_gate_session_findings(r.findings),
                              tokens_in=r.tokens_in, tokens_out=r.tokens_out, wall_ms=r.wall_ms,
-                             per_model_usage=r.per_model_usage)
+                             per_model_usage=r.per_model_usage, error=r.error)
     except Exception as e:  # noqa: BLE001
         if work_root is not None:
             shutil.rmtree(work_root, ignore_errors=True)
