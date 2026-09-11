@@ -177,7 +177,8 @@ def panel(row, w, active, eta=""):
         l1 = pad(f"{name:<22s} {color}{'█' * filled}{C}▓{D}{'░' * empty}{X} {n:>3}/50{Y}{eta}{X}", w)
     else:
         l1 = pad(f"{name:<22s} {color}{'█' * filled}{D}{'░' * empty}{X} {n:>3}/50{Y}{eta}{X}", w)
-    l2 = pad(f"{HD}rec {rec:.2f}  adjP {ap:.2f}  ✗{poison:<3d}{X}", w)  # 240->250: readable
+    f1 = 2 * rec * ap / max(rec + ap, 1e-9)
+    l2 = pad(f"{HD}rec {rec:.2f}  adjP {ap:.2f}  F1 {f1:.2f}  ✗{poison:<3d}{X}", w)
     return [l1, l2]
 
 def is_active(row):
