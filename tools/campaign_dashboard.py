@@ -249,8 +249,6 @@ def last_pass_minutes():
         # and using it as a basis poisons every downstream estimate (negative countdowns)
         if n_target and d / n_target >= 0.25:  # >= 15s per targeted run
             completed[name_for(*key)] = (d, n_target)
-        if n_target:
-            completed[name_for(*key)] = (d, n_target)
     for path, kind in [("logs/campaign_final_refill.log", "sweep"),
                        ("logs/campaign_ce_codex.log", "chain"),
                        ("logs/campaign_ce_claude.log", "chain"),
