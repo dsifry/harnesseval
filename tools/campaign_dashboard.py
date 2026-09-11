@@ -235,7 +235,7 @@ try:
     prev_state = json.load(open(STATE))
     # format guard: older states stored [rec, ap] lists — discard incompatible entries
     prev_state = {k: v for k, v in prev_state.items()
-                  if isinstance(v, dict) and "n" in v and "f1" in v} if isinstance(prev_state, dict) else {}
+                  if isinstance(v, dict) and "quiet" in v and "n_last" in v} if isinstance(prev_state, dict) else {}
 except Exception:
     prev_state = {}
 trend_by_name = {}
@@ -245,22 +245,24 @@ for name, n, rec, ap, poison in rows:
     st = prev_state.get(name)
     if st is None:
         trend_by_name[name] = f"{D}.{X}"        # no baseline yet (first poll only)
-        new_state[name] = {"n": n, "f1": [rec, ap], "t": ""}
-    elif n == st["n"]:
-        # no results landed since the last batch: PERSIST the last known direction
-        # (complete cells show no indicator — nothing will ever move them)
+        new_state[name] = {"n_last": n, "quiet": [rec, ap], "t": ""}
+    elif n == st["n_last"]:
+        # settled this poll: the batch finished — the settled value becomes the new
+        # pre-batch baseline for the NEXT batch; the arrow persists until then
         trend_by_name[name] = "" if n >= 50 else (st.get("t") or f"{D}.{X}")
-        new_state[name] = st
+        new_state[name] = {"n_last": n, "quiet": [rec, ap], "t": st.get("t", "")}
     else:
-        d = f1c - f1(*st["f1"])                 # results landed: compare vs where we were before them
-        if d > 1e-9:
+        # batch in flight: compare vs the SETTLED pre-batch value — never the 15s-ago slice
+        d = f1c - f1(*st["quiet"])
+        if d > 1e-12:
             t = f"{G}▲{X}"
-        elif d < -1e-9:
+        elif d < -1e-12:
             t = f"{R}▼{X}"
-        else:                                   # exactly unchanged F1: keep prior direction
+        else:
             t = st.get("t") or f"{TY}-{X}"
         trend_by_name[name] = t
-        new_state[name] = {"n": n, "f1": [rec, ap], "t": t}  # ratchet baseline + remember direction
+        # quiet stays PUT while the batch lands — the whole batch is measured against it
+        new_state[name] = {"n_last": n, "quiet": st["quiet"], "t": t}
 try:
     json.dump(new_state, open(STATE, "w"))
 except Exception:
