@@ -407,6 +407,36 @@ for _, ts, tag, col, msg in events[-LOGN:]:
     out.append(f"{D}│{X}{pad(f'{D}{ts}{X} {col}[{tag}]{X} {lc}{msg[:VW - 16]}{X}', VW - 2)}{X}{D}│{X}")
 out.append(f"{D}└{'─' * (VW - 2)}┘{X}")
 
+# ── key-pool utilization panel: aggregated from the router's ledger ──
+import json as _json2
+_kagg = {}
+try:
+    for _ln in open("logs/key_usage.jsonl", errors="replace"):
+        try:
+            _r = _json2.loads(_ln)
+        except Exception:
+            continue
+        if _r.get("ts", 0) < time.time() - 86400:  # last 24h
+            continue
+        _a = _kagg.setdefault(_r.get("key", 9), {"ok": 0, "fail": 0, "s": 0.0, "in": 0, "out": 0, "cached": 0, "models": {}})
+        if _r.get("ok"): _a["ok"] += 1
+        else: _a["fail"] += 1
+        _a["s"] += _r.get("s", 0) or 0
+        _a["in"] += _r.get("in", 0); _a["out"] += _r.get("out", 0); _a["cached"] += _r.get("cached", 0)
+        _a["models"][_r.get("model", "?")] = _a["models"].get(_r.get("model", "?"), 0) + 1
+except OSError:
+    pass
+if _kagg:
+    out.append(f"{D}├{'─' * (VW - 2)}┤{X}")
+    out.append(f"{D}│{X}{BO}{HD}{pad(' KEY POOL — 24h utilization (key0 = bench file, key1 = interactive file)', VW - 2)}{X}{D}│{X}")
+    for _k in sorted(_kagg):
+        _a = _kagg[_k]
+        _ms = ", ".join(f"{_m}×{_c}" for _m, _c in sorted(_a["models"].items()))
+        _row = (f"key{_k}: {_a['ok']}ok/{_a['fail']}fail  {_a['s']/60:.0f}m busy  "
+                f"in {_a['in']:,} (cached {_a['cached']:,})  out {_a['out']:,}  {_ms}")
+        out.append(f"{D}│{X}{pad(_row, VW - 2)}{X}{D}│{X}")
+    out.append(f"{D}└{'─' * (VW - 2)}┘{X}")
+
 # btop-style panel draw: address absolute rows, clear each line to EOL, clear below.
 # The upper (cells) panel is never overwritten because every row is addressed explicitly
 # and the total block is sized to fit the pane.
