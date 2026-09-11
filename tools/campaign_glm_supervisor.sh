@@ -92,12 +92,12 @@ PYEOF
   return 1
 }
 
-# order switched per owner (2026-09-10): flash first — the vision serving was
-# returning 503 INFERENCE_UNAVAILABLE mid-refill; flash cells run clean. Vision
-# refills come back at the end (skip-batch keeps everything already banked).
+# order re-switched (2026-09-10 22:xx): vision serving recovered (2/3 probes UP) —
+# vision refills launch into the healthy window; flash resumes after (skip-batch
+# preserves the completed flash-low cell).
+run_cell glm-5.3-vision-background medium
+run_cell glm-5.3-vision-background high
 run_cell glm-5.3-flash-background low
 run_cell glm-5.3-flash-background medium
 run_cell glm-5.3-flash-background high
-run_cell glm-5.3-vision-background medium
-run_cell glm-5.3-vision-background high
 log "supervisor: GLM legs complete"
