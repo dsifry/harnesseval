@@ -278,7 +278,8 @@ def last_pass_minutes():
         if pend:
             name = name_for(*pend[1])
             if name not in out:  # completed passes take precedence
-                d = NOW // 60 - pend[0]   # minutes-of-day elapsed (log lines are today's)
+                _lt = time.localtime(NOW)
+                d = (_lt.tm_hour * 60 + _lt.tm_min) - pend[0]  # minutes-of-day elapsed
                 if d < 0: d += 1440
                 out[name] = d
     return out
