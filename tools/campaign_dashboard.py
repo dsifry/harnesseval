@@ -248,7 +248,8 @@ for name, n, rec, ap, poison in rows:
         new_state[name] = {"n": n, "f1": [rec, ap], "t": ""}
     elif n == st["n"]:
         # no results landed since the last batch: PERSIST the last known direction
-        trend_by_name[name] = st.get("t") or f"{D}.{X}"
+        # (complete cells show no indicator — nothing will ever move them)
+        trend_by_name[name] = "" if n >= 50 else (st.get("t") or f"{D}.{X}")
         new_state[name] = st
     else:
         d = f1c - f1(*st["f1"])                 # results landed: compare vs where we were before them
