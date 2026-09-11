@@ -213,12 +213,24 @@ async def call_model_json(model: str, system: str, user: str, *, effort: str = "
         # raised APITimeoutError (a Lunaroute concurrency-queue stall); _call_openai_compat
         # already retries once internally, but a double-timeout would otherwise propagate and
         # fail the whole cell, so catch it here and give it one more attempt.
-        try:
-            text2, tin2, tout2, per_model2 = await call_model(model, system, user, effort=effort, max_tokens=max_tokens, execution_mode=execution_mode)
-        except Exception:
-            text2, tin2, tout2, per_model2 = "", 0, 0, {}
-        tin += tin2; tout += tout2
-        from harnesseval.usage import merge
-        per_model = merge(per_model, per_model2)
-        parsed = _try_parse(text2) or {}
+        # Flap-window deepening (2026-09-10): during gateway flaps a single retry is not
+        # enough — two consecutive hangs were poisoning whole cells (each call hangs to the
+        # 600s transport timeout, ~30 min/cell wasted). Retry up to 3 total attempts on
+        # timeout-class failures; non-timeout errors keep the single retry.
+        import asyncio as _aio
+        for attempt in range(2, 4):
+            try:
+                text2, tin2, tout2, per_model2 = await call_model(model, system, user, effort=effort, max_tokens=max_tokens, execution_mode=execution_mode)
+            except Exception as e2:
+                timeoutish = "timeout" in type(e2).__name__.lower() or "timed out" in str(e2).lower()
+                if not (timeoutish and attempt < 3):
+                    break  # non-timeout error, or retries exhausted — the poison guard catches it
+                await _aio.sleep(min(5 * (attempt - 1), 15))
+                continue
+            tin += tin2; tout += tout2
+            from harnesseval.usage import merge
+            per_model = merge(per_model, per_model2)
+            parsed = _try_parse(text2) or {}
+            if parsed:
+                break
     return parsed or {}, tin, tout, per_model
