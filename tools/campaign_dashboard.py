@@ -232,6 +232,9 @@ STATE = "/tmp/campaign_f1_state.json"
 f1 = lambda rec, ap: 2 * rec * ap / max(rec + ap, 1e-9)
 try:
     prev_state = json.load(open(STATE))
+    # format guard: older states stored [rec, ap] lists — discard incompatible entries
+    prev_state = {k: v for k, v in prev_state.items()
+                  if isinstance(v, dict) and "n" in v and "f1" in v} if isinstance(prev_state, dict) else {}
 except Exception:
     prev_state = {}
 trend_by_name = {}
