@@ -239,13 +239,13 @@ for name, n, rec, ap, poison in rows:
     if name in prev_state:
         d = f1c - f1(*prev_state[name])
         if abs(d) < 0.005:
-            trend_by_name[name] = f"{Y}→{X}"   # no meaningful change
+            trend_by_name[name] = f"{Y}-{X}"   # no meaningful change (ASCII: U+2192 is ambiguous-width)
         elif d > 0:
             trend_by_name[name] = f"{G}▲{X}"   # rising since the last result landed
         else:
             trend_by_name[name] = f"{R}▼{X}"   # falling
     else:
-        trend_by_name[name] = f"{D}·{X}"        # no baseline yet (first poll)
+        trend_by_name[name] = f"{D}.{X}"        # no baseline yet (first poll; ASCII — width-safe)
 prev_state = {name: [rec, ap] for name, n, rec, ap, poison in rows}
 try:
     json.dump(prev_state, open(STATE, "w"))
