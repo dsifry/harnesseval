@@ -69,6 +69,12 @@ for round in $(seq 1 $MAX_ROUNDS); do
   for fw in compound-realistic metareview-realistic vanilla-engineered; do
     for model in claude-opus-5 claude-sonnet-5 gpt-5.6-sol gpt-5.6-terra glm-5.3-vision-background glm-5.3-flash-background; do
       for eff in low medium high; do
+        # ownership split: the GLM chain (window glmfinal) owns the mrv glm cells;
+        # the sweeper owns CE/vanilla glm cells + everything else. Two managers on
+        # one cell = duplicate runs + 429 thrash (2026-09-11 collision, caught live).
+        if [ "$fw" = "metareview-realistic" ] && [ "$model" = "glm-5.3-vision-background" -o "$model" = "glm-5.3-flash-background" ]; then
+          continue
+        fi
         SPECS=$(missing_specs "$fw" "$model" "$eff")
         [ -z "$SPECS" ] && continue
         N=$(echo "$SPECS" | tr ',' '\n' | wc -l | tr -d ' ')

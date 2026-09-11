@@ -86,7 +86,7 @@ run_cell() {  # model effort
     .venv/bin/python -c "$PYCLEAN" "$model" "$eff"
     # conc 12 = full bench-key budget; overflow spills to key1's campaign share (HARNESS_KEY_BUDGETS)
     .venv/bin/python -u -m harnesseval.run_model_matrix --prs 50 --frameworks metareview-realistic \
-      --models $model --efforts $eff --mode api --concurrency 12 \
+      --models $model --efforts $eff --mode api --concurrency 4  # vision pool negative-scales past ~4: 25-min calls at 12-wide vs 4-min at 2-wide \
       --run-batch $BATCH --skip-batch $BATCH --fill "$(missing_specs "$model" "$eff")" >> logs/mx_campaign_${model}_${eff}.log 2>&1
     local LEFT; LEFT=$(missing_specs "$model" "$eff" | tr ',' '\n' | grep -c . || true)
     if [ -z "$LEFT" ] || [ "$LEFT" = "0" ]; then
