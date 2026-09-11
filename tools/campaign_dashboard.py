@@ -246,10 +246,41 @@ def last_pass_minutes():
                         if pend and pend[1] != (ma.group(1), ma.group(2), ma.group(3)):
                             emit(pend[0], pend[1], t)
                         pend = (t, (ma.group(1), ma.group(2), ma.group(3)))
-            if pend and kind == "glm":  # a still-running attempt has no end yet — skip
-                pass
         except OSError:
             pass
+    # in-flight passes: report elapsed-so-far for cells with no completed pass yet
+    for path, kind in [("logs/campaign_final_refill.log", "sweep"),
+                       ("logs/campaign_ce_codex.log", "chain"),
+                       ("logs/campaign_ce_claude.log", "chain"),
+                       ("logs/campaign_glm_final.log", "glm")]:
+        pend = None
+        try:
+            for ln in open(path, errors="replace"):
+                m = _re3.match(r"^(\d{2}):(\d{2})\s+(.*)", ln)
+                if not m: continue
+                t = int(m.group(1)) * 60 + int(m.group(2))
+                msg = m.group(3)
+                if kind == "sweep":
+                    ms = _re3.match(r"cell (\S+)/(\S+)/(\S+) — refilling", msg)
+                    md = _re3.match(r"cell (\S+)/(\S+)/(\S+) refill pass done", msg)
+                    if ms: pend = (t, (ms.group(1), ms.group(2), ms.group(3)))
+                    elif md: pend = None
+                elif kind == "chain":
+                    ms = _re3.match(r"cell (\S+)/(\S+)/(\S+) filling \d+ missing", msg)
+                    md = _re3.match(r"cell (\S+)/(\S+)/(\S+) (?:done|still missing)", msg)
+                    if ms: pend = (t, (ms.group(1), ms.group(2), ms.group(3)))
+                    elif md: pend = None
+                else:
+                    ma = _re3.match(r"cell (\S+)/(\S+)/(\S+) attempt", msg)
+                    if ma: pend = (t, (ma.group(1), ma.group(2), ma.group(3)))
+        except OSError:
+            pass
+        if pend:
+            name = name_for(*pend[1])
+            if name not in out:  # completed passes take precedence
+                d = NOW // 60 - pend[0]   # minutes-of-day elapsed (log lines are today's)
+                if d < 0: d += 1440
+                out[name] = d
     return out
 last_pass = last_pass_minutes()
 
