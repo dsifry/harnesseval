@@ -70,8 +70,10 @@ for fw, m, e in keys:
 def frame_line(ch="─"):
     return f"{D}{'┌' + ch * (W - 2) + '┐'}{X}"
 
+import re as _re
 def pad(s, w):
-    s = s.replace(G, "").replace(Y, "").replace(R, "").replace(D, "").replace(HD, "").replace(BO, "").replace(X, "")
+    s = _re.sub(r"\033\[[0-9;]*m", "", s)  # strip ALL ANSI — the cursor's cyan was missing
+                                           # from the old list, shortening padded cursor rows
     return s + " " * max(0, w - len(s))
 
 C = "\033[38;5;51m"  # cyan cursor: marks the rightmost dot of actively-refilling cells
