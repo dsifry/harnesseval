@@ -83,7 +83,7 @@ run_cell() {  # model effort
     log "cell $model/$eff attempt $try"
     .venv/bin/python -c "$PYCLEAN" "$model" "$eff"
     .venv/bin/python -u -m harnesseval.run_model_matrix --prs 50 --frameworks metareview-realistic \
-      --models $model --efforts $eff --mode api --concurrency 3 \
+      --models $model --efforts $eff --mode api --concurrency 2 \
       --run-batch $BATCH --skip-batch $BATCH --fill "$(missing_specs "$model" "$eff")" >> logs/mx_campaign_${model}_${eff}.log 2>&1
     local LEFT; LEFT=$(missing_specs "$model" "$eff" | tr ',' '\n' | grep -c . || true)
     if [ -z "$LEFT" ] || [ "$LEFT" = "0" ]; then

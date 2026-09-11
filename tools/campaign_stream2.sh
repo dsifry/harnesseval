@@ -16,7 +16,7 @@ run_cell() {  # fw model eff
   for try in 1 2 3; do
     log "cell $fw/$model/$eff attempt $try"
     .venv/bin/python -u -m harnesseval.run_model_matrix --prs 50 --frameworks $fw \
-      --models $model --efforts $eff --mode api --concurrency 3 \
+      --models $model --efforts $eff --mode api --concurrency 2 \
       --run-batch $BATCH --skip-batch $BATCH >> logs/mx_campaign_s2_${fw}_${model}_${eff}.log 2>&1
     local LEFT
     LEFT=$( .venv/bin/python - "$fw" "$model" "$eff" <<'PYEOF'

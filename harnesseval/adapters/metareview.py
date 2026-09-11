@@ -201,7 +201,7 @@ async def _run_lens(model: str, lens: str, prompt_body: str, effort: str = "medi
 async def _run_all_lenses(model: str, pr: PRSample, effort: str = "medium") -> tuple[list[Finding], int, int, list[str], dict]:
     from harnesseval.usage import merge
     body = LENS_HEADER.format(pr_title=pr.pr_title, diff=_truncate(pr.diff))
-    sem = asyncio.Semaphore(5)
+    sem = asyncio.Semaphore(6)  # 6 x 2 concurrent cells = 12 API calls/key — the -background tier's limit
     async def bounded(l):
         async with sem:
             return await _run_lens(model, l, body, effort=effort)

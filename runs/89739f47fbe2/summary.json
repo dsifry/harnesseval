@@ -1,0 +1,1376 @@
+{
+  "tp": 2,
+  "fp": 40,
+  "fn": 0,
+  "precision": 0.047619047619047616,
+  "recall": 1.0,
+  "n_findings": 46,
+  "n_golden": 2,
+  "tokens_in": 222576,
+  "tokens_out": 8608,
+  "wall_ms": 560956.3341140747,
+  "per_model_usage": {
+    "glm-5.3-flash-background": {
+      "input_tokens": 22817,
+      "cache_read_input_tokens": 53760,
+      "cache_creation_input_tokens": 0,
+      "output_tokens": 8608,
+      "reasoning_output_tokens": 145999,
+      "cost_usd": 0.0,
+      "total_tokens": 231184
+    }
+  },
+  "total_cost_usd": 0.0,
+  "resolved_model": "glm-5.3-flash-background",
+  "adjudicated_precision": 1.0,
+  "incremental_recall": 1.0,
+  "n_bug_ungold": 17,
+  "n_important_non_bug": 23,
+  "n_true_hallucination": 0,
+  "n_unresolved": 0,
+  "n_real_ungold": 17,
+  "n_hallucination": 0,
+  "decomposition": {
+    "deterministic_tp": 0,
+    "llm_lens_tp": 2,
+    "deterministic_gate_recall": 0.0,
+    "llm_lens_recall": 1.0
+  },
+  "findings": [
+    {
+      "issue_text": "[BUG] The cleanup loop interval is hardcoded from 10 minutes down to `time.NewTicker(time.Minute * 1)`, running every cleanup job (temp files, dashboards, permissions, annotations) 10x more frequently with no config option or feature flag. Every Grafana instance sweeps all cleanup jobs once per minute instead of once per 10 minutes, multiplying background DB query load by 10x \u2014 the opposite of what a 'Database Performance Optimizations' PR should do \u2014 and operators cannot tune or disable it without a code change. The unusual `time.Minute * 1` spelling strongly suggests a debugging leftover that was never reverted; no test in the diff asserts the cadence, so nothing catches it.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] The new MaxAge batch path logs with `r.log.Error` on every successful batch, including an `\"err\", err` field that is provably nil at that point (the code already returned on error at line 531-533) and a dump of every fetched ID. Production error logs are spammed at Error level once per deleted batch \u2014 for a backlog cleanup with batch size 32767 this emits an Error-level structured log line carrying up to 32767 IDs \u2014 triggering on-call alerting and log-volume costs for a normal, successful cleanup operation.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] The new MaxCount batch path logs with `r.log.Error` on every successful batch, including a nil `\"err\", y` field and the full ID list, same defect as the MaxAge block. Error-level log spam with giant ID dumps on a normal cleanup path; combined with the 1-minute cleanup ticker this fires every minute on any instance with more than MaxCount annotations.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] CleanOrphanedAnnotationTags was rewritten onto the new fetchIDs/deleteByIDs loop and logs with `r.log.Error` per batch, including a nil `\"err\", y` field and the full orphaned-tag ID list. Error-level log spam on every orphaned-tag cleanup batch; a large orphan backlog produces thousands of Error lines each carrying the full batch of IDs.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] The SQLite inline-ID branch builds the IN-list with repeated `values = fmt.Sprintf(\"%s, %d\", values, v)`, which copies the entire accumulator string on every iteration \u2014 O(n\u00b2) in the number of IDs. With the newly supported batch size of 32767 (exercised by the new test case), each batch copies ~3.5GB of string data and allocates ~32k intermediate strings, adding seconds of CPU and GC pressure to every cleanup batch on SQLite \u2014 in a PR whose purpose is database performance. `strings.Builder` or `strings.Join` over a []string would make this linear.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] Both cleanup tests were converted to integration tests (`TestIntegrationAnnotationCleanUp`, `TestIntegrationOldAnnotationsAreDeletedFirst`) with `testing.Short()` skips, so the entirely rewritten deletion path (fetchIDs, deleteByIDs with both the parameterized and inline branches, and the untilDoneOrCancelled loop) has zero coverage in the default unit-test run that previously exercised TestAnnotationCleanUp. A regression in the new batched-delete code (e.g., a wrong placeholder count or a broken loop-termination condition) passes the standard unit CI run and is only caught by the separate integration suite, if it runs against the right database backend; the inline SQLite branch with batch > 999 is exercised by exactly one test case.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The inline branch selection compares the configured batch size against `sqliteParameterLimit = 999` but inlines IDs into raw SQL with no upper bound, so on SQLite a batch size above roughly 130,000 produces a DELETE statement exceeding SQLite's default 1MB SQLITE_MAX_SQL_LENGTH, where the previous parameterized subquery statement had no such limit. An operator who raises AnnotationCleanupJobBatchSize far past the tested 32767 on SQLite gets a per-batch 'too big SQL statement' error and cleanup fails entirely instead of completing; the code validates a lower bound (999) but not an upper one.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] The global cleanup service ticker is changed from 10 minutes to 1 minute, a hard-coded 10x increase in cleanup frequency for ALL cleanup jobs (temp files, parsed states, annotation cleanup) that is not traceable to any requirement in this 'Database Performance Optimizations' PR. Every cleanup job in CleanUpService.Run now executes 10x more often against the database, directly increasing DB load in a PR whose stated intent is to reduce it; operators cannot tune or revert the cadence without a code deploy because there is no config option. This is unrelated scope expansion buried in a performance PR.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] Leftover debug logging ships in the MaxAge cleanup hot path: r.log.Error logs the full batch ID list (up to AnnotationCleanupJobBatchSize IDs) plus a guaranteed-nil err on every successful batch. Production error logs flood on every cleanup cycle with multi-thousand-integer 'error' lines (with the ticker at 1 minute, this is every minute), triggering false error-rate alerts and obscuring real errors; 'err', err logs nil because err was already checked at line 532.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] Same leftover Error-level debug logging (full ID list, nil-err field, unnamed x/y result variables) in the MaxCount cleanup branch. Every successful MaxCount batch is logged as an Error with the entire ID slice, flooding error logs and firing false alerts during routine background cleanup.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] Same leftover Error-level debug logging (full ID list, nil-err field) in CleanOrphanedAnnotationTags. Routine orphaned-tag cleanup logs an Error line containing every fetched tag ID per batch, polluting error logs and alerting on a healthy system.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] The two existing cleanup tests are renamed to TestIntegration* with a testing.Short() skip, but the file gains no //go:build integration tag (the repo's actual gating mechanism for integration tests), so this is a naming-only reclassification. In short-mode test runs the regression coverage for cleanup deletion logic \u2014 including the only test of the new SQLite >999 ID-interpolation path in deleteByIDs \u2014 silently skips, so a regression in the rewritten delete loop can land undetected in routine CI; meanwhile the tests still run (now with a 40003-row fixture) in non-short runs, contradicting the 'integration' naming.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] The batch loop logs at Error level on the success path: r.log.Error(\"Annotations to clean by time\", ...) and r.log.Error(\"cleaned annotations by time\", ...) execute after every successful batch, emit the entire fetched ID list, and pass an err value that is guaranteed nil at that point (it was already checked and returned on line 532-533). Every deployment with annotation cleanup configured (MaxAge/MaxCount > 0) emits ERROR-severity log lines per batch containing thousands of IDs (a 32767-ID batch is a ~200KB log line), paging on-call for a healthy system and making the real errors indistinguishable from the noise; the dangling nil \"err\" field also poisons log-based err!=nil matching.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] Same Error-level-on-success-path logging defect in the MaxCount cleanup loop: r.log.Error(\"Annotations to clean by count\", ...) and r.log.Error(\"cleaned annotations by count\", ...) fire after every successful batch with the full ID list and a nil err. ERROR-severity log spam and false pages on every MaxCount cleanup batch; identical mechanism to the MaxAge sites, so the noise doubles when both settings are configured.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] Same Error-level-on-success-path logging defect in CleanOrphanedAnnotationTags: r.log.Error(\"Tags to clean\", ...) and r.log.Error(\"cleaned tags\", ...) fire after every successful batch with the full ID list and a nil err. Orphan-tag cleanup (which runs unconditionally, not gated on MaxAge/MaxCount settings) logs ERROR lines with thousands of IDs on every cycle on every Grafana instance, generating false alerts fleet-wide even on default installations.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] The cleanup loop ticker was changed from 10 minutes to 1 minute with no comment or configuration, a 10x frequency increase for all work driven by this loop, not just annotation cleanup. Operators get all periodic cleanup work (tmp files, and whatever else this loop drives) executed 10x more often, multiplying background DB load in a PR titled 'Database Performance Optimizations'; the `time.Minute * 1` spelling suggests a debugging leftover, and because the interval is hardcoded there is no way to tune it back without a code deploy.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The SQLite inline-ID branch builds the IN-list with repeated fmt.Sprintf accumulation (values = fmt.Sprintf(\"%s, %d\", values, v)), which is O(n^2) in bytes copied. With the new supported batch size of 32767 (the size the new test explicitly exercises), each Sprintf re-copies the growing ~230KB string, costing on the order of gigabytes of memcpy per batch in the cleanup path of a performance-focused PR; strings.Builder or a preallocated []byte makes this linear.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] deleteByIDs special-cases only SQLite's 999-parameter limit; the else branch emits one '?' placeholder per ID, so a configured AnnotationCleanupJobBatchSize above the 65535 bind-parameter limit of PostgreSQL and MySQL produces a statement that fails on every batch. An operator who raises the batch size beyond 65535 on Postgres/MySQL gets a permanent 'too many parameters' driver error on every cleanup cycle (cleanup silently never completes, error returned from Run each tick) until someone correlates the cryptic driver message with the config value; the code handles the analogous SQLite limit explicitly but not the equivalent limit on the other two dialects.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] Routine successful cleanup batches are logged at Error level (`r.log.Error(\"Annotations to clean by time\", \"count\", len(ids), \"ids\", ids, ...)`) including the full ID list and an always-nil `err` field, which is leftover debug logging from iterating on the deadlock fix, not intended production behavior. On a healthy system with a large backlog of expired annotations, every batch emits an Error-level log line containing up to AnnotationCleanupJobBatchSize raw IDs; combined with the ticker change in this same PR (cleanup now runs every minute), error-rate alerting and log-based paging fire continuously on normal operation, and log volume balloons. The `\"err\", err` field is always nil at this site (the nil case returned at line 531-533), so it misleads anyone triaging the error.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] The MaxCount cleanup path logs its normal per-batch operation at Error level with the full ID list (`r.log.Error(\"Annotations to clean by count\", \"count\", len(ids), \"ids\", ids, \"cond\", cond, \"err\", err)`) and an always-nil `err`, same debug leftover as the MaxAge path. MaxCount trimming is the branch that runs continuously on busy instances (it deletes down to the configured max every cycle), so with the 1-minute ticker this path emits Error-level log lines with up to batch-size IDs every minute on every large org, flooding error dashboards and paging on healthy behavior.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] CleanOrphanedAnnotationTags logs its normal per-batch deletes at Error level with the full orphaned-tag ID list (`r.log.Error(\"Tags to clean\", ...)` and `r.log.Error(\"cleaned tags\", ...)`), the third instance of shipped debug logging. After bulk annotation deletions (e.g., the new high-volume cleanup path in this PR creates large tag orphans), the next cycle dumps every orphaned tag ID at Error level; on a database with a large orphan backlog this is a multi-megabyte error log line repeated every run, generating alert noise and log-storage cost for a non-error condition.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] The cleanup service tick interval was silently changed from 10 minutes to 1 minute (`time.NewTicker(time.Minute * 1)`), a 10x increase in cleanup frequency with no config knob, no test, and no stated rationale in a PR titled 'Database Performance Optimizations'. This is an unflagged objective change hidden inside a performance PR: all cleanup work (tmp files, annotation cleanup via CleanAnnotations, other maintenance) now hits the database and filesystem 10x more often, directly increasing DB load \u2014 the opposite of the PR's stated intent \u2014 and operators cannot tune or revert it without a code deploy. If the 1-minute value was a local experiment from debugging the deadlock, it shipped without explicit acceptance.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] The SQLite >999-parameter fallback builds the IN-list with repeated `fmt.Sprintf(\"%s, %d\", values, v)` accumulation, which is O(n\u00b2) in string copies and is triggered for any batch size over 999 even though SQLite >= 3.32 supports up to 32766 bound parameters (as the new test's own name acknowledges). Anyone who raises AnnotationCleanupJobBatchSize on SQLite into the thousands pays quadratic string-building in the cleanup hot path \u2014 a self-inflicted slowdown inside a PR whose purpose is database performance \u2014 and the branch is broader than the parameter limit it exists to avoid, so the placeholder path is needlessly bypassed for batch sizes 1000\u201332766. The next change to this statement (e.g., adding a column or dialect) has to be made in two divergent SQL-building branches.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] The MaxAge cleanup batch logs successful work at Error level, including the full ID slice, the SQL condition fragment, and an err value that is provably nil at that point (err is checked and returned on the preceding lines). Every cleanup cycle emits r.log.Error('Annotations to clean by time', ...) with up to AnnotationCleanupJobBatchSize IDs per log line (the new test exercises batch sizes of 32767), firing false Error alerts against on-call dashboards and inflating log storage with per-ID dumps on a routine maintenance path; the 'err' field is always nil, so the log is misleading during any real incident triage.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] The MaxCount cleanup batch has the same leftover Error-level debug logging: log.Error('Annotations to clean by count', ...) and log.Error('cleaned annotations by count', ...) both fire on the success path with a nil err and the full ID list. Routine max-count deletion produces Error-severity log lines containing every deleted annotation ID and an always-nil err field on each batch, causing alert fatigue and unbounded log volume proportional to the number of annotations cleaned.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] CleanOrphanedAnnotationTags likewise logs 'Tags to clean' and 'cleaned tags' at Error level with the full orphaned-tag ID slice and an err field that is nil when the log statement executes. Orphaned-tag cleanup, which can run repeatedly until the table is drained, writes an Error-level line per batch with every tag ID enumerated, generating sustained false-positive error alerts and log growth on a background maintenance job.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] The new MaxAge batch loop logs routine per-batch progress (including a dump of every ID in the batch and a guaranteed-nil err) via r.log.Error instead of Debug/Info. Every production Grafana instance emits Error-level log lines on every cleanup batch (and each line can contain up to AnnotationCleanupJobBatchSize IDs, thousands of entries), polluting error logs and firing error-rate alerting for a normal, successful cleanup cycle.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] The new MaxCount batch loop likewise logs successful per-batch work with r.log.Error, including a nil err field and the full fetched ID list. Same as the MaxAge site: false Error-severity log spam and alert noise on every max-count cleanup run, with up-to-batch-size ID dumps per line.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] CleanOrphanedAnnotationTags' rewritten loop also logs both the fetch and the delete of every batch at Error level, with a hard-coded nil err field. Orphaned-tag cleanup, which runs regularly for every instance with annotation tags, generates Error-severity log noise (plus full ID dumps) on each successful batch, degrading log-based error monitoring.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] The cleanup service ticker was changed from 10 minutes to 1 minute with no accompanying config, feature flag, or rationale, in a PR whose stated goal is reducing database load. All background cleanup jobs driven by this service (tmp files, expired tokens/actions, old records) run 10x more frequently in every deployment, multiplying background DB and filesystem load \u2014 this looks like a debugging leftover matching the leftover r.log.Error calls in xorm_store.go, and no test in the diff covers the ticker change.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] TestAnnotationCleanUp was renamed to TestIntegrationAnnotationCleanUp and given a testing.Short() skip, removing it from the default unit-test run at the same time the production cleanup logic was substantially rewritten (fetchIDs/deleteByIDs/untilDoneOrCancelled). A plain `go test ./pkg/services/annotations/...` (short mode, as in the default CI unit job) now executes zero assertions against the rewritten CleanAnnotations/CleanOrphanedAnnotationTags code paths; regressions in the new batching logic are only caught if the integration suite happens to run against the right database.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] TestOldAnnotationsAreDeletedFirst was likewise renamed to TestIntegrationOldAnnotationsAreDeletedFirst with a testing.Short() skip, so the only test asserting delete ordering (oldest-first) no longer runs in the default suite that covered it before this diff. A regression in the ORDER BY id DESC / OFFSET semantics of the new fetch-and-delete split (e.g., deleting the newest kept annotations instead of the oldest excess ones) passes default CI and is only caught in integration runs.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The rewritten test suite only exercises the happy path of the new untilDoneOrCancelled loop: every cleaner.Run call passes context.Background() and no test induces a fetchIDs or deleteByIDs error, so the loop's context-cancellation return (totalAffected, ctx.Err()) and its error-abort path are never executed. A regression in the new exit conditions \u2014 e.g., treating ctx.Err() as nil and looping forever on a cancelled job, or swallowing a per-batch error and continuing \u2014 would pass the entire test suite; cancellation is the exact scenario the deadlocking-production incident makes likely. Evidence of absence: cleanup_test.go is the only test file in this diff touching these symbols, and its four Run call sites all use context.Background().",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The SQLite string-interpolation branch of deleteByIDs builds the IN-list with repeated fmt.Sprintf(\"%s, %d\", values, v), re-copying the entire accumulated string on every iteration \u2014 O(n\u00b2) in batch size. With the new 32767-sized batches this performs ~32k Sprintf calls per batch rebuilding a ~200KB string each time (hundreds of MB of cumulative allocation churn per cleanup cycle) on exactly the resource-constrained SQLite instances this branch targets; strings.Join over a preallocated slice eliminates it.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The case named \"running the max count delete again should not remove any annotations\" no longer runs cleanup against state left by a previous cleanup pass: the old test shared one dataset across sequential cases (case 4 ran on case 3's post-cleanup state), while the rewritten suite creates fresh data per subtest, so this case now only verifies a single pass against data already exactly at MaxCount. The idempotency property the case name claims is no longer exercised; a regression that only manifests on a second cleanup run over already-cleaned state (e.g., the OFFSET-based MaxCount query drifting after deletions) would pass this suite.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] In each subtest, t.Cleanup is registered only after createTestAnnotations and the initial count assertions succeed, whereas the old test registered cleanup at the parent level before any subtest ran; a require failure mid-creation (e.g., a partial InsertMulti batch) aborts the subtest before cleanup is registered. If creation of the 40003-annotation case fails partway, the leftover rows persist and every subsequent subtest fails with duplicate-ID insert errors (createTestAnnotations pins ID = i+1), masking the real root-cause failure \u2014 the old parent-level cleanup made this impossible.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] The MaxAge cleanup path logs every successful batch through r.log.Error (\"Annotations to clean by time\" and \"cleaned annotations by time\"), including the full ids slice and an always-nil err, despite the error already being handled by the `if err != nil { return 0, err }` check above. In production, every cleanup cycle emits Error-severity log lines containing up to AnnotationCleanupJobBatchSize IDs each (the new test case exercises 32,767 IDs per line), even when cleanup succeeds \u2014 flooding error logs and paging alerting on a routine background job, and these debug leftovers ship the full ID dump at Error level every minute given the ticker change in cleanup.go.",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] The MaxCount cleanup path logs every successful batch through r.log.Error (\"Annotations to clean by count\" and \"cleaned annotations by count\") with the full ids slice, on the success path after the error check has already returned. Same as the MaxAge path: routine, successful count-based cleanup produces Error-severity log spam with potentially tens of thousands of IDs per line, triggering error-rate alerting and obscuring genuine errors from this service.",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] CleanOrphanedAnnotationTags logs every successful batch through r.log.Error (\"Tags to clean\" and \"cleaned tags\") with the full ids slice, on the success path after the error check has already returned. Every orphaned-tag cleanup cycle logs at Error severity even when it succeeds, polluting error metrics/logs; combined with the 1-minute ticker this runs 10x more often than before the change.",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] The cleanup service ticker interval is reduced from 10 minutes to 1 minute, a 10x increase in execution frequency for every cleanup job served by this loop, not just the annotation cleanup this PR retunes. Operators get all cleanup jobs (dashboard version cleanup, expired-token/login-attempt cleanup, etc.) running 10x more often against the database; even no-op cycles pay their query cost every minute. If the intent was only to smooth annotation-deletion batches, that is already bounded by AnnotationCleanupJobBatchSize, so the global frequency change needs justification or a revert.",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] deleteByIDs only interpolates IDs into the statement for SQLite; on MySQL/Postgres the placeholder path builds one ? per ID, so a batch larger than the server's per-statement placeholder limit (65535 on both) makes every cleanup batch fail with 'prepared statement contains too many placeholders'. An operator who raises AnnotationCleanupJobBatchSize above 65535 on MySQL or Postgres (the knob is exposed precisely to tune around driver limits, as the new SQLite test demonstrates) turns the annotation cleanup job into a permanent per-cycle error instead of a bounded delete; the size cap is only enforced for SQLite.",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] The MaxAge cleanup batch logs its routine progress ('Annotations to clean by time', 'cleaned annotations by time') at Error level, and the first log emits an err field that is always nil at that point. Every successful cleanup cycle is reported as an ERROR in Grafana's log stream, so log-based error alerting/dashboards fire on normal operation and real cleanup failures become indistinguishable from noise; additionally the log line embeds the full ids slice (up to AnnotationCleanupJobBatchSize, e.g. 32767 IDs) per batch, producing enormous log lines whenever a large backlog is purged. With the companion change lowering the cleanup ticker to 1 minute, this error spam recurs continuously.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] The MaxCount cleanup batch logs its routine progress ('Annotations to clean by count', 'cleaned annotations by count') at Error level, with the first log emitting an err field that is always nil at that point. Successful count-based trimming is surfaced as ERROR-level log output every batch, polluting error telemetry and tripping log-error alerting during normal operation; the full ids slice (up to batch size) is also serialized into each log line when a large backlog is purged.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] CleanOrphanedAnnotationTags logs its routine progress ('Tags to clean', 'cleaned tags') at Error level, with the first log emitting an err field that is always nil at that point. Normal orphaned-tag cleanup is reported as errors on every batch; any log-based error monitoring treats the healthy job as failing, and the full ids slice (up to batch size) is written into each log line, inflating log volume during large cleanups.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] deleteByIDs guards only SQLite's 999-parameter limit; for PostgreSQL (65535 placeholders) and MySQL (65535 placeholders in prepared statements) a configured AnnotationCleanupJobBatchSize above the driver cap makes every batch statement fail at the driver level. An operator who raises AnnotationCleanupJobBatchSize above the non-SQLite placeholder cap gets a cleanup job that errors on every batch every cycle \u2014 annotations are never cleaned and the error recurs indefinitely, with no guard or validation rejecting the configuration up front.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The cleanup ticker is lowered from 10 minutes to 1 minute, which runs every cleanUpJob in the cleanup service (not just the annotation cleaner) ten times more frequently. All periodic cleanup jobs (tmp-file removal, expired-entity sweeps, annotation cleanup now looping batch-by-batch with no backoff) hit the database ten times as often; combined with the new per-batch fetch-then-delete pattern this turns the cleanup service into a near-continuous background DELETE workload, and amplifies the mis-leveled Error logging above to once per minute. If the 10x frequency was intended only for the annotation deadlock workaround, it should be scoped to that job rather than applied globally.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    }
+  ],
+  "goldens": [
+    {
+      "comment": "The code uses Error log level for what appears to be debugging information. This will pollute error logs in production. Consider using Debug or Info level instead.",
+      "severity": "Low",
+      "category": "perf"
+    },
+    {
+      "comment": "The cleanup job ticker was changed from 10 minutes to 1 minute, which can lead to increased database load and contention due to more frequent execution of cleanup tasks. This change should be reviewed to ensure it aligns with performance expectations.",
+      "severity": "Low",
+      "category": "perf"
+    }
+  ],
+  "per_golden_matches": [
+    {
+      "golden_comment": "The code uses Error log level for what appears to be debugging information. This will pollute error logs in production. Consider using Debug or Info level instead.",
+      "severity": "Low",
+      "category": "perf",
+      "matched_candidate": "[BUG] The new MaxAge batch loop logs routine per-batch progress (including a dump of every ID in the batch and a guaranteed-nil err) via r.log.Error instead of Debug/Info. Every production Grafana instance emits Error-level log lines on every cleanup batch (and each line can contain up to AnnotationCleanupJobBatchSize IDs, thousands of entries), polluting error logs and firing error-rate alerting for a normal, successful cleanup cycle.",
+      "confidence": 0.97,
+      "reasoning": "Yes. The candidate flags that routine, successful per-batch progress is being logged at Error level and recommends using Debug/Info instead, which is the same concern as the golden comment about polluting production error logs."
+    },
+    {
+      "golden_comment": "The cleanup job ticker was changed from 10 minutes to 1 minute, which can lead to increased database load and contention due to more frequent execution of cleanup tasks. This change should be reviewed to ensure it aligns with performance expectations.",
+      "severity": "Low",
+      "category": "perf",
+      "matched_candidate": "[BUG] The global cleanup service ticker is changed from 10 minutes to 1 minute, a hard-coded 10x increase in cleanup frequency for ALL cleanup jobs (temp files, parsed states, annotation cleanup) that is not traceable to any requirement in this 'Database Performance Optimizations' PR. Every cleanup job in CleanUpService.Run now executes 10x more often against the database, directly increasing DB load in a PR whose stated intent is to reduce it; operators cannot tune or revert the cadence without a code deploy because there is no config option. This is unrelated scope expansion buried in a performance PR.",
+      "confidence": 0.97,
+      "reasoning": "Both comments flag the same change: the cleanup job ticker interval was reduced from 10 minutes to 1 minute, increasing cleanup frequency and potentially causing higher database load/contestion. The candidate adds extra context (scope, configurability), but the core issue matches the golden comment."
+    }
+  ],
+  "adjudication_records": [
+    {
+      "issue_text": "[BUG] The cleanup loop interval is hardcoded from 10 minutes down to `time.NewTicker(time.Minute * 1)`, running every cleanup job (temp files, dashboards, permissions, annotations) 10x more frequently with no config option or feature flag. Every Grafana instance sweeps all cleanup jobs once per minute instead of once per 10 minutes, multiplying background DB query load by 10x \u2014 the opposite of what a 'Database Performance Optimizations' PR should do \u2014 and operators cannot tune or disable it without a code change. The unusual `time.Minute * 1` spelling strongly suggests a debugging leftover that was never reverted; no test in the diff asserts the cadence, so nothing catches it.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "unjudged",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "unjudged",
+        "adjudicating_judge": null,
+        "confidence": null,
+        "rationale": null,
+        "diff_context_hash": "a105138157d3009fa919319b62e6d297c72c1fd2"
+      }
+    },
+    {
+      "issue_text": "[BUG] The new MaxAge batch path logs with `r.log.Error` on every successful batch, including an `\"err\", err` field that is provably nil at that point (the code already returned on error at line 531-533) and a dump of every fetched ID. Production error logs are spammed at Error level once per deleted batch \u2014 for a backlog cleanup with batch size 32767 this emits an Error-level structured log line carrying up to 32767 IDs \u2014 triggering on-call alerting and log-volume costs for a normal, successful cleanup operation.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "unjudged",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "unjudged",
+        "adjudicating_judge": null,
+        "confidence": null,
+        "rationale": null,
+        "diff_context_hash": "a105138157d3009fa919319b62e6d297c72c1fd2"
+      }
+    },
+    {
+      "issue_text": "[BUG] The new MaxCount batch path logs with `r.log.Error` on every successful batch, including a nil `\"err\", y` field and the full ID list, same defect as the MaxAge block. Error-level log spam with giant ID dumps on a normal cleanup path; combined with the 1-minute cleanup ticker this fires every minute on any instance with more than MaxCount annotations.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "unjudged",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "unjudged",
+        "adjudicating_judge": null,
+        "confidence": null,
+        "rationale": null,
+        "diff_context_hash": "a105138157d3009fa919319b62e6d297c72c1fd2"
+      }
+    },
+    {
+      "issue_text": "[BUG] CleanOrphanedAnnotationTags was rewritten onto the new fetchIDs/deleteByIDs loop and logs with `r.log.Error` per batch, including a nil `\"err\", y` field and the full orphaned-tag ID list. Error-level log spam on every orphaned-tag cleanup batch; a large orphan backlog produces thousands of Error lines each carrying the full batch of IDs.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.9,
+        "rationale": "In `CleanOrphanedAnnotationTags`, the new batched loop logs with `r.log.Error` on every batch both before and after deletion, and includes the full `ids` slice in the log fields (`\"ids\", ids`). On success, `err`/`y` will typically be nil but still logged at Error level (`\"err\", err` / `\"err\", y`). This is verifiable log-level/verbosity/log-spam concern introduced by the diff, not a functional correctness defect.",
+        "diff_context_hash": "a105138157d3009fa919319b62e6d297c72c1fd2"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The SQLite inline-ID branch builds the IN-list with repeated `values = fmt.Sprintf(\"%s, %d\", values, v)`, which copies the entire accumulator string on every iteration \u2014 O(n\u00b2) in the number of IDs. With the newly supported batch size of 32767 (exercised by the new test case), each batch copies ~3.5GB of string data and allocates ~32k intermediate strings, adding seconds of CPU and GC pressure to every cleanup batch on SQLite \u2014 in a PR whose purpose is database performance. `strings.Builder` or `strings.Join` over a []string would make this linear.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.9,
+        "rationale": "In `deleteByIDs`, the SQLite branch for `AnnotationCleanupJobBatchSize > 999` builds the `IN (...)` list via repeated `values = fmt.Sprintf(\"%s, %d\", values, v)` inside a loop. This pattern repeatedly reallocates/copies the accumulated string, making construction O(n\u00b2) in `len(ids)`. The diff also adds a test exercising a batch size of 32767, which would hit this branch on SQLite and amplify the overhead. This is a concrete, diff-grounded performance issue (not a correctness defect).",
+        "diff_context_hash": "a105138157d3009fa919319b62e6d297c72c1fd2"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] Both cleanup tests were converted to integration tests (`TestIntegrationAnnotationCleanUp`, `TestIntegrationOldAnnotationsAreDeletedFirst`) with `testing.Short()` skips, so the entirely rewritten deletion path (fetchIDs, deleteByIDs with both the parameterized and inline branches, and the untilDoneOrCancelled loop) has zero coverage in the default unit-test run that previously exercised TestAnnotationCleanUp. A regression in the new batched-delete code (e.g., a wrong placeholder count or a broken loop-termination condition) passes the standard unit CI run and is only caught by the separate integration suite, if it runs against the right database backend; the inline SQLite branch with batch > 999 is exercised by exactly one test case.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.86,
+        "rationale": "The diff renames the prior unit tests to `TestIntegrationAnnotationCleanUp` and `TestIntegrationOldAnnotationsAreDeletedFirst` and adds `if testing.Short() { t.Skip(...) }`, meaning they will be skipped in short/default unit test runs. Meanwhile, the deletion implementation in `xorm_store.go` is substantially rewritten (new `untilDoneOrCancelled`, `fetchIDs`, `deleteByIDs` with a SQLite inline-ID branch when batch size > 999). As shown, there are no remaining non-integration tests exercising this new batched-delete logic; the added large-batch SQLite case exists only inside the integration test table, so regressions in placeholder construction or loop termination could pass normal unit CI.",
+        "diff_context_hash": "a105138157d3009fa919319b62e6d297c72c1fd2"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The inline branch selection compares the configured batch size against `sqliteParameterLimit = 999` but inlines IDs into raw SQL with no upper bound, so on SQLite a batch size above roughly 130,000 produces a DELETE statement exceeding SQLite's default 1MB SQLITE_MAX_SQL_LENGTH, where the previous parameterized subquery statement had no such limit. An operator who raises AnnotationCleanupJobBatchSize far past the tested 32767 on SQLite gets a per-batch 'too big SQL statement' error and cleanup fails entirely instead of completing; the code validates a lower bound (999) but not an upper one.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.66,
+        "rationale": "In `deleteByIDs`, when `r.db.GetDBType() == migrator.SQLite` and `r.cfg.AnnotationCleanupJobBatchSize > sqliteParameterLimit` (999), the code builds `DELETE FROM <table> WHERE id IN (<comma-separated ids>)` by inlining *all* IDs into the SQL string with no upper bound (`values = fmt.Sprintf(\"%s, %d\", values, v)`). This makes per-batch statement size grow linearly with batch size, so very large `AnnotationCleanupJobBatchSize` values can produce an oversized SQL statement and return an error, aborting cleanup, whereas the previous approach did not expand the SQL text with the batch size. The diff shows no guard/validation to prevent this on SQLite.",
+        "diff_context_hash": "a105138157d3009fa919319b62e6d297c72c1fd2"
+      }
+    },
+    {
+      "issue_text": "[BUG] The global cleanup service ticker is changed from 10 minutes to 1 minute, a hard-coded 10x increase in cleanup frequency for ALL cleanup jobs (temp files, parsed states, annotation cleanup) that is not traceable to any requirement in this 'Database Performance Optimizations' PR. Every cleanup job in CleanUpService.Run now executes 10x more often against the database, directly increasing DB load in a PR whose stated intent is to reduce it; operators cannot tune or revert the cadence without a code deploy because there is no config option. This is unrelated scope expansion buried in a performance PR.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": [
+        "The cleanup job ticker was changed from 10 minutes to 1 minute, which can lead to increased database load and contention due to more frequent execution of cleanup tasks. This change should be reviewed to ensure it aligns with performance expectations."
+      ],
+      "primary_judge_verdict": "matched",
+      "primary_judge": "gpt-5.2",
+      "primary_judge_confidence": 0.97,
+      "primary_judge_reasoning": "Both comments flag the same change: the cleanup job ticker interval was reduced from 10 minutes to 1 minute, increasing cleanup frequency and potentially causing higher database load/contestion. The candidate adds extra context (scope, configurability), but the core issue matches the golden comment.",
+      "adjudication": {
+        "verdict": "matched",
+        "adjudicating_judge": null,
+        "confidence": null,
+        "rationale": null,
+        "diff_context_hash": "a105138157d3009fa919319b62e6d297c72c1fd2"
+      }
+    },
+    {
+      "issue_text": "[BUG] Leftover debug logging ships in the MaxAge cleanup hot path: r.log.Error logs the full batch ID list (up to AnnotationCleanupJobBatchSize IDs) plus a guaranteed-nil err on every successful batch. Production error logs flood on every cleanup cycle with multi-thousand-integer 'error' lines (with the ticker at 1 minute, this is every minute), triggering false error-rate alerts and obscuring real errors; 'err', err logs nil because err was already checked at line 532.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.93,
+        "rationale": "In `xorm_store.go`, the new cleanup loops log at error level on the success path: e.g. after `ids, err := r.fetchIDs(...)` and `if err != nil { return 0, err }`, the code still does `r.log.Error(\"Annotations to clean by time\", ..., \"ids\", ids, ..., \"err\", err)` and similarly after delete (`r.log.Error(\"cleaned annotations by time\", ...)`) and in the MaxCount/tag cleanup paths. This will emit `Error` logs every batch even when `err` is nil and may include very large `ids` lists (up to `AnnotationCleanupJobBatchSize`). Separately, `cleanup.go` reduces the cleanup ticker from 10 minutes to 1 minute, increasing the frequency of these error logs. This is a verifiable operational defect (log flooding/false error alerts) introduced by the diff.",
+        "diff_context_hash": "a105138157d3009fa919319b62e6d297c72c1fd2"
+      }
+    },
+    {
+      "issue_text": "[BUG] Same leftover Error-level debug logging (full ID list, nil-err field, unnamed x/y result variables) in the MaxCount cleanup branch. Every successful MaxCount batch is logged as an Error with the entire ID slice, flooding error logs and firing false alerts during routine background cleanup.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.9,
+        "rationale": "In `CleanAnnotations` MaxCount branch, the diff adds `r.log.Error` calls that run on the success path: after `ids, err := r.fetchIDs(...)` it logs at Error level including the full `ids` slice and an `err` field that will typically be `nil`; then after `x, y := r.deleteByIDs(...)` it again logs at Error level with `err` = `y`. This will emit Error logs during routine cleanup batches and can flood logs / trigger false alerts, matching the finding.",
+        "diff_context_hash": "a105138157d3009fa919319b62e6d297c72c1fd2"
+      }
+    },
+    {
+      "issue_text": "[BUG] Same leftover Error-level debug logging (full ID list, nil-err field) in CleanOrphanedAnnotationTags. Routine orphaned-tag cleanup logs an Error line containing every fetched tag ID per batch, polluting error logs and alerting on a healthy system.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.86,
+        "rationale": "In `CleanOrphanedAnnotationTags`, the new implementation logs at Error level for normal cleanup batches and includes the full `ids` slice and an `err` field that will typically be nil: `r.log.Error(\"Tags to clean\", \"count\", len(ids), \"ids\", ids, ... \"err\", err)` and `r.log.Error(\"cleaned tags\", ... \"ids\", ids, ... \"err\", y)`. This will spam error logs (and potentially alerting) during healthy, routine operation, especially with large batches. It\u2019s an operational/logging severity issue rather than a correctness/security defect.",
+        "diff_context_hash": "a105138157d3009fa919319b62e6d297c72c1fd2"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The two existing cleanup tests are renamed to TestIntegration* with a testing.Short() skip, but the file gains no //go:build integration tag (the repo's actual gating mechanism for integration tests), so this is a naming-only reclassification. In short-mode test runs the regression coverage for cleanup deletion logic \u2014 including the only test of the new SQLite >999 ID-interpolation path in deleteByIDs \u2014 silently skips, so a regression in the rewritten delete loop can land undetected in routine CI; meanwhile the tests still run (now with a 40003-row fixture) in non-short runs, contradicting the 'integration' naming.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.68,
+        "rationale": "The diff shows both tests renamed to `TestIntegration...` and now gated only by `if testing.Short() { t.Skip(...) }` (no `//go:build integration` or similar build constraint was added in this file). So the \u201cintegration\u201d reclassification is effectively naming + `-short` behavior only, and in `-short` runs these tests (including the new large-fixture case intended to exercise the SQLite parameter-limit branch in `deleteByIDs`) will be skipped. Whether the repo uses build tags as the primary gating mechanism isn\u2019t verifiable from the diff, but the lack of a build tag and reliance on `testing.Short()` is directly supported by the changes.",
+        "diff_context_hash": "a105138157d3009fa919319b62e6d297c72c1fd2"
+      }
+    },
+    {
+      "issue_text": "[BUG] The batch loop logs at Error level on the success path: r.log.Error(\"Annotations to clean by time\", ...) and r.log.Error(\"cleaned annotations by time\", ...) execute after every successful batch, emit the entire fetched ID list, and pass an err value that is guaranteed nil at that point (it was already checked and returned on line 532-533). Every deployment with annotation cleanup configured (MaxAge/MaxCount > 0) emits ERROR-severity log lines per batch containing thousands of IDs (a 32767-ID batch is a ~200KB log line), paging on-call for a healthy system and making the real errors indistinguishable from the noise; the dangling nil \"err\" field also poisons log-based err!=nil matching.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.87,
+        "rationale": "In xorm_store.go, the new batching logic logs with r.log.Error on the normal/success path for every batch (e.g., after successful fetchIDs and deleteByIDs in CleanAnnotations and CleanOrphanedAnnotationTags). These logs include the full fetched \"ids\" slice and also include an \"err\" field that will be nil on success (and the first log\u2019s err is guaranteed nil because it returns on non-nil just above). This is verifiably introduced by the diff and can cause erroneous ERROR-level spam and huge log lines in healthy systems.",
+        "diff_context_hash": "a105138157d3009fa919319b62e6d297c72c1fd2"
+      }
+    },
+    {
+      "issue_text": "[BUG] Same Error-level-on-success-path logging defect in the MaxCount cleanup loop: r.log.Error(\"Annotations to clean by count\", ...) and r.log.Error(\"cleaned annotations by count\", ...) fire after every successful batch with the full ID list and a nil err. ERROR-severity log spam and false pages on every MaxCount cleanup batch; identical mechanism to the MaxAge sites, so the noise doubles when both settings are configured.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.93,
+        "rationale": "In `xorm_store.go`, the new MaxCount cleanup loop uses `r.log.Error` on the normal success path: after `fetchIDs` succeeds it logs `r.log.Error(\"Annotations to clean by count\", ..., \"err\", err)` where `err` will be `nil`, and after `deleteByIDs` it logs `r.log.Error(\"cleaned annotations by count\", ..., \"err\", y)` where `y` is `nil` on success. This will emit ERROR-level logs every batch (including full `ids` lists), causing log spam/false alerting. The same pattern also exists in the MaxAge and tag cleanup paths, but the finding\u2019s MaxCount claim is directly verified by the diff.",
+        "diff_context_hash": "a105138157d3009fa919319b62e6d297c72c1fd2"
+      }
+    },
+    {
+      "issue_text": "[BUG] Same Error-level-on-success-path logging defect in CleanOrphanedAnnotationTags: r.log.Error(\"Tags to clean\", ...) and r.log.Error(\"cleaned tags\", ...) fire after every successful batch with the full ID list and a nil err. Orphan-tag cleanup (which runs unconditionally, not gated on MaxAge/MaxCount settings) logs ERROR lines with thousands of IDs on every cycle on every Grafana instance, generating false alerts fleet-wide even on default installations.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.86,
+        "rationale": "In `xorm_store.go`, `CleanOrphanedAnnotationTags` now logs with `r.log.Error(...)` on the normal/success path in every batch: after `fetchIDs` it logs `\"Tags to clean\"` with `err` (often nil) and full `ids`, and after `deleteByIDs` it logs `\"cleaned tags\"` similarly. This will emit ERROR-level logs even when there is no error and can include large ID lists, causing noisy/false error reporting. (The claim about running unconditionally isn\u2019t verifiable from this diff, but the error-level-on-success logging is.)",
+        "diff_context_hash": "a105138157d3009fa919319b62e6d297c72c1fd2"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The cleanup loop ticker was changed from 10 minutes to 1 minute with no comment or configuration, a 10x frequency increase for all work driven by this loop, not just annotation cleanup. Operators get all periodic cleanup work (tmp files, and whatever else this loop drives) executed 10x more often, multiplying background DB load in a PR titled 'Database Performance Optimizations'; the `time.Minute * 1` spelling suggests a debugging leftover, and because the interval is hardcoded there is no way to tune it back without a code deploy.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.86,
+        "rationale": "The diff explicitly changes the cleanup service loop ticker from `time.NewTicker(time.Minute * 10)` to `time.NewTicker(time.Minute * 1)` in `pkg/services/cleanup/cleanup.go`, increasing the frequency of whatever work is executed on each tick by 10x. This is a concrete, diff-grounded behavioral/performance concern (hardcoded interval, no config/comment) but not a provable correctness defect from the diff alone.",
+        "diff_context_hash": "a105138157d3009fa919319b62e6d297c72c1fd2"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The SQLite inline-ID branch builds the IN-list with repeated fmt.Sprintf accumulation (values = fmt.Sprintf(\"%s, %d\", values, v)), which is O(n^2) in bytes copied. With the new supported batch size of 32767 (the size the new test explicitly exercises), each Sprintf re-copies the growing ~230KB string, costing on the order of gigabytes of memcpy per batch in the cleanup path of a performance-focused PR; strings.Builder or a preallocated []byte makes this linear.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.88,
+        "rationale": "In xorm_store.go deleteByIDs(), the SQLite branch for large batch sizes constructs the IN-list by repeatedly doing `values = fmt.Sprintf(\"%s, %d\", values, v)` in a loop. This re-allocates and copies the growing string each iteration, which is O(n^2) in total bytes copied. The diff also adds an integration test using `annotationCleanupJobBatchSize: 32767`, so this inefficient path is now explicitly exercised and could be costly, even though it doesn\u2019t break correctness.",
+        "diff_context_hash": "a105138157d3009fa919319b62e6d297c72c1fd2"
+      }
+    },
+    {
+      "issue_text": "[BUG] deleteByIDs special-cases only SQLite's 999-parameter limit; the else branch emits one '?' placeholder per ID, so a configured AnnotationCleanupJobBatchSize above the 65535 bind-parameter limit of PostgreSQL and MySQL produces a statement that fails on every batch. An operator who raises the batch size beyond 65535 on Postgres/MySQL gets a permanent 'too many parameters' driver error on every cleanup cycle (cleanup silently never completes, error returned from Run each tick) until someone correlates the cryptic driver message with the config value; the code handles the analogous SQLite limit explicitly but not the equivalent limit on the other two dialects.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.74,
+        "rationale": "In xorm_store.go, deleteByIDs builds a single DELETE ... WHERE id IN (...) statement with one \"?\" placeholder per ID for all non-SQLite DBs (placeholders := \"?\" + strings.Repeat(\",?\", len(ids)-1); args = asAny(ids)). The number of IDs comes directly from fetchIDs(), which uses r.cfg.AnnotationCleanupJobBatchSize as the SELECT LIMIT, with no upper bound except the config. The diff only special-cases SQLite when the batch size exceeds 999 parameters, but does not apply any similar cap/splitting for other dialects. Therefore, configuring a very large batch size can produce a statement with an excessive number of bind parameters and fail at runtime on DBs that enforce a max-parameter limit. This risk is introduced by the new IN-list/placeholder approach compared to the prior single-statement subquery deletes.",
+        "diff_context_hash": "a105138157d3009fa919319b62e6d297c72c1fd2"
+      }
+    },
+    {
+      "issue_text": "[BUG] Routine successful cleanup batches are logged at Error level (`r.log.Error(\"Annotations to clean by time\", \"count\", len(ids), \"ids\", ids, ...)`) including the full ID list and an always-nil `err` field, which is leftover debug logging from iterating on the deadlock fix, not intended production behavior. On a healthy system with a large backlog of expired annotations, every batch emits an Error-level log line containing up to AnnotationCleanupJobBatchSize raw IDs; combined with the ticker change in this same PR (cleanup now runs every minute), error-rate alerting and log-based paging fire continuously on normal operation, and log volume balloons. The `\"err\", err` field is always nil at this site (the nil case returned at line 531-533), so it misleads anyone triaging the error.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.88,
+        "rationale": "The diff adds multiple `r.log.Error(...)` calls in normal, non-error control flow inside `CleanAnnotations` and `CleanOrphanedAnnotationTags` (e.g. after `ids, err := r.fetchIDs(...)` and `if err != nil { return 0, err }`, it logs `\"err\", err` even though `err` is nil and logs the full `ids` slice). This will emit Error-level logs during successful cleanup batches and can include up to `AnnotationCleanupJobBatchSize` raw IDs per batch. In the same PR, `cleanup.go` changes the ticker from 10 minutes to 1 minute, increasing how often this runs. These are verifiable from the diff and constitute erroneous production behavior (false Error logs / excessive noisy logging).",
+        "diff_context_hash": "a105138157d3009fa919319b62e6d297c72c1fd2"
+      }
+    },
+    {
+      "issue_text": "[BUG] The MaxCount cleanup path logs its normal per-batch operation at Error level with the full ID list (`r.log.Error(\"Annotations to clean by count\", \"count\", len(ids), \"ids\", ids, \"cond\", cond, \"err\", err)`) and an always-nil `err`, same debug leftover as the MaxAge path. MaxCount trimming is the branch that runs continuously on busy instances (it deletes down to the configured max every cycle), so with the 1-minute ticker this path emits Error-level log lines with up to batch-size IDs every minute on every large org, flooding error dashboards and paging on healthy behavior.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.78,
+        "rationale": "In `xorm_store.go`, both the MaxAge and MaxCount cleanup loops unconditionally emit `r.log.Error(...)` per batch and include the full `ids` slice (e.g., `r.log.Error(\"Annotations to clean by count\", \"count\", len(ids), \"ids\", ids, \"cond\", cond, \"err\", err)`), even on the normal success path where `err` is typically nil (the code returns early if `fetchIDs` returns a non-nil error). This is diff-verifiable and can create noisy/incorrect Error-level logging. The claim about it running every minute is partially supported by `cleanup/cleanup.go` changing the ticker from 10 minutes to 1 minute, though the diff alone doesn\u2019t prove that ticker schedules annotation cleanup specifically.",
+        "diff_context_hash": "a105138157d3009fa919319b62e6d297c72c1fd2"
+      }
+    },
+    {
+      "issue_text": "[BUG] CleanOrphanedAnnotationTags logs its normal per-batch deletes at Error level with the full orphaned-tag ID list (`r.log.Error(\"Tags to clean\", ...)` and `r.log.Error(\"cleaned tags\", ...)`), the third instance of shipped debug logging. After bulk annotation deletions (e.g., the new high-volume cleanup path in this PR creates large tag orphans), the next cycle dumps every orphaned tag ID at Error level; on a database with a large orphan backlog this is a multi-megabyte error log line repeated every run, generating alert noise and log-storage cost for a non-error condition.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.87,
+        "rationale": "In `xorm_store.go`, `CleanOrphanedAnnotationTags` now logs per-batch cleanup using `r.log.Error(\"Tags to clean\", \"ids\", ids, ...)` and `r.log.Error(\"cleaned tags\", \"ids\", ids, ...)` regardless of whether `err` is nil. This will emit error-level logs for normal operation and includes the full ID slice, which can be extremely large after bulk deletions, causing noisy/massive error logs for a non-error condition.",
+        "diff_context_hash": "a105138157d3009fa919319b62e6d297c72c1fd2"
+      }
+    },
+    {
+      "issue_text": "[BUG] The cleanup service tick interval was silently changed from 10 minutes to 1 minute (`time.NewTicker(time.Minute * 1)`), a 10x increase in cleanup frequency with no config knob, no test, and no stated rationale in a PR titled 'Database Performance Optimizations'. This is an unflagged objective change hidden inside a performance PR: all cleanup work (tmp files, annotation cleanup via CleanAnnotations, other maintenance) now hits the database and filesystem 10x more often, directly increasing DB load \u2014 the opposite of the PR's stated intent \u2014 and operators cannot tune or revert it without a code deploy. If the 1-minute value was a local experiment from debugging the deadlock, it shipped without explicit acceptance.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.86,
+        "rationale": "The diff in pkg/services/cleanup/cleanup.go changes the cleanup loop ticker from 10 minutes to 1 minute (`time.NewTicker(time.Minute * 10)` -> `time.NewTicker(time.Minute * 1)`), which will run all cleanup tasks 10x more frequently. This is a concrete, diff-grounded behavioral change with operational/performance implications and no accompanying configurability or justification shown in the diff, but it is not inherently a correctness defect by itself.",
+        "diff_context_hash": "a105138157d3009fa919319b62e6d297c72c1fd2"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The SQLite >999-parameter fallback builds the IN-list with repeated `fmt.Sprintf(\"%s, %d\", values, v)` accumulation, which is O(n\u00b2) in string copies and is triggered for any batch size over 999 even though SQLite >= 3.32 supports up to 32766 bound parameters (as the new test's own name acknowledges). Anyone who raises AnnotationCleanupJobBatchSize on SQLite into the thousands pays quadratic string-building in the cleanup hot path \u2014 a self-inflicted slowdown inside a PR whose purpose is database performance \u2014 and the branch is broader than the parameter limit it exists to avoid, so the placeholder path is needlessly bypassed for batch sizes 1000\u201332766. The next change to this statement (e.g., adding a column or dialect) has to be made in two divergent SQL-building branches.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.86,
+        "rationale": "In `deleteByIDs`, the SQLite fallback triggers whenever `r.db.GetDBType() == migrator.SQLite && r.cfg.AnnotationCleanupJobBatchSize > 999`, and it builds the `IN (...)` list via repeated `fmt.Sprintf(\"%s, %d\", values, v)` concatenation in a loop. That is verifiably O(n\u00b2) string copying and will be taken for any SQLite batch size >999 (including 1000\u201332766), even though the added test explicitly targets a much higher variable limit (`annotationCleanupJobBatchSize: 32767`). This is a concrete performance/maintainability concern created by the diff, but not a correctness defect.",
+        "diff_context_hash": "a105138157d3009fa919319b62e6d297c72c1fd2"
+      }
+    },
+    {
+      "issue_text": "[BUG] The MaxAge cleanup batch logs successful work at Error level, including the full ID slice, the SQL condition fragment, and an err value that is provably nil at that point (err is checked and returned on the preceding lines). Every cleanup cycle emits r.log.Error('Annotations to clean by time', ...) with up to AnnotationCleanupJobBatchSize IDs per log line (the new test exercises batch sizes of 32767), firing false Error alerts against on-call dashboards and inflating log storage with per-ID dumps on a routine maintenance path; the 'err' field is always nil, so the log is misleading during any real incident triage.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "unjudged",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "unjudged",
+        "adjudicating_judge": null,
+        "confidence": null,
+        "rationale": null,
+        "diff_context_hash": "a105138157d3009fa919319b62e6d297c72c1fd2"
+      }
+    },
+    {
+      "issue_text": "[BUG] The MaxCount cleanup batch has the same leftover Error-level debug logging: log.Error('Annotations to clean by count', ...) and log.Error('cleaned annotations by count', ...) both fire on the success path with a nil err and the full ID list. Routine max-count deletion produces Error-severity log lines containing every deleted annotation ID and an always-nil err field on each batch, causing alert fatigue and unbounded log volume proportional to the number of annotations cleaned.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.93,
+        "rationale": "In pkg/services/annotations/annotationsimpl/xorm_store.go, the new MaxCount cleanup loop logs via r.log.Error on the normal success path: after fetchIDs (\"Annotations to clean by count\", including \"ids\", ids and \"err\", err) and after deleteByIDs (\"cleaned annotations by count\", also including full ids and \"err\", y). These calls occur regardless of whether err/y are nil, so routine successful cleanup will emit Error-severity logs and potentially large log payloads proportional to the batch size.",
+        "diff_context_hash": "a105138157d3009fa919319b62e6d297c72c1fd2"
+      }
+    },
+    {
+      "issue_text": "[BUG] CleanOrphanedAnnotationTags likewise logs 'Tags to clean' and 'cleaned tags' at Error level with the full orphaned-tag ID slice and an err field that is nil when the log statement executes. Orphaned-tag cleanup, which can run repeatedly until the table is drained, writes an Error-level line per batch with every tag ID enumerated, generating sustained false-positive error alerts and log growth on a background maintenance job.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.9,
+        "rationale": "In `CleanOrphanedAnnotationTags`, the new loop logs with `r.log.Error(...)` for normal control flow: after `ids, err := r.fetchIDs(...)`, it logs `\"Tags to clean\"` including the full `ids` slice and the `err` variable, which will typically be `nil` at that point; it then logs `\"cleaned tags\"` at Error level with `err` `y` that may also be `nil`. Because this runs in batches via `untilDoneOrCancelled` until drained, it can emit sustained Error-level lines per batch and dump all tag IDs, causing false-positive error signaling and excessive log volume.",
+        "diff_context_hash": "a105138157d3009fa919319b62e6d297c72c1fd2"
+      }
+    },
+    {
+      "issue_text": "[BUG] The new MaxAge batch loop logs routine per-batch progress (including a dump of every ID in the batch and a guaranteed-nil err) via r.log.Error instead of Debug/Info. Every production Grafana instance emits Error-level log lines on every cleanup batch (and each line can contain up to AnnotationCleanupJobBatchSize IDs, thousands of entries), polluting error logs and firing error-rate alerting for a normal, successful cleanup cycle.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": [
+        "The code uses Error log level for what appears to be debugging information. This will pollute error logs in production. Consider using Debug or Info level instead."
+      ],
+      "primary_judge_verdict": "matched",
+      "primary_judge": "gpt-5.2",
+      "primary_judge_confidence": 0.97,
+      "primary_judge_reasoning": "Yes. The candidate flags that routine, successful per-batch progress is being logged at Error level and recommends using Debug/Info instead, which is the same concern as the golden comment about polluting production error logs.",
+      "adjudication": {
+        "verdict": "matched",
+        "adjudicating_judge": null,
+        "confidence": null,
+        "rationale": null,
+        "diff_context_hash": "a105138157d3009fa919319b62e6d297c72c1fd2"
+      }
+    },
+    {
+      "issue_text": "[BUG] The new MaxCount batch loop likewise logs successful per-batch work with r.log.Error, including a nil err field and the full fetched ID list. Same as the MaxAge site: false Error-severity log spam and alert noise on every max-count cleanup run, with up-to-batch-size ID dumps per line.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.9,
+        "rationale": "In `CleanAnnotations`, both the MaxAge and MaxCount loops now call `r.log.Error(...)` for normal operation: they log fetched IDs (`\"ids\", ids`) and include an `\"err\"` field even when `err` is nil (e.g., `r.log.Error(\"Annotations to clean by count\", ..., \"err\", err)` and `r.log.Error(\"cleaned annotations by count\", ..., \"err\", y)`). This can produce error-severity log spam and large per-line ID dumps on every cleanup run, but it\u2019s a logging/operational concern rather than a functional correctness defect shown in the diff.",
+        "diff_context_hash": "a105138157d3009fa919319b62e6d297c72c1fd2"
+      }
+    },
+    {
+      "issue_text": "[BUG] CleanOrphanedAnnotationTags' rewritten loop also logs both the fetch and the delete of every batch at Error level, with a hard-coded nil err field. Orphaned-tag cleanup, which runs regularly for every instance with annotation tags, generates Error-severity log noise (plus full ID dumps) on each successful batch, degrading log-based error monitoring.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.9,
+        "rationale": "In xorm_store.go, CleanOrphanedAnnotationTags now logs at Error level for every batch regardless of success: it calls r.log.Error(\"Tags to clean\", ..., \"ids\", ids, ..., \"err\", err) immediately after fetchIDs (err is typically nil on success) and r.log.Error(\"cleaned tags\", ..., \"err\", y) after deleteByIDs (y typically nil). This would produce error-severity log noise and can dump full ID lists on successful cleanup batches. The finding\u2019s \u201chard-coded nil\u201d wording is slightly off (it\u2019s just passing the current err/y variables), but the core issue is directly shown in the diff.",
+        "diff_context_hash": "a105138157d3009fa919319b62e6d297c72c1fd2"
+      }
+    },
+    {
+      "issue_text": "[BUG] The cleanup service ticker was changed from 10 minutes to 1 minute with no accompanying config, feature flag, or rationale, in a PR whose stated goal is reducing database load. All background cleanup jobs driven by this service (tmp files, expired tokens/actions, old records) run 10x more frequently in every deployment, multiplying background DB and filesystem load \u2014 this looks like a debugging leftover matching the leftover r.log.Error calls in xorm_store.go, and no test in the diff covers the ticker change.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.78,
+        "rationale": "The diff clearly changes the cleanup service loop ticker from 10 minutes to 1 minute (`pkg/services/cleanup/cleanup.go`: `time.NewTicker(time.Minute * 10)` -> `time.NewTicker(time.Minute * 1)`), and the diff does not show any new configuration/flag to control this cadence or any tests/assertions covering this behavioral change. While this is a significant operational/performance-impacting change, the diff alone cannot prove it is a correctness defect (it may be intentional), and PR intent/rationale is not verifiable from the diff.",
+        "diff_context_hash": "a105138157d3009fa919319b62e6d297c72c1fd2"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] TestAnnotationCleanUp was renamed to TestIntegrationAnnotationCleanUp and given a testing.Short() skip, removing it from the default unit-test run at the same time the production cleanup logic was substantially rewritten (fetchIDs/deleteByIDs/untilDoneOrCancelled). A plain `go test ./pkg/services/annotations/...` (short mode, as in the default CI unit job) now executes zero assertions against the rewritten CleanAnnotations/CleanOrphanedAnnotationTags code paths; regressions in the new batching logic are only caught if the integration suite happens to run against the right database.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.67,
+        "rationale": "The diff explicitly renames `TestAnnotationCleanUp`/`TestOldAnnotationsAreDeletedFirst` to `TestIntegration...` and adds `if testing.Short() { t.Skip(...) }`, so running tests with `-short` will skip the only assertions exercising the rewritten cleanup paths (`CleanAnnotations`/`CleanOrphanedAnnotationTags` now use `fetchIDs`/`deleteByIDs`/`untilDoneOrCancelled`). The claim about default CI using short mode isn\u2019t verifiable from the diff, but the reduction of coverage in short runs is real and diff-grounded.",
+        "diff_context_hash": "a105138157d3009fa919319b62e6d297c72c1fd2"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] TestOldAnnotationsAreDeletedFirst was likewise renamed to TestIntegrationOldAnnotationsAreDeletedFirst with a testing.Short() skip, so the only test asserting delete ordering (oldest-first) no longer runs in the default suite that covered it before this diff. A regression in the ORDER BY id DESC / OFFSET semantics of the new fetch-and-delete split (e.g., deleting the newest kept annotations instead of the oldest excess ones) passes default CI and is only caught in integration runs.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.62,
+        "rationale": "The diff shows `TestOldAnnotationsAreDeletedFirst` was renamed to `TestIntegrationOldAnnotationsAreDeletedFirst` and now skips when `testing.Short()` is true (`if testing.Short() { t.Skip(...) }`). Previously it would always run. Given the cleanup implementation changed from a single DELETE-with-subquery to a fetch-IDs-then-delete approach (`fetchIDs` + `deleteByIDs` with `ORDER BY id DESC` / `LimitOffset` conditions), losing this ordering assertion in any `-short` (or otherwise \u201cshort mode\u201d) test runs is a concrete coverage reduction for nontrivial new logic. Whether default CI runs with `-short` isn\u2019t verifiable from the diff, so the risk framing depends on external setup, but the change to gating is real and specific.",
+        "diff_context_hash": "a105138157d3009fa919319b62e6d297c72c1fd2"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The rewritten test suite only exercises the happy path of the new untilDoneOrCancelled loop: every cleaner.Run call passes context.Background() and no test induces a fetchIDs or deleteByIDs error, so the loop's context-cancellation return (totalAffected, ctx.Err()) and its error-abort path are never executed. A regression in the new exit conditions \u2014 e.g., treating ctx.Err() as nil and looping forever on a cancelled job, or swallowing a per-batch error and continuing \u2014 would pass the entire test suite; cancellation is the exact scenario the deadlocking-production incident makes likely. Evidence of absence: cleanup_test.go is the only test file in this diff touching these symbols, and its four Run call sites all use context.Background().",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.86,
+        "rationale": "The diff introduces a new batched loop helper `untilDoneOrCancelled(ctx, batchWork)` in `xorm_store.go` that has two non-happy-path exits: returning `(totalAffected, ctx.Err())` on `<-ctx.Done()` and aborting on any per-batch error returned by `batchWork()` (e.g., from `fetchIDs`/`deleteByIDs`). In `cleanup_test.go`, all invocations of the cleanup service use `cleaner.Run(context.Background(), test.cfg)` (and other DB sessions also use `context.Background()`), and the tests only validate successful cleanup outcomes; they do not use a cancellable context or force `fetchIDs`/`deleteByIDs` to error. Therefore the cancellation and error-abort behavior of the new loop is not exercised by this rewritten test suite, which is a concrete, diff-grounded testing gap rather than a demonstrated functional bug.",
+        "diff_context_hash": "a105138157d3009fa919319b62e6d297c72c1fd2"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The SQLite string-interpolation branch of deleteByIDs builds the IN-list with repeated fmt.Sprintf(\"%s, %d\", values, v), re-copying the entire accumulated string on every iteration \u2014 O(n\u00b2) in batch size. With the new 32767-sized batches this performs ~32k Sprintf calls per batch rebuilding a ~200KB string each time (hundreds of MB of cumulative allocation churn per cleanup cycle) on exactly the resource-constrained SQLite instances this branch targets; strings.Join over a preallocated slice eliminates it.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.9,
+        "rationale": "In xorm_store.go, deleteByIDs() has a SQLite-specific path that builds an `IN (...)` list by repeatedly doing `values = fmt.Sprintf(\"%s, %d\", values, v)` inside a loop over `ids[1:]`. This re-creates and re-copies the accumulated string on every iteration, which is O(n\u00b2) work/allocation relative to batch size. The diff also adds a test case using `annotationCleanupJobBatchSize: 32767`, making this inefficiency concretely relevant. This is a real performance/scalability concern (not a functional correctness bug).",
+        "diff_context_hash": "a105138157d3009fa919319b62e6d297c72c1fd2"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The case named \"running the max count delete again should not remove any annotations\" no longer runs cleanup against state left by a previous cleanup pass: the old test shared one dataset across sequential cases (case 4 ran on case 3's post-cleanup state), while the rewritten suite creates fresh data per subtest, so this case now only verifies a single pass against data already exactly at MaxCount. The idempotency property the case name claims is no longer exercised; a regression that only manifests on a second cleanup run over already-cleaned state (e.g., the OFFSET-based MaxCount query drifting after deletions) would pass this suite.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.88,
+        "rationale": "In the rewritten `TestIntegrationAnnotationCleanUp`, each subtest now calls `createTestAnnotations(...)` and registers a per-subtest `t.Cleanup` that deletes `annotation`/`annotation_tag`, so cases no longer share DB state across runs. Therefore the case named \"running the max count delete again should not remove any annotations\" no longer executes a *second* cleanup pass over the already-cleaned state produced by the prior MaxCount cleanup case; it only checks a single run on freshly created data. This reduces coverage of the idempotency/second-pass behavior that the old sequential, shared-dataset test structure exercised.",
+        "diff_context_hash": "a105138157d3009fa919319b62e6d297c72c1fd2"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] In each subtest, t.Cleanup is registered only after createTestAnnotations and the initial count assertions succeed, whereas the old test registered cleanup at the parent level before any subtest ran; a require failure mid-creation (e.g., a partial InsertMulti batch) aborts the subtest before cleanup is registered. If creation of the 40003-annotation case fails partway, the leftover rows persist and every subsequent subtest fails with duplicate-ID insert errors (createTestAnnotations pins ID = i+1), masking the real root-cause failure \u2014 the old parent-level cleanup made this impossible.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.85,
+        "rationale": "In `TestIntegrationAnnotationCleanUp`, the per-subtest `t.Cleanup` is registered only after `createTestAnnotations` and the initial assertions. Since `createTestAnnotations` uses `require.NoError` (which aborts the subtest via `FailNow` on error), a failure during batched inserts would prevent cleanup registration, leaving rows in the shared `fakeSQL` DB (initialized once outside the subtests). Because `createTestAnnotations` now sets explicit IDs (`ID: int64(i+1)`), leftover rows can cause duplicate-key insert failures in later subtests, obscuring the original failure. The old version\u2019s parent-level cleanup avoided this scenario.",
+        "diff_context_hash": "a105138157d3009fa919319b62e6d297c72c1fd2"
+      }
+    },
+    {
+      "issue_text": "[BUG] The MaxAge cleanup path logs every successful batch through r.log.Error (\"Annotations to clean by time\" and \"cleaned annotations by time\"), including the full ids slice and an always-nil err, despite the error already being handled by the `if err != nil { return 0, err }` check above. In production, every cleanup cycle emits Error-severity log lines containing up to AnnotationCleanupJobBatchSize IDs each (the new test case exercises 32,767 IDs per line), even when cleanup succeeds \u2014 flooding error logs and paging alerting on a routine background job, and these debug leftovers ship the full ID dump at Error level every minute given the ticker change in cleanup.go.",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.93,
+        "rationale": "In xorm_store.go, the new MaxAge cleanup callback logs with r.log.Error on the success path: after `ids, err := r.fetchIDs(...)` it immediately returns on error, but then still does `r.log.Error(\"Annotations to clean by time\", ..., \"ids\", ids, ..., \"err\", err)` where `err` is nil, and similarly logs `\"cleaned annotations by time\"` after `deleteByIDs` even when `y` is nil. This emits Error-severity logs (including potentially large `ids` slices up to `AnnotationCleanupJobBatchSize`) during normal successful cleanup. The diff also changes the cleanup ticker in cleanup.go from 10 minutes to 1 minute, increasing the frequency of these Error logs, making log flooding/paging a concrete, diff-grounded operational defect.",
+        "diff_context_hash": "a105138157d3009fa919319b62e6d297c72c1fd2"
+      }
+    },
+    {
+      "issue_text": "[BUG] The MaxCount cleanup path logs every successful batch through r.log.Error (\"Annotations to clean by count\" and \"cleaned annotations by count\") with the full ids slice, on the success path after the error check has already returned. Same as the MaxAge path: routine, successful count-based cleanup produces Error-severity log spam with potentially tens of thousands of IDs per line, triggering error-rate alerting and obscuring genuine errors from this service.",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.93,
+        "rationale": "In xorm_store.go, both the MaxAge and MaxCount cleanup paths call r.log.Error on the normal success path (after checking fetchIDs error), e.g. `r.log.Error(\"Annotations to clean by count\", \"ids\", ids, ... , \"err\", err)` where `err` is nil, and again after deletion. This will emit Error-severity logs for routine successful cleanup and includes the full `ids` slice, which can be very large, causing log/alert spam and obscuring real errors. This behavior is directly introduced by the diff.",
+        "diff_context_hash": "a105138157d3009fa919319b62e6d297c72c1fd2"
+      }
+    },
+    {
+      "issue_text": "[BUG] CleanOrphanedAnnotationTags logs every successful batch through r.log.Error (\"Tags to clean\" and \"cleaned tags\") with the full ids slice, on the success path after the error check has already returned. Every orphaned-tag cleanup cycle logs at Error severity even when it succeeds, polluting error metrics/logs; combined with the 1-minute ticker this runs 10x more often than before the change.",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.9,
+        "rationale": "In xorm_store.go, CleanOrphanedAnnotationTags unconditionally calls r.log.Error(\"Tags to clean\", ...) after fetchIDs succeeds (err == nil), and again r.log.Error(\"cleaned tags\", ...) after deleteByIDs, so successful batches are logged at Error severity. Both logs include the full \"ids\" slice, which can be extremely large/noisy. Separately, cleanup.go changes the cleanup ticker from 10 minutes to 1 minute, increasing how often such error-level logs could occur (though whether it drives this exact cleanup isn\u2019t shown here). The unconditional Error-level logging on success is directly verifiable in the diff.",
+        "diff_context_hash": "a105138157d3009fa919319b62e6d297c72c1fd2"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The cleanup service ticker interval is reduced from 10 minutes to 1 minute, a 10x increase in execution frequency for every cleanup job served by this loop, not just the annotation cleanup this PR retunes. Operators get all cleanup jobs (dashboard version cleanup, expired-token/login-attempt cleanup, etc.) running 10x more often against the database; even no-op cycles pay their query cost every minute. If the intent was only to smooth annotation-deletion batches, that is already bounded by AnnotationCleanupJobBatchSize, so the global frequency change needs justification or a revert.",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.87,
+        "rationale": "The diff explicitly changes the cleanup loop ticker in pkg/services/cleanup/cleanup.go from 10 minutes to 1 minute (`time.NewTicker(time.Minute * 10)` -> `time.NewTicker(time.Minute * 1)`), which increases the run frequency of everything executed in that loop, not just annotation cleanup. The finding\u2019s concern about broader operational/database impact and needing justification/revert is therefore diff-grounded, but it\u2019s not a strictly verifiable correctness defect by itself.",
+        "diff_context_hash": "a105138157d3009fa919319b62e6d297c72c1fd2"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] deleteByIDs only interpolates IDs into the statement for SQLite; on MySQL/Postgres the placeholder path builds one ? per ID, so a batch larger than the server's per-statement placeholder limit (65535 on both) makes every cleanup batch fail with 'prepared statement contains too many placeholders'. An operator who raises AnnotationCleanupJobBatchSize above 65535 on MySQL or Postgres (the knob is exposed precisely to tune around driver limits, as the new SQLite test demonstrates) turns the annotation cleanup job into a permanent per-cycle error instead of a bounded delete; the size cap is only enforced for SQLite.",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.78,
+        "rationale": "In xorm_store.go, deleteByIDs() builds a DELETE ... WHERE id IN (?, ?, ...) with one placeholder per ID for non-SQLite backends (placeholders := \"?\" + strings.Repeat(\",?\", len(ids)-1)). The number of IDs comes directly from fetchIDs() which is limited by r.cfg.AnnotationCleanupJobBatchSize. There is no cap/guard for MySQL/Postgres if AnnotationCleanupJobBatchSize is set very large, so a too-large batch can generate a statement with an excessive number of placeholders and fail every cycle. Only SQLite has special handling (parameter limit 999) and only when batch size exceeds that, so the issue is exposed by this diff for other DBs.",
+        "diff_context_hash": "a105138157d3009fa919319b62e6d297c72c1fd2"
+      }
+    },
+    {
+      "issue_text": "[BUG] The MaxAge cleanup batch logs its routine progress ('Annotations to clean by time', 'cleaned annotations by time') at Error level, and the first log emits an err field that is always nil at that point. Every successful cleanup cycle is reported as an ERROR in Grafana's log stream, so log-based error alerting/dashboards fire on normal operation and real cleanup failures become indistinguishable from noise; additionally the log line embeds the full ids slice (up to AnnotationCleanupJobBatchSize, e.g. 32767 IDs) per batch, producing enormous log lines whenever a large backlog is purged. With the companion change lowering the cleanup ticker to 1 minute, this error spam recurs continuously.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.88,
+        "rationale": "In xorm_store.go the new MaxAge cleanup path logs routine batch progress with r.log.Error(\"Annotations to clean by time\", ...) and r.log.Error(\"cleaned annotations by time\", ...) even on the success path. The first log includes an \"err\" field that is necessarily nil because fetchIDs errors are returned before the log. Both logs also include the full \"ids\" slice, which can be extremely large (batch size set as high as 32767 in the added integration test), producing huge error-level log lines during normal operation. Additionally, cleanup.go reduces the ticker from 10 minutes to 1 minute, increasing the frequency of this error-level spam.",
+        "diff_context_hash": "a105138157d3009fa919319b62e6d297c72c1fd2"
+      }
+    },
+    {
+      "issue_text": "[BUG] The MaxCount cleanup batch logs its routine progress ('Annotations to clean by count', 'cleaned annotations by count') at Error level, with the first log emitting an err field that is always nil at that point. Successful count-based trimming is surfaced as ERROR-level log output every batch, polluting error telemetry and tripping log-error alerting during normal operation; the full ids slice (up to batch size) is also serialized into each log line when a large backlog is purged.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.88,
+        "rationale": "In xorm_store.go, the new MaxCount cleanup path logs routine, non-error progress using `r.log.Error(...)` both before and after deletion (`\"Annotations to clean by count\"` and `\"cleaned annotations by count\"`). In the first log, the `err` field is logged even though `err` is necessarily nil at that point (it would have returned on error). Both logs also serialize the full `ids` slice (`\"ids\", ids`), potentially very large. This introduces ERROR-level log spam during normal operation and can trigger error-alerting despite successful cleanup.",
+        "diff_context_hash": "a105138157d3009fa919319b62e6d297c72c1fd2"
+      }
+    },
+    {
+      "issue_text": "[BUG] CleanOrphanedAnnotationTags logs its routine progress ('Tags to clean', 'cleaned tags') at Error level, with the first log emitting an err field that is always nil at that point. Normal orphaned-tag cleanup is reported as errors on every batch; any log-based error monitoring treats the healthy job as failing, and the full ids slice (up to batch size) is written into each log line, inflating log volume during large cleanups.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.86,
+        "rationale": "In xorm_store.go, CleanOrphanedAnnotationTags now logs routine batch progress with r.log.Error(\"Tags to clean\"...) and r.log.Error(\"cleaned tags\"...). These lines run on the normal path (after `if err != nil { return 0, err }`), so the logged `\"err\", err` is always nil there, yet it is still emitted at Error level. Additionally, the log includes `\"ids\", ids`, which can dump up to the batch size worth of IDs each iteration, inflating log volume during large cleanups. This is a concrete behavior introduced by the diff that can cause false error alerts and excessive logging.",
+        "diff_context_hash": "a105138157d3009fa919319b62e6d297c72c1fd2"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] deleteByIDs guards only SQLite's 999-parameter limit; for PostgreSQL (65535 placeholders) and MySQL (65535 placeholders in prepared statements) a configured AnnotationCleanupJobBatchSize above the driver cap makes every batch statement fail at the driver level. An operator who raises AnnotationCleanupJobBatchSize above the non-SQLite placeholder cap gets a cleanup job that errors on every batch every cycle \u2014 annotations are never cleaned and the error recurs indefinitely, with no guard or validation rejecting the configuration up front.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.67,
+        "rationale": "In the diff, `deleteByIDs` builds a `DELETE ... WHERE id IN (?, ?, ...)` statement with one placeholder per ID for all non-SQLite DBs (only SQLite has a special path when batch size > 999). Since `ids` length is driven by `AnnotationCleanupJobBatchSize` (`fetchIDs` uses a dialect `LIMIT` with that batch size), a very large configured batch size will produce a statement with a very large number of placeholders and arguments, with no validation/guard for non-SQLite. The finding\u2019s specific numeric caps for Postgres/MySQL aren\u2019t shown in the diff, but the general issue (unbounded placeholder count outside SQLite) is real and created by this change.",
+        "diff_context_hash": "a105138157d3009fa919319b62e6d297c72c1fd2"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The cleanup ticker is lowered from 10 minutes to 1 minute, which runs every cleanUpJob in the cleanup service (not just the annotation cleaner) ten times more frequently. All periodic cleanup jobs (tmp-file removal, expired-entity sweeps, annotation cleanup now looping batch-by-batch with no backoff) hit the database ten times as often; combined with the new per-batch fetch-then-delete pattern this turns the cleanup service into a near-continuous background DELETE workload, and amplifies the mis-leveled Error logging above to once per minute. If the 10x frequency was intended only for the annotation deadlock workaround, it should be scoped to that job rather than applied globally.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.68,
+        "rationale": "The diff explicitly changes the global cleanup service ticker from `time.NewTicker(time.Minute * 10)` to `time.NewTicker(time.Minute * 1)` in `pkg/services/cleanup/cleanup.go`, so the cleanup loop will fire 10x more often. This is a scope/performance/operational concern because it affects the entire cleanup service cadence, not just annotation cleanup. The rest of the finding (DB load amplification and log volume) is a plausible consequence given the new batch-looping cleanup patterns in `xorm_store.go`, but the key, verifiable issue is that the frequency change is global and not scoped to annotations.",
+        "diff_context_hash": "a105138157d3009fa919319b62e6d297c72c1fd2"
+      }
+    }
+  ],
+  "diff_context_hash": "a105138157d3009fa919319b62e6d297c72c1fd2",
+  "primary_judge": "gpt-5.2",
+  "adjudicating_judge": "gpt-5.2",
+  "url": "https://github.com/grafana/grafana/pull/80329",
+  "framework": "metareview-realistic",
+  "model": "glm-5.3-flash-background",
+  "effort": "medium",
+  "judge": "gpt-5.2",
+  "wall_s": 669.7010428905487,
+  "execution_mode": "api",
+  "run_batch": "20260910-mrv0120-manifold"
+}
