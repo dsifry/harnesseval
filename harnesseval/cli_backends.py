@@ -109,7 +109,11 @@ async def _claude_cli(model_alias: str, effort: str, prompt: str, system: str | 
     args += [prompt]
     proc = await asyncio.to_thread(subprocess.run, args, capture_output=True, text=True, timeout=timeout)
     if proc.returncode != 0:
-        raise RuntimeError(f"claude -p failed: {proc.stderr.strip()[:300]}")
+        # claude CLI prints rate-limit/cap messages on STDOUT, not stderr — capture both
+        # or the error reads "claude -p failed: " with an empty tail (2026-09-11 blind spot)
+        raise RuntimeError(
+            f"claude -p failed: rc={proc.returncode} "
+            f"stderr={proc.stderr.strip()[:200]!r} stdout_tail={proc.stdout.strip()[-200:]!r}")
     d = json.loads(proc.stdout)
     u = d.get("usage", {})
     text = d.get("result", "")
