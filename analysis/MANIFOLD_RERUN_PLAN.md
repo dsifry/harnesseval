@@ -32,9 +32,12 @@ Scope (models × efforts as already built; triad = vanilla + CE-realistic + mrv-
 
 ## Phase 3 — Uniform dual-judge instrumentation (no regeneration)
 For unchanged harnesses (vanilla-engineered, compound-realistic/CE) — keep generation, re-judge:
-- [ ] Calibrated judge (in-harness, adjudicate.py) — already in summaries; verify coverage
-- [ ] New improved judge (rj3: gpt-5.2 k=3 medium + v3.1 clustering) — run readjudicate3
-      over every cell lacking it, so ALL cells carry both instruments
+- [ ] Calibrated judge (in-harness, adjudicate.py) — **re-run over the saved findings of ALL
+      reused cells** (not just regenerated ones), so the calibrated layer is also uniform:
+      same judge code at the same time for every cell in the manifold (regenerated cells get
+      it at generation; reused cells via the judging-only pass over their saved findings)
+- [ ] New improved judge (rj3: gpt-5.2 k=1 + v3.1 clustering) — run readjudicate3
+      over every cell, so ALL cells carry both instruments
 - [ ] Anchor-corroborated matcher (auxiliary) on official misses, both conventions reported
       (total + policy-in-scope recall)
 
