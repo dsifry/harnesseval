@@ -365,7 +365,11 @@ def main():
                 res["run_batch"] = batch_id
                 # register
                 register(phase="B", model=model, framework=fw, effort=effort, run_n=0,
-                         status="pass" if res.get("tp") is not None else "fail",
+                         # zero-token "pass" is laundering: a swallowed adapter failure returns
+                         # a clean-looking run (tp=0) with no tokens — the #159 poison class.
+                         status=("pass" if (res.get("tp") is not None
+                                            and (res.get("tokens_in",0) or 0)+(res.get("tokens_out",0) or 0) > 0)
+                                 else "fail"),
                          metrics={"tp": res.get("tp",0), "fp": res.get("fp",0), "fn": res.get("fn",0),
                                   "precision": res.get("precision",0), "recall": res.get("recall",0),
                                   "adjudicated_precision": res.get("adjudicated_precision",0),
