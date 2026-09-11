@@ -304,8 +304,8 @@ def last_pass_minutes():
         if pend:
             name = name_for(*pend[1])
             _lt = time.localtime(NOW)
-            d = (_lt.tm_hour * 60 + _lt.tm_min) - pend[0]  # minutes-of-day elapsed
-            if d < 0: d += 1440
+            now_s = _lt.tm_hour * 3600 + _lt.tm_min * 60 + _lt.tm_sec
+            d = ((now_s - pend[0] * 60) % 86400) / 60.0  # elapsed in float minutes (ticks every refresh)
             cand = (d, True, pend[2], pend[0])
             # the most RECENT pass wins: a live in-flight pass must not be hidden by a
             # stale completed entry from a dead chain's log (sonnet-high 02:00 bug)
