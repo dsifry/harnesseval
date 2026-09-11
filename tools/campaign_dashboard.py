@@ -189,5 +189,45 @@ rc = "  ".join(sorted(set(runners))) or "none"
 out.append(f"  {BO}runners:{X} {clip(rc, VW - 12)}")
 out.append(f"  {BO}▓{X} = actively refilling")
 
+# ── recent events panel: merged, timestamped tails of the campaign logs ──
+import re as _re2
+SOURCES = [  # (file, tag, color)
+    ("logs/campaign_final_refill.log", "refill", Y),
+    ("logs/campaign_glm_final.log",    "glm",    C),
+    ("logs/campaign_ce_codex.log",     "ce-codex", G),
+    ("logs/campaign_ce_claude.log",    "ce-claude", G),
+    ("logs/campaign_stream2.log",      "s2",     G),
+    ("logs/campaign_phase2.log",       "phase2", D),
+]
+events = []
+for path, tag, col in SOURCES:
+    try:
+        lines = open(path, errors="replace").read().splitlines()
+        day = time.strftime("%m-%d", time.localtime(os.path.getmtime(path)))
+    except OSError:
+        continue
+    # walk BACKWARD from the newest line (its date = the file's mtime); each time an
+    # older line has a LATER hh:mm than the line after it, we crossed midnight going back
+    prev_ts = None
+    for ln in reversed(lines[-400:]):
+        m = _re2.match(r"^(\d{2}:\d{2})\s+(.*)", ln)
+        if not m:
+            continue
+        ts = m.group(1)
+        if prev_ts and ts > prev_ts:  # backward walk, but hh:mm jumped forward -> midnight crossed
+            day = time.strftime("%m-%d", time.localtime(os.path.getmtime(path) - 86400))
+        prev_ts = ts
+        events.append((f"{day} {ts}", ts, tag, col, m.group(2)))
+events.sort(key=lambda e: e[0])
+BAD = ("fail", "err ", "error", "poison", "timeout")
+GOOD = ("clean", "done", "complete", "stable", "refill pass done")
+LOGN = max(4, min(14, 46 - (len(out) + 4)))
+out.append(f"{D}├{'─' * (PL)}┴{'─' * PR}┤{X}")
+out.append(f"{D}│{X}{BO}{HD}{pad(' RECENT EVENTS — newest last', VW - 2)}{X}{D}│{X}")
+for _, ts, tag, col, msg in events[-LOGN:]:
+    lc = R if any(b in msg.lower() for b in BAD) else (G if any(g in msg.lower() for g in GOOD) else HD)
+    out.append(f"{D}│{X}{pad(f'{D}{ts}{X} {col}[{tag}]{X} {lc}{msg[:VW - 16]}{X}', VW - 2)}{X}{D}│{X}")
+out.append(f"{D}└{'─' * (VW - 2)}┘{X}")
+
 for line in out:
     print(line)
