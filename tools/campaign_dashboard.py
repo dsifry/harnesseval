@@ -235,7 +235,7 @@ def last_pass_minutes():
     def emit(start_min, key, done_min, n_target):
         d = done_min - start_min
         if d < 0: d += 1440  # midnight wrap
-        out[name_for(*key)] = (d, False, n_target)
+        out[name_for(*key)] = (d, False, n_target, start_min)
         if n_target:
             completed[name_for(*key)] = (d, n_target)
     for path, kind in [("logs/campaign_final_refill.log", "sweep"),
@@ -298,11 +298,14 @@ def last_pass_minutes():
             pass
         if pend:
             name = name_for(*pend[1])
-            if name not in out:  # completed passes take precedence
-                _lt = time.localtime(NOW)
-                d = (_lt.tm_hour * 60 + _lt.tm_min) - pend[0]  # minutes-of-day elapsed
-                if d < 0: d += 1440
-                out[name] = (d, True, pend[2])
+            _lt = time.localtime(NOW)
+            d = (_lt.tm_hour * 60 + _lt.tm_min) - pend[0]  # minutes-of-day elapsed
+            if d < 0: d += 1440
+            cand = (d, True, pend[2], pend[0])
+            # the most RECENT pass wins: a live in-flight pass must not be hidden by a
+            # stale completed entry from a dead chain's log (sonnet-high 02:00 bug)
+            if name not in out or cand[3] > out[name][3]:
+                out[name] = cand
     return out, completed
 last_pass, last_completed = last_pass_minutes()
 
