@@ -192,14 +192,25 @@ async def call_model_json(model: str, system: str, user: str, *, effort: str = "
     calls are byte-identical, so frozen instruments (official matcher, rj3 adjudicator) are
     unaffected; only would-be crashes become measurements.
     """
-    try:
-        text, tin, tout, per_model = await call_model(model, system, user, effort=effort, max_tokens=max_tokens, execution_mode=execution_mode)
-    except Exception as e:
-        if "max_tokens or model output limit" in str(e):
-            text, tin, tout, per_model = await call_model(model, system, user, effort=effort,
-                                                          max_tokens=max(8192, max_tokens * 4),
-                                                          execution_mode=execution_mode)
-        else:
+    import asyncio as _aio
+    text = tin = tout = per_model = None
+    for _attempt in range(3):
+        try:
+            text, tin, tout, per_model = await call_model(model, system, user, effort=effort, max_tokens=max_tokens, execution_mode=execution_mode)
+            break
+        except Exception as e:
+            es = str(e)
+            if "max_tokens or model output limit" in es:
+                text, tin, tout, per_model = await call_model(model, system, user, effort=effort,
+                                                              max_tokens=max(8192, max_tokens * 4),
+                                                              execution_mode=execution_mode)
+                break
+            if ("429" in es or "CONCURRENT_REQUEST_LIMIT" in es or "rate limit" in es.lower()) and _attempt < 2:
+                # concurrency-cap / rate-limit: back off and retry (the serving recovers
+                # between windows; the 429 class was unreachable before — it propagated
+                # and poisoned whole cells during the vision refills)
+                await _aio.sleep(min(20 * (_attempt + 1), 60))
+                continue
             raise
     def _try_parse(t):
         try:
