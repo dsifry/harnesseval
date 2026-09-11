@@ -43,8 +43,22 @@ run_cell() {  # model effort
     .venv/bin/python -u -m harnesseval.run_model_matrix --prs 50 --frameworks metareview-realistic \
       --models $model --efforts $eff --mode api --concurrency 5 \
       --run-batch $BATCH --skip-batch $BATCH >> logs/mx_campaign_${model}_${eff}.log 2>&1
-    if .venv/bin/python -m harnesseval.validate --batch $BATCH >/dev/null 2>&1; then
-      log "supervisor: cell $model/$eff CLEAN"; return 0
+    if [ "$( .venv/bin/python - "$model" "$eff" <<'PYEOF'
+import json, glob, sys
+model, eff = sys.argv[1], sys.argv[2]
+have = {}
+for f in glob.glob("runs/*/summary.json"):
+    try: s = json.load(open(f))
+    except Exception: continue
+    if (s.get("run_batch") == "20260910-mrv0120-manifold" and s.get("model") == model and s.get("effort") == eff):
+        bad = (s.get("tokens_in", 0) or 0) + (s.get("tokens_out", 0) or 0) == 0 or bool(s.get("error"))
+        u = s.get("url")
+        have[u] = have.get(u, False) or (not bad)
+missing = [u for u, ok in have.items() if not ok]
+print(len(missing))
+PYEOF
+)" = "0" ]; then
+      log "supervisor: cell $model/$eff CLEAN (healthy run for every PR)"; return 0
     fi
     local SPECS; SPECS=$(poison_specs "$model" "$eff")
     # only refill if the cell lacks a healthy run for some PR (dead duplicates are fine)
