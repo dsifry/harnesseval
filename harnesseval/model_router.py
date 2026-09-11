@@ -168,8 +168,18 @@ async def _call_openai_compat(model, system, user, effort, max_tokens, temperatu
     # once — empty content means 0 findings downstream. Native OpenAI doesn't hit this
     # (separately-budgeted reasoning), so retry only for Lunaroute.
     if is_lunaroute and not text.strip():
-        resp = await asyncio.to_thread(client.chat.completions.create, **call_kwargs)
-        text = resp.choices[0].message.content or ""
+        # Empty content at the 16384 floor is the SILENT twin of the output-cap 400: at
+        # medium/high effort the hidden reasoning can exceed the floor, finish_reason=length
+        # fires mid-thinking, and no visible content is emitted. Retrying at the same cap
+        # reproduces it (observed: vision-medium cells consuming 723k tokens over 74 min
+        # with zero findings). Retry with a DOUBLED cap, up to two raises — same contract
+        # as the output-cap ladder: transport headroom only, the prompt is untouched.
+        for _raise in range(2):
+            call_kwargs["max_completion_tokens"] = max(call_kwargs["max_completion_tokens"], 16384) * (2 ** (_raise + 1))
+            resp = await asyncio.to_thread(client.chat.completions.create, **call_kwargs)
+            text = resp.choices[0].message.content or ""
+            if text.strip():
+                break
     per_model = from_openai_api(resp, model)
     gt = grand_total(per_model)
     return text, gt["total_tokens"] - sum(u.get("output_tokens", 0) for u in per_model.values()), \
