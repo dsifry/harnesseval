@@ -233,9 +233,15 @@ async def call_model_json(model: str, system: str, user: str, *, effort: str = "
             try:
                 text2, tin2, tout2, per_model2 = await call_model(model, system, user, effort=effort, max_tokens=max_tokens, execution_mode=execution_mode)
             except Exception as e2:
-                timeoutish = "timeout" in type(e2).__name__.lower() or "timed out" in str(e2).lower()
-                if not (timeoutish and attempt < 3):
-                    break  # non-timeout error, or retries exhausted — the poison guard catches it
+                # retryable-transient: timeouts AND 503-class gateway unavailability
+                # (UPSTREAM_ERROR / "backend unavailable") — both are provider-side and
+                # both were poisoning cells during flap windows (harnesseval, 2026-09-10)
+                es = (type(e2).__name__ + " " + str(e2)).lower()
+                transient = ("timeout" in es or "timed out" in es or "503" in es
+                             or "upstream" in es or "backend unavailable" in es
+                             or "overloaded" in es)
+                if not (transient and attempt < 3):
+                    break  # permanent error, or retries exhausted — the poison guard catches it
                 await _aio.sleep(min(5 * (attempt - 1), 15))
                 continue
             tin += tin2; tout += tout2
