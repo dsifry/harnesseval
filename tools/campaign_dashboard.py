@@ -44,7 +44,7 @@ try:
             cmd = open(f"/proc/{pid}/cmdline").read().replace("\0", " ")
         except Exception:
             cmd = subprocess.run(["ps", "-p", pid, "-o", "command="], capture_output=True, text=True).stdout
-        m = re.search(r"frameworks (\S+) models (\S+) efforts (\S+)", cmd)
+        m = re.search(r"(?:--)?frameworks (\S+) (?:--)?models (\S+) (?:--)?efforts (\S+)", cmd)
         if m:
             runners.append(f"{m.group(2)} {m.group(3)}")
             active_keys.add((m.group(1), m.group(2), m.group(3)))
