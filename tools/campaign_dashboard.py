@@ -146,9 +146,11 @@ def panel(row, w, active):
     return [l1, l2]
 
 def is_active(row):
+    # exact match on all three: framework, model, effort — a vision runner must not
+    # light the flash cell, and a sol runner must not light both mrv and CE sol
     toks = row[0].split()
-    eff = toks[-1]
-    return any(k[1] and eff == k[2] and (k[1].split("-")[0] in row[0] or m_short.get(k[1], "") in row[0]) for k in active_keys)
+    return any(fw_short.get(k[0]) == toks[0] and m_short.get(k[1]) == toks[1] and k[2] == toks[2]
+               for k in active_keys)
 
 half = (len(rows) + 1) // 2
 left, right = rows[:half], rows[half:]
