@@ -473,9 +473,11 @@ try:
 except OSError:
     pass
 _intervals = _kagg.pop("__intervals__", {})
-BUDGET_PER_KEY = 12  # flat-fee plan concurrency cap per key
+# budgets must match the chains' HARNESS_KEY_BUDGETS export: bench 12, interactive 6
+# (the interactive key reserves a lane for interactive use)
+BUDGETS = [12, 6]
 
-def _conc_stats(ivs, window_s=3600.0):
+def _conc_stats(ivs, window_s=3600.0, budget=12):
     """(now_inflight, peak, avg, util%) over the trailing window from busy intervals."""
     now = time.time()
     now_n = sum(1 for s0, s1 in ivs if s0 <= now < s1)
@@ -490,24 +492,25 @@ def _conc_stats(ivs, window_s=3600.0):
         cur = max(0, cur + dv); peak = max(peak, cur)
     busy += cur * (now - last_t)
     avg = busy / window_s
-    return now_n, peak, avg, 100.0 * avg / BUDGET_PER_KEY  # true share of the key's budget
+    return now_n, peak, avg, 100.0 * avg / budget  # true share of this key's budget
 if _kagg:
     out.append(f"{D}├{'─' * (VW - 2)}┤{X}")
     out.append(f"{D}│{X}{BO}{HD}{pad(' KEY POOL — 24h utilization (key0 = bench file, key1 = interactive file)', VW - 2)}{X}{D}│{X}")
     _tot_n = 0; _tot_util = 0.0
     _merged = [iv for _k in sorted(_kagg) for iv in _intervals.get(_k, [])]
-    _pn, _ppeak, _pavg, _putil = _conc_stats(_merged)
+    _pn, _ppeak, _pavg, _putil = _conc_stats(_merged, budget=sum(BUDGETS))
     for _k in sorted(_kagg):
         _a = _kagg[_k]
         _ms = ", ".join(f"{_m}×{_c}" for _m, _c in sorted(_a["models"].items()))
-        _now, _peak, _avg, _util = _conc_stats(_intervals.get(_k, []))
+        _b = BUDGETS[_k] if _k < len(BUDGETS) else 12
+        _now, _peak, _avg, _util = _conc_stats(_intervals.get(_k, []), budget=_b)
         _tot_n += _now; _tot_util += _util
-        _row = (f"key{_k}: {_a['ok']}ok/{_a['fail']}fail  now {_now}/{BUDGET_PER_KEY}  peak {_peak}  "
+        _row = (f"key{_k}: {_a['ok']}ok/{_a['fail']}fail  now {_now}/{_b}  peak {_peak}  "
                 f"avg {_avg:.1f} ({_util:.0f}% of budget)  in {_a['in']:,} (cached {_a['cached']:,})  out {_a['out']:,}")
         out.append(f"{D}│{X}{pad(_row, VW - 2)}{X}{D}│{X}")
         _mr = ", ".join(f"{_m}×{_c}" for _m, _c in sorted(_a["models"].items()))
         out.append(f"{D}│{X}{pad(f'      models: {_mr}', VW - 2)}{X}{D}│{X}")
-    out.append(f"{D}│{X}{pad(f'POOL: {_tot_n} in flight now (budget {BUDGET_PER_KEY * 2}) · peak {_ppeak} · avg {_pavg:.1f} · utilization {_putil:.0f}% — headroom {100 - _putil:.0f}%', VW - 2)}{X}{D}│{X}")
+    out.append(f"{D}│{X}{pad(f'POOL: {_tot_n} in flight now (budget {sum(BUDGETS)}) · peak {_ppeak} · avg {_pavg:.1f} · utilization {_putil:.0f}% — headroom {100 - _putil:.0f}%', VW - 2)}{X}{D}│{X}")
     out.append(f"{D}└{'─' * (VW - 2)}┘{X}")
 
 # btop-style panel draw: address absolute rows, clear each line to EOL, clear below.
