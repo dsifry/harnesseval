@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import subprocess
 import time
 from pathlib import Path
@@ -91,6 +92,19 @@ def is_transient_claude_error(returncode: int, stdout: str, stderr: str) -> bool
         return False
 
 
+def _oauth_env() -> dict:
+    """Environment for OAuth CLI calls, with API-key vars explicitly UNSET.
+
+    The claude CLI prefers ANTHROPIC_API_KEY over the OAuth login when the variable is
+    present (2026-09-11 smoke test: garbage key -> the call hangs in retry; unset ->
+    clean 4.7s firstParty OAuth). Inheriting the parent env silently made billing depend
+    on whatever the launching shell exported. OAuth CLI use is now unconditional.
+    """
+    env = {k: v for k, v in os.environ.items()
+           if not k.startswith(("ANTHROPIC_", "OPENAI_"))}
+    return env
+
+
 async def _claude_cli(model_alias: str, effort: str, prompt: str, system: str | None = None,
                      max_turns: int = 1, timeout: int = 900) -> tuple[str, dict, str]:
     """Run a review via `claude -p` OAuth. Returns (text, usage_dict, resolved_model).
@@ -107,7 +121,8 @@ async def _claude_cli(model_alias: str, effort: str, prompt: str, system: str | 
             "--output-format", "json", "--max-turns", str(max_turns)]
     args += ["--append-system-prompt", system or "You are an expert code reviewer."]
     args += [prompt]
-    proc = await asyncio.to_thread(subprocess.run, args, capture_output=True, text=True, timeout=timeout)
+    proc = await asyncio.to_thread(subprocess.run, args, capture_output=True, text=True, timeout=timeout,
+                                   env=_oauth_env())
     if proc.returncode != 0:
         # claude CLI prints rate-limit/cap messages on STDOUT, not stderr — capture both
         # or the error reads "claude -p failed: " with an empty tail (2026-09-11 blind spot)
@@ -135,7 +150,7 @@ async def _codex_cli(model_slug: str, effort: str, prompt: str, system: str | No
     args += [full]
     # IMPORTANT: codex exec reads from stdin if no prompt arg -> close stdin (pass input=None via DEVNULL)
     proc = await asyncio.to_thread(subprocess.run, args, capture_output=True, text=True,
-                                   timeout=timeout, stdin=subprocess.DEVNULL)
+                                   timeout=timeout, stdin=subprocess.DEVNULL, env=_oauth_env())
     if proc.returncode != 0:
         raise RuntimeError(f"codex exec failed: {proc.stderr.strip()[:300]}")
     # parse JSONL: skip non-JSON lines (e.g. 'Reading additional input from stdin...'), last turn.completed has usage
