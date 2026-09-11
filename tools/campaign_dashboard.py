@@ -86,20 +86,25 @@ NOW = time.time()
 def eta_str(c, n, active):
     # expected time to 50/50: recent 30-min completion rate first, cell-span average as fallback
     if n >= 50:
-        return ""
+        return "", None
     if not active:
-        return " —"
+        return " —", None
     recent = [t for t in c["times"] if t > NOW - 1800]
     if len(recent) >= 2:
         rate = len(recent) / 30.0  # runs per minute over the last half hour
     elif len(c["times"]) >= 2:
         rate = len(c["times"]) / max(1.0, (max(c["times"]) - min(c["times"])) / 60.0)
     else:
-        return " ?"  # active but not enough history to estimate
+        return " ?", None  # active but not enough history to estimate
     mins = (50 - n) / max(rate, 1e-9)
     if mins >= 100:
-        return f" {int(mins // 60)}h{int(mins % 60):02d}"
-    return f" {int(mins):02d}:{int((mins % 1) * 60):02d}"
+        return f" {int(mins // 60)}h{int(mins % 60):02d}", mins
+    return f" {int(mins):02d}:{int((mins % 1) * 60):02d}", mins
+
+def fmt_mins(mins):
+    if mins >= 100:
+        return f"{int(mins // 60)}h{int(mins % 60):02d}"
+    return f"{int(mins):02d}:{int((mins % 1) * 60):02d}"
 
 rows = []
 total = 0
@@ -165,7 +170,7 @@ PL = (VW - 3) // 2   # left panel width  (between the │ separators)
 PR = VW - 3 - PL     # right panel width — identical math, no drift
 out.append(f"{D}│{'─' * PL}┬{'─' * PR}│{X}")
 
-def panel(row, w, active, eta="", trend=""):
+def panel(row, w, active, eta="", trend="", last=""):
     name, n, rec, ap, poison = row
     barw = w - 47
     filled = n * barw // 50
@@ -178,7 +183,7 @@ def panel(row, w, active, eta="", trend=""):
     else:
         l1 = pad(f"{name:<22s} {color}{'█' * filled}{D}{'░' * empty}{X} {n:>3}/50{Y}{eta}{X}", w)
     f1v = 2 * rec * ap / max(rec + ap, 1e-9)
-    l2 = pad(f"{HD}rec {rec:.2f}  adjP {ap:.2f}  F1 {f1v:.2f}{trend}  ✗{poison:<3d}{X}", w)
+    l2 = pad(f"{HD}rec {rec:.2f}  adjP {ap:.2f}  F1 {f1v:.2f}{trend}  ✗{poison:<3d}{X}{D}{last}{X}", w)
     return [l1, l2]
 
 def is_active(row):
@@ -193,6 +198,30 @@ left, right = rows[:half], rows[half:]
 right += [None] * (half - len(right))
 eta_by_name = {r[0]: eta_str(cells[(k)], r[1], is_active(r)) for r, k in
                [(r, key) for r, key in zip(rows, keys)]}
+
+# last completed refill-pass wall clock per cell, from the sweeper log
+def last_pass_minutes():
+    import re as _re3
+    out = {}
+    pend = None
+    try:
+        for ln in open("logs/campaign_final_refill.log", errors="replace"):
+            m = _re3.match(r"^(\d{2}):(\d{2}) cell (\S+)/ (\S+)", ln)
+            m_start = _re3.match(r"^(\d{2}):(\d{2}) cell (\S+)/(\S+)/(\S+) — refilling", ln)
+            m_done = _re3.match(r"^(\d{2}):(\d{2}) cell (\S+)/(\S+)/(\S+) refill pass done", ln)
+            if m_start:
+                pend = (int(m_start.group(1)) * 60 + int(m_start.group(2)),
+                        (m_start.group(3), m_start.group(4), m_start.group(5)))
+            elif m_done and pend and pend[1] == (m_done.group(3), m_done.group(4), m_done.group(5)):
+                d = (int(m_done.group(1)) * 60 + int(m_done.group(2))) - pend[0]
+                if d < 0: d += 1440  # midnight wrap
+                name = f"{fw_short.get(pend[1][0], pend[1][0])} {m_short.get(pend[1][1], pend[1][1])} {pend[1][2]}"
+                out[name] = d
+                pend = None
+    except OSError:
+        pass
+    return out
+last_pass = last_pass_minutes()
 
 # F1 trend vs the previous poll (state persisted across refreshes in /tmp)
 STATE = "/tmp/campaign_f1_state.json"
@@ -220,12 +249,15 @@ try:
 except Exception:
     pass
 for i in range(half):
-    lp = panel(left[i], PL, is_active(left[i]), eta_by_name.get(left[i][0], ""), trend_by_name.get(left[i][0], "")) if i < len(left) else [pad("", PL), pad("", PL)]
-    rp = panel(right[i], PR, is_active(right[i]), eta_by_name.get(right[i][0], ""), trend_by_name.get(right[i][0], "")) if right[i] else [pad("", PR), pad("", PR)]
+    lp = panel(left[i], PL, is_active(left[i]), eta_by_name.get(left[i][0], ("", None))[0], trend_by_name.get(left[i][0], ""), f" last {fmt_mins(last_pass[left[i][0]])}" if left[i][0] in last_pass else "") if i < len(left) else [pad("", PL), pad("", PL)]
+    rp = panel(right[i], PR, is_active(right[i]), eta_by_name.get(right[i][0], ("", None))[0], trend_by_name.get(right[i][0], ""), f" last {fmt_mins(last_pass[right[i][0]])}" if right[i][0] in last_pass else "") if right[i] else [pad("", PR), pad("", PR)]
     out.append(f"{D}│{X}{lp[0]}{D}│{X}{rp[0]}{D}│{X}")
     out.append(f"{D}│{X}{lp[1]}{D}│{X}{rp[1]}{D}│{X}")
 out.append(f"{D}└{'─' * PL}┴{'─' * PR}┘{X}")
-out.append(f"  {BO}TOTAL healthy runs: {G}{total}{X}   {D}residue = dead runs with healthy siblings (harmless){X}")
+_etas = [(eta_by_name.get(r[0], ("", None))[1], r[0]) for r in rows]
+_overall = max((e for e in _etas if e[0] is not None), default=None)
+_suffix = f"   {BO}overall eta ~{fmt_mins(_overall[0])}{X} {D}(bottleneck: {_overall[1]}){X}" if _overall else ""
+out.append(f"  {BO}TOTAL healthy runs: {G}{total}{X}   {D}residue = dead runs with healthy siblings (harmless){X}{_suffix}")
 rc = "  ".join(sorted(set(runners))) or "none"
 out.append(f"  {BO}runners:{X} {clip(rc, VW - 12)}")
 out.append(f"  {BO}▓{X} = actively refilling")
