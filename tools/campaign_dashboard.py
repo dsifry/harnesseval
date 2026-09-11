@@ -183,8 +183,12 @@ def panel(row, w, active, eta="", trend="", last_mins=None, pace=None):
     empty = barw - filled
     color = G if n >= 50 else (R if n == 0 else Y)
     # the in-flight cell sits immediately AFTER the last completed cell, not at the
-    # bar's right edge — it marks the frontier of the fill
-    cursor = f"{C}▓{D}" if (n < 50 and active and empty > 0) else ""
+    # bar's right edge — it marks the frontier of the fill. The cursor REPLACES the
+    # last empty slot (adding it made cursor rows 51 wide and shifted their columns).
+    _has_cursor = n < 50 and active and empty > 0
+    if _has_cursor:
+        empty -= 1
+    cursor = f"{C}▓{D}" if _has_cursor else ""
     suffix = eta
     if last_mins is not None:
         mins, inflight = last_mins[0], last_mins[1]
@@ -240,6 +244,11 @@ def last_pass_minutes():
         d = done_min - start_min
         if d < 0: d += 1440  # midnight wrap
         out[name_for(*key)] = (d, False, n_target, start_min, None)
+        # a pass only counts as a pace measurement if runs landed at a plausible rate —
+        # a 2-minute "pass" targeting 26 runs is a fast-fail storm artifact, not a pace,
+        # and using it as a basis poisons every downstream estimate (negative countdowns)
+        if n_target and d / n_target >= 0.25:  # >= 15s per targeted run
+            completed[name_for(*key)] = (d, n_target)
         if n_target:
             completed[name_for(*key)] = (d, n_target)
     for path, kind in [("logs/campaign_final_refill.log", "sweep"),
