@@ -246,7 +246,7 @@ out.append(f"{D}└{'─' * (VW - 2)}┘{X}")
 # btop-style panel draw: address absolute rows, clear each line to EOL, clear below.
 # The upper (cells) panel is never overwritten because every row is addressed explicitly
 # and the total block is sized to fit the pane.
-buf = ["\033[2J\033[H"]
+buf = ["\033[H"]  # no full clear — in-place redraw avoids the 15s flicker; trailing \033[J handles shrinkage
 for i, line in enumerate(out, start=1):
     if i > H - 1:
         break
