@@ -215,6 +215,15 @@ async def _call_openai_compat(model, system, user, effort, max_tokens, temperatu
         last_exc: Exception | None = None
         tried: set[int] = set()
         sess = _KEY_SESSION.get()
+        # admission control: never exceed a key's budget. If every key is saturated, WAIT
+        # for a slot instead of overflowing into 429s (the peak-40-over-budget-24 lesson).
+        if all(_KEY_INFLIGHT.get(i, 0) >= _budget(i) for i in range(len(clients))):
+            _waited = 0.0
+            while all(_KEY_INFLIGHT.get(i, 0) >= _budget(i) for i in range(len(clients))):
+                await asyncio.sleep(0.05)
+                _waited += 0.05
+                if _waited > 600:
+                    break  # fail loud via the normal path rather than wait forever
         for _attempt in range(len(clients)):
             if sess is not None and sess in _KEY_STICKY and _KEY_STICKY[sess] not in tried:
                 # cache affinity: a session's later calls stay on the key that warmed its prefix
