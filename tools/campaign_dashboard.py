@@ -106,9 +106,6 @@ out.append(f"{D}{'└' + '─' * colw + '┴' + '─' * (W - 4 - colw) + '┘'}{
 out.append(f"  {BO}TOTAL healthy runs: {G}{total}{X}   {D}residue = dead runs with healthy siblings (harmless){X}")
 
 # footer: runners + last events
-runners = []
-for p in glob.glob("/proc/*/cmdline"):  # macOS fallback below
-    pass
 rc = "  ".join(sorted(set(runners))) or "none"
 out.append(f"  {BO}runners:{X} {rc}   {BO}▓{X} = actively refilling")
 
