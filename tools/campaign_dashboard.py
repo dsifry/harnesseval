@@ -134,11 +134,14 @@ def panel(row, w, active):
     filled = n * barw // 50
     empty = barw - filled
     color = G if n >= 50 else (R if n == 0 else Y)
+    # the in-flight cell sits immediately AFTER the last completed cell, not at the
+    # bar's right edge — it marks the frontier of the fill
     cursor = ""
     if n < 50 and active and empty > 0:
-        empty -= 1
         cursor = C + "▓" + D
-    l1 = pad(f"{name:<22s} {color}{'█' * filled}{D}{'░' * empty}{cursor}{X} {n:>3}/50", w)
+        l1 = pad(f"{name:<22s} {color}{'█' * filled}{cursor}{D}{'░' * empty}{X} {n:>3}/50", w)
+    else:
+        l1 = pad(f"{name:<22s} {color}{'█' * filled}{D}{'░' * empty}{X} {n:>3}/50", w)
     l2 = pad(f"{D}rec {rec:.2f}  adjP {ap:.2f}  ✗{poison:<3d}{X}", w)
     return [l1, l2]
 
