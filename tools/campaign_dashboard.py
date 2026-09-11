@@ -1,9 +1,15 @@
 #!/usr/bin/env python3
 """Campaign dashboard — btop-style: frames, colors, block bars, two columns."""
-import json, glob, os, sys, shutil, time
+import json, glob, os, sys, time
 from collections import defaultdict
 
-W = shutil.get_terminal_size((164, 40)).columns
+# query the tty directly — shutil.get_terminal_size trusts $COLUMNS, which the tmux
+# environment can set to a value unrelated to the actual pane width (318 vs 171 observed)
+import sys as _sys
+try:
+    W = os.get_terminal_size(_sys.stdout.fileno()).columns
+except Exception:
+    W = 164
 G = "\033[38;5;114m"; Y = "\033[38;5;179m"; R = "\033[38;5;203m"
 D = "\033[38;5;240m"; HD = "\033[38;5;250m"; X = "\033[0m"; BO = "\033[1m"
 
