@@ -92,11 +92,11 @@ PYEOF
   return 1
 }
 
-# order (2026-09-10 23:xx): vision 503s + 429 CONCURRENT_REQUEST_LIMIT at conc 5 —
-# vision paused AGAIN, flash completes first; vision resumes last at low concurrency
-# (the 429 says the vision serving's concurrent cap is < 5).
-run_cell glm-5.3-flash-background medium
-run_cell glm-5.3-flash-background high
+# order (2026-09-10 24:00): vision serving UP (3/3 probes) while flash still hangs —
+# vision refills run NOW into the healthy window; flash medium/high resume after
+# (flash-low is banked 50/50 CLEAN).
 run_cell glm-5.3-vision-background medium
 run_cell glm-5.3-vision-background high
+run_cell glm-5.3-flash-background medium
+run_cell glm-5.3-flash-background high
 log "supervisor: GLM legs complete"
