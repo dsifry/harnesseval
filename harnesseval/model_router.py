@@ -131,6 +131,16 @@ async def _call_anthropic(model, system, user, effort, max_tokens, temperature) 
 
 
 _KEY_INFLIGHT: dict[int, int] = {}  # live requests per key-pool index (least-loaded selection)
+import contextvars as _cv
+_KEY_SESSION: _cv.ContextVar = _cv.ContextVar("key_pool_session", default=None)
+_KEY_STICKY: dict[str, int] = {}    # session -> key index (cache affinity: a review run's
+                                    # ~10 lens calls share long prefixes; keeping them on one
+                                    # key maximizes prompt-cache hits on that key's account)
+
+
+def set_session(session_id: str) -> None:
+    """Tag all model calls made in this context (and child tasks) as one cache session."""
+    _KEY_SESSION.set(session_id)
 
 
 def _log_key_usage(idx: int, model: str, seconds: float, resp, ok: bool) -> None:
@@ -145,7 +155,8 @@ def _log_key_usage(idx: int, model: str, seconds: float, resp, ok: bool) -> None
         path = os.environ.get("HARNESS_KEY_USAGE_FILE", "logs/key_usage.jsonl")
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         u = getattr(resp, "usage", None) if resp is not None else None
-        rec = {"ts": time.time(), "key": idx, "model": model, "s": round(seconds, 1), "ok": ok}
+        rec = {"ts": time.time(), "key": idx, "model": model, "s": round(seconds, 1), "ok": ok,
+               "sess": _KEY_SESSION.get()}
         if u is not None:
             rec["in"] = getattr(u, "prompt_tokens", 0) or 0
             rec["out"] = getattr(u, "completion_tokens", 0) or 0
@@ -195,9 +206,19 @@ async def _call_openai_compat(model, system, user, effort, max_tokens, temperatu
         resp = None
         last_exc: Exception | None = None
         tried: set[int] = set()
+        sess = _KEY_SESSION.get()
         for _attempt in range(len(clients)):
-            idx = min((i for i in range(len(clients)) if i not in tried),
-                      key=lambda i: _KEY_INFLIGHT.get(i, 0))
+            if sess is not None and sess in _KEY_STICKY and _KEY_STICKY[sess] not in tried:
+                # cache affinity: a session's later calls stay on the key that warmed its prefix
+                idx = _KEY_STICKY[sess]
+            else:
+                idx = min((i for i in range(len(clients)) if i not in tried),
+                          key=lambda i: _KEY_INFLIGHT.get(i, 0))
+            if sess is not None and len(_KEY_STICKY) > 512:
+                for _old in list(_KEY_STICKY)[: len(_KEY_STICKY) - 512]:
+                    _KEY_STICKY.pop(_old, None)
+            if sess is not None:
+                _KEY_STICKY[sess] = idx
             tried.add(idx)
             _KEY_INFLIGHT[idx] = _KEY_INFLIGHT.get(idx, 0) + 1
             t0 = time.time()

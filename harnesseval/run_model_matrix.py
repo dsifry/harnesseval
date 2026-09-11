@@ -341,6 +341,8 @@ def main():
                 tag = f"[{i+1}/{len(cells)}] {fw} {model} {effort}"
                 print(f"[mx] {tag} ...", flush=True)
                 try:
+                    from harnesseval import model_router as _mr
+                    _mr.set_session(f"{fw}/{model}/{effort}/{pr.url}")
                     res = await _run_cell_async(pr, fw, model, effort, judge, mode=args.mode)
                 except Exception as e:
                     # capture the failing call site, not just the truncated message — the
