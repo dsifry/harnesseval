@@ -51,7 +51,9 @@ for f in glob.glob("runs/*/summary.json"):
     try: s = json.load(open(f))
     except Exception: continue
     if (s.get("run_batch") == "20260910-mrv0120-manifold" and s.get("model") == model and s.get("effort") == eff):
-        bad = (s.get("tokens_in", 0) or 0) + (s.get("tokens_out", 0) or 0) == 0 or bool(s.get("error"))
+        n_find = len(s.get("findings", []))
+        tok = (s.get("tokens_in", 0) or 0) + (s.get("tokens_out", 0) or 0)
+        bad = tok == 0 or bool(s.get("error")) or (n_find == 0 and tok > 20000)
         u = s.get("url")
         have[u] = have.get(u, False) or (not bad)
 missing = [u for u, ok in have.items() if not ok]
@@ -70,7 +72,9 @@ for f in glob.glob("runs/*/summary.json"):
     try: s = json.load(open(f))
     except Exception: continue
     if (s.get("run_batch") == "20260910-mrv0120-manifold" and s.get("model") == model and s.get("effort") == eff):
-        bad = (s.get("tokens_in", 0) or 0) + (s.get("tokens_out", 0) or 0) == 0 or bool(s.get("error"))
+        n_find = len(s.get("findings", []))
+        tok = (s.get("tokens_in", 0) or 0) + (s.get("tokens_out", 0) or 0)
+        bad = tok == 0 or bool(s.get("error")) or (n_find == 0 and tok > 20000)
         u = s.get("url")
         have[u] = have.get(u, False) or (not bad)
 missing = [u for u, ok in have.items() if not ok]
