@@ -117,7 +117,7 @@ def fmt_mins(mins):
     if h: parts.append(f"{h}h")
     parts.append(f"{mm}m")
     parts.append(f"{ss}s")
-    return ("-" if neg else "") + ":".join(parts)
+    return ("-" if neg else "") + " ".join(parts)
 
 def fmt_signed(mins):
     sign = "-" if mins < 0 else ""
