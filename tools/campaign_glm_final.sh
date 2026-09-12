@@ -80,25 +80,22 @@ print(",".join(f"metareview-realistic/{model}/{eff}/{u.rsplit('/', 1)[-1]}" for 
 PYEOF
 }
 
-run_cell() {  # model effort
-  local model=$1 eff=$2
-  for try in 1 2 3 4 5; do
-    log "cell $model/$eff attempt $try"
+run_cell() {  # model effort — SLOW MODE: one PR per invocation, 5-min breath between runs
+  local model=$1 eff=$2 try=0
+  while true; do
+    try=$((try + 1))
+    if [ "$try" -gt 300 ]; then log "cell $model/$eff giving up after 300 single-PR passes"; return 1; fi
     .venv/bin/python -c "$PYCLEAN" "$model" "$eff"
-    # conc 12 = full bench-key budget; overflow spills to key1's campaign share (HARNESS_KEY_BUDGETS)
-    # conc 2: the vision pool negative-scales past 2-wide (4-min calls at 2-wide, 25-min at 12-wide, measured 2026-09-11).
-    # NOTE: no comment lines inside a backslash-continued command — they comment out the rest (2026-09-11 incident).
-    .venv/bin/python -u -m harnesseval.run_model_matrix --prs 50 --frameworks metareview-realistic \
-      --models $model --efforts $eff --mode api --concurrency 1  # evening pool: 1-wide concentrates burst service so runs FINISH (5-wide: 0 completions/h) \
-      --run-batch $BATCH --skip-batch $BATCH --fill "$(missing_specs "$model" "$eff")" >> logs/mx_campaign_${model}_${eff}.log 2>&1
-    local LEFT; LEFT=$(missing_specs "$model" "$eff" | tr ',' '\n' | grep -c . || true)
-    if [ -z "$LEFT" ] || [ "$LEFT" = "0" ]; then
-      log "cell $model/$eff CLEAN (50/50 healthy)"; return 0
-    fi
-    log "cell $model/$eff missing $LEFT — next attempt refills"
+    SPECS=$(missing_specs "$model" "$eff")
+    if [ -z "$SPECS" ]; then log "cell $model/$eff CLEAN (50/50 healthy)"; return 0; fi
+    ONE=$(echo "$SPECS" | tr ',' '\n' | grep . | head -1)
+    log "cell $model/$eff slow pass $try: running single PR $ONE (conc 1)"
+    timeout 10800 .venv/bin/python -u -m harnesseval.run_model_matrix --prs 50 --frameworks metareview-realistic \
+      --models $model --efforts $eff --mode api --concurrency 1 \
+      --run-batch $BATCH --skip-batch $BATCH --fill "$ONE" >> logs/mx_campaign_${model}_${eff}.log 2>&1
+    log "cell $model/$eff slow pass $try done — breathing 5 min before the next PR"
+    sleep 300
   done
-  log "cell $model/$eff FAILED after 5 attempts — missing: $(missing_specs "$model" "$eff" | tr ',' '\n' | wc -l | tr -d ' ')"
-  return 1
 }
 
 # flash-high moved LAST (2026-09-11): the flash pool is wedged (1h+ hangs, 429s)

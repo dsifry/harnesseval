@@ -7,6 +7,7 @@ cd "$(dirname "$0")/.."
 LOG=logs/campaign_final_refill.log
 log() { echo "$(date +%H:%M) $*" | tee -a "$LOG"; }
 BATCH=20260910-mrv0120-manifold
+ulimit -n 10240  # FD exhaustion fix (2026-09-12): subprocess-spawning runners leak descriptors per run; the 256 default exhausts after ~4 runs (45x Errno 24 in CE vision-high)
 export HARNESS_KEY_BUDGETS=12,6
 export HARNESS_LUNAROUTE_TIMEOUT_S=2400  # queue headroom: longest observed drain 1778s, ceiling gives peak-hour margin
 export HARNESS_LUNAROUTE_KEY_FILES=~/.config/harnesseval/keys.env.bench:~/.config/harnesseval/keys.env
@@ -91,7 +92,7 @@ for round in $(seq 1 $MAX_ROUNDS); do
           *)     MODE=cli; CONC=3 ;;
         esac
         HARNESS_KEYS_FILE=~/.config/harnesseval/keys.env.bench \
-          .venv/bin/python -m harnesseval.run_model_matrix --prs 50 \
+          timeout 14400 .venv/bin/python -m harnesseval.run_model_matrix --prs 50 \
           --frameworks "$fw" --models "$model" --efforts "$eff" --mode "$MODE" \
           --concurrency $CONC --run-batch $BATCH --skip-batch $BATCH \
           --fill "$SPECS" >> "logs/mx_campaign_${model}_${eff}.log" 2>&1
