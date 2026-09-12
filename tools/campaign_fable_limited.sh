@@ -7,7 +7,7 @@ cd "$(dirname "$0")/.."
 LOG=logs/campaign_fable.log
 log() { echo "$(date +%H:%M) $*" | tee -a "$LOG"; }
 BATCH=20260910-mrv0120-manifold
-CONC=4
+CONC=1  # one PR at a time within a cell: a mid-run session drain costs at most ONE in-flight attempt
 MODEL=claude-fable-5-1
 TOPN=6
 
