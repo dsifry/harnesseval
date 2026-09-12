@@ -69,7 +69,7 @@ for round in $(seq 1 $MAX_ROUNDS); do
   log "=== refill round $round"
   INCOMPLETE=0
   for fw in compound-realistic metareview-realistic vanilla-engineered; do
-    for model in claude-opus-5 claude-sonnet-5 gpt-5.6-sol gpt-5.6-terra glm-5.3-vision-background glm-5.3-flash-background; do
+    for model in claude-opus-5 claude-sonnet-5 gpt-5.6-sol gpt-5.6-terra; do
       for eff in low medium high; do
         # ownership split: the GLM chain (window glmfinal) owns the mrv glm cells;
         # the sweeper owns CE/vanilla glm cells + everything else. Two managers on
