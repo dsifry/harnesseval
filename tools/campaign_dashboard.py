@@ -236,20 +236,32 @@ eta_by_name = {r[0]: eta_str(cells[(k)], r[1], is_active(r)) for r, k in
 def last_pass_minutes():
     import re as _re3
     out = {}
+    import collections as _col
+    d_min = lambda a, b: (b - a) if b >= a else (b - a + 1440)
     FW_ALIAS = {"CE": "compound-realistic", "mrv": "metareview-realistic", "van": "vanilla-engineered"}
     def name_for(fw, model, eff):
         fw = FW_ALIAS.get(fw, fw)
         return f"{fw_short.get(fw, fw)} {m_short.get(model, model)} {eff}"
-    completed = {}  # name -> (duration, N) of the last COMPLETED pass (avg-per-run fallback)
+    completed = {}  # name -> (duration, landed) of the last COMPLETED pass (avg-per-run fallback)
+    pass_seq = collections.defaultdict(list)  # name -> [(start, end, n_target)] for landed computation
     def emit(start_min, key, done_min, n_target):
         d = done_min - start_min
         if d < 0: d += 1440  # midnight wrap
         out[name_for(*key)] = (d, False, n_target, start_min, None)
-        # a pass only counts as a pace measurement if runs landed at a plausible rate —
-        # a 2-minute "pass" targeting 26 runs is a fast-fail storm artifact, not a pace,
-        # and using it as a basis poisons every downstream estimate (negative countdowns)
-        if n_target and d / n_target >= 0.25:  # >= 15s per targeted run
-            completed[name_for(*key)] = (d, n_target)
+        pass_seq[name_for(*key)].append((start_min, done_min, n_target))
+    # landed runs per pass = targeted minus the NEXT pass's target for the same cell
+    # (a pass targeting 3 that leaves 1 missing landed 2 — dividing by 3 inflated the pace)
+    for _nm, seq in pass_seq.items():
+        seq.sort()
+        for i, (s0, s1, n_t) in enumerate(seq):
+            if n_t is None:
+                continue  # glm chain passes have no targeted count — no landed basis
+            landed = n_t
+            if i + 1 < len(seq):
+                landed = max(1, n_t - seq[i + 1][2])
+            rate = d_min(s0, s1) / max(1, landed)
+            if rate >= 0.25:  # >= 15s per landed run
+                completed[_nm] = (d_min(s0, s1), landed)
     for path, kind in [("logs/campaign_final_refill.log", "sweep"),
                        ("logs/campaign_ce_codex.log", "chain"),
                        ("logs/campaign_ce_claude.log", "chain"),
