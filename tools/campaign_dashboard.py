@@ -77,7 +77,8 @@ try:
             cmd = subprocess.run(["ps", "-ww", "-p", pid, "-o", "command="], capture_output=True, text=True).stdout  # -ww: no truncation
         m = re.search(r"(?:--)?frameworks (\S+) (?:--)?models (\S+) (?:--)?efforts (\S+)", cmd)
         if m:
-            runners.append(f"{m.group(2)} {m.group(3)}")
+            _fw = fw_short.get(m.group(1), m.group(1))
+            runners.append(f"{_fw} {m_short.get(m.group(2), m.group(2))} {m.group(3)}")
             active_keys.add((m.group(1), m.group(2), m.group(3)))
 except Exception:
     pass

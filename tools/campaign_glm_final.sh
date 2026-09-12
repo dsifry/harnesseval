@@ -85,8 +85,9 @@ run_cell() {  # model effort
     log "cell $model/$eff attempt $try"
     .venv/bin/python -c "$PYCLEAN" "$model" "$eff"
     # conc 12 = full bench-key budget; overflow spills to key1's campaign share (HARNESS_KEY_BUDGETS)
+    # conc 2: the vision pool negative-scales past 2-wide (4-min calls at 2-wide, 25-min at 12-wide, measured 2026-09-11).
+    # NOTE: no comment lines inside a backslash-continued command — they comment out the rest (2026-09-11 incident).
     .venv/bin/python -u -m harnesseval.run_model_matrix --prs 50 --frameworks metareview-realistic \
-      # conc 2: the vision pool negative-scales past 2-wide (4-min calls at 2-wide, 25-min at 12-wide, measured 2026-09-11)
       --models $model --efforts $eff --mode api --concurrency 2 \
       --run-batch $BATCH --skip-batch $BATCH --fill "$(missing_specs "$model" "$eff")" >> logs/mx_campaign_${model}_${eff}.log 2>&1
     local LEFT; LEFT=$(missing_specs "$model" "$eff" | tr ',' '\n' | grep -c . || true)
