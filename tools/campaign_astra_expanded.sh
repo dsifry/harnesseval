@@ -55,29 +55,38 @@ while ! codex_ok; do
   log "gate: codex capped — waiting for the reset (probing every 2 min)"
   sleep 120
 done
-log "codex open — bursting at conc $CONC"
+log "codex open — bursting: all 8 cells concurrently, OAuth CLI, conc $CONC each"
 
+PIDS=""
 for fw in vanilla-engineered compound-realistic metareview-realistic; do
   for eff in low medium high; do
     SPECS=$(missing_specs "$fw" "$MODEL" "$eff")
     if [ -z "$SPECS" ]; then log "cell $fw/$MODEL/$eff complete — skip"; continue; fi
     N=$(echo "$SPECS" | tr ',' '\n' | grep -c .)
-    log "cell $fw/$MODEL/$eff — filling $N at conc $CONC"
+    log "launching cell $fw/$MODEL/$eff — filling $N (background)"
     .venv/bin/python -u -m harnesseval.run_model_matrix --prs 50 --frameworks "$fw" \
       --models $MODEL --efforts "$eff" --mode cli --concurrency $CONC \
       --run-batch $BATCH --skip-batch $BATCH \
-      --fill "$SPECS" >> "logs/mx_campaign_astra_${fw}_${eff}.log" 2>&1
-    log "cell $fw/$MODEL/$eff pass done"
-    SPECS2=$(missing_specs "$fw" "$MODEL" "$eff")
-    if [ -n "$SPECS2" ]; then
-      N2=$(echo "$SPECS2" | tr ',' '\n' | grep -c .)
-      log "cell $fw/$MODEL/$eff still missing $N2 — one retry pass"
-      .venv/bin/python -u -m harnesseval.run_model_matrix --prs 50 --frameworks "$fw" \
-        --models $MODEL --efforts "$eff" --mode cli --concurrency $CONC \
-        --run-batch $BATCH --skip-batch $BATCH \
-        --fill "$SPECS2" >> "logs/mx_campaign_astra_${fw}_${eff}.log" 2>&1
-      log "cell $fw/$MODEL/$eff retry pass done"
-    fi
+      --fill "$SPECS" >> "logs/mx_campaign_astra_${fw}_${eff}.log" 2>&1 &
+    PIDS="$PIDS $!"
   done
 done
+wait $PIDS
+log "all first passes done — retry passes for cells still missing"
+
+PIDS=""
+for fw in vanilla-engineered compound-realistic metareview-realistic; do
+  for eff in low medium high; do
+    SPECS2=$(missing_specs "$fw" "$MODEL" "$eff")
+    [ -z "$SPECS2" ] && { log "cell $fw/$MODEL/$eff complete"; continue; }
+    N2=$(echo "$SPECS2" | tr ',' '\n' | grep -c .)
+    log "launching retry cell $fw/$MODEL/$eff — missing $N2 (background)"
+    .venv/bin/python -u -m harnesseval.run_model_matrix --prs 50 --frameworks "$fw" \
+      --models $MODEL --efforts "$eff" --mode cli --concurrency $CONC \
+      --run-batch $BATCH --skip-batch $BATCH \
+      --fill "$SPECS2" >> "logs/mx_campaign_astra_${fw}_${eff}.log" 2>&1 &
+    PIDS="$PIDS $!"
+  done
+done
+wait $PIDS
 log "expanded astra run complete"
