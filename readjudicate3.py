@@ -633,6 +633,7 @@ def main():
     ap.add_argument("--no-dedup", action="store_true",
                     help="v2 behavior: adjudicate every finding per-run, no cross-run clustering")
     ap.add_argument("--k", type=int, default=3, help="votes per adjudication (majority wins)")
+    ap.add_argument("--model", default=None, help="restrict the pass to one model-under-test (run selection only)")
     ap.add_argument("--second-pass", action="store_true",
                     help="one higher-effort retry for unresolved verdicts before they stay unresolved")
     ap.add_argument("--no-semantic-merge", action="store_true",
@@ -652,6 +653,8 @@ def main():
         raise SystemExit("either --run or --batch required")
     targets = [(rid, s) for rid, s in latest_pass_summaries(args.batch)
                if (s.get("n_hallucination", 0) + s.get("n_real_ungold", 0)) > 0]
+    if args.model:  # run-selection filter only — the instrument (prompts, judges, logic) is unchanged
+        targets = [(rid, s) for rid, s in targets if s.get("model") == args.model]
     if args.limit:
         targets = targets[:args.limit]
     total = sum(s.get("n_hallucination", 0) + s.get("n_real_ungold", 0) for _, s in targets)
