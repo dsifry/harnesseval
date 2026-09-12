@@ -81,7 +81,7 @@ PYEOF
 }
 
 run_cell() {  # model effort — SLOW MODE: one PR per invocation, 5-min breath between runs
-  local model=$1 eff=$2 try=0
+  local model=$1 eff=$2 try=0 LASTFAIL=""
   while true; do
     try=$((try + 1))
     if [ "$try" -gt 300 ]; then log "cell $model/$eff giving up after 300 single-PR passes"; return 1; fi
@@ -89,11 +89,20 @@ run_cell() {  # model effort — SLOW MODE: one PR per invocation, 5-min breath 
     SPECS=$(missing_specs "$model" "$eff")
     if [ -z "$SPECS" ]; then log "cell $model/$eff CLEAN (50/50 healthy)"; return 0; fi
     ONE=$(echo "$SPECS" | tr ',' '\n' | grep . | head -1)
+    if [ "$ONE" = "$LASTFAIL" ]; then  # rotate past a repeatedly-failing PR so one bad PR cannot block the cell
+      ALT=$(echo "$SPECS" | tr ',' '\n' | grep . | grep -v "^$ONE$" | head -1)
+      [ -n "$ALT" ] && ONE=$ALT && log "cell $model/$eff: rotating past stuck PR (will retry it later)"
+    fi
     log "cell $model/$eff slow pass $try: running single PR $ONE (conc 1)"
-    timeout 10800 .venv/bin/python -u -m harnesseval.run_model_matrix --prs 50 --frameworks metareview-realistic \
+    bash tools/with_ceiling.sh 10800 .venv/bin/python -u -m harnesseval.run_model_matrix --prs 50 --frameworks metareview-realistic \
       --models $model --efforts $eff --mode api --concurrency 1 \
       --run-batch $BATCH --skip-batch $BATCH --fill "$ONE" >> logs/mx_campaign_${model}_${eff}.log 2>&1
     log "cell $model/$eff slow pass $try done — breathing 5 min before the next PR"
+    if echo "$(missing_specs "$model" "$eff")" | tr ',' '\n' | grep -q "^$ONE$"; then
+      LASTFAIL=$ONE
+    else
+      LASTFAIL=""
+    fi
     sleep 300
   done
 }

@@ -92,7 +92,7 @@ for round in $(seq 1 $MAX_ROUNDS); do
           *)     MODE=cli; CONC=3 ;;
         esac
         HARNESS_KEYS_FILE=~/.config/harnesseval/keys.env.bench \
-          timeout 14400 .venv/bin/python -m harnesseval.run_model_matrix --prs 50 \
+          bash tools/with_ceiling.sh 14400 .venv/bin/python -m harnesseval.run_model_matrix --prs 50 \
           --frameworks "$fw" --models "$model" --efforts "$eff" --mode "$MODE" \
           --concurrency $CONC --run-batch $BATCH --skip-batch $BATCH \
           --fill "$SPECS" >> "logs/mx_campaign_${model}_${eff}.log" 2>&1
