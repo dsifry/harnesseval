@@ -126,6 +126,19 @@ while true; do
       >> "logs/mx_campaign_${model}_${eff}.log" 2>&1 &
     PIDS="$PIDS $!"
   done <<< "$TOP"
+  # wedge self-heal: 45 min of ledger silence > any legit in-flight call (2400s timeout + failover writes an end event)
+  while :; do
+    ALIVE=0
+    for p in $PIDS; do kill -0 "$p" 2>/dev/null && ALIVE=1; done
+    [ "$ALIVE" = "0" ] && break
+    AGE=$(( $(date +%s) - $(stat -f %m logs/key_usage.jsonl) ))
+    if [ "$AGE" -gt 2700 ]; then
+      log "wave $WAVE: ledger silent ${AGE}s — killing wedged runners, wave ends"
+      for p in $PIDS; do kill "$p" 2>/dev/null; done
+      break
+    fi
+    sleep 60
+  done
   for p in $PIDS; do wait "$p" 2>/dev/null; done
   log "wave $WAVE done — breathing 60s before re-census"
   sleep 60
