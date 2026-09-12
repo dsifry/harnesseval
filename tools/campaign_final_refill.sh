@@ -68,6 +68,7 @@ PYEOF
 for round in $(seq 1 $MAX_ROUNDS); do
   log "=== refill round $round"
   INCOMPLETE=0
+  LAUNCHED_THIS_ROUND=0
   for fw in compound-realistic metareview-realistic vanilla-engineered; do
     for model in claude-opus-5 claude-sonnet-5 gpt-5.6-sol gpt-5.6-terra; do
       for eff in low medium high; do
@@ -86,6 +87,7 @@ for round in $(seq 1 $MAX_ROUNDS); do
           continue
         fi
         log "cell $fw/$model/$eff — refilling $N"
+        LAUNCHED_THIS_ROUND=$((LAUNCHED_THIS_ROUND + 1))
         # CLI-hosted premium models (claude/gpt slugs) run via the CLI (OAuth); GLM via the API
         case "$model" in
           glm-*) MODE=api; CONC=1 ;;  # evening pool: 1-wide concentrates burst service so runs FINISH  # vision pool negative-scales past 2-wide (measured)
@@ -101,6 +103,11 @@ for round in $(seq 1 $MAX_ROUNDS); do
     done
   done
   [ "$INCOMPLETE" -eq 0 ] && { log "ALL CELLS COMPLETE (50/50)"; exit 0; }
-  sleep 120
+  if [ "$LAUNCHED_THIS_ROUND" -eq 0 ] && [ "$INCOMPLETE" -gt 0 ]; then
+    log "round launched nothing (all gates closed) — waiting out the window before the next round; probing every 10 min"
+    sleep 600
+  else
+    sleep 120
+  fi
 done
 log "max rounds reached — cells still incomplete; check dashboard"
