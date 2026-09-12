@@ -57,13 +57,22 @@ PYEOF
 CELLS="vanilla-engineered/medium vanilla-engineered/high compound-realistic/low compound-realistic/medium compound-realistic/high metareview-realistic/low metareview-realistic/medium metareview-realistic/high"
 
 log "LIMITED fable run: top-$TOPN PRs x 8 cells on the new account (expand: raise TOPN and relaunch)"
-for ROUND in 1 2 3 4 5 6; do
+for ROUND in 1 2 3 4 5 6 7 8; do
+  if ! claude_ok; then
+    log "round $ROUND: capped at round start — waiting out the window; probing every 10 min"
+    while ! claude_ok; do sleep 600; done
+    log "round $ROUND: window open — starting cells"
+  fi
   PIDS=""
   for cell in $CELLS; do
     fw="${cell%%/*}"; eff="${cell##*/}"
     SPECS=$(missing_specs "$fw" "$eff")
     if [ -z "$SPECS" ]; then log "round $ROUND: cell $fw/$eff top-$TOPN subset complete — skip"; continue; fi
-    if ! claude_ok; then log "round $ROUND: claude capped — probing every 10 min"; break; fi
+    if ! claude_ok; then
+      log "round $ROUND: capped at cell $fw/$eff — waiting out the window; probing every 10 min"
+      while ! claude_ok; do sleep 600; done
+      log "round $ROUND: window open — retrying cell $fw/$eff"
+    fi
     N=$(echo "$SPECS" | tr ',' '\n' | grep -c .)
     log "round $ROUND: launching cell $fw/$MODEL/$eff — filling $N of top-$TOPN (conc $CONC) — SERIAL: one cell at a time"
     bash tools/with_ceiling.sh 14400 .venv/bin/python -u -m harnesseval.run_model_matrix --prs 50 --frameworks "$fw" \
