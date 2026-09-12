@@ -151,7 +151,7 @@ def set_session(session_id: str) -> None:
     _KEY_SESSION.set(session_id)
 
 
-def _log_key_usage(idx: int, model: str, seconds: float, resp, ok: bool) -> None:
+def _log_key_usage(idx: int, model: str, seconds: float, resp, ok: bool, ev: str = "end") -> None:
     """Append one utilization record per key-pool attempt to the key-usage ledger (JSONL).
 
     The ledger is what makes key utilization observable from OUTSIDE the runner processes:
@@ -163,8 +163,8 @@ def _log_key_usage(idx: int, model: str, seconds: float, resp, ok: bool) -> None
         path = os.environ.get("HARNESS_KEY_USAGE_FILE", "logs/key_usage.jsonl")
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         u = getattr(resp, "usage", None) if resp is not None else None
-        rec = {"ts": time.time(), "key": idx, "model": model, "s": round(seconds, 1), "ok": ok,
-               "sess": _KEY_SESSION.get()}
+        rec = {"ts": time.time(), "ev": ev, "key": idx, "model": model, "s": round(seconds, 1),
+               "ok": ok, "sess": _KEY_SESSION.get()}
         if u is not None:
             rec["in"] = getattr(u, "prompt_tokens", 0) or 0
             rec["out"] = getattr(u, "completion_tokens", 0) or 0
@@ -240,6 +240,7 @@ async def _call_openai_compat(model, system, user, effort, max_tokens, temperatu
             _KEY_INFLIGHT[idx] = _KEY_INFLIGHT.get(idx, 0) + 1
             t0 = time.time()
             ok = False
+            _log_key_usage(idx, model, 0.0, None, None, ev="start")
             try:
                 resp = await asyncio.to_thread(clients[idx].chat.completions.create, **call_kwargs)
                 ok = True

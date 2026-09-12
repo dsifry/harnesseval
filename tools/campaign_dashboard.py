@@ -472,6 +472,7 @@ out.append(f"{D}└{'─' * (VW - 2)}┘{X}")
 # ── key-pool utilization panel: aggregated from the router's ledger ──
 import json as _json2
 _kagg = {}
+_live = {}   # key -> in-flight right now (start events minus end events, file is append-ordered)
 try:
     for _ln in open("logs/key_usage.jsonl", errors="replace"):
         try:
@@ -480,15 +481,19 @@ try:
             continue
         if _r.get("ts", 0) < time.time() - 86400:  # last 24h
             continue
-        _a = _kagg.setdefault(_r.get("key", 9), {"ok": 0, "fail": 0, "s": 0.0, "in": 0, "out": 0, "cached": 0, "models": {}})
+        _k = _r.get("key", 9)
+        if _r.get("ev") == "start":
+            _live[_k] = _live.get(_k, 0) + 1
+            continue
+        _a = _kagg.setdefault(_k, {"ok": 0, "fail": 0, "s": 0.0, "in": 0, "out": 0, "cached": 0, "models": {}})
         if _r.get("ok"): _a["ok"] += 1
         else: _a["fail"] += 1
         _a["s"] += _r.get("s", 0) or 0
         _a["in"] += _r.get("in", 0); _a["out"] += _r.get("out", 0); _a["cached"] += _r.get("cached", 0)
         _a["models"][_r.get("model", "?")] = _a["models"].get(_r.get("model", "?"), 0) + 1
-        # concurrency tracking: each record occupies [ts-s, ts] — reconstruct live/peak/avg
-        _iv = getattr(_kagg.setdefault("__intervals__", {}), "setdefault", None)
-        _kagg.setdefault("__intervals__", {}).setdefault(_r.get("key", 9), []).append(
+        _live[_k] = max(0, _live.get(_k, 0) - 1)  # an end closes its start
+        # concurrency tracking: each completed record occupied [ts-s, ts]
+        _kagg.setdefault("__intervals__", {}).setdefault(_k, []).append(
             (_r["ts"] - (_r.get("s", 0) or 0), _r["ts"]))
 except OSError:
     pass
@@ -523,7 +528,8 @@ if _kagg:
         _a = _kagg[_k]
         _ms = ", ".join(f"{_m}×{_c}" for _m, _c in sorted(_a["models"].items()))
         _b = BUDGETS[_k] if _k < len(BUDGETS) else 12
-        _now, _peak, _avg, _util = _conc_stats(_intervals.get(_k, []), budget=_b)
+        _now = _live.get(_k, 0)  # live in-flight from start/end events (sees long calls)
+        _, _peak, _avg, _util = _conc_stats(_intervals.get(_k, []), budget=_b)
         _tot_n += _now; _tot_util += _util
         _row = (f"key{_k}: {_a['ok']}ok/{_a['fail']}fail  now {_now}/{_b}  peak {_peak}  "
                 f"avg {_avg:.1f} ({_util:.0f}% of budget)  in {_a['in']:,} (cached {_a['cached']:,})  out {_a['out']:,}")
