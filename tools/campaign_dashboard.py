@@ -423,7 +423,8 @@ events = []
 for path, tag, col in SOURCES:
     try:
         lines = open(path, errors="replace").read().splitlines()
-        day = time.strftime("%m-%d", time.localtime(os.path.getmtime(path)))
+        mtime = os.path.getmtime(path)
+        day = time.strftime("%m-%d", time.localtime(mtime))
     except OSError:
         continue
     # walk BACKWARD from the newest line (its date = the file's mtime); each time an
@@ -438,6 +439,25 @@ for path, tag, col in SOURCES:
             day = time.strftime("%m-%d", time.localtime(os.path.getmtime(path) - 86400))
         prev_ts = ts
         events.append((f"{day} {ts}", ts, tag, col, m.group(2)))
+# mx logs carry no timestamps — stamp their last lines with the file's mtime so
+# per-run starts/completions show up in the panel (the campaign's real heartbeat)
+import glob as _glob
+for _p in sorted(_glob.glob("logs/mx_campaign_*.log"), key=os.path.getmtime, reverse=True)[:12]:
+    try:
+        _mt = os.path.getmtime(_p)
+        if _mt < time.time() - 3600:
+            continue  # only logs touched in the last hour
+        _day = time.strftime("%m-%d", time.localtime(_mt))
+        _name = os.path.basename(_p).replace("mx_campaign_", "").replace(".log", "")
+        for _ln in open(_p, errors="replace").read().splitlines()[-3:]:
+            if not _ln.strip():
+                continue
+            _hm = time.strftime("%H:%M", time.localtime(_mt))
+            _bad = ("ERR" in _ln or "fail" in _ln.lower() or "POISON" in _ln)
+            _col = R if _bad else HD
+            events.append((f"{_day} {_hm}", _hm, _name[:14], _col, _ln.replace("[mx] ", "").strip()[:96]))
+    except OSError:
+        pass
 events.sort(key=lambda e: e[0])
 BAD = ("fail", "err ", "error", "poison", "timeout")
 GOOD = ("clean", "done", "complete", "stable", "refill pass done")
