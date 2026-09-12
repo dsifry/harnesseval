@@ -65,12 +65,16 @@ for ROUND in 1 2 3 4 5 6; do
     if [ -z "$SPECS" ]; then log "round $ROUND: cell $fw/$eff top-$TOPN subset complete — skip"; continue; fi
     if ! claude_ok; then log "round $ROUND: claude capped — probing every 10 min"; break; fi
     N=$(echo "$SPECS" | tr ',' '\n' | grep -c .)
-    log "round $ROUND: launching cell $fw/$MODEL/$eff — filling $N of top-$TOPN (conc $CONC)"
+    log "round $ROUND: launching cell $fw/$MODEL/$eff — filling $N of top-$TOPN (conc $CONC) — SERIAL: one cell at a time"
     bash tools/with_ceiling.sh 14400 .venv/bin/python -u -m harnesseval.run_model_matrix --prs 50 --frameworks "$fw" \
       --models $MODEL --efforts "$eff" --mode cli --concurrency $CONC \
       --run-batch $BATCH --skip-batch $BATCH \
-      --fill "$SPECS" >> "logs/mx_campaign_fable_${fw}_${eff}.log" 2>&1 &
-    PIDS="$PIDS $!"
+      --fill "$SPECS" >> "logs/mx_campaign_fable_${fw}_${eff}.log" 2>&1
+    if ! claude_ok; then
+      log "claude capped after cell $fw/$eff — waiting out the window; probing every 10 min"
+      while ! claude_ok; do sleep 600; done
+      log "claude window open — continuing"
+    fi
   done
   DONE=1
   for cell in $CELLS; do
@@ -78,12 +82,6 @@ for ROUND in 1 2 3 4 5 6; do
     [ -n "$(missing_specs "$fw" "$eff")" ] && DONE=0
   done
   [ "$DONE" -eq 1 ] && { log "all 8 fable cells complete on the top-$TOPN subset — done (expand: TOPN=20 + relaunch)"; exit 0; }
-  [ -n "$PIDS" ] && wait $PIDS
   log "round $ROUND finished — re-censusing"
-  if ! claude_ok; then
-    log "claude capped after round $ROUND — waiting out the window; probing every 10 min"
-    while ! claude_ok; do sleep 600; done
-    log "claude window open — continuing"
-  fi
 done
 log "limited fable run: 6 rounds exhausted — remaining subset gaps need a relaunch"
