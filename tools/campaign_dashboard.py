@@ -344,14 +344,22 @@ last_pass, last_completed = last_pass_minutes()
 
 def pace_by_name_factory():
     def pace_for(name, n):
+        # every pace must pass the plausibility filter (>= 15s per run) — fast-fail
+        # sweeps are failure artifacts, not paces (the 00:02-per-run lesson)
+        def plausible(rate):
+            return rate is not None and rate >= 0.25  # minutes per run
         e = last_pass.get(name)
-        if e and len(e) > 4 and e[4] is not None:
+        if e and len(e) > 4 and e[4] is not None and plausible(e[4]):
             return e[4]  # in-flight: the pace basis the running estimate is built on
         if e and not e[1] and e[2]:
-            return e[0] / e[2]  # completed pass: realized pace (actual duration / actual runs)
+            rate = e[0] / e[2]  # completed pass: realized pace (actual duration / actual runs)
+            if plausible(rate):
+                return rate
         if name in last_completed and last_completed[name][1]:
             d0, n0 = last_completed[name]
-            return d0 / n0
+            rate = d0 / n0
+            if plausible(rate):
+                return rate
         return None
     return pace_for
 pace_for = pace_by_name_factory()
