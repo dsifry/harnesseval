@@ -8,7 +8,7 @@ LOG=logs/campaign_final_refill.log
 log() { echo "$(date +%H:%M) $*" | tee -a "$LOG"; }
 BATCH=20260910-mrv0120-manifold
 export HARNESS_KEY_BUDGETS=12,6
-export HARNESS_LUNAROUTE_TIMEOUT_S=1800  # background-variant queue waits: queued calls drain instead of dying at 10 min
+export HARNESS_LUNAROUTE_TIMEOUT_S=2400  # queue headroom: longest observed drain 1778s, ceiling gives peak-hour margin
 export HARNESS_LUNAROUTE_KEY_FILES=~/.config/harnesseval/keys.env.bench:~/.config/harnesseval/keys.env
 MAX_ROUNDS=6
 
