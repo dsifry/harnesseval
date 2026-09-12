@@ -86,13 +86,13 @@ for round in $(seq 1 $MAX_ROUNDS); do
         log "cell $fw/$model/$eff — refilling $N"
         # CLI-hosted premium models (claude/gpt slugs) run via the CLI (OAuth); GLM via the API
         case "$model" in
-          glm-*) MODE=api ;;
-          *)     MODE=cli ;;
+          glm-*) MODE=api; CONC=2 ;;  # vision pool negative-scales past 2-wide (measured)
+          *)     MODE=cli; CONC=3 ;;
         esac
         HARNESS_KEYS_FILE=~/.config/harnesseval/keys.env.bench \
           .venv/bin/python -m harnesseval.run_model_matrix --prs 50 \
           --frameworks "$fw" --models "$model" --efforts "$eff" --mode "$MODE" \
-          --concurrency 3 --run-batch $BATCH --skip-batch $BATCH \
+          --concurrency $CONC --run-batch $BATCH --skip-batch $BATCH \
           --fill "$SPECS" >> "logs/mx_campaign_${model}_${eff}.log" 2>&1
         log "cell $fw/$model/$eff refill pass done"
       done
