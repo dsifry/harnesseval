@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Campaign dashboard — btop-style: frames, colors, block bars, two columns."""
 import json, glob, os, sys, time
+import collections
 from collections import defaultdict
 
 # width ground truth: tmux's pane_width — the tty itself can carry a stale client size
@@ -236,8 +237,6 @@ eta_by_name = {r[0]: eta_str(cells[(k)], r[1], is_active(r)) for r, k in
 def last_pass_minutes():
     import re as _re3
     out = {}
-    import collections as _col
-collections = _col
     d_min = lambda a, b: (b - a) if b >= a else (b - a + 1440)
     FW_ALIAS = {"CE": "compound-realistic", "mrv": "metareview-realistic", "van": "vanilla-engineered"}
     def name_for(fw, model, eff):
