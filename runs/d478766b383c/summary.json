@@ -1,0 +1,319 @@
+{
+  "tp": 3,
+  "fp": 4,
+  "fn": 2,
+  "precision": 0.42857142857142855,
+  "recall": 0.6,
+  "n_findings": 7,
+  "n_golden": 5,
+  "tokens_in": 1449480,
+  "tokens_out": 4930,
+  "wall_ms": 427280.9610366821,
+  "per_model_usage": {
+    "gpt-6-astra": {
+      "input_tokens": 36859,
+      "cache_read_input_tokens": 1407360,
+      "cache_creation_input_tokens": 0,
+      "output_tokens": 4930,
+      "reasoning_output_tokens": 331,
+      "cost_usd": 0.0,
+      "total_tokens": 1449480
+    }
+  },
+  "total_cost_usd": 0.0,
+  "resolved_model": "gpt-6-astra",
+  "adjudicated_precision": 1.0,
+  "incremental_recall": 0.7142857142857143,
+  "n_bug_ungold": 2,
+  "n_important_non_bug": 2,
+  "n_true_hallucination": 0,
+  "n_unresolved": 0,
+  "n_real_ungold": 2,
+  "n_hallucination": 0,
+  "decomposition": {
+    "deterministic_tp": 0,
+    "llm_lens_tp": 3,
+    "deterministic_gate_recall": 0.0,
+    "llm_lens_recall": 0.6
+  },
+  "findings": [
+    {
+      "issue_text": "pkg/services/anonymous/anonimpl/anonstore/database.go:110 \u2014 [P1, confidence 100] `count, err := s.CountDevices(ctx, time.Now().UTC().Add(-anonymousDeviceExpiration), time.Now().UTC().Add(time.Minute))` checks capacity in a separate database session from `_, err := dbSession.Exec(args...)` at line 151, so concurrent first requests for distinct devices both observe the last free slot and both insert successfully, exceeding the configured device limit because neither a transaction with serialized admission nor a database invariant protects the count-and-insert operation.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null
+    },
+    {
+      "issue_text": "pkg/services/anonymous/anonimpl/anonstore/database.go:110 \u2014 [advisory, P2, confidence 100] `count, err := s.CountDevices(ctx, time.Now().UTC().Add(-anonymousDeviceExpiration), time.Now().UTC().Add(time.Minute))` runs `SELECT COUNT(*) FROM anon_device WHERE updated_at BETWEEN ? AND ?` before every existing-device refresh, making a refresh cycle across N active devices count N matching rows N times and delaying synchronous anonymous authentication under large configured limits; the strongest counterargument is the 29-minute local cache, but it only spaces these repeated full-range counts out, and updating an already-active device first makes the count query unnecessary for existing-device refreshes.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null
+    },
+    {
+      "issue_text": "pkg/services/anonymous/anonimpl/impl.go:147 \u2014 [P1; confidence 100] Returning `return err` after `a.localCache.SetDefault(key, struct{}{})` (line 87) leaves a rejected device cached for 29 minutes, so after the new capacity check returns ErrDeviceLimitReached the next TagDevice call takes `if _, ok := a.localCache.Get(key); ok {` and returns success without retrying the rejected operation or persisting that device.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null
+    },
+    {
+      "issue_text": "pkg/services/anonymous/anonimpl/client.go:44 \u2014 [advisory; P2; confidence 75] The synchronous `if err := a.anonDeviceService.TagDevice(ctx, httpReqCopy, anonymous.AnonDeviceUI); err != nil {` removes the previous two-minute tagging deadline, so with a request context lacking a deadline a stalled database tagging call blocks anonymous authentication indefinitely; the strongest rebuttal is that request cancellation eventually aborts the query, but a connected client has no cancellation deadline and the removed context.WithTimeout previously bounded this work.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null
+    },
+    {
+      "issue_text": "pkg/services/anonymous/anonimpl/client.go:44 \u2014 [P1, confidence 100] An unauthenticated caller bypasses a full configured device limit by omitting `X-Grafana-Device-Id`, because the new guard `if err := a.anonDeviceService.TagDevice(ctx, httpReqCopy, anonymous.AnonDeviceUI); err != nil {` delegates to `if deviceID == \"\" {` followed by `return nil` (pkg/services/anonymous/anonimpl/impl.go:120\u2013121), after which `return &authn.Identity{` grants the configured anonymous role without checking or consuming a device slot.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null
+    },
+    {
+      "issue_text": "pkg/services/anonymous/anonimpl/anonstore/database_test.go:65 \u2014 [P2, confidence 100, advisory] Changing the only limited-device fixture to a different ID with `anonDevice.DeviceID = \"keep\"` leaves successful refreshes at capacity untested, so replacing the new update path with unconditional ErrDeviceLimitReached passes this suite while locking out already-admitted users; although the test correctly verifies rejection of a second device, that assertion does not protect the equally necessary existing-device success branch or its persisted timestamp and metadata.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null
+    },
+    {
+      "issue_text": "pkg/services/anonymous/anonimpl/impl_test.go:117 \u2014 [P2, confidence 100, advisory] Constructing every service test with `&authntest.FakeService{}, store, setting.NewCfg(), orgtest.NewOrgServiceFake(), nil, actest.FakeAccessControl{}, &routing.RouteRegisterImpl{})` keeps the limit at zero and leaves the newly added TagDevice error propagation unexercised, so deleting `return err` at impl.go:147 passes the changed tests while admitting requests after the store rejects their device; although the database test checks the limit error directly, it bypasses the service boundary whose previous behavior swallowed that error.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null
+    }
+  ],
+  "goldens": [
+    {
+      "comment": "Race condition: Multiple concurrent requests could pass the device count check simultaneously and create devices beyond the limit. Consider using a database transaction or lock.",
+      "severity": "High",
+      "category": "concurrency"
+    },
+    {
+      "comment": "Anonymous authentication now fails entirely if anonDeviceService.TagDevice returns ErrDeviceLimitReached. Previously, device tagging was asynchronous and non-blocking. This change prevents anonymous users from authenticating when the device limit is reached.",
+      "severity": "Medium",
+      "category": "bug"
+    },
+    {
+      "comment": "The updateDevice function returns ErrDeviceLimitReached when rowsAffected == 0, but zero affected rows means the device doesn't exist or falls outside the time window, not that a limit was reached.",
+      "severity": "Low",
+      "category": "doc_defect"
+    },
+    {
+      "comment": "Time window calculation inconsistency: Using device.UpdatedAt.UTC().Add(-anonymousDeviceExpiration) as the lower bound but device.UpdatedAt as the current time may not match the intended logic. Consider using time.Now().UTC() consistently.",
+      "severity": "Low",
+      "category": "bug"
+    },
+    {
+      "comment": "The `tagDeviceUI` function populates the local cache with the device ID before the `CreateOrUpdateDevice` call. If `ErrDeviceLimitReached` is returned, the cache entry remains set, allowing subsequent requests to bypass the device limit until the cache expires after 29 minutes.",
+      "severity": "High",
+      "category": "bug"
+    }
+  ],
+  "per_golden_matches": [
+    {
+      "golden_comment": "Race condition: Multiple concurrent requests could pass the device count check simultaneously and create devices beyond the limit. Consider using a database transaction or lock.",
+      "severity": "High",
+      "category": "concurrency",
+      "matched_candidate": "pkg/services/anonymous/anonimpl/anonstore/database.go:110 \u2014 [P1, confidence 100] `count, err := s.CountDevices(ctx, time.Now().UTC().Add(-anonymousDeviceExpiration), time.Now().UTC().Add(time.Minute))` checks capacity in a separate database session from `_, err := dbSession.Exec(args...)` at line 151, so concurrent first requests for distinct devices both observe the last free slot and both insert successfully, exceeding the configured device limit because neither a transaction with serialized admission nor a database invariant protects the count-and-insert operation.",
+      "confidence": 0.98,
+      "reasoning": "The candidate issue identifies exactly the same race condition as the golden comment. Both point out that: 1) Multiple concurrent requests can pass the device count check simultaneously, 2) This allows creating devices beyond the configured limit, 3) The solution involves using a transaction or database-level protection. The candidate provides more technical detail about the specific lines of code and the mechanism of the race condition, but it's fundamentally the same issue."
+    },
+    {
+      "golden_comment": "Anonymous authentication now fails entirely if anonDeviceService.TagDevice returns ErrDeviceLimitReached. Previously, device tagging was asynchronous and non-blocking. This change prevents anonymous users from authenticating when the device limit is reached.",
+      "severity": "Medium",
+      "category": "bug",
+      "matched_candidate": "pkg/services/anonymous/anonimpl/impl_test.go:117 \u2014 [P2, confidence 100, advisory] Constructing every service test with `&authntest.FakeService{}, store, setting.NewCfg(), orgtest.NewOrgServiceFake(), nil, actest.FakeAccessControl{}, &routing.RouteRegisterImpl{})` keeps the limit at zero and leaves the newly added TagDevice error propagation unexercised, so deleting `return err` at impl.go:147 passes the changed tests while admitting requests after the store rejects their device; although the database test checks the limit error directly, it bypasses the service boundary whose previous behavior swallowed that error.",
+      "confidence": 0.75,
+      "reasoning": "The candidate issue is discussing test coverage concerns - specifically that the tests don't properly exercise the TagDevice error propagation path, and that the service boundary behavior change (which previously swallowed the error) isn't being tested. The golden comment is about a behavioral change where anonymous authentication now fails entirely when device limit is reached, whereas previously it was non-blocking. The candidate is pointing to the same underlying issue - that TagDevice errors are now propagated (blocking authentication) when they weren't before - but from a test coverage perspective rather than directly stating the behavioral impact. Both are concerned about the same code change where errors from TagDevice are now returned instead of being swallowed."
+    },
+    {
+      "golden_comment": "The `tagDeviceUI` function populates the local cache with the device ID before the `CreateOrUpdateDevice` call. If `ErrDeviceLimitReached` is returned, the cache entry remains set, allowing subsequent requests to bypass the device limit until the cache expires after 29 minutes.",
+      "severity": "High",
+      "category": "bug",
+      "matched_candidate": "pkg/services/anonymous/anonimpl/impl.go:147 \u2014 [P1; confidence 100] Returning `return err` after `a.localCache.SetDefault(key, struct{}{})` (line 87) leaves a rejected device cached for 29 minutes, so after the new capacity check returns ErrDeviceLimitReached the next TagDevice call takes `if _, ok := a.localCache.Get(key); ok {` and returns success without retrying the rejected operation or persisting that device.",
+      "confidence": 0.98,
+      "reasoning": "The candidate issue identifies the exact same problem as the golden comment: the local cache is populated with the device ID before the CreateOrUpdateDevice call, and if ErrDeviceLimitReached is returned, the cache entry remains set, allowing subsequent requests to bypass the device limit check by hitting the cached entry. Both comments point to the same bug where the cache is set at line 87 before the operation, and when the device limit error occurs, the cache entry persists for 29 minutes, allowing bypass of the limit."
+    },
+    {
+      "golden_comment": "The updateDevice function returns ErrDeviceLimitReached when rowsAffected == 0, but zero affected rows means the device doesn't exist or falls outside the time window, not that a limit was reached.",
+      "severity": "Low",
+      "category": "doc_defect"
+    },
+    {
+      "golden_comment": "Time window calculation inconsistency: Using device.UpdatedAt.UTC().Add(-anonymousDeviceExpiration) as the lower bound but device.UpdatedAt as the current time may not match the intended logic. Consider using time.Now().UTC() consistently.",
+      "severity": "Low",
+      "category": "bug"
+    }
+  ],
+  "adjudication_records": [
+    {
+      "issue_text": "pkg/services/anonymous/anonimpl/anonstore/database.go:110 \u2014 [P1, confidence 100] `count, err := s.CountDevices(ctx, time.Now().UTC().Add(-anonymousDeviceExpiration), time.Now().UTC().Add(time.Minute))` checks capacity in a separate database session from `_, err := dbSession.Exec(args...)` at line 151, so concurrent first requests for distinct devices both observe the last free slot and both insert successfully, exceeding the configured device limit because neither a transaction with serialized admission nor a database invariant protects the count-and-insert operation.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null,
+      "matched_golden_ids": [
+        "Race condition: Multiple concurrent requests could pass the device count check simultaneously and create devices beyond the limit. Consider using a database transaction or lock."
+      ],
+      "primary_judge_verdict": "matched",
+      "primary_judge": "claude-opus-4-5-20251101",
+      "primary_judge_confidence": 0.98,
+      "primary_judge_reasoning": "The candidate issue identifies exactly the same race condition as the golden comment. Both point out that: 1) Multiple concurrent requests can pass the device count check simultaneously, 2) This allows creating devices beyond the configured limit, 3) The solution involves using a transaction or database-level protection. The candidate provides more technical detail about the specific lines of code and the mechanism of the race condition, but it's fundamentally the same issue.",
+      "adjudication": {
+        "verdict": "matched",
+        "adjudicating_judge": null,
+        "confidence": null,
+        "rationale": null,
+        "diff_context_hash": "7b5e7fb56e70e08bf730044936caeed535f338b3"
+      }
+    },
+    {
+      "issue_text": "pkg/services/anonymous/anonimpl/anonstore/database.go:110 \u2014 [advisory, P2, confidence 100] `count, err := s.CountDevices(ctx, time.Now().UTC().Add(-anonymousDeviceExpiration), time.Now().UTC().Add(time.Minute))` runs `SELECT COUNT(*) FROM anon_device WHERE updated_at BETWEEN ? AND ?` before every existing-device refresh, making a refresh cycle across N active devices count N matching rows N times and delaying synchronous anonymous authentication under large configured limits; the strongest counterargument is the 29-minute local cache, but it only spaces these repeated full-range counts out, and updating an already-active device first makes the count query unnecessary for existing-device refreshes.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null,
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "claude-opus-4-5-20251101",
+        "confidence": 0.72,
+        "rationale": "The finding correctly identifies that CreateOrUpdateDevice calls CountDevices before every insert/update when deviceLimit > 0. Looking at the diff, line 110 shows `count, err := s.CountDevices(ctx, ...)` is called unconditionally when the limit is set. The finding's concern about performance is valid - this adds a COUNT query on every device tag operation. However, the 29-minute local cache in impl.go does mitigate this significantly by preventing repeated calls for the same device. The suggestion to try updating first before counting is a reasonable optimization. This is a legitimate performance/architecture concern but not a bug since the code functions correctly.",
+        "diff_context_hash": "7b5e7fb56e70e08bf730044936caeed535f338b3"
+      }
+    },
+    {
+      "issue_text": "pkg/services/anonymous/anonimpl/impl.go:147 \u2014 [P1; confidence 100] Returning `return err` after `a.localCache.SetDefault(key, struct{}{})` (line 87) leaves a rejected device cached for 29 minutes, so after the new capacity check returns ErrDeviceLimitReached the next TagDevice call takes `if _, ok := a.localCache.Get(key); ok {` and returns success without retrying the rejected operation or persisting that device.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null,
+      "matched_golden_ids": [
+        "The `tagDeviceUI` function populates the local cache with the device ID before the `CreateOrUpdateDevice` call. If `ErrDeviceLimitReached` is returned, the cache entry remains set, allowing subsequent requests to bypass the device limit until the cache expires after 29 minutes."
+      ],
+      "primary_judge_verdict": "matched",
+      "primary_judge": "claude-opus-4-5-20251101",
+      "primary_judge_confidence": 0.98,
+      "primary_judge_reasoning": "The candidate issue identifies the exact same problem as the golden comment: the local cache is populated with the device ID before the CreateOrUpdateDevice call, and if ErrDeviceLimitReached is returned, the cache entry remains set, allowing subsequent requests to bypass the device limit check by hitting the cached entry. Both comments point to the same bug where the cache is set at line 87 before the operation, and when the device limit error occurs, the cache entry persists for 29 minutes, allowing bypass of the limit.",
+      "adjudication": {
+        "verdict": "matched",
+        "adjudicating_judge": null,
+        "confidence": null,
+        "rationale": null,
+        "diff_context_hash": "7b5e7fb56e70e08bf730044936caeed535f338b3"
+      }
+    },
+    {
+      "issue_text": "pkg/services/anonymous/anonimpl/client.go:44 \u2014 [advisory; P2; confidence 75] The synchronous `if err := a.anonDeviceService.TagDevice(ctx, httpReqCopy, anonymous.AnonDeviceUI); err != nil {` removes the previous two-minute tagging deadline, so with a request context lacking a deadline a stalled database tagging call blocks anonymous authentication indefinitely; the strongest rebuttal is that request cancellation eventually aborts the query, but a connected client has no cancellation deadline and the removed context.WithTimeout previously bounded this work.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null,
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "claude-opus-4-5-20251101",
+        "confidence": 0.85,
+        "rationale": "The diff clearly shows removal of the goroutine with context.WithTimeout(context.Background(), timeoutTag) where timeoutTag was 2*time.Minute. The new code directly calls TagDevice with the request context (ctx) without any timeout. The finding correctly identifies that this change removes the 2-minute deadline protection. If the request context has no deadline and the database call stalls, the authentication would block indefinitely. This is a real behavioral change that could cause issues - the previous code had explicit timeout protection that is now removed.",
+        "diff_context_hash": "7b5e7fb56e70e08bf730044936caeed535f338b3"
+      }
+    },
+    {
+      "issue_text": "pkg/services/anonymous/anonimpl/client.go:44 \u2014 [P1, confidence 100] An unauthenticated caller bypasses a full configured device limit by omitting `X-Grafana-Device-Id`, because the new guard `if err := a.anonDeviceService.TagDevice(ctx, httpReqCopy, anonymous.AnonDeviceUI); err != nil {` delegates to `if deviceID == \"\" {` followed by `return nil` (pkg/services/anonymous/anonimpl/impl.go:120\u2013121), after which `return &authn.Identity{` grants the configured anonymous role without checking or consuming a device slot.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null,
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "claude-opus-4-5-20251101",
+        "confidence": 0.85,
+        "rationale": "The finding correctly identifies a security bypass. Looking at the diff in client.go (lines 44-50), when TagDevice returns an error, it only blocks authentication if the error is ErrDeviceLimitReached. However, examining impl.go lines 120-121 (referenced in the finding), when deviceID is empty, the tagDeviceUI function returns nil (no error), not ErrDeviceLimitReached. This means a caller without X-Grafana-Device-Id header would have TagDevice return nil, bypassing the device limit check entirely, and still receive the anonymous identity. The device limit enforcement in anonstore/database.go only happens when CreateOrUpdateDevice is called, but that path is skipped when deviceID is empty.",
+        "diff_context_hash": "7b5e7fb56e70e08bf730044936caeed535f338b3"
+      }
+    },
+    {
+      "issue_text": "pkg/services/anonymous/anonimpl/anonstore/database_test.go:65 \u2014 [P2, confidence 100, advisory] Changing the only limited-device fixture to a different ID with `anonDevice.DeviceID = \"keep\"` leaves successful refreshes at capacity untested, so replacing the new update path with unconditional ErrDeviceLimitReached passes this suite while locking out already-admitted users; although the test correctly verifies rejection of a second device, that assertion does not protect the equally necessary existing-device success branch or its persisted timestamp and metadata.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null,
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "claude-opus-4-5-20251101",
+        "confidence": 0.85,
+        "rationale": "The finding correctly identifies a gap in test coverage. Looking at the test TestIntegrationBeyondDeviceLimit (lines 51-67), it creates one device, then tries to create a second device with a different ID and expects ErrDeviceLimitReached. However, the test doesn't verify that updating an EXISTING device (same device_id) at capacity succeeds. The updateDevice function (lines 72-99) is the path that should allow existing devices to refresh, but this path is not tested. The test only verifies rejection of new devices, not successful updates of existing ones. This is a legitimate test coverage gap for newly added logic.",
+        "diff_context_hash": "7b5e7fb56e70e08bf730044936caeed535f338b3"
+      }
+    },
+    {
+      "issue_text": "pkg/services/anonymous/anonimpl/impl_test.go:117 \u2014 [P2, confidence 100, advisory] Constructing every service test with `&authntest.FakeService{}, store, setting.NewCfg(), orgtest.NewOrgServiceFake(), nil, actest.FakeAccessControl{}, &routing.RouteRegisterImpl{})` keeps the limit at zero and leaves the newly added TagDevice error propagation unexercised, so deleting `return err` at impl.go:147 passes the changed tests while admitting requests after the store rejects their device; although the database test checks the limit error directly, it bypasses the service boundary whose previous behavior swallowed that error.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null,
+      "matched_golden_ids": [
+        "Anonymous authentication now fails entirely if anonDeviceService.TagDevice returns ErrDeviceLimitReached. Previously, device tagging was asynchronous and non-blocking. This change prevents anonymous users from authenticating when the device limit is reached."
+      ],
+      "primary_judge_verdict": "matched",
+      "primary_judge": "claude-opus-4-5-20251101",
+      "primary_judge_confidence": 0.75,
+      "primary_judge_reasoning": "The candidate issue is discussing test coverage concerns - specifically that the tests don't properly exercise the TagDevice error propagation path, and that the service boundary behavior change (which previously swallowed the error) isn't being tested. The golden comment is about a behavioral change where anonymous authentication now fails entirely when device limit is reached, whereas previously it was non-blocking. The candidate is pointing to the same underlying issue - that TagDevice errors are now propagated (blocking authentication) when they weren't before - but from a test coverage perspective rather than directly stating the behavioral impact. Both are concerned about the same code change where errors from TagDevice are now returned instead of being swallowed.",
+      "adjudication": {
+        "verdict": "matched",
+        "adjudicating_judge": null,
+        "confidence": null,
+        "rationale": null,
+        "diff_context_hash": "7b5e7fb56e70e08bf730044936caeed535f338b3"
+      }
+    }
+  ],
+  "diff_context_hash": "7b5e7fb56e70e08bf730044936caeed535f338b3",
+  "primary_judge": "claude-opus-4-5-20251101",
+  "adjudicating_judge": "claude-opus-4-5-20251101",
+  "url": "https://github.com/grafana/grafana/pull/79265",
+  "framework": "metareview-realistic",
+  "model": "gpt-6-astra",
+  "effort": "high",
+  "judge": "claude-opus-4-5-20251101",
+  "wall_s": 454.8238401412964,
+  "execution_mode": "cli",
+  "run_batch": "20260910-mrv0120-manifold"
+}

@@ -1,0 +1,298 @@
+{
+  "tp": 3,
+  "fp": 5,
+  "fn": 0,
+  "precision": 0.375,
+  "recall": 1.0,
+  "n_findings": 7,
+  "n_golden": 3,
+  "tokens_in": 1162574,
+  "tokens_out": 5869,
+  "wall_ms": 373114.2621040344,
+  "per_model_usage": {
+    "gpt-6-astra": {
+      "input_tokens": 33994,
+      "cache_read_input_tokens": 1122432,
+      "cache_creation_input_tokens": 0,
+      "output_tokens": 5869,
+      "reasoning_output_tokens": 279,
+      "cost_usd": 0.0,
+      "total_tokens": 1162574
+    }
+  },
+  "total_cost_usd": 0.0,
+  "resolved_model": "gpt-6-astra",
+  "adjudicated_precision": 1.0,
+  "incremental_recall": 1.0,
+  "n_bug_ungold": 2,
+  "n_important_non_bug": 3,
+  "n_true_hallucination": 0,
+  "n_unresolved": 0,
+  "n_real_ungold": 2,
+  "n_hallucination": 0,
+  "decomposition": {
+    "deterministic_tp": 0,
+    "llm_lens_tp": 3,
+    "deterministic_gate_recall": 0.0,
+    "llm_lens_recall": 1.0
+  },
+  "findings": [
+    {
+      "issue_text": "pkg/services/authz/rbac/service.go:139 \u2014 [confidence 100][P2][advisory: wrong shape] `permissions, err := s.getIdentityPermissions(ctx, checkReq.Namespace, checkReq.IdentityType, checkReq.UserUID, checkReq.Action)` refetches the complete action permission set after every cached denial for a previously unseen resource, so N sequential checks of inaccessible dashboards for the same user and action issue N permission-store queries and rebuild the same permission map N times even when the preceding check just refreshed it; the strongest rebuttal is that this refresh discovers newly granted access and `singleflight` coalesces requests, but sequential checks never overlap and the denial key includes each resource name, so the previous shared-cache amortization is lost and high-cardinality authorization workloads repeatedly load the database, requiring freshness tracking or refresh throttling at the shared user/action cache level.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null
+    },
+    {
+      "issue_text": "pkg/services/authz/rbac/cache.go:31 \u2014 [confidence 100][P2] `return namespace + \".perm_\" + userUID + \"_\" + action + \"_\" + name + \"_\" + parent` uses unescaped separators for independently supplied resource and folder identifiers, so `(name=\"a_b\", parent=\"c\")` and `(name=\"a\", parent=\"b_c\")` produce the same denial key and denying the first makes `Check` reject the second for 30 seconds even when its permission map grants access; the strongest rebuttal is that keys follow existing cache conventions, but the new variable name/parent suffix introduces this specific ambiguity and request validation does not prohibit underscores, so the tuple needs an injective encoding.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null
+    },
+    {
+      "issue_text": "pkg/services/authz/rbac/service.go:131 \u2014 Sequential checks of N distinct inaccessible resources for one user/action now perform N full permission-store reads and rebuild the same M-entry permission map even inside one cache TTL, imposing O(N\u00d7M) permission work on large-resource tenants and their shared database \u2014 P2; confidence=100; classification=advisory; trigger=N nonoverlapping Check calls with different names, unchanged permissions, and no denial entries; harmed party=tenants sharing the permission database; verbatim code=`if allowed {` / `permissions, err := s.getIdentityPermissions(ctx, checkReq.Namespace, checkReq.IdentityType, checkReq.UserUID, checkReq.Action)` / `permissions, err := s.permissionStore.GetUserPermissions(ctx, ns, userPermQuery)`; strongest author rebuttal=refresh-on-denial discovers new grants while denial caching and singleflight suppress duplicate reads; why it survives=denial keys include the resource name and singleflight only coalesces overlapping calls, so neither bounds sequential different-resource requests although the previous implementation reused the user/action permission snapshot for 30 seconds; bound refresh frequency per user/action while retaining the grant-refresh behavior.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null
+    },
+    {
+      "issue_text": "pkg/services/authz/rbac/cache.go:31 \u2014 [confidence 100, P2] `return namespace + \".perm_\" + userUID + \"_\" + action + \"_\" + name + \"_\" + parent` gives the same denial key to `(name=\"dash_a\", parent=\"b\")` and `(name=\"dash\", parent=\"a_b\")`, so denying the former suppresses an explicitly permitted request for the latter for 30 seconds because Check returns before evaluating its permissions; the strongest rebuttal is that callers supply valid resource identifiers, but underscore-containing identifiers are not rejected by validateCheckRequest and tuple encoding is still ambiguous.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null
+    },
+    {
+      "issue_text": "pkg/services/authz/rbac/service.go:116 \u2014 [confidence 75, P2, advisory] `permDenialKey := userPermDenialCacheKey(checkReq.Namespace.Value, checkReq.UserUID, checkReq.Action, checkReq.Name, checkReq.ParentFolder)` drops IdentityType even though permission computation distinguishes anonymous, renderer, and user identities, so a denied anonymous subject with the same parsed identifier as an authorized user or renderer poisons that other principal's next identical check for 30 seconds; the strongest rebuttal is that production callers use distinct identifier conventions, but validateSubject accepts these identity types without enforcing disjoint identifiers and the new early return precedes the identity-specific permission lookup.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null
+    },
+    {
+      "issue_text": "pkg/services/authz/rbac/service_test.go:982 \u2014 The explicit-denial test still returns the expected denial when the denial-cache lookup is removed because its purported allow fixture is false and its default store grants nothing; metadata: P2, confidence 100, advisory; code: `map[string]bool{\"dashboards:uid:dash1\": false}` and `assert.False(t, resp.Allowed)`; trigger/harmed party: a regression that bypasses cached denials silently restores database work for repeated denied requests, harming service operators; strongest author rebuttal: the fixture seeds a real denial entry and asserts the final response; survives because the uncached path produces exactly the same response and no store-call assertion distinguishes it; seed a true cached grant and assert zero backing-store calls.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null
+    },
+    {
+      "issue_text": "pkg/services/authz/rbac/service_test.go:979 \u2014 The cache tests manually insert the only denial-cache fixture and make one Check per fresh service, so deleting the production denial-cache write leaves their assertions unchanged and fails to detect loss of repeated-denial caching; metadata: P2, confidence 100, advisory; code: `s.permDenialCache.Set(ctx, userPermDenialCacheKey(\"org-12\", \"test-uid\", \"dashboards:read\", \"dash1\", \"fold1\"), true)` bypasses production `s.permDenialCache.Set(ctx, permDenialKey, true)` at service.go:154; trigger/harmed party: a missing or incorrectly keyed write makes every denied request reload permissions, harming service operators; strongest author rebuttal: existing user/anonymous denial tests exercise the write and the new test exercises a hit; survives because those tests never inspect the denial entry or issue a second request against the same service, so they do not connect population to reuse; drive an initial store denial followed by the identical request and assert that the second call performs no additional store reads.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null
+    }
+  ],
+  "goldens": [
+    {
+      "comment": "The Check operation exhibits asymmetric cache trust logic: cached permission grants are trusted and returned immediately, but cached denials from the same permission cache are ignored, leading to a fresh database lookup. This allows stale cached grants to provide access to revoked resources, posing a security risk. ",
+      "severity": "High",
+      "category": "security"
+    },
+    {
+      "comment": "The test comment says the cached permissions 'allow access', but the map stores false for dashboards:uid:dash1, so checkPermission will still treat this scope as not allowed.",
+      "severity": "Low",
+      "category": "doc_defect"
+    },
+    {
+      "comment": "The cache key construction in `userPermDenialCacheKey` uses simple string concatenation with underscores, which can lead to ambiguous keys and collision risks when any component contains underscores or is empty. This could result in incorrect denial cache hits, affecting user permissions.",
+      "severity": "Medium",
+      "category": "data"
+    }
+  ],
+  "per_golden_matches": [
+    {
+      "golden_comment": "The Check operation exhibits asymmetric cache trust logic: cached permission grants are trusted and returned immediately, but cached denials from the same permission cache are ignored, leading to a fresh database lookup. This allows stale cached grants to provide access to revoked resources, posing a security risk. ",
+      "severity": "High",
+      "category": "security",
+      "matched_candidate": "pkg/services/authz/rbac/service_test.go:982 \u2014 The explicit-denial test still returns the expected denial when the denial-cache lookup is removed because its purported allow fixture is false and its default store grants nothing; metadata: P2, confidence 100, advisory; code: `map[string]bool{\"dashboards:uid:dash1\": false}` and `assert.False(t, resp.Allowed)`; trigger/harmed party: a regression that bypasses cached denials silently restores database work for repeated denied requests, harming service operators; strongest author rebuttal: the fixture seeds a real denial entry and asserts the final response; survives because the uncached path produces exactly the same response and no store-call assertion distinguishes it; seed a true cached grant and assert zero backing-store calls.",
+      "confidence": 0.78,
+      "reasoning": "The candidate issue discusses the same underlying problem - the asymmetric cache trust logic where cached denials are not trusted the same way as cached grants. The candidate specifically mentions 'a regression that bypasses cached denials silently restores database work for repeated denied requests' and discusses how the test doesn't properly distinguish between cached and uncached paths. While the candidate focuses on the test file and test coverage aspects rather than the security implications emphasized in the golden comment, both are identifying the same core issue: cached permission grants are trusted but cached denials are ignored/bypassed, leading to database lookups. The candidate even suggests the fix should 'seed a true cached grant and assert zero backing-store calls' to properly test this behavior."
+    },
+    {
+      "golden_comment": "The test comment says the cached permissions 'allow access', but the map stores false for dashboards:uid:dash1, so checkPermission will still treat this scope as not allowed.",
+      "severity": "Low",
+      "category": "doc_defect",
+      "matched_candidate": "pkg/services/authz/rbac/service_test.go:982 \u2014 The explicit-denial test still returns the expected denial when the denial-cache lookup is removed because its purported allow fixture is false and its default store grants nothing; metadata: P2, confidence 100, advisory; code: `map[string]bool{\"dashboards:uid:dash1\": false}` and `assert.False(t, resp.Allowed)`; trigger/harmed party: a regression that bypasses cached denials silently restores database work for repeated denied requests, harming service operators; strongest author rebuttal: the fixture seeds a real denial entry and asserts the final response; survives because the uncached path produces exactly the same response and no store-call assertion distinguishes it; seed a true cached grant and assert zero backing-store calls.",
+      "confidence": 0.95,
+      "reasoning": "The candidate issue identifies the same problem as the golden comment. Both point out that the test claims to test cached permissions that 'allow access', but the map actually stores `false` for 'dashboards:uid:dash1'. The candidate correctly notes that the 'purported allow fixture is false' and that the test would produce the same denial result whether or not the cache is consulted, making the test ineffective at verifying the caching behavior. The candidate even suggests the fix: 'seed a true cached grant' - which aligns with the golden comment's observation that the cached value should be true to actually test the 'allow access' scenario."
+    },
+    {
+      "golden_comment": "The cache key construction in `userPermDenialCacheKey` uses simple string concatenation with underscores, which can lead to ambiguous keys and collision risks when any component contains underscores or is empty. This could result in incorrect denial cache hits, affecting user permissions.",
+      "severity": "Medium",
+      "category": "data",
+      "matched_candidate": "pkg/services/authz/rbac/cache.go:31 \u2014 [confidence 100][P2] `return namespace + \".perm_\" + userUID + \"_\" + action + \"_\" + name + \"_\" + parent` uses unescaped separators for independently supplied resource and folder identifiers, so `(name=\"a_b\", parent=\"c\")` and `(name=\"a\", parent=\"b_c\")` produce the same denial key and denying the first makes `Check` reject the second for 30 seconds even when its permission map grants access; the strongest rebuttal is that keys follow existing cache conventions, but the new variable name/parent suffix introduces this specific ambiguity and request validation does not prohibit underscores, so the tuple needs an injective encoding.",
+      "confidence": 0.98,
+      "reasoning": "The candidate issue identifies the exact same problem as the golden comment: the cache key construction using simple string concatenation with underscores can lead to key collisions when components contain underscores. The candidate provides a specific example showing how (name=\"a_b\", parent=\"c\") and (name=\"a\", parent=\"b_c\") would produce the same key, which is precisely the ambiguity/collision risk mentioned in the golden comment. Both issues point to the same bug in `userPermDenialCacheKey` that could result in incorrect denial cache hits affecting user permissions."
+    }
+  ],
+  "adjudication_records": [
+    {
+      "issue_text": "pkg/services/authz/rbac/service.go:139 \u2014 [confidence 100][P2][advisory: wrong shape] `permissions, err := s.getIdentityPermissions(ctx, checkReq.Namespace, checkReq.IdentityType, checkReq.UserUID, checkReq.Action)` refetches the complete action permission set after every cached denial for a previously unseen resource, so N sequential checks of inaccessible dashboards for the same user and action issue N permission-store queries and rebuild the same permission map N times even when the preceding check just refreshed it; the strongest rebuttal is that this refresh discovers newly granted access and `singleflight` coalesces requests, but sequential checks never overlap and the denial key includes each resource name, so the previous shared-cache amortization is lost and high-cardinality authorization workloads repeatedly load the database, requiring freshness tracking or refresh throttling at the shared user/action cache level.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null,
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "claude-opus-4-5-20251101",
+        "confidence": 0.72,
+        "rationale": "The finding correctly identifies a performance concern in the new caching logic. Looking at the diff, when a cached denial is NOT found (line 115-119), the code checks cached permissions (line 121), and if that check doesn't allow access, it falls through to call getIdentityPermissions() (line 143). The denial cache key includes name and parent (userPermDenialCacheKey includes action, name, parent), so each unique resource will miss the denial cache and trigger a full permission fetch. While singleflight helps with concurrent requests, sequential checks for different resources will each query the database. This is a valid architectural concern about the caching strategy - the denial cache is per-resource while the permission cache is per-action, creating potential for repeated database queries. However, this is a design tradeoff rather than a bug - the code functions correctly, it's just potentially less efficient than the previous approach for certain workloads.",
+        "diff_context_hash": "a5ffd38b06edec5bdae43bbc0d8d98aa9ff4c4b2"
+      }
+    },
+    {
+      "issue_text": "pkg/services/authz/rbac/cache.go:31 \u2014 [confidence 100][P2] `return namespace + \".perm_\" + userUID + \"_\" + action + \"_\" + name + \"_\" + parent` uses unescaped separators for independently supplied resource and folder identifiers, so `(name=\"a_b\", parent=\"c\")` and `(name=\"a\", parent=\"b_c\")` produce the same denial key and denying the first makes `Check` reject the second for 30 seconds even when its permission map grants access; the strongest rebuttal is that keys follow existing cache conventions, but the new variable name/parent suffix introduces this specific ambiguity and request validation does not prohibit underscores, so the tuple needs an injective encoding.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null,
+      "matched_golden_ids": [
+        "The cache key construction in `userPermDenialCacheKey` uses simple string concatenation with underscores, which can lead to ambiguous keys and collision risks when any component contains underscores or is empty. This could result in incorrect denial cache hits, affecting user permissions."
+      ],
+      "primary_judge_verdict": "matched",
+      "primary_judge": "claude-opus-4-5-20251101",
+      "primary_judge_confidence": 0.98,
+      "primary_judge_reasoning": "The candidate issue identifies the exact same problem as the golden comment: the cache key construction using simple string concatenation with underscores can lead to key collisions when components contain underscores. The candidate provides a specific example showing how (name=\"a_b\", parent=\"c\") and (name=\"a\", parent=\"b_c\") would produce the same key, which is precisely the ambiguity/collision risk mentioned in the golden comment. Both issues point to the same bug in `userPermDenialCacheKey` that could result in incorrect denial cache hits affecting user permissions.",
+      "adjudication": {
+        "verdict": "matched",
+        "adjudicating_judge": null,
+        "confidence": null,
+        "rationale": null,
+        "diff_context_hash": "a5ffd38b06edec5bdae43bbc0d8d98aa9ff4c4b2"
+      }
+    },
+    {
+      "issue_text": "pkg/services/authz/rbac/service.go:131 \u2014 Sequential checks of N distinct inaccessible resources for one user/action now perform N full permission-store reads and rebuild the same M-entry permission map even inside one cache TTL, imposing O(N\u00d7M) permission work on large-resource tenants and their shared database \u2014 P2; confidence=100; classification=advisory; trigger=N nonoverlapping Check calls with different names, unchanged permissions, and no denial entries; harmed party=tenants sharing the permission database; verbatim code=`if allowed {` / `permissions, err := s.getIdentityPermissions(ctx, checkReq.Namespace, checkReq.IdentityType, checkReq.UserUID, checkReq.Action)` / `permissions, err := s.permissionStore.GetUserPermissions(ctx, ns, userPermQuery)`; strongest author rebuttal=refresh-on-denial discovers new grants while denial caching and singleflight suppress duplicate reads; why it survives=denial keys include the resource name and singleflight only coalesces overlapping calls, so neither bounds sequential different-resource requests although the previous implementation reused the user/action permission snapshot for 30 seconds; bound refresh frequency per user/action while retaining the grant-refresh behavior.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null,
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "claude-opus-4-5-20251101",
+        "confidence": 0.72,
+        "rationale": "The finding identifies a real performance concern in the diff. Looking at the Check function (lines 113-154), when cached permissions exist but don't grant access (line 131 `if allowed`), the code falls through to call `getIdentityPermissions` which hits the database. The old code (removed lines 377-381 in getUserPermissions) had cache checks that would return cached permissions, but now those checks are removed. The denial cache uses keys that include name and parent (line 116), so different resources create different denial keys. While singleflight helps with concurrent requests, sequential requests for different resources will each hit the database. This is a valid architectural/performance concern about the caching strategy change, though it's advisory rather than a bug since the system still functions correctly.",
+        "diff_context_hash": "a5ffd38b06edec5bdae43bbc0d8d98aa9ff4c4b2"
+      }
+    },
+    {
+      "issue_text": "pkg/services/authz/rbac/cache.go:31 \u2014 [confidence 100, P2] `return namespace + \".perm_\" + userUID + \"_\" + action + \"_\" + name + \"_\" + parent` gives the same denial key to `(name=\"dash_a\", parent=\"b\")` and `(name=\"dash\", parent=\"a_b\")`, so denying the former suppresses an explicitly permitted request for the latter for 30 seconds because Check returns before evaluating its permissions; the strongest rebuttal is that callers supply valid resource identifiers, but underscore-containing identifiers are not rejected by validateCheckRequest and tuple encoding is still ambiguous.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null,
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "claude-opus-4-5-20251101",
+        "confidence": 0.85,
+        "rationale": "The diff shows userPermDenialCacheKey at line 30-31 concatenates namespace, userUID, action, name, and parent with underscores as separators. If any of these values contain underscores, there's ambiguity - e.g., (name='dash_a', parent='b') produces the same key as (name='dash', parent='a_b'). The Check function uses this key to cache denials and returns early if found (lines 115-119), meaning a denial for one resource could incorrectly deny access to a different resource with a colliding key. This is a real correctness bug since underscore-containing identifiers are valid.",
+        "diff_context_hash": "a5ffd38b06edec5bdae43bbc0d8d98aa9ff4c4b2"
+      }
+    },
+    {
+      "issue_text": "pkg/services/authz/rbac/service.go:116 \u2014 [confidence 75, P2, advisory] `permDenialKey := userPermDenialCacheKey(checkReq.Namespace.Value, checkReq.UserUID, checkReq.Action, checkReq.Name, checkReq.ParentFolder)` drops IdentityType even though permission computation distinguishes anonymous, renderer, and user identities, so a denied anonymous subject with the same parsed identifier as an authorized user or renderer poisons that other principal's next identical check for 30 seconds; the strongest rebuttal is that production callers use distinct identifier conventions, but validateSubject accepts these identity types without enforcing disjoint identifiers and the new early return precedes the identity-specific permission lookup.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null,
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "claude-opus-4-5-20251101",
+        "confidence": 0.78,
+        "rationale": "The finding identifies a real issue: the permDenialCacheKey is constructed using only Namespace.Value, UserUID, Action, Name, and ParentFolder, but does NOT include IdentityType. Looking at the diff, the Check function at line 116 creates the denial cache key before any identity-type-specific logic. The getCachedIdentityPermissions function (lines 339-371) shows that different identity types (TypeAnonymous, TypeRenderService, TypeUser, TypeServiceAccount) have different permission retrieval paths. If an anonymous user is denied access, the denial is cached with a key that doesn't distinguish identity type. A subsequent check by a user with the same parsed identifier (UserUID) would hit this denial cache and be incorrectly denied. The cache TTL is shortCacheTTL which is 30 seconds based on the test setup. This is a correctness bug where cache key construction doesn't account for identity type differentiation.",
+        "diff_context_hash": "a5ffd38b06edec5bdae43bbc0d8d98aa9ff4c4b2"
+      }
+    },
+    {
+      "issue_text": "pkg/services/authz/rbac/service_test.go:982 \u2014 The explicit-denial test still returns the expected denial when the denial-cache lookup is removed because its purported allow fixture is false and its default store grants nothing; metadata: P2, confidence 100, advisory; code: `map[string]bool{\"dashboards:uid:dash1\": false}` and `assert.False(t, resp.Allowed)`; trigger/harmed party: a regression that bypasses cached denials silently restores database work for repeated denied requests, harming service operators; strongest author rebuttal: the fixture seeds a real denial entry and asserts the final response; survives because the uncached path produces exactly the same response and no store-call assertion distinguishes it; seed a true cached grant and assert zero backing-store calls.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null,
+      "matched_golden_ids": [
+        "The Check operation exhibits asymmetric cache trust logic: cached permission grants are trusted and returned immediately, but cached denials from the same permission cache are ignored, leading to a fresh database lookup. This allows stale cached grants to provide access to revoked resources, posing a security risk. ",
+        "The test comment says the cached permissions 'allow access', but the map stores false for dashboards:uid:dash1, so checkPermission will still treat this scope as not allowed."
+      ],
+      "primary_judge_verdict": "matched",
+      "primary_judge": "claude-opus-4-5-20251101",
+      "primary_judge_confidence": 0.95,
+      "primary_judge_reasoning": "The candidate issue discusses the same underlying problem - the asymmetric cache trust logic where cached denials are not trusted the same way as cached grants. The candidate specifically mentions 'a regression that bypasses cached denials silently restores database work for repeated denied requests' and discusses how the test doesn't properly distinguish between cached and uncached paths. While the candidate focuses on the test file and test coverage aspects rather than the security implications emphasized in the golden comment, both are identifying the same core issue: cached permission grants are trusted but cached denials are ignored/bypassed, leading to database lookups. The candidate even suggests the fix should 'seed a true cached grant and assert zero backing-store calls' to properly test this behavior.",
+      "adjudication": {
+        "verdict": "matched",
+        "adjudicating_judge": null,
+        "confidence": null,
+        "rationale": null,
+        "diff_context_hash": "a5ffd38b06edec5bdae43bbc0d8d98aa9ff4c4b2"
+      }
+    },
+    {
+      "issue_text": "pkg/services/authz/rbac/service_test.go:979 \u2014 The cache tests manually insert the only denial-cache fixture and make one Check per fresh service, so deleting the production denial-cache write leaves their assertions unchanged and fails to detect loss of repeated-denial caching; metadata: P2, confidence 100, advisory; code: `s.permDenialCache.Set(ctx, userPermDenialCacheKey(\"org-12\", \"test-uid\", \"dashboards:read\", \"dash1\", \"fold1\"), true)` bypasses production `s.permDenialCache.Set(ctx, permDenialKey, true)` at service.go:154; trigger/harmed party: a missing or incorrectly keyed write makes every denied request reload permissions, harming service operators; strongest author rebuttal: existing user/anonymous denial tests exercise the write and the new test exercises a hit; survives because those tests never inspect the denial entry or issue a second request against the same service, so they do not connect population to reuse; drive an initial store denial followed by the identical request and assert that the second call performs no additional store reads.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null,
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "claude-opus-4-5-20251101",
+        "confidence": 0.78,
+        "rationale": "The finding correctly identifies a test coverage gap. Looking at the diff, the test 'Should deny on explicit cache deny entry' at line 979 manually sets up the denial cache entry with `s.permDenialCache.Set()` and then makes a single Check call. This tests that reading from the denial cache works, but it doesn't test that the production code at service.go:153-154 (`if !allowed { s.permDenialCache.Set(ctx, permDenialKey, true) }`) actually writes to the cache correctly. The test bypasses the production write path by pre-populating the cache. A more complete test would: 1) make a request that gets denied (triggering the production write), 2) make the same request again, and 3) verify the second request uses the cached denial (e.g., by checking no additional store reads occur). This is a legitimate test coverage concern for newly added caching logic.",
+        "diff_context_hash": "a5ffd38b06edec5bdae43bbc0d8d98aa9ff4c4b2"
+      }
+    }
+  ],
+  "diff_context_hash": "a5ffd38b06edec5bdae43bbc0d8d98aa9ff4c4b2",
+  "primary_judge": "claude-opus-4-5-20251101",
+  "adjudicating_judge": "claude-opus-4-5-20251101",
+  "url": "https://github.com/grafana/grafana/pull/103633",
+  "framework": "metareview-realistic",
+  "model": "gpt-6-astra",
+  "effort": "high",
+  "judge": "claude-opus-4-5-20251101",
+  "wall_s": 390.0538878440857,
+  "execution_mode": "cli",
+  "run_batch": "20260910-mrv0120-manifold"
+}
