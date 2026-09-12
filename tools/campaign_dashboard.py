@@ -237,6 +237,7 @@ def last_pass_minutes():
     import re as _re3
     out = {}
     import collections as _col
+collections = _col
     d_min = lambda a, b: (b - a) if b >= a else (b - a + 1440)
     FW_ALIAS = {"CE": "compound-realistic", "mrv": "metareview-realistic", "van": "vanilla-engineered"}
     def name_for(fw, model, eff):
