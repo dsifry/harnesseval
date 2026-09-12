@@ -104,9 +104,20 @@ def eta_str(c, n, active):
     return f" {int(mins):02d}:{int((mins % 1) * 60):02d}", mins
 
 def fmt_mins(mins):
-    if mins >= 100:
-        return f"{int(mins // 60)}h{int(mins % 60):02d}"
-    return f"{int(mins):02d}:{int((mins % 1) * 60):02d}"
+    # unambiguous durations: "9m:30s", "1h:23m:45s" — bare MM:SS invited misreads
+    neg = mins < 0
+    m = abs(mins)
+    h = int(m // 60)
+    mm = int(m) % 60
+    ss = int(round((m - int(m)) * 60))
+    if ss == 60:
+        mm += 1
+        ss = 0
+    parts = []
+    if h: parts.append(f"{h}h")
+    parts.append(f"{mm}m")
+    parts.append(f"{ss}s")
+    return ("-" if neg else "") + ":".join(parts)
 
 def fmt_signed(mins):
     sign = "-" if mins < 0 else ""
@@ -215,7 +226,12 @@ def panel(row, w, active, eta="", trend="", last_mins=None, pace=None):
             suffix = f" {ld}/{es}" if es and es != "—" else f" {ld}/No ETA"
     l1 = pad(f"{name:<22s} {color}{'█' * filled}{cursor}{D}{'░' * empty}{X} {n:>3}/50{Y}{suffix}{X}", w)
     f1v = 2 * rec * ap / max(rec + ap, 1e-9)
-    _pace = f"{HD}  ·  {fmt_mins(pace)} per run{X}" if pace else ""
+    if pace:
+        _pace = f"{HD}  ·  {fmt_mins(pace)} per run{X}"
+    elif name in last_pass:
+        _pace = f"{D}  ·  pace n/a{X}"  # pass history exists but no plausible pace (failed sweeps)
+    else:
+        _pace = ""
     l2 = pad(f"{HD}rec {rec:.2f}  adjP {ap:.2f}  F1 {f1v:.2f}{trend}{D}  ✗{poison:<3d}{X}{_pace}", w)
     return [l1, l2]
 
