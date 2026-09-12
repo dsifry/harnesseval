@@ -112,10 +112,10 @@ while true; do
   TOTAL=$(echo "$CENSUS" | awk -F'|' '{s+=$4} END {print s}')
   log "wave $WAVE: $(echo "$CENSUS" | wc -l | tr -d ' ') cells, $TOTAL total missing — advancing top $K:"
   PIDS=""
-  mapfile -t TOP <<< "$(census | head -K)"
-  for line in "${TOP[@]}"; do
-    [ -z "$line" ] && continue
-    IFS='|' read -r fw model eff miss <<< "$line"
+  # bash 3.2-safe: no mapfile; herestring + while-read keeps runners as direct children (waitable)
+  TOP=$(census | head -n "$K")
+  while IFS='|' read -r fw model eff miss; do
+    [ -z "$fw" ] && continue
     .venv/bin/python -c "$PYCLEAN" "$model" "$fw" >/dev/null 2>&1
     SPEC=$(next_spec "$fw" "$model" "$eff")
     [ -z "$SPEC" ] && continue
@@ -125,7 +125,7 @@ while true; do
       --run-batch $BATCH --skip-batch $BATCH --fill "$SPEC" \
       >> "logs/mx_campaign_${model}_${eff}.log" 2>&1 &
     PIDS="$PIDS $!"
-  done
+  done <<< "$TOP"
   for p in $PIDS; do wait "$p" 2>/dev/null; done
   log "wave $WAVE done — breathing 60s before re-census"
   sleep 60
