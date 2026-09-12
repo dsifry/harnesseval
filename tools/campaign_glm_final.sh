@@ -89,7 +89,7 @@ run_cell() {  # model effort
     # conc 2: the vision pool negative-scales past 2-wide (4-min calls at 2-wide, 25-min at 12-wide, measured 2026-09-11).
     # NOTE: no comment lines inside a backslash-continued command — they comment out the rest (2026-09-11 incident).
     .venv/bin/python -u -m harnesseval.run_model_matrix --prs 50 --frameworks metareview-realistic \
-      --models $model --efforts $eff --mode api --concurrency 2 \
+      --models $model --efforts $eff --mode api --concurrency 1  # evening pool: 1-wide concentrates burst service so runs FINISH (5-wide: 0 completions/h) \
       --run-batch $BATCH --skip-batch $BATCH --fill "$(missing_specs "$model" "$eff")" >> logs/mx_campaign_${model}_${eff}.log 2>&1
     local LEFT; LEFT=$(missing_specs "$model" "$eff" | tr ',' '\n' | grep -c . || true)
     if [ -z "$LEFT" ] || [ "$LEFT" = "0" ]; then
