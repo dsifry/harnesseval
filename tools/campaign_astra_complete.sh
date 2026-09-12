@@ -10,7 +10,7 @@ CONC=6
 MODEL=gpt-6-astra
 
 log "completion phase: waiting for the first-pass script to exit (handoff)"
-while tmux has-window -t astra 2>/dev/null; do sleep 60; done
+while tmux list-windows -t 0 2>/dev/null | grep -q " astra$"; do sleep 60; done
 log "handoff complete — gating on codex health"
 
 missing_specs() {
