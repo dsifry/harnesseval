@@ -99,7 +99,7 @@ for f in glob.glob("runs/*/summary.json"):
         if tok and not s.get("error") and (n or tok <= 20000): have.add(s["url"])
 missing = [u for u in urls if u not in have]
 if missing:
-    print(f"{fw}/{model}/{eff}/{missing[0].rsplit('/', 1)[-1]}")
+    print(f"{fw}/{model}/{eff}/{missing[0]}")  # full URL as substring suffix — bare PR number matched many URLs (11-PR bug)
 PYEOF
 }
 

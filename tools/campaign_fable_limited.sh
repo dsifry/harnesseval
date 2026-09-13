@@ -34,7 +34,7 @@ for f in glob.glob("runs/*/summary.json"):
     n = len(s.get("findings", [])); tok = (s.get("tokens_in", 0) or 0) + (s.get("tokens_out", 0) or 0)
     if tok and not s.get("error") and (n or tok <= 20000): have.add(s["url"])
 missing = [u for u in urls if u not in have]
-print(",".join(f"{fw}/claude-fable-5-1/{eff}/{u.rsplit('/', 1)[-1]}" for u in missing))
+print(",".join(f"{fw}/claude-fable-5-1/{eff}/{u}" for u in missing))  # full URL: the runner treats the 4th component as a URL SUBSTRING — a bare PR number matches every URL containing that digit (the 11-PR bug)
 PYEOF
 }
 
