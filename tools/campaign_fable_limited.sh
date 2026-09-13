@@ -54,7 +54,7 @@ asyncio.run(t())
 PYEOF
 }
 
-CELLS="vanilla-engineered/medium vanilla-engineered/high compound-realistic/low metareview-realistic/low compound-realistic/medium metareview-realistic/medium compound-realistic/high metareview-realistic/high"  # alternate frameworks: CE-low, mrv-low, CE-med, mrv-med, CE-high, mrv-high
+CELLS="vanilla-engineered/medium vanilla-engineered/high compound-realistic/low metareview-realistic/low compound-realistic/medium metareview-realistic/medium"  # high-effort cells held while the session is drained (92%): cheap runs first; restore CE-high/mrv-high cells on the next window by appending: compound-realistic/high metareview-realistic/high
 
 log "LIMITED fable run: top-$TOPN PRs x 8 cells on the new account (expand: raise TOPN and relaunch)"
 WAVE=0
