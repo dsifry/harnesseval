@@ -14,7 +14,7 @@ export HARNESS_KEYS_FILE=~/.config/harnesseval/keys.env.bench
 export HARNESS_KEY_BUDGETS=12,6
 export HARNESS_LUNAROUTE_TIMEOUT_S=2400
 export HARNESS_LUNAROUTE_KEY_FILES=~/.config/harnesseval/keys.env.bench:~/.config/harnesseval/keys.env
-K=3
+K=1  # single run at a time (user, 2026-09-12): concentrate pool service on one run so it completes — 3-wide spreads burst capacity and feeds the degenerate marathon mode
 
 PYCLEAN='
 import json, glob, os, sys
