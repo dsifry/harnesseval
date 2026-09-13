@@ -57,48 +57,28 @@ PYEOF
 CELLS="vanilla-engineered/medium vanilla-engineered/high compound-realistic/low compound-realistic/medium compound-realistic/high metareview-realistic/low metareview-realistic/medium metareview-realistic/high"
 
 log "LIMITED fable run: top-$TOPN PRs x 8 cells on the new account (expand: raise TOPN and relaunch)"
-for ROUND in 1 2 3 4 5 6 7 8; do
-  if ! claude_ok; then
-    log "round $ROUND: capped at round start — waiting out the window; probing every 10 min"
-    while ! claude_ok; do sleep 600; done
-    log "round $ROUND: window open — starting cells"
-  fi
-  PIDS=""
-  for cell in $CELLS; do
-    fw="${cell%%/*}"; eff="${cell##*/}"
-    SPECS=$(missing_specs "$fw" "$eff")
-    if [ -z "$SPECS" ]; then log "round $ROUND: cell $fw/$eff top-$TOPN subset complete — skip"; continue; fi
-    if ! claude_ok; then
-      log "round $ROUND: capped at cell $fw/$eff — waiting out the window; probing every 10 min"
-      while ! claude_ok; do sleep 600; done
-      log "round $ROUND: window open — retrying cell $fw/$eff"
-    fi
-    N=$(echo "$SPECS" | tr ',' '\n' | grep -c .)
-    log "round $ROUND: cell $fw/$MODEL/$eff — $N missing, running ONE PR AT A TIME (probe-gated between every run)"
-    echo "$SPECS" | tr ',' '\n' | grep . | while IFS= read -r SPEC; do
-      if ! claude_ok; then
-        log "claude capped before $fw/$eff PR $SPEC — waiting out the window; probing every 10 min"
-        while ! claude_ok; do sleep 600; done
-        log "claude window open — resuming $fw/$eff"
-      fi
-      log "round $ROUND: $fw/$eff — running single PR $SPEC"
-      bash tools/with_ceiling.sh 10800 .venv/bin/python -u -m harnesseval.run_model_matrix --prs 50 --frameworks "$fw" \
-        --models $MODEL --efforts "$eff" --mode cli --concurrency 1 \
-        --run-batch $BATCH --skip-batch $BATCH \
-        --fill "$SPEC" >> "logs/mx_campaign_fable_${fw}_${eff}.log" 2>&1
-    done
-    if ! claude_ok; then
-      log "claude capped after cell $fw/$eff — waiting out the window; probing every 10 min"
-      while ! claude_ok; do sleep 600; done
-      log "claude window open — continuing"
-    fi
-  done
+WAVE=0
+while :; do
+  WAVE=$((WAVE + 1))
   DONE=1
   for cell in $CELLS; do
     fw="${cell%%/*}"; eff="${cell##*/}"
-    [ -n "$(missing_specs "$fw" "$eff")" ] && DONE=0
+    SPECS=$(missing_specs "$fw" "$eff")
+    [ -n "$SPECS" ] && DONE=0
+    SPEC=$(echo "$SPECS" | tr ',' '\n' | grep . | head -1)
+    [ -z "$SPEC" ] && continue
+    if ! claude_ok; then
+      log "wave $WAVE: capped before $fw/$eff — waiting out the window; probing every 10 min"
+      while ! claude_ok; do sleep 600; done
+      log "wave $WAVE: window open — continuing"
+    fi
+    log "wave $WAVE: $fw/$eff +1 PR (interleaved rotation)"
+    bash tools/with_ceiling.sh 10800 .venv/bin/python -u -m harnesseval.run_model_matrix --prs 50 --frameworks "$fw" \
+      --models $MODEL --efforts "$eff" --mode cli --concurrency 1 \
+      --run-batch $BATCH --skip-batch $BATCH \
+      --fill "$SPEC" >> "logs/mx_campaign_fable_${fw}_${eff}.log" 2>&1
   done
   [ "$DONE" -eq 1 ] && { log "all 8 fable cells complete on the top-$TOPN subset — done (expand: TOPN=20 + relaunch)"; exit 0; }
-  log "round $ROUND finished — re-censusing"
+  log "wave $WAVE rotation done — next rotation re-censuses"
 done
-log "limited fable run: 6 rounds exhausted — remaining subset gaps need a relaunch"
+log "limited fable run: exhausted — remaining subset gaps need a relaunch"
