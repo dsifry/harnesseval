@@ -21,8 +21,11 @@ from harnesseval.dataset import martian
 rows = []
 for f in glob.glob(str(Path(martian.GOLDEN_DIR) / "*.json")):
     for pr in json.load(open(f)):
-        rows.append(pr["url"])
-urls = sorted({u for u in rows})[:topn]  # the deterministic top-N subset
+        cs = pr.get("comments", [])
+        sev_w = {"Critical": 4, "High": 3, "Medium": 2, "Low": 1}
+        rows.append((sum(sev_w.get(c.get("severity", "Low"), 1) for c in cs), len(cs), pr["url"]))
+rows.sort(reverse=True)
+urls = [u for _, _, u in rows[:topn]]  # TOP-N = the HARNESS ordering (severity weight desc, comments desc): the hardest PRs. NEVER lexicographic.
 have = set()
 for f in glob.glob("runs/*/summary.json"):
     try: s = json.load(open(f))
