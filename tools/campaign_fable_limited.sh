@@ -54,7 +54,7 @@ asyncio.run(t())
 PYEOF
 }
 
-CELLS="vanilla-engineered/medium vanilla-engineered/high compound-realistic/low metareview-realistic/low compound-realistic/medium metareview-realistic/medium"  # high-effort cells held while the session is drained (92%): cheap runs first; restore CE-high/mrv-high cells on the next window by appending: compound-realistic/high metareview-realistic/high
+CELLS="vanilla-engineered/medium vanilla-engineered/high metareview-realistic/high compound-realistic/high metareview-realistic/medium compound-realistic/medium metareview-realistic/low compound-realistic/low"  # resume order (user, 2026-09-12): fresh window spends capacity on expensive high-effort runs first — mrv-high, CE-high, mrv-med, CE-med, mrv-low, CE-low — until every top-6 subset is complete
 
 log "LIMITED fable run: top-$TOPN PRs x 8 cells on the new account (expand: raise TOPN and relaunch)"
 WAVE=0
