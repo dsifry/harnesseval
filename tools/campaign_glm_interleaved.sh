@@ -53,7 +53,9 @@ for f in glob.glob(str(Path(martian.GOLDEN_DIR) / "*.json")):
 urls = set(rows)
 cells = [
     ("metareview-realistic", "glm-5.3-vision-background", "medium"),
-    ("metareview-realistic", "glm-5.3-vision-background", "high"),
+    # HELD overnight (2026-09-12 23:15): mrv glm vision-high routes lens calls through the claude CLI
+    # (futile cc_cli_limit fast-fails while fable owns the account; routing investigation pending).
+    # Restore by re-adding: ("metareview-realistic", "glm-5.3-vision-background", "high"),
     ("metareview-realistic", "glm-5.3-flash-background", "high"),
     ("compound-realistic", "glm-5.3-vision-background", "medium"),
     ("compound-realistic", "glm-5.3-vision-background", "high"),
