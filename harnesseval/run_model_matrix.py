@@ -316,7 +316,7 @@ def main():
                         for spec in fill:
                             if len(spec) == 3 and (fw, model, effort) == spec:
                                 matched = True; break
-                            if len(spec) == 4 and (fw, model, effort) == spec[:3] and spec[3] == pr_num:
+                            if len(spec) == 4 and (fw, model, effort) == spec[:3] and (spec[3] == pr_num or spec[3] == url):  # url form: unambiguous single-PR targeting (bare PR numbers collide across repos: 11 PRs are "#1")
                                 matched = True; break
                         if not matched:
                             continue
