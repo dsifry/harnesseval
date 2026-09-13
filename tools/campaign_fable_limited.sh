@@ -74,11 +74,19 @@ for ROUND in 1 2 3 4 5 6 7 8; do
       log "round $ROUND: window open — retrying cell $fw/$eff"
     fi
     N=$(echo "$SPECS" | tr ',' '\n' | grep -c .)
-    log "round $ROUND: launching cell $fw/$MODEL/$eff — filling $N of top-$TOPN (conc $CONC) — SERIAL: one cell at a time"
-    bash tools/with_ceiling.sh 14400 .venv/bin/python -u -m harnesseval.run_model_matrix --prs 50 --frameworks "$fw" \
-      --models $MODEL --efforts "$eff" --mode cli --concurrency $CONC \
-      --run-batch $BATCH --skip-batch $BATCH \
-      --fill "$SPECS" >> "logs/mx_campaign_fable_${fw}_${eff}.log" 2>&1
+    log "round $ROUND: cell $fw/$MODEL/$eff — $N missing, running ONE PR AT A TIME (probe-gated between every run)"
+    echo "$SPECS" | tr ',' '\n' | grep . | while IFS= read -r SPEC; do
+      if ! claude_ok; then
+        log "claude capped before $fw/$eff PR $SPEC — waiting out the window; probing every 10 min"
+        while ! claude_ok; do sleep 600; done
+        log "claude window open — resuming $fw/$eff"
+      fi
+      log "round $ROUND: $fw/$eff — running single PR $SPEC"
+      bash tools/with_ceiling.sh 10800 .venv/bin/python -u -m harnesseval.run_model_matrix --prs 50 --frameworks "$fw" \
+        --models $MODEL --efforts "$eff" --mode cli --concurrency 1 \
+        --run-batch $BATCH --skip-batch $BATCH \
+        --fill "$SPEC" >> "logs/mx_campaign_fable_${fw}_${eff}.log" 2>&1
+    done
     if ! claude_ok; then
       log "claude capped after cell $fw/$eff — waiting out the window; probing every 10 min"
       while ! claude_ok; do sleep 600; done
