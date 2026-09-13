@@ -131,15 +131,16 @@ while true; do
   # wedge self-heal: kill only if 45 min elapsed SINCE WAVE LAUNCH and the ledger shows nothing since then
   # (the first version measured raw ledger age — after one wedge it burned every fresh wave instantly)
   WAVE_T0=$(date +%s)
-  LEDGER_AT_LAUNCH=$(stat -f %m logs/key_usage.jsonl)
   while :; do
     ALIVE=0
     for p in $PIDS; do kill -0 "$p" 2>/dev/null && ALIVE=1; done
     [ "$ALIVE" = "0" ] && break
     ELAPSED=$(( $(date +%s) - WAVE_T0 ))
-    NOW_LEDGER=$(stat -f %m logs/key_usage.jsonl)
-    if [ "$ELAPSED" -gt 2700 ] && [ "$NOW_LEDGER" -le "$LEDGER_AT_LAUNCH" ]; then
-      log "wave $WAVE: no ledger activity since launch (${ELAPSED}s) — killing wedged runners, wave ends"
+    LEDGER_AGE=$(( $(date +%s) - $(stat -f %m logs/key_usage.jsonl) ))
+    # 10-min launch grace (let a fresh runner make its first call), then raw silence: 45 min quiet = wedge,
+    # whether the wedge came before the first call or mid-wave after calls (the 01:12 blind spot)
+    if [ "$ELAPSED" -gt 600 ] && [ "$LEDGER_AGE" -gt 2700 ]; then
+      log "wave $WAVE: ledger silent ${LEDGER_AGE}s with runners alive (${ELAPSED}s into wave) — killing wedged runners, wave ends"
       for p in $PIDS; do kill "$p" 2>/dev/null; done
       break
     fi
