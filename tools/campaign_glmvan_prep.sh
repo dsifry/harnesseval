@@ -91,5 +91,6 @@ while :; do
       --fill "vanilla-engineered/$MODEL/$eff/$URL" >> "logs/mx_campaign_glmvan_${eff}.log" 2>&1
     log "run $WAVE done — verifier: $(.venv/bin/python tools/verify_hitlist.py 2>/dev/null | head -1)"
   done
+  [ "$DONE" -eq 1 ] && { log "ALL 3 glm-vision vanilla cells complete on the severity top-6 — done"; exit 0; }
   log "wave $WAVE done — verifier: $(.venv/bin/python tools/verify_hitlist.py 2>/dev/null | head -1)"
 done
