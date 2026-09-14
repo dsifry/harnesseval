@@ -70,7 +70,7 @@ if [ "$DRY" = "1" ]; then
   else
     log "phase 2 FAIL — DO NOT run live"; exit 1
   fi
-  log "DRY RUN COMPLETE — live plan: paced waves (1 -> 2 -> 4-wide) of single-PR api invocations, verifier-checked between waves"
+  log "DRY RUN COMPLETE — live plan: STRICTLY SEQUENTIAL single-PR api runs (one lane; the vision pool has a fixed lane count), verifier-checked after every run"
   exit 0
 fi
 
@@ -84,15 +84,12 @@ while :; do
     URL=$(missing_for "$eff" | head -1)
     [ -n "$URL" ] && DONE=0
     [ -z "$URL" ] && continue
-    log "wave $WAVE: $MODEL vanilla $eff +1 PR"
+    log "run $WAVE: $MODEL vanilla $eff +1 PR (SEQUENTIAL — one lane, no parallelism: the vision pool has a fixed number of lanes)"
     bash tools/with_ceiling.sh 10800 .venv/bin/python -u -m harnesseval.run_model_matrix --prs 50 \
       --frameworks vanilla-engineered --models $MODEL --efforts "$eff" --mode api --concurrency 1 \
       --run-batch $BATCH --skip-batch $BATCH \
-      --fill "vanilla-engineered/$MODEL/$eff/$URL" >> "logs/mx_campaign_glmvan_${eff}.log" 2>&1 &
-    PIDS="$PIDS $!"
-    [ $(pgrep -f "run_model_matrix.*vanilla-engineered.*glm" | wc -l | tr -d ' ') -ge 4 ] && break
+      --fill "vanilla-engineered/$MODEL/$eff/$URL" >> "logs/mx_campaign_glmvan_${eff}.log" 2>&1
+    log "run $WAVE done — verifier: $(.venv/bin/python tools/verify_hitlist.py 2>/dev/null | head -1)"
   done
-  [ -z "$PIDS" ] && [ "$DONE" -eq 1 ] && { log "ALL 3 glm-vision vanilla cells complete on the severity top-6 — done"; exit 0; }
-  for p in $PIDS; do wait "$p" 2>/dev/null; done
   log "wave $WAVE done — verifier: $(.venv/bin/python tools/verify_hitlist.py 2>/dev/null | head -1)"
 done
