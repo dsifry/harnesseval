@@ -10,7 +10,10 @@ BATCHES = ("20260910-mrv0120-manifold", "20260906-fable51-vanilla-low", "2026090
 for f in glob.glob("runs/*/summary.json"):
     try: s = json.load(open(f))
     except Exception: continue
-    if s.get("run_batch") not in BATCHES: continue
+    # ERA RULE (user, 2026-09-13): vanilla-engineered pairs accept healthy runs from ANY era
+    # (no metareview binary involved); mrv/compound pairs require the current campaign batch
+    # (pre-0.12 binaries are instrument-confounded).
+    if s.get("framework") != "vanilla-engineered" and s.get("run_batch") not in BATCHES: continue
     tok = (s.get("tokens_in") or 0) + (s.get("tokens_out") or 0)
     if s.get("error") or tok == 0: continue
     n = len(s.get("findings", []))

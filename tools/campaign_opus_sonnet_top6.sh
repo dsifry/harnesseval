@@ -108,7 +108,7 @@ run_one() {  # model fw eff url
 
 # CELLS in cost order: all vanilla first (cheap single-shot), then mrv (multi-lens)
 CELLS=""
-for fw in vanilla-engineered metareview-realistic; do
+for fw in metareview-realistic; do  # vanilla-engineered CLEARED by any-era reuse (user, 2026-09-13); mrv needs current-batch re-runs
   for eff in low medium high; do
     for model in $MODELS; do
       CELLS="$CELLS $model/$fw/$eff"
@@ -117,7 +117,7 @@ for fw in vanilla-engineered metareview-realistic; do
 done
 
 # ---- PHASE 1: census + queue validation (always runs, zero tokens) ----
-log "phase 1: census of the 12 cells against the severity top-6"
+log "phase 1: census of the opus/sonnet mrv cells against the severity top-6"
 TOTAL=0
 QUEUE=""
 for cell in $CELLS; do
@@ -128,7 +128,7 @@ for cell in $CELLS; do
   log "  $model $fw $eff: missing $N/6"
   QUEUE="$QUEUE$M"
 done
-log "phase 1 result: $TOTAL runs needed across 12 cells"
+log "phase 1 result: $TOTAL runs needed across the mrv cells"
 if [ "$DRY" = "1" ]; then
   log "phase 1 verified: census machinery works; specs generated for every missing pair"
 fi
@@ -167,6 +167,6 @@ while :; do
     fi
     run_one "$model" "$fw" "$eff" "$URL"
   done
-  [ "$DONE" -eq 1 ] && { log "ALL 12 opus/sonnet cells complete on the severity top-6 — done"; exit 0; }
+  [ "$DONE" -eq 1 ] && { log "ALL opus/sonnet mrv cells complete on the severity top-6 — done"; exit 0; }
   log "wave $WAVE rotation done — next rotation re-censuses"
 done

@@ -14,3 +14,8 @@ The severity-weight top-6 of this campaign's dataset:
   6. calcom/cal.com/pull/10967    (sev 13, 6)
 Authoritative artifact: manifold_top6_hitlist.csv (regenerated against this ordering).
 Verifier: .venv/bin/python tools/verify_hitlist.py --verbose
+
+## Era rule for re-use (BANKED 2026-09-13, user decision)
+- **vanilla-engineered pairs count as done with healthy runs from ANY batch/era** (no metareview binary involved)
+- **mrv/compound pairs require the current campaign batch** (20260910-mrv0120-manifold) — pre-0.12 binaries are instrument-confounded
+- Consequence: opus/sonnet vanilla top-6 = done via August-era reuse; their mrv top-6 = 36 re-runs (tools/campaign_opus_sonnet_top6.sh)
