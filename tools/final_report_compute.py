@@ -1062,6 +1062,219 @@ out["expanded_gold_semantic"]["pairs_summary"] = {
                  for met in ("dRecall_sem", "dF1", "dF1p")},
 }
 
+
+# ============================================================================
+# §10c — VERIFIED UNION (dedup + golden-overlap corrected; supersedes §10b levels)
+# ============================================================================
+# Two corrections to §10b, both measured by the LLM verification passes:
+#   (1) UNDER-MERGE: a stricter whole-PR re-merge collapsed 359 raw clusters -> 258.
+#   (2) GOLDEN OVERLAP: 49 raw clusters describe defects ALREADY in the golden set
+#       (the official text-only matcher missed them); a strict adversarial re-check
+#       decides which survive. Counting them as new inflated both the denominator
+#       and the per-run credit.
+# Credit rules reported side by side:
+#   A (benchmark-compatible): goldens found = the official matcher's TP identities only.
+#   B (real-world, PRIMARY):  goldens found = official ∪ goldens the run's own clusters
+#      were verified to be the same defect as (credit for finding it regardless of
+#      which instrument noticed). Both avoid double counting: an additional cluster is
+#      only counted when it is NOT a golden overlap.
+# rng5 = SEED+4 (appended after all other rng consumers; earlier sections untouched).
+rng5 = np.random.default_rng(SEED + 4)
+
+_VERIFIED_OK = True
+_vrfy, _strict = {}, {}
+for _u in TOP6:
+    _slug = _u.rstrip("/").split("/")[-1]
+    try:
+        _vrfy[_u] = json.load(open(f"{ROOT}/analysis/semantic_true_golden_verify_{_slug}.json"))
+        _strict[_u] = json.load(open(f"{ROOT}/analysis/semantic_overlap_finding_{_slug}.json"))
+    except FileNotFoundError:
+        _VERIFIED_OK = False
+        break
+
+def _goldens_list(pr):
+    import glob as _glob
+    for _f in _glob.glob(f"{ROOT}/third_party/code-review-benchmark/offline/golden_comments/*.json"):
+        for _e in json.load(open(_f)):
+            if _e["url"] == pr:
+                return [c["comment"] for c in _e["comments"]]
+    return []
+
+if _VERIFIED_OK:
+    _v_pr = {}
+    for _u in TOP6:
+        _groups = _vrfy[_u]["clusters"]
+        _sc = _strict[_u]["clusters"]
+        assert len(_groups) == len(_sc)
+        _raw2g = {}
+        for _gi, _g in enumerate(_groups):
+            for _r in _g["merge_group"]:
+                _raw2g[_r] = _gi
+        _gl = _goldens_list(_u)
+        _strict_g = [c.get("golden_index") for c in _sc]   # finding-level overlap (None = verified additional)
+        _v_pr[_u] = {
+            "goldens": _gl, "raw2g": _raw2g,
+            "group_golden": _strict_g,                     # None -> additional
+            "n_additional": sum(1 for x in _strict_g if x is None),
+            "n_merged": len(_groups),
+            "n_overlap_strict": sum(1 for x in _strict_g if x is not None),
+        }
+
+    def _verified_rows(cell, urls):
+        rows = []
+        for u in urls:
+            p = _v_pr[u]
+            f2c = {int(k): v for k, v in _sem_by_url[u]["finding_to_cluster"].items()}
+            flat = _sem_flat(u)
+            bnd, i = {}, 0
+            for rid, t in flat:
+                bnd.setdefault(rid, [i, i])[1] = i + 1
+                i += 1
+            r0 = next(x for x in D["selected_runs"] if (x["model"], x["framework"], x["effort"], x["url"]) == (cell[0], cell[1], cell[2], u))
+            s_, e_ = bnd[r0["run_id"]]
+            own_groups = {p["raw2g"][f2c[i2]] for i2 in range(s_, e_)}
+            own_add = sum(1 for g in own_groups if p["group_golden"][g] is None)
+            own_gv = {p["group_golden"][g] for g in own_groups if p["group_golden"][g] is not None}
+            official = {p["goldens"].index(t) for t in (r0.get("matched_goldens") or []) if t in p["goldens"]}
+            v = r0["rj3"] or r0["inrun"]
+            rows.append({"tpA": len(official) + own_add, "tpB": len(official | own_gv) + own_add,
+                         "den": len(p["goldens"]) + p["n_additional"], "hal": v["hal"], "imp": v["imp"]})
+        return rows
+
+    _vcells, _vcells_A = {}, {}
+    for m in MODELS:
+        for fw in FRAMEWORKS:
+            for e in EFFORTS:
+                cell = (m, fw, e)
+                urls = [u for u in TOP6 if u in sel[cell]]
+                if not urls:
+                    continue
+                rows = _verified_rows(cell, urls)
+                n = len(rows)
+                arr = np.array([[r["tpA"], r["tpB"], r["den"], r["hal"], r["imp"]] for r in rows], dtype=float)
+                idx = rng5.integers(0, n, size=(B, n))
+                S = arr[idx]
+                def _met(tp, den, hal, imp):
+                    rec = tp.sum() / den.sum() if den.sum() else 0.0
+                    adj = tp.sum() / (tp.sum() + hal.sum()) if (tp.sum() + hal.sum()) else 0.0
+                    adjp = tp.sum() / (tp.sum() + hal.sum() + imp.sum()) if (tp.sum() + hal.sum() + imp.sum()) else 0.0
+                    f1 = 2 * rec * adj / (rec + adj) if (rec + adj) else 0.0
+                    f1p = 2 * rec * adjp / (rec + adjp) if (rec + adjp) else 0.0
+                    return rec, adj, adjp, f1, f1p
+                recB, adjB, adjpB, f1B, f1pB = _met(S[:, :, 1], S[:, :, 2], S[:, :, 3], S[:, :, 4])
+                recA, adjA, adjpA, f1A, f1pA = _met(S[:, :, 0], S[:, :, 2], S[:, :, 3], S[:, :, 4])
+                pA = _met(arr[:, 0], arr[:, 2], arr[:, 3], arr[:, 4])
+                pB = _met(arr[:, 1], arr[:, 2], arr[:, 3], arr[:, 4])
+                _vcells[f"{m}|{fw}|{e}"] = {
+                    "n_pr": n, "TP_sem": int(arr[:, 1].sum()), "TP_bench": int(arr[:, 0].sum()),
+                    "den": int(arr[:, 2].sum()), "hal": int(arr[:, 3].sum()), "imp": int(arr[:, 4].sum()),
+                    "recall_sem": pB[0], "adjP": pB[1], "adjPp": pB[2], "F1": pB[3], "F1p": pB[4],
+                    "recall_bench": pA[0], "F1_bench": pA[3],
+                    "ci": {"recall_sem": (float(recB[0]), float(np.percentile(recB, 2.5)), float(np.percentile(recB, 97.5)), 1.0),
+                           "F1": (float(f1B[0]), float(np.percentile(f1B, 2.5)), float(np.percentile(f1B, 97.5)), 1.0),
+                           "F1p": (float(f1pB[0]), float(np.percentile(f1pB, 2.5)), float(np.percentile(f1pB, 97.5)), 1.0)},
+                }
+
+    def _pm_of(X):
+        t = X[:, 0].sum(); d = X[:, 1].sum(); h = X[:, 2].sum(); im = X[:, 3].sum()
+        r = t / d if d else 0.0
+        a = t / (t + h) if (t + h) else 0.0
+        ap = t / (t + h + im) if (t + h + im) else 0.0
+        f = 2 * r * a / (r + a) if (r + a) else 0.0
+        fp = 2 * r * ap / (r + ap) if (r + ap) else 0.0
+        return r, f, fp
+
+    _vpairs = {}
+    for m in MODELS:
+        for e in EFFORTS:
+            cCE, cMRV = (m, "compound-realistic", e), (m, "metareview-realistic", e)
+            urls = [u for u in TOP6 if u in sel[cCE] and u in sel[cMRV]]
+            if len(urls) < 2:
+                continue
+            def _rows(cell):
+                return np.array([[r["tpB"], r["den"], r["hal"], r["imp"]] for r in _verified_rows(cell, urls)], dtype=float)
+            A_, M_ = _rows(cCE), _rows(cMRV)
+            n = len(urls)
+            idx = rng5.integers(0, n, size=(B, n))
+            def _m(X, ix):
+                t = X[ix][:, 0].sum(axis=1); d = X[ix][:, 1].sum(axis=1)
+                h = X[ix][:, 2].sum(axis=1); im = X[ix][:, 3].sum(axis=1)
+                r = np.where(d > 0, t / np.where(d > 0, d, 1), 0)
+                a = np.where(t + h > 0, t / np.where(t + h > 0, t + h, 1), 0)
+                ap = np.where(t + h + im > 0, t / np.where(t + h + im > 0, t + h + im, 1), 0)
+                f1 = np.where(r + a > 0, 2 * r * a / np.where(r + a > 0, r + a, 1), 0)
+                f1p = np.where(r + ap > 0, 2 * r * ap / np.where(r + ap > 0, r + ap, 1), 0)
+                return r, f1, f1p
+            rA, fA, fpA = _m(A_, idx); rM, fM, fpM = _m(M_, idx)
+            rA0, fA0, fpA0 = _pm_of(A_); rM0, fM0, fpM0 = _pm_of(M_)
+            _vpairs[f"{m}|{e}"] = {
+                "n_pr": n,
+                "dRecall_sem": (float(rM0 - rA0), float(np.percentile(rM - rA, 2.5)), float(np.percentile(rM - rA, 97.5))),
+                "dF1": (float(fM0 - fA0), float(np.percentile(fM - fA, 2.5)), float(np.percentile(fM - fA, 97.5))),
+                "dF1p": (float(fpM0 - fpA0), float(np.percentile(fpM - fpA, 2.5)), float(np.percentile(fpM - fpA, 97.5))),
+            }
+
+    _vhv = {}
+    for m in MODELS:
+        for fw in ("compound-realistic", "metareview-realistic"):
+            for e in EFFORTS:
+                Ah = (m, fw, e); V = (m, "vanilla-engineered", e)
+                urls = [u for u in TOP6 if u in sel[Ah] and u in sel[V]]
+                if len(urls) < 2:
+                    continue
+                XA = np.array([[r["tpB"], r["den"]] for r in _verified_rows(Ah, urls)], dtype=float)
+                XV = np.array([[r["tpB"], r["den"]] for r in _verified_rows(V, urls)], dtype=float)
+                n = len(urls)
+                idx = rng5.integers(0, n, size=(B, n))
+                SA, SV = XA[idx], XV[idx]
+                rA = np.where(SA[:, :, 1] > 0, SA[:, :, 0] / np.where(SA[:, :, 1] > 0, SA[:, :, 1], 1), 0).mean(axis=1)
+                rV = np.where(SV[:, :, 1] > 0, SV[:, :, 0] / np.where(SV[:, :, 1] > 0, SV[:, :, 1], 1), 0).mean(axis=1)
+                pA = XA[:, 0].sum() / XA[:, 1].sum() if XA[:, 1].sum() else 0
+                pV = XV[:, 0].sum() / XV[:, 1].sum() if XV[:, 1].sum() else 0
+                _vhv[f"{m}|{fw}|{e}"] = {"n_pr": n,
+                    "dRecall_sem": (float(pA - pV), float(np.percentile(rA - rV, 2.5)), float(np.percentile(rA - rV, 97.5)))}
+
+    _pkeys = sorted(_vpairs)
+    _P = {met: np.array([_vpairs[k][met][0] for k in _pkeys]) for met in ("dRecall_sem", "dF1", "dF1p")}
+    _pidx = rng5.integers(0, len(_pkeys), size=(B, len(_pkeys)))
+    out["expanded_gold_verified"] = {
+        "construction": ("§10c VERIFIED union (supersedes §10b levels). Corrects two measured defects: "
+                         "(1) a stricter whole-PR LLM re-merge collapsed 359 raw clusters to 258 distinct "
+                         "defects; (2) 49 raw clusters describe defects already in the golden set (official "
+                         "text-only matcher false negatives); a strict adversarial re-check (same-root-cause, "
+                         "not same-area) assigns at most one cluster per golden, giving a locked overlap count. "
+                         "denominator per PR = n_goldens + verified additional defects. Credit rule B (primary, "
+                         "real-world): a run's goldens-found = official matcher TP identities ∪ goldens whose "
+                         "verified overlapping cluster the run produced; additional found = verified non-golden "
+                         "groups hit. Rule A (benchmark-compatible): official TP identities only. No bug is "
+                         "counted twice in either rule. Artifacts: analysis/semantic_true_golden_verify_<pr>.json "
+                         "(re-merge + first-pass overlap), analysis/semantic_overlap_finding_<pr>.json (finding-level "
+                         "overlap check: a cluster overlaps a golden only if a single member finding is that golden's "
+                         "defect; judged per finding because cluster representatives are broader than any one "
+                         "golden). CIs: cluster bootstrap, B=10000, seed 20260916, rng5=SEED+4. Provenance: "
+                         "judge gpt-5.2, 2026-09-17; LLM steps are not deterministic — the stored artifacts are "
+                         "the record; residual under-merge makes verified recall a mild lower bound."),
+        "per_pr": {u: {"goldens": len(_v_pr[u]["goldens"]), "n_merged": _v_pr[u]["n_merged"],
+                       "n_overlap_strict": _v_pr[u]["n_overlap_strict"],
+                       "n_verified_additional": _v_pr[u]["n_additional"]} for u in TOP6},
+        "totals": {"goldens": sum(len(_v_pr[u]["goldens"]) for u in TOP6),
+                   "n_merged": sum(_v_pr[u]["n_merged"] for u in TOP6),
+                   "n_overlap_strict": sum(_v_pr[u]["n_overlap_strict"] for u in TOP6),
+                   "n_verified_additional": sum(_v_pr[u]["n_additional"] for u in TOP6)},
+        "matrix_sem": _vcells,
+        "ce_vs_mrv": _vpairs,
+        "harness_vs_vanilla_sem": _vhv,
+        "pairs_summary": {
+            "n_pairs": len(_pkeys),
+            "signs": {met: {"pos": int((_P[met] > 0).sum()), "zero": int((_P[met] == 0).sum()), "neg": int((_P[met] < 0).sum())}
+                      for met in _P},
+            "mean": {met: float(_P[met].mean()) for met in _P},
+            "ci_mean": {met: (float(_P[met].mean()), float(np.percentile(_P[met][_pidx].mean(axis=1), 2.5)),
+                               float(np.percentile(_P[met][_pidx].mean(axis=1), 97.5))) for met in _P},
+        },
+    }
+    print("§10c verified union totals:", json.dumps(out["expanded_gold_verified"]["totals"]))
+
 with open(f"{ROOT}/analysis/final_report_metrics.json", "w") as fh:
     json.dump(out, fh, indent=1)
 
