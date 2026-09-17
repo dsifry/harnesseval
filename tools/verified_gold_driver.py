@@ -187,23 +187,34 @@ def _template_test(file):
 async def author_test(model, cand, file, content, diff, supplier_dir, stem, extra=""):
     prompt = TEST_PROMPT.format(file=file, line=cand.get("line") or "?", title=cand.get("title") or "",
                                 severity=cand.get("severity") or "?",
-                                reports="\n".join(f"- {r}" for r in cand.get("reports", [])[:6]),
+                                reports="\n".join(f"- {r}" for r in cand.get("reports", [])[:4]),
                                 content=content, diff=(diff or "(none)") + extra,
                                 tmpl=_template_test(file) or "(no neighbouring test found)",
                                 dir=supplier_dir, stem=stem)
-    parsed, tin, tout, _ = await call_model_json(model, SYSTEM, prompt, effort="medium", max_tokens=6000)
+    # reasoning models burn the output budget on large inputs: keep effort low and the budget large,
+    # otherwise the call returns EMPTY content with 0 output tokens (observed on 87k-char files).
+    parsed, tin, tout, _ = await call_model_json(model, SYSTEM, prompt, effort="low", max_tokens=16000)
     return (parsed if isinstance(parsed, dict) else {}), tin, tout
 
 
 async def author_fix(model, cand, file, content, test_code, head_log, original_content):
     prompt = FIX_PROMPT.format(title=cand.get("title") or "", file=file, test_code=test_code[:6000],
                                content=content, head_log=head_log[-2500:])
-    parsed, tin, tout, _ = await call_model_json(model, SYSTEM, prompt, effort="medium", max_tokens=4000)
+    parsed, tin, tout, _ = await call_model_json(model, SYSTEM, prompt, effort="low", max_tokens=8000)
     return (parsed if isinstance(parsed, dict) else {}), tin, tout
 
 
 def run_test(test_path):
+    """Run vitest via the local binary (yarn's script resolution fails in copied checkouts:
+    'Couldn't find a script named "vitest"'). Falls back to yarn only if the binary is absent."""
+    if (REPO / "node_modules/.bin/vitest").exists():
+        return sh(f"./node_modules/.bin/vitest run {test_path} --reporter=basic", timeout=420)
     return sh(f"yarn vitest run {test_path} --reporter=basic", timeout=420)
+
+
+def ran(log):
+    """True when vitest actually executed (its summary line is present)."""
+    return bool(re.search(r"Test Files\s+\d+ (passed|failed)", log)) or bool(re.search(r"Tests\s+\d+", log))
 
 
 def classify(log):
@@ -264,7 +275,7 @@ async def do_candidate(cand, model, k_retry=3):
     supplier_dir = str(Path(file).parent)
     d = bundle_dir(pr, f"B{cand['class_index']:02d}-{cand['class_slug']}")
     original = (REPO / file).read_text()
-    content = _window(original, cand.get("line"), 90) if len(original) > 12000 else original
+    content = _window(original, cand.get("line"), 60) if len(original) > 9000 else original
     diff = pr_file_diff(cand["pr"], file)
     notes, tin, tout = [], 0, 0
     tp = f"{supplier_dir}/{stem}.verified.test.ts"
@@ -286,6 +297,10 @@ async def do_candidate(cand, model, k_retry=3):
             return write_bundle(d, cand, pr, "not_a_bug", {"head": head_log}, test_code, "", tp,
                                 {"notes": notes, "model_tokens": {"in": tin, "out": tout},
                                  "demotion_review": "test passes on unmodified head: no observable behaviour change demonstrated"})
+        if not ran(head_log) and attempt < k_retry:
+            notes.append(f"test attempt {attempt}: vitest did not execute (env); retried")
+            diff = (diff or "") + "\n\nLAST RUN ERROR (the harness could not run the test):\n" + head_log[-1200:]
+            continue
         if re.search(r"Failed to load|Cannot find module|Transform failed|SyntaxError", head_log) and attempt < k_retry:
             notes.append(f"test attempt {attempt}: did not load/compile; retried")
             diff = (diff or "") + "\n\nLAST TEST RUN ERROR (fix the test):\n" + head_log[-1500:]
@@ -317,6 +332,9 @@ async def do_candidate(cand, model, k_retry=3):
         if classify(fixed_log) == "PASS":
             fixed = True
             break
+        if not ran(fixed_log):
+            notes.append(f"fix attempt {attempt}: vitest did not execute (env); retried")
+            continue
         notes.append(f"fix attempt {attempt}: test still failing after fix; retried")
     if not fixed:
         clean_repo(head)
@@ -326,8 +344,17 @@ async def do_candidate(cand, model, k_retry=3):
                              "model_tokens": {"in": tin, "out": tout}})
 
     # ---- 3. base comparison
-    _rc3, base_log = sh(f"git checkout -q -f {base} && yarn vitest run {tp} --reporter=basic", timeout=420)
+    if (REPO / "node_modules/.bin/vitest").exists():
+        _rc3, base_log = sh(f"git checkout -q -f {base} && ./node_modules/.bin/vitest run {tp} --reporter=basic", timeout=420)
+    else:
+        _rc3, base_log = sh(f"git checkout -q -f {base} && yarn vitest run {tp} --reporter=basic", timeout=420)
     bc = classify(base_log)
+    if not ran(base_log) and bc != "N/A_module_absent":
+        clean_repo(head)
+        return write_bundle(d, cand, pr, "inconclusive_env", {"base": base_log, "head": head_log, "fixed": fixed_log},
+                            test_code, fix_diff, tp,
+                            {"notes": notes, "blocker": "base run did not execute (no vitest summary line)",
+                             "model_tokens": {"in": tin, "out": tout}})
     verdict = ("behavior_change_not_regression" if bc == "N/A_module_absent"
                else "confirmed_regression" if bc == "PASS"
                else "defect_present_before_pr")
