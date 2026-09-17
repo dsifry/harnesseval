@@ -58,6 +58,17 @@ Everything else is excluded from verified metrics and **never deleted**:
 6. The fix is the **minimal change for the demonstrated instance**; other instances of the same
    class are listed in `meta.json.sibling_instances` as unverified, never silently fixed.
 
+## Known causes of `inconclusive_env` (disclosed)
+
+- **Fix targeting across modules.** The candidate's resolved file (from the findings' own anchors) is
+  sometimes the *caller* while the defect lives in a *callee* (e.g. a tRPC router vs the zod schema it
+  imports). The fix author then guesses a file and its `find` string matches nothing, so no fix is
+  produced. The fix prompt now accepts `fix_file_path`, which reduces but does not eliminate this.
+- **Very large files.** Authoring against `handleNewBooking.ts` / `EventManager.ts` (40-90k chars)
+  takes 5-8 minutes and sometimes still fails.
+- These bundles are kept with their logs and blockers for the `standalone_real_code` pass or manual
+  triage; they are never silently dropped.
+
 ## Deliberate limitations (disclosed, not hidden)
 
 - Full-fidelity bundles run the repository's own test framework at the PR commit. Where the era

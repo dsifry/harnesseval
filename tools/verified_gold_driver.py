@@ -98,8 +98,12 @@ RULES
 - Minimal change: fix only what this defect requires; keep everything else byte-identical.
 - NEVER return the whole file.
 
+The code to change may live in a DIFFERENT file from the one the test imports (e.g. a schema, helper
+or caller in another module) — name that file in `fix_file_path` (an existing repo-relative path).
+
 Respond with ONLY this JSON object (no prose, no code fences):
-{{"fix_edits": [{{"find": "<verbatim excerpt>", "replace": "<corrected excerpt>"}}],
+{{"fix_file_path": "<repo-relative path of the file to edit>",
+  "fix_edits": [{{"find": "<verbatim excerpt of THAT file>", "replace": "<corrected excerpt>"}}],
   "explanation": "<one sentence>"}}"""
 
 
@@ -478,14 +482,18 @@ async def do_candidate(cand, model, k_retry=3, k_fix=4):
         if not edits:
             notes.append(f"fix attempt {attempt}: no fix_edits returned")
             continue
+        target = fx.get("fix_file_path") or file     # the defect may live in another module
+        if not (REPO / target).exists():
+            notes.append(f"fix attempt {attempt}: fix_file_path {target!r} does not exist")
+            target = file
         sh("git checkout -q -- .")                      # reset source; keep the (untracked) test
         try:
-            apply_edits(file, edits)
+            apply_edits(target, edits)
         except Exception as e:
-            notes.append(f"fix attempt {attempt}: edits rejected: {e}")
+            notes.append(f"fix attempt {attempt}: edits rejected for {target}: {e}")
             continue
         _rc, fixed_log = run_test(tp)
-        _rc2, fix_diff = sh(f"git diff -- {file}")
+        _rc2, fix_diff = sh(f"git diff -- {target}")
         if classify(fixed_log) == "PASS":
             fixed = True
             break
