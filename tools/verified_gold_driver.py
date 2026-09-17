@@ -28,6 +28,7 @@ PR_HEADS = {
     "14740": ("b004587262e8221083bafbe9a0c515e7becaa7b3", "92f44dcea7ff19e9123a30c63c167a2938df5a55"),
     "10967": ("a308075bc39b77ed7059b0cae9d443d669a7bf98", "de628295646d0848226618108a52f2f1e5d04ac0"),
 }
+AUTHOR_MODEL = 'deepseek-4.1-flash'   # LunarRoute; recorded per bundle
 SYSTEM = "You are a senior TypeScript engineer writing executable regression evidence. Respond with ONLY valid JSON."
 TEST_PROMPT = """A code-review campaign claims the following defect in this pull request. Write a vitest
 test that FAILS on the current (post-PR) code by asserting the claimed behavior.
@@ -234,7 +235,7 @@ def write_bundle(d, cand, pr, verdict, logs, test_code, fix_diff, test_path, ext
     for k, v in logs.items():
         (d / "logs" / f"{k}.log").write_text(v)
     meta = {
-        "bug_id": f"{pr}-B{cand['class_index']:02d}",
+        "bug_id": f"{pr}-B{cand['class_index']:02d}", "authoring_model": AUTHOR_MODEL,
         "candidate": cand, "pr": pr, "verdict": verdict, "fidelity": "repo_suite",
         "three_way": {k: classify(v) for k, v in logs.items()},
         "test_path": test_path, "fix_scope": "minimal fix for the demonstrated instance only",
@@ -365,15 +366,16 @@ async def do_candidate(cand, model, k_retry=3):
 
 
 async def main():
-    global REPO
+    global REPO, AUTHOR_MODEL
     ap = argparse.ArgumentParser()
     ap.add_argument("--pr", default="11059")
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--only", type=int, default=None)
-    ap.add_argument("--model", default="gpt-5.2")
+    ap.add_argument("--model", default=AUTHOR_MODEL)
     ap.add_argument("--repo", default=None)
     ap.add_argument("--force", action="store_true")
     a = ap.parse_args()
+    AUTHOR_MODEL = a.model
     if a.repo:
         REPO = Path(a.repo)
     print(f"repo={REPO}", flush=True)

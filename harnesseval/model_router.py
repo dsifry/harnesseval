@@ -248,8 +248,9 @@ def _log_key_usage(idx: int, model: str, seconds: float, resp, ok: bool, ev: str
 
 async def _call_openai_compat(model, system, user, effort, max_tokens, temperature) -> tuple[str, int, int, dict]:
     from harnesseval.usage import from_openai_api, grand_total
-    # Lunaroute (glm/kimi) or native OpenAI (gpt) — both OpenAI-compat
-    is_lunaroute = "glm" in model.lower() or "kimi" in model.lower()
+    # Lunaroute (glm/kimi/deepseek/…) or native OpenAI (gpt) — both OpenAI-compat
+    from harnesseval.effort import is_lunaroute as _is_lr
+    is_lunaroute = _is_lr(model)
     if is_lunaroute:
         clients = keys.lunaroute_clients()  # key pool: least-in-flight + failover (see below)
     else:
@@ -439,7 +440,8 @@ async def call_model_json(model: str, system: str, user: str, *, effort: str = "
         except Exception:
             return None
     parsed = _try_parse(text)
-    is_lunaroute = "glm" in model.lower() or "kimi" in model.lower()
+    from harnesseval.effort import is_lunaroute as _is_lr2
+    is_lunaroute = _is_lr2(model)
     if is_lunaroute and not parsed:
         # empty or unparseable under load -> retry once. Also retry once if the first call
         # raised APITimeoutError (a Lunaroute concurrency-queue stall); _call_openai_compat

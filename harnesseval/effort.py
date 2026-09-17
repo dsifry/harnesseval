@@ -51,5 +51,15 @@ def is_anthropic(model: str) -> bool:
     return "claude" in model.lower() or model.startswith("anthropic/")
 
 
+LUNAROUTE_FAMILIES = ("glm", "kimi", "deepseek", "qwen", "minimax")
+
+
+def is_lunaroute(model: str) -> bool:
+    """Models served by the LunarRoute OpenAI-compatible gateway."""
+    ml = (model or "").lower()
+    return any(f in ml for f in LUNAROUTE_FAMILIES)
+
+
 def is_openai_compat(model: str) -> bool:
-    return "gpt" in model.lower() or model.startswith("openai/") or "glm" in model.lower() or "kimi" in model.lower()
+    return ("gpt" in model.lower() or model.startswith("openai/")
+            or is_lunaroute(model))
