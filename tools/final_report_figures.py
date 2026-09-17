@@ -78,7 +78,7 @@ for ax, met, xlab in ((axes[0], "F1_sem", "F1, true golden set (CI)"),
     ax.set_xscale("log")
     ax.set_xlabel("metered $ per real finding (TP + beyond-gold real), log scale — CI")
     ax.set_ylabel(xlab)
-    ax.set_ylim(0.0, 0.7)
+    ax.set_ylim(0.0, 0.5 if met == "F1p_sem" else 0.6)
     if met == "F1_sem":
         ax.legend(fontsize=6)
 fig.suptitle("Cost/quality frontier, true golden set (42 goldens + 359 real bugs) — top-6 cells", fontsize=9)
