@@ -61,6 +61,7 @@ for k, v in M["matrix"].items():
         c["F1_sem"] = se["F1"]; c["F1_sem_lo"] = se["ci"]["F1"][1]; c["F1_sem_hi"] = se["ci"]["F1"][2]
         c["F1p_sem"] = se["F1p"]; c["F1p_sem_lo"] = se["ci"]["F1p"][1]; c["F1p_sem_hi"] = se["ci"]["F1p"][2]
         c["adjP_sem"] = se["adjP"]; c["adjPp_sem"] = se["adjPp"]
+    c["TP_golden"] = v.get("TP")
     c["instruments"] = "/".join(v["instruments"]); c["judges"] = "/".join(v["judges"])
     c["run_dates"] = ",".join(v["run_dates"])
     c["glm_prefix"] = v["glm_prefix_runs"]; c["pmu_missing"] = v["pmu_missing_runs"]
@@ -232,10 +233,9 @@ HTML = """<!DOCTYPE html>
 
 
   <div class="panel">
-    <h2>1f · True golden set vs strict benchmark — 359 real bugs the goldens missed</h2>
-    <div class="note">One row per complete cell. <b style="color:#B07AA1">Colored dot</b> = the true-golden-set result — the number we report: recall/F1 against the 42 goldens + 359 distinct real bugs (LLM semantic merge of every confirmed-bug finding across all 2,416 runs; hallucinations and nitpicks excluded at the gate; evidence pack in the repo). <b style="color:#888">Gray dot</b> = the strict benchmark (goldens only), kept for comparison. The segment between them is what the golden-only lens hides. Hover either dot for the pair. Rows sorted by |gap| (largest first). <b>Switch the metric to F1</b> — under the honest denominators harness F1 lands ~0.4–0.6 and vanilla ~0.2–0.3: the gap is ~2×, real, and now defensible.</div>
-    <div class="controls"><label>metric <select id="expmet"><option value="recall">recall</option><option value="F1">F1</option></select></label></div>
-    <div id="chart1f" style="height:760px"></div>
+    <h2>1f · What each setup actually found — golden bugs vs real bugs the benchmark missed</h2>
+    <div class="note">One bar per cell, sorted by total real bugs found. <b style="color:#888">Gray segment</b> = golden defects found (the only thing the strict benchmark scores). <b style="color:#B07AA1">Colored segment</b> = additional distinct real bugs found from the 359-bug true golden set (LLM-deduplicated from all 2,416 runs, hallucinations and nitpicks excluded; evidence pack in the repo). The longer the colored part, the more the setup finds that the benchmark never credits. Hover for details.</div>
+    <div id="chart1f" style="height:920px"></div>
     <div id="takeaway1f" style="margin-top:10px;padding:10px 14px;border-left:4px solid #B07AA1;background:#faf7fa;font-size:13.5px;border-radius:0 8px 8px 0"></div>
   </div>
 
@@ -361,36 +361,30 @@ VIEWS.forEach(v => {
   document.getElementById(v[1]).onchange = () => drawView(v);
 });
 
-// ---- 1f strict vs expanded (dumbbell of the pairs, anchor-primary union), recall/F1 toggle
-const expmet=document.getElementById('expmet');
+// ---- 1f what each setup actually found (stacked: goldens + additional real bugs)
 function draw6(){
-  const met=expmet.value; const aKey=met, bKey=met+'_sem';
-  const rows = Object.keys(DATA.exp).filter(k=>{const p=k.split('|'); return fModels.has(p[0]) && fFws.has(p[1]) && fEffs.has(p[2]);})
-    .map(k=>({k, ...DATA.exp[k], gap: DATA.exp[k][bKey] - DATA.exp[k][aKey],
-              model:k.split('|')[0], fw:k.split('|')[1], eff:k.split('|')[2]}))
-    .sort((a,b)=>Math.abs(b.gap)-Math.abs(a.gap));
-  const labels = rows.map(r=>SH2[r.model]+'·'+SH2[r.fw]+'·'+r.eff);
-  const yx = rows.map((r,i)=>i);
-  const shapes = rows.map((r,i)=>({type:'line', xref:'x', yref:'y', x0:r[aKey], x1:r[bKey], y0:i, y1:i,
-    line:{color:'#ccc', width:1.5}, layer:'below'}));
+  const rows = DATA.cells.filter(c=>vis(c) && DATA.exp[c.model+'|'+c.fw+'|'+c.eff])
+    .map(c=>{const ex=DATA.exp[c.model+'|'+c.fw+'|'+c.eff];
+             const tpSem=c.TP_sem??0, tpGold=c.TP_golden??0;
+             return {k:c.modelShort+'·'+c.fwShort+'·'+c.eff, m:c.model, fw:c.fw, e:c.eff,
+                     gold: tpGold, extra: Math.max(0,tpSem-tpGold), tot: tpSem,
+                     rec: ex.recall_sem, ci: ex.ci_recall_sem};})
+    .sort((a,b)=>b.tot-a.tot);
+  const labels=rows.map(r=>r.k), yx=rows.map((r,i)=>i);
   const ts=[
-    {x:rows.map(r=>r[bKey]), y:yx, mode:'markers', name:'TRUE GOLDEN SET — our real-world result',
-     marker:{color:'#B07AA1',size:9,line:{width:1.5,color:'#333'}}, customdata:rows, hovertemplate:'<b>%{customdata.k}</b><br>true golden set: %{x:.3f}<br>strict benchmark: %{customdata.'+aKey+'}:.3f}<br>gap: %{customdata.gap:+.3f}<extra>true golden set</extra>'},
-    {x:rows.map(r=>r[aKey]), y:yx, mode:'markers', name:'strict benchmark (goldens only — the artificial lens)',
-     marker:{color:'#999',size:7}, customdata:rows, hovertemplate:'<b>%{customdata.k}</b><br>true golden set: %{customdata.'+bKey+'}:.3f}<br>strict benchmark: %{x:.3f}<br>gap: %{customdata.gap:+.3f}<extra>strict benchmark</extra>'},
+    {x:rows.map(r=>r.gold), y:yx, orientation:'h', type:'bar', name:'golden bugs found', marker:{color:'#bbb'},
+     customdata:rows, hovertemplate:'<b>%{customdata.k}</b><br>golden bugs: %{x}<extra></extra>'},
+    {x:rows.map(r=>r.extra), y:yx, orientation:'h', type:'bar', name:'real bugs found (beyond goldens)', marker:{color:'#B07AA1'},
+     customdata:rows, hovertemplate:'<b>%{customdata.k}</b><br>real bugs beyond goldens: %{x}<br>total: %{customdata.tot} · recall_sem %{customdata.rec:.3f} [%{customdata.ci[1]:.3f}, %{customdata.ci[2]:.3f}]<extra></extra>'},
   ];
-  Plotly.react('chart1f', ts, {shapes:shapes, margin:{l:130,r:16,t:8,b:44},
-    xaxis:{title:met+' (colored = true golden set; gray = strict benchmark)', range:[0, Math.max(...rows.map(r=>r[bKey]))*1.2], gridcolor:'#eee'},
-    yaxis:{tickvals:yx, ticktext:labels, tickfont:{size:10}, gridcolor:'#eee', autorange:'reversed', range:[rows.length-0.5, -0.8]},
-    legend:{font:{size:11}, orientation:'h', y:-0.06}, paper_bgcolor:'rgba(0,0,0,0)'}, {displayModeBar:false, responsive:true});
-  takeaway1f(met);
-}
-function takeaway1f(met){
+  Plotly.react('chart1f', ts, {barmode:'stack', margin:{l:150,r:16,t:8,b:44},
+    xaxis:{title:'distinct real bugs found (of 42 goldens + 359 true-set bugs)', gridcolor:'#eee'},
+    yaxis:{tickvals:yx, ticktext:labels, tickfont:{size:9.5}, autorange:'reversed'},
+    legend:{font:{size:11},orientation:'h',y:-0.06}, paper_bgcolor:'rgba(0,0,0,0)'}, {displayModeBar:false, responsive:true});
   const el=document.getElementById('takeaway1f');
-  if(met==='recall') el.innerHTML='<b>Takeaway:</b> against the <b>true golden set</b> (42 goldens + 359 real bugs), harness-vs-vanilla Δrecall resolves positive in <b>39/43</b> paired cells. The recommendation cell glm-vis · MRV · low finds 0.339 [0.268, 0.416] of all real bugs vs fable-5.1 vanilla 0.177 — <b>~1.9×</b> at ~1/4 the cost. Residual under-merge makes these mild lower bounds.';
-  else el.innerHTML='<b>Takeaway:</b> true-golden-set F1: harnesses land 0.43–0.58, vanilla 0.20–0.31 — and <b>MRV beats CE overall</b> (mean ΔF1 +0.036 [+0.012, +0.064] over 21 matched pairs; the gap widens under the nitpick-charged F1\u2032). Every bug in the denominator carries a human-verifiable evidence card (location, why-real, replication) — see TRUE_GOLDEN_EVIDENCE.md.';
+  el.innerHTML='<b>Takeaway:</b> the colored segments are nearly invisible for vanilla cells — single-pass finds the goldens and little else — while harness cells (especially GLM at any effort, and fable-5.1 on metareview) pile up long colored sections: dozens of real bugs the strict benchmark never scores. This is the whole §10b story in one chart.';
 }
-expmet.onchange=draw6; draw6();
+draw6();
 
 // ---- 2 effort ladder
 const fwsel=document.getElementById('fwsel');
