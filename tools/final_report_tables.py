@@ -208,11 +208,12 @@ for u, v in M["expanded_gold"]["per_pr"].items():
 w()
 
 # ---- §10b semantic union tables (PRIMARY real-world result) ----
-SEM = M["expanded_gold_semantic"]
-w("### T12 — semantic-union matrix (§10b PRIMARY): per-cell real-world metrics with 95% cluster-bootstrap CIs")
+SEM = M["expanded_gold_verified"]
+w("### T12 — VERIFIED-union matrix (§10c PRIMARY): per-cell real-world metrics with 95% cluster-bootstrap CIs")
 w()
-w("Union = distinct real bugs (LLM semantic merge of all confirmed-bug findings; hallucinations and")
-w("nitpicks excluded at the gate). recall_sem = (golden TP + distinct bugs found)/(goldens + true bugs).")
+w("Union = distinct real bugs after (a) a stricter whole-PR re-merge and (b) removal of clusters verified")
+w("to duplicate a golden (47 across the six PRs). recall_sem = (goldens found + additional bugs found) /")
+w(f"({SEM['totals']['goldens']} goldens + {SEM['totals']['n_verified_additional']} verified additional).")
 w("adjP charges only hallucinations; adjP\' also charges nitpicks (user lens: everything the reader wades through).")
 w()
 w("| cell | n PRs | recall_sem | adjP | adjP\' | F1 | F1\' |")
@@ -254,15 +255,19 @@ for k, v in sorted(SEM["harness_vs_vanilla_sem"].items()):
 w()
 w(f"Resolved positive {posf}/{len(SEM['harness_vs_vanilla_sem'])} (vs 38/42 under the frozen key-union, 17/42 strict).")
 w()
-w("### T15 — true-golden set per PR (semantic union; evidence pack)")
+w("### T15 — verified true-golden set per PR (§10c; evidence pack)")
 w()
-w("| PR | goldens | true bugs | findings clustered | judge calls |")
-w("|---|---|---|---|---|")
+w("| PR | goldens | verified additional | verified universe | merged clusters | golden-duplicates removed |")
+w("|---|---|---|---|---|---|")
 for u, v in SEM["per_pr"].items():
-    w(f"| {u.split('github.com/')[1]} | {v['goldens']} | **{v['union_sem']}** | {v['n_findings']:,} | {v['judge_calls']} |")
+    w(f"| {u.split('github.com/')[1]} | {v['goldens']} | **{v['n_verified_additional']}** | "
+      f"{v['goldens'] + v['n_verified_additional']} | {v['n_merged']} | {v['n_overlap_strict']} |")
 w()
-w(f"Total: 42 goldens + 359 true bugs. Per-bug verification cards (location, why-real, replication,")
-w("found-by): `analysis/TRUE_GOLDEN_EVIDENCE.md`.")
+T = SEM["totals"]
+w(f"Total: {T['goldens']} goldens + {T['n_verified_additional']} verified additional bugs = "
+  f"{T['goldens'] + T['n_verified_additional']} distinct bugs ({T['n_merged']} merged clusters; "
+  f"{T['n_overlap_strict']} golden-duplicates removed, not counted).")
+w("Per-bug verification cards (location, why-real, replication, found-by): `analysis/TRUE_GOLDEN_EVIDENCE.md`.")
 w()
 
 open("/tmp/final_report_tables.md", "w").write("\n".join(out))

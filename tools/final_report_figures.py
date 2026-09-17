@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 D = json.load(open(f"{ROOT}/analysis/final_report_dataset.json"))
 M = json.load(open(f"{ROOT}/analysis/final_report_metrics.json"))
-SEM = M["expanded_gold_semantic"]["matrix_sem"]
+SEM = M["expanded_gold_verified"]["matrix_sem"]
 
 def sem_cell(m, fw, e):
     return SEM.get(f"{m}|{fw}|{e}")
@@ -81,7 +81,7 @@ for ax, met, xlab in ((axes[0], "F1_sem", "F1, true golden set (CI)"),
     ax.set_ylim(0.0, 0.5 if met == "F1p_sem" else 0.6)
     if met == "F1_sem":
         ax.legend(fontsize=6)
-fig.suptitle("Cost/quality frontier, true golden set (42 goldens + 359 real bugs) — top-6 cells", fontsize=9)
+fig.suptitle("Cost/quality frontier, verified true golden set (42 goldens + 211 additional bugs) — top-6 cells", fontsize=9)
 fig.tight_layout()
 fig.savefig(f"{FIG}/fig_pareto_frontier.png"); plt.close(fig)
 
@@ -350,7 +350,7 @@ for m, fw, e, v in pts:
 ax.set_xlabel("metered $ per true bug found (log)"); ax.set_ylabel("recall, true golden set [CI]")
 ax.set_title("(d) cost per true bug vs recall (true golden set)", fontsize=9)
 
-fig.suptitle("Efficiency 2×2, true golden set — top-6 cells, 95% cluster-bootstrap CIs", fontsize=10)
+fig.suptitle("Efficiency 2×2, verified true golden set — top-6 cells, 95% cluster-bootstrap CIs", fontsize=10)
 fig.tight_layout()
 fig.savefig(f"{FIG}/fig_efficiency_2x2.png"); plt.close(fig)
 

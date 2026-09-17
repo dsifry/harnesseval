@@ -53,7 +53,7 @@ for k, v in M["matrix"].items():
     if ex:
         c["TP_exp"] = ex["TP_exp"]
         c["usd_per_tp_exp"] = (v["ci"]["cost_run"][0] * v["n_pr"] / ex["TP_exp"]) if ex["TP_exp"] else None
-    se = M["expanded_gold_semantic"]["matrix_sem"].get(kx)
+    se = M["expanded_gold_verified"]["matrix_sem"].get(kx)
     if se:
         c["TP_sem"] = se["TP_sem"]
         c["usd_per_tp_sem"] = (v["ci"]["cost_run"][0] * v["n_pr"] / se["TP_sem"]) if se["TP_sem"] else None
@@ -62,7 +62,7 @@ for k, v in M["matrix"].items():
         c["F1p_sem"] = se["F1p"]; c["F1p_sem_lo"] = se["ci"]["F1p"][1]; c["F1p_sem_hi"] = se["ci"]["F1p"][2]
         c["adjP_sem"] = se["adjP"]; c["adjPp_sem"] = se["adjPp"]
     c["TP_golden"] = v.get("TP")
-    _pp = M["expanded_gold_semantic"]["per_pr"]
+    _pp = {u: (M["expanded_gold_verified"]["per_pr"][u] | {"union_sem": M["expanded_gold_verified"]["per_pr"][u]["n_verified_additional"]}) for u in M["expanded_gold_verified"]["per_pr"]}
     _cov = [r["url"] for r in D["selected_runs"] if r["model"] == m and r["framework"] == fw and r["effort"] == e and r["url"] in _pp]
     c["ceiling"] = sum(_pp[u]["goldens"] + _pp[u]["union_sem"] for u in _cov)
     c["instruments"] = "/".join(v["instruments"]); c["judges"] = "/".join(v["judges"])
@@ -124,7 +124,7 @@ def round5(o):
     return o
 
 expd = {}
-for k, v in M["expanded_gold_semantic"]["matrix_sem"].items():
+for k, v in M["expanded_gold_verified"]["matrix_sem"].items():
     st = M["matrix"].get(k)
     if not st:
         continue
@@ -236,8 +236,8 @@ HTML = """<!DOCTYPE html>
 
 
   <div class="panel">
-    <h2>1f · What each setup actually found — golden bugs vs real bugs the benchmark missed</h2>
-    <div class="note">One bar per cell, sorted by total real bugs found. <b style="color:#888">Gray segment</b> = golden defects found (the only thing the strict benchmark scores). <b style="color:#B07AA1">Colored segment</b> = additional distinct real bugs found from the 359-bug true golden set (LLM-deduplicated from all 2,416 runs, hallucinations and nitpicks excluded; evidence pack in the repo). The longer the colored part, the more the setup finds that the benchmark never credits. The dashed line at 401 marks the <b>"perfect" agent</b> (as far as we know — and we are being facetious): all 42 goldens + all 359 true-set bugs on the six PRs. The small gray tick on each row is that cell's reachable ceiling (six cells cover fewer than the six PRs and cannot reach 401). Hover for details.</div>
+    <h2>1f · What each setup actually found — golden bugs vs verified real bugs the benchmark missed</h2>
+    <div class="note">One bar per cell, sorted by total real bugs found. <b style="color:#888">Gray segment</b> = golden defects found (the only thing the strict benchmark scores). <b style="color:#B07AA1">Colored segment</b> = additional distinct real bugs found from the <b>verified</b> set (LLM-deduplicated and golden-overlap-corrected from all 2,416 runs; hallucinations and nitpicks excluded; evidence pack in the repo). The longer the colored part, the more the setup finds that the benchmark never credits. The dashed line at 253 marks the <b>"perfect" agent</b> (as far as we know — and we are being facetious): all 42 goldens + all 211 verified additional bugs on the six PRs. The small gray tick on each row is that cell's reachable ceiling (some cells cover fewer than the six PRs and cannot reach 253). Hover for details.</div>
     <div id="chart1f" style="height:920px"></div>
     <div id="takeaway1f" style="margin-top:10px;padding:10px 14px;border-left:4px solid #B07AA1;background:#faf7fa;font-size:13.5px;border-radius:0 8px 8px 0"></div>
   </div>
@@ -382,12 +382,12 @@ function draw6(){
     {x:rows.map(r=>r.ceiling), y:yx, mode:'markers', name:'reachable ceiling for this cell', marker:{color:'#666',symbol:'line-ns-open',size:8,line:{width:1}},
      customdata:rows, hovertemplate:'<b>%{customdata.k}</b><br>reachable ceiling (covered PRs): %{x}<extra></extra>'},
   ];
-  const PERFECT = 401; // "perfect" agent = 42 goldens + 359 true-set bugs (facetious: bounded by what the campaign found)
+  const PERFECT = 253; // "perfect" agent = 42 goldens + 211 verified additional bugs (facetious: bounded by what the campaign found)
   const shapes=[{type:'line', xref:'x', x0:PERFECT, x1:PERFECT, yref:'y', y0:-0.5, y1:rows.length-0.5,
     line:{color:'#333', width:1.2, dash:'dash'}, layer:'below'}];
-  const annotations=[{xref:'x', x:PERFECT, yref:'y', y:-0.5, text:'"perfect" agent (as far as we know): 42 goldens + 359 true-set bugs', showarrow:false, font:{size:9}, xanchor:'right', yanchor:'bottom'}];
+  const annotations=[{xref:'x', x:PERFECT, yref:'y', y:-0.5, text:'"perfect" agent (as far as we know): 42 goldens + 211 verified additional bugs', showarrow:false, font:{size:9}, xanchor:'right', yanchor:'bottom'}];
   Plotly.react('chart1f', ts, {shapes:shapes, annotations:annotations, barmode:'stack', margin:{l:150,r:16,t:8,b:44},
-    xaxis:{title:'distinct real bugs found (of 42 goldens + 359 true-set bugs)', gridcolor:'#eee'},
+    xaxis:{title:'distinct real bugs found (of 42 goldens + 211 verified additional bugs)', gridcolor:'#eee'},
     yaxis:{tickvals:yx, ticktext:labels, tickfont:{size:9.5}, autorange:'reversed'},
     legend:{font:{size:11},orientation:'h',y:-0.06}, paper_bgcolor:'rgba(0,0,0,0)'}, {displayModeBar:false, responsive:true});
   const el=document.getElementById('takeaway1f');

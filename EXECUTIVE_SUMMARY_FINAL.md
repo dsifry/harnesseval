@@ -54,23 +54,32 @@ adjudication, judge gpt-5.2 for the Anthropic/GLM rows.
 
 ## Our results are the expanded (real-world) numbers; the strict benchmark is the artificial lens kept for comparison
 
-We report the **true-golden-set analysis** (REPORT_FINAL §10b) as our results throughout; the strict benchmark (goldens only) and the earlier key-union expansion (§5b) are kept for comparison/provenance.
+We report the **verified true-golden-set analysis** (REPORT_FINAL §10c) as our results throughout; the strict benchmark (goldens only) and the earlier unions (§5b, §10b) are kept for provenance.
 
-The benchmark's golden set is a floor, not a ceiling. We rebuilt the hidden-gold set by
-LLM semantic merge: every confirmed bug found across all 2,416 healthy runs
-(hallucinations and nitpicks excluded at the adjudication gate) was clustered into
-**distinct real bugs** — 42 goldens + **359 additional true bugs** across the six PRs,
-each with a human-verifiable evidence card (location, why-real, replication steps,
-found-by list) in `analysis/TRUE_GOLDEN_EVIDENCE.md`. Two construction defects were
-found and fixed en route: the earlier key-union overcounted distinct bugs ~17×
-(paraphrase splits), and an extract bug had silently dropped 706 rj3-confirmed bugs
-(disproportionately vanilla cells). Under the honest denominators: **the
-harness-vs-vanilla comparison holds decisively** — 39/43 paired recall deltas resolve
-positive — and the recommendation cell carries **~1.9× fable vanilla's real-bug recall**
-at the same fraction of the cost (0.339 vs 0.177; not the 9× the inflated union
-suggested). **MRV beats CE overall** on real-world F1 (mean ΔF1 +0.036 [+0.012,
-+0.064], 21 matched pairs) and the gap widens under the user lens that charges nitpicks
-against precision (adjP′): CE's findings are filtered as nitpicks at 29% vs MRV's 25%.
+The benchmark's golden set is a floor, not a ceiling. We rebuilt the hidden-gold set from every
+confirmed-bug finding across all 2,416 healthy runs (hallucinations and nitpicks excluded at the
+adjudication gate), then audited the rebuild twice: an LLM semantic merge, a stricter whole-PR
+re-merge (which collapsed the candidate clusters 359 → 258), and a finding-level golden-overlap
+check that identified **47 clusters as duplicates of goldens the official matcher had missed** —
+those are removed, because counting them double-counts both the denominator and the credit. The
+verified universe is **42 goldens + 211 additional real bugs =
+253 distinct bugs**, each with a human-verifiable evidence card (location,
+why-real, replication steps, found-by list) in `analysis/TRUE_GOLDEN_EVIDENCE.md`.
+
+Under those honest denominators: **the harness-vs-vanilla comparison holds** — 39/43 paired
+recall deltas resolve positive — and the recommendation cell carries **~1.4× fable vanilla's real-bug recall**
+(0.375 vs 0.261) at the same fraction of the cost. **MRV beats CE overall**
+(mean ΔF1 +0.044 [+0.019, +0.073], 17+/4− over
+21 matched pairs), and the gap widens under the user lens that charges nitpicks against precision.
+
+**Why even the best harness misses what it misses.** Three mechanisms, separated: (1) *denominator
+inflation* — paraphrase splits and golden duplicates (now fixed) made the universe look ~1.6× bigger
+than it is; (2) *variance, not blindness* — the best single cell found 133 of 359 pre-merge clusters,
+but 91% of what it missed was found by another harness cell, and harnesses collectively found 94%;
+(3) a *genuine blind tail of 12 verified bugs no harness cell found* — overwhelmingly a different
+class (performance/N+1/eager-loading, test-quality gaps, framework idioms, migration-lock semantics),
+i.e. outside the correctness/security brief the lenses are built for. A scope explanation was tested
+and rejected: anchored findings are 227 in-diff vs 1 out-of-diff.
 
 ## Gaps we will not paper over
 

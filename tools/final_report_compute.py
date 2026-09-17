@@ -1081,13 +1081,18 @@ out["expanded_gold_semantic"]["pairs_summary"] = {
 # rng5 = SEED+4 (appended after all other rng consumers; earlier sections untouched).
 rng5 = np.random.default_rng(SEED + 4)
 
+def _ci(pt, lo, hi):
+    """Percentile CI, clamped to contain the point estimate (tiny-n bootstrap resamples can
+    produce percentile bounds that exclude the observed value; negative error bars downstream)."""
+    return (float(pt), float(min(lo, pt)), float(max(hi, pt)), 1.0)
+
 _VERIFIED_OK = True
 _vrfy, _strict = {}, {}
 for _u in TOP6:
     _slug = _u.rstrip("/").split("/")[-1]
     try:
         _vrfy[_u] = json.load(open(f"{ROOT}/analysis/semantic_true_golden_verify_{_slug}.json"))
-        _strict[_u] = json.load(open(f"{ROOT}/analysis/semantic_overlap_finding_{_slug}.json"))
+        _strict[_u] = json.load(open(f"{ROOT}/analysis/semantic_overlap_locked_{_slug}.json"))
     except FileNotFoundError:
         _VERIFIED_OK = False
         break
@@ -1111,7 +1116,7 @@ if _VERIFIED_OK:
             for _r in _g["merge_group"]:
                 _raw2g[_r] = _gi
         _gl = _goldens_list(_u)
-        _strict_g = [c.get("golden_index") for c in _sc]   # finding-level overlap (None = verified additional)
+        _strict_g = [c.get("locked_golden") for c in _sc]   # locked overlap (None = verified additional)
         _v_pr[_u] = {
             "goldens": _gl, "raw2g": _raw2g,
             "group_golden": _strict_g,                     # None -> additional
@@ -1125,11 +1130,7 @@ if _VERIFIED_OK:
         for u in urls:
             p = _v_pr[u]
             f2c = {int(k): v for k, v in _sem_by_url[u]["finding_to_cluster"].items()}
-            flat = _sem_flat(u)
-            bnd, i = {}, 0
-            for rid, t in flat:
-                bnd.setdefault(rid, [i, i])[1] = i + 1
-                i += 1
+            bnd = _sem_bounds(u)   # all runs of the PR, zero-width when no confirmed findings
             r0 = next(x for x in D["selected_runs"] if (x["model"], x["framework"], x["effort"], x["url"]) == (cell[0], cell[1], cell[2], u))
             s_, e_ = bnd[r0["run_id"]]
             own_groups = {p["raw2g"][f2c[i2]] for i2 in range(s_, e_)}
@@ -1154,25 +1155,37 @@ if _VERIFIED_OK:
                 arr = np.array([[r["tpA"], r["tpB"], r["den"], r["hal"], r["imp"]] for r in rows], dtype=float)
                 idx = rng5.integers(0, n, size=(B, n))
                 S = arr[idx]
-                def _met(tp, den, hal, imp):
-                    rec = tp.sum() / den.sum() if den.sum() else 0.0
-                    adj = tp.sum() / (tp.sum() + hal.sum()) if (tp.sum() + hal.sum()) else 0.0
-                    adjp = tp.sum() / (tp.sum() + hal.sum() + imp.sum()) if (tp.sum() + hal.sum() + imp.sum()) else 0.0
+                def _vec(tp, den, hal, imp):
+                    rec = np.where(den > 0, tp / np.where(den > 0, den, 1), 0)
+                    adj = np.where(tp + hal > 0, tp / np.where(tp + hal > 0, tp + hal, 1), 0)
+                    adjp = np.where(tp + hal + imp > 0, tp / np.where(tp + hal + imp > 0, tp + hal + imp, 1), 0)
+                    f1 = np.where(rec + adj > 0, 2 * rec * adj / np.where(rec + adj > 0, rec + adj, 1), 0)
+                    f1p = np.where(rec + adjp > 0, 2 * rec * adjp / np.where(rec + adjp > 0, rec + adjp, 1), 0)
+                    return rec, adj, adjp, f1, f1p
+
+                def _pt(tp, den, hal, imp):
+                    t, d, h, im = float(tp.sum()), float(den.sum()), float(hal.sum()), float(imp.sum())
+                    rec = t / d if d else 0.0
+                    adj = t / (t + h) if (t + h) else 0.0
+                    adjp = t / (t + h + im) if (t + h + im) else 0.0
                     f1 = 2 * rec * adj / (rec + adj) if (rec + adj) else 0.0
                     f1p = 2 * rec * adjp / (rec + adjp) if (rec + adjp) else 0.0
                     return rec, adj, adjp, f1, f1p
-                recB, adjB, adjpB, f1B, f1pB = _met(S[:, :, 1], S[:, :, 2], S[:, :, 3], S[:, :, 4])
-                recA, adjA, adjpA, f1A, f1pA = _met(S[:, :, 0], S[:, :, 2], S[:, :, 3], S[:, :, 4])
-                pA = _met(arr[:, 0], arr[:, 2], arr[:, 3], arr[:, 4])
-                pB = _met(arr[:, 1], arr[:, 2], arr[:, 3], arr[:, 4])
+                # aggregate each bootstrap replicate over the sampled PRs (axis=1)
+                tpBv, denv, halv, impv = S[:, :, 1].sum(axis=1), S[:, :, 2].sum(axis=1), S[:, :, 3].sum(axis=1), S[:, :, 4].sum(axis=1)
+                tpAv = S[:, :, 0].sum(axis=1)
+                recB, adjB, adjpB, f1B, f1pB = _vec(tpBv, denv, halv, impv)
+                recA, adjA, adjpA, f1A, f1pA = _vec(tpAv, denv, halv, impv)
+                pA = _pt(arr[:, 0], arr[:, 2], arr[:, 3], arr[:, 4])
+                pB = _pt(arr[:, 1], arr[:, 2], arr[:, 3], arr[:, 4])
                 _vcells[f"{m}|{fw}|{e}"] = {
                     "n_pr": n, "TP_sem": int(arr[:, 1].sum()), "TP_bench": int(arr[:, 0].sum()),
                     "den": int(arr[:, 2].sum()), "hal": int(arr[:, 3].sum()), "imp": int(arr[:, 4].sum()),
                     "recall_sem": pB[0], "adjP": pB[1], "adjPp": pB[2], "F1": pB[3], "F1p": pB[4],
                     "recall_bench": pA[0], "F1_bench": pA[3],
-                    "ci": {"recall_sem": (float(recB[0]), float(np.percentile(recB, 2.5)), float(np.percentile(recB, 97.5)), 1.0),
-                           "F1": (float(f1B[0]), float(np.percentile(f1B, 2.5)), float(np.percentile(f1B, 97.5)), 1.0),
-                           "F1p": (float(f1pB[0]), float(np.percentile(f1pB, 2.5)), float(np.percentile(f1pB, 97.5)), 1.0)},
+                    "ci": {"recall_sem": _ci(pB[0], np.percentile(recB, 2.5), np.percentile(recB, 97.5)),
+                           "F1": _ci(pB[3], np.percentile(f1B, 2.5), np.percentile(f1B, 97.5)),
+                           "F1p": _ci(pB[4], np.percentile(f1pB, 2.5), np.percentile(f1pB, 97.5))},
                 }
 
     def _pm_of(X):
@@ -1248,7 +1261,7 @@ if _VERIFIED_OK:
                          "verified overlapping cluster the run produced; additional found = verified non-golden "
                          "groups hit. Rule A (benchmark-compatible): official TP identities only. No bug is "
                          "counted twice in either rule. Artifacts: analysis/semantic_true_golden_verify_<pr>.json "
-                         "(re-merge + first-pass overlap), analysis/semantic_overlap_finding_<pr>.json (finding-level "
+                         "(re-merge + first-pass overlap), analysis/semantic_overlap_locked_<pr>.json (finding-level "
                          "overlap check: a cluster overlaps a golden only if a single member finding is that golden's "
                          "defect; judged per finding because cluster representatives are broader than any one "
                          "golden). CIs: cluster bootstrap, B=10000, seed 20260916, rng5=SEED+4. Provenance: "
