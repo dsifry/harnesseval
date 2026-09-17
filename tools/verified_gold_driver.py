@@ -29,9 +29,8 @@ PR_HEADS = {
     "10967": ("a308075bc39b77ed7059b0cae9d443d669a7bf98", "de628295646d0848226618108a52f2f1e5d04ac0"),
 }
 SYSTEM = "You are a senior TypeScript engineer writing executable regression evidence. Respond with ONLY valid JSON."
-PROMPT = """A code-review campaign claims the following defect in this pull request. Turn the claim into
-EXECUTABLE EVIDENCE: a vitest test that FAILS on the current (post-PR) code by asserting the claimed
-behavior, plus the MINIMAL source fix that makes it pass.
+TEST_PROMPT = """A code-review campaign claims the following defect in this pull request. Write a vitest
+test that FAILS on the current (post-PR) code by asserting the claimed behavior.
 
 CLAIM
   file: {file} (line ~{line})
@@ -40,7 +39,7 @@ CLAIM
   reports (deduplicated; may state the mechanism):
 {reports}
 
-CURRENT POST-PR SOURCE of {file}:
+CURRENT POST-PR SOURCE (may be an excerpt for large files):
 ```ts
 {content}
 ```
@@ -56,24 +55,51 @@ AN EXISTING TEST FROM THIS PACKAGE — follow its conventions (imports, mocking 
 ```
 
 REQUIREMENTS
-- Import the REAL module with a relative path and execute the real code path.
-- The test must FAIL on the current code with an assertion naming the claimed behavior, and PASS once the
-  minimal fix is applied. Assert observable behavior (returned values, thrown errors, side effects).
-- Put the test next to the source: same directory, name `{stem}.verified.test.ts`.
+- Import the REAL module (relative path) and execute the real code path.
+- The test must FAIL on the current code with an assertion naming the claimed behavior.
+- Assert observable behavior (returned values, thrown errors, side effects), not implementation details.
+- Put it next to the source: `{dir}/{stem}.verified.test.ts`.
 - Set env vars BEFORE importing modules that read them at import time (dynamic `await import(...)`).
 - Mock only true externals (network, prisma, feature flags) — never the module under test.
-- The fix must be MINIMAL: change only what the claimed defect requires.
+- Keep it under ~150 lines.
 
-OUTPUT FORMAT (critical): return ONLY a JSON object. NEVER return the whole source file — use
-minimal exact-match edits. Keep test_code under ~200 lines. Each `find` string must appear EXACTLY ONCE
-in the current file (include a few surrounding lines to make it unique).
-
+Respond with ONLY this JSON object (no prose, no code fences):
 {{"test_path": "{dir}/{stem}.verified.test.ts",
   "test_code": "<full test file contents>",
-  "fix_edits": [{{"find": "<exact excerpt of the current file>", "replace": "<corrected excerpt>"}}],
-  "claim_restated": "<one sentence: the behavior the test demonstrates>",
+  "claim_restated": "<one sentence>",
   "expected_failure": "<assertion message expected on unfixed code>",
   "confidence": 0.0-1.0}}"""
+
+FIX_PROMPT = """A vitest test demonstrates the defect below and currently FAILS on this code. Produce the MINIMAL
+fix as exact-match edits.
+
+CLAIM: {title}
+FILE: {file}
+
+TEST (must pass after your fix; do not modify the test):
+```ts
+{test_code}
+```
+
+CURRENT SOURCE (excerpt for large files):
+```ts
+{content}
+```
+
+FAILING TEST OUTPUT (tail):
+```
+{head_log}
+```
+
+RULES
+- Return ONLY exact-match edits: each `find` must be a verbatim excerpt of the CURRENT SOURCE and must
+  occur EXACTLY ONCE. Include enough surrounding context to be unique.
+- Minimal change: fix only what this defect requires; keep everything else byte-identical.
+- NEVER return the whole file.
+
+Respond with ONLY this JSON object (no prose, no code fences):
+{{"fix_edits": [{{"find": "<verbatim excerpt>", "replace": "<corrected excerpt>"}}],
+  "explanation": "<one sentence>"}}"""
 
 
 def sh(cmd, cwd=None, timeout=300):
@@ -149,8 +175,7 @@ def _template_test(file):
     for up in [base] + list(base.parents)[:4]:
         if not str(up).startswith(str(REPO)):
             break
-        hits = sorted(up.rglob("*.test.ts"))
-        hits = [h for h in hits if "node_modules" not in str(h) and h.name != "index.test.ts"]
+        hits = [h for h in sorted(up.rglob("*.test.ts")) if "node_modules" not in str(h) and h.name != "index.test.ts"]
         if hits:
             try:
                 return "\n".join(hits[0].read_text().splitlines()[:55])
@@ -159,15 +184,21 @@ def _template_test(file):
     return ""
 
 
-async def author(model, cand, file, content, diff, supplier_dir, stem):
-    w = _window(content, cand.get("line"), span=90) if len(content) > 12000 else content
-    prompt = PROMPT.format(file=file, line=cand.get("line") or "?", title=cand.get("title") or "",
-                           severity=cand.get("severity") or "?",
-                           reports="\n".join(f"- {r}" for r in cand.get("reports", [])[:6]),
-                           content=w, diff=diff or "(none)",
-                           tmpl=_template_test(file) or "(no neighbouring test found)",
-                           dir=supplier_dir, stem=stem)
-    parsed, tin, tout, _ = await call_model_json(model, SYSTEM, prompt, effort="medium", max_tokens=8000)
+async def author_test(model, cand, file, content, diff, supplier_dir, stem, extra=""):
+    prompt = TEST_PROMPT.format(file=file, line=cand.get("line") or "?", title=cand.get("title") or "",
+                                severity=cand.get("severity") or "?",
+                                reports="\n".join(f"- {r}" for r in cand.get("reports", [])[:6]),
+                                content=content, diff=(diff or "(none)") + extra,
+                                tmpl=_template_test(file) or "(no neighbouring test found)",
+                                dir=supplier_dir, stem=stem)
+    parsed, tin, tout, _ = await call_model_json(model, SYSTEM, prompt, effort="medium", max_tokens=6000)
+    return (parsed if isinstance(parsed, dict) else {}), tin, tout
+
+
+async def author_fix(model, cand, file, content, test_code, head_log, original_content):
+    prompt = FIX_PROMPT.format(title=cand.get("title") or "", file=file, test_code=test_code[:6000],
+                               content=content, head_log=head_log[-2500:])
+    parsed, tin, tout, _ = await call_model_json(model, SYSTEM, prompt, effort="medium", max_tokens=4000)
     return (parsed if isinstance(parsed, dict) else {}), tin, tout
 
 
@@ -215,79 +246,95 @@ def write_bundle(d, cand, pr, verdict, logs, test_code, fix_diff, test_path, ext
 
 async def do_candidate(cand, model, k_retry=3):
     pr = cand["pr_slug"]; base, head = PR_HEADS[pr]
-    clean_repo(head)                       # worktree must be at head before any existence check
+    clean_repo(head)                                  # worktree at head before any check
     file = cand.get("file_resolved") or ""
-    exists = bool(file) and sh(f"git cat-file -e {head}:{file}")[0] == 0   # commit-based, worktree-independent
+    exists = bool(file) and sh(f"git cat-file -e {head}:{file}")[0] == 0
     if not exists:
         d = bundle_dir(pr, f"B{cand['class_index']:02d}-{cand['class_slug']}")
         (d / "meta.json").write_text(json.dumps({
             "bug_id": f"{pr}-B{cand['class_index']:02d}", "candidate": cand, "pr": pr,
             "verdict": "unresolved_file",
             "blocker": f"could not pin the finding to a file changed by this PR (card file: {cand.get('file')!r}); needs manual triage",
-            "fidelity": "n/a", "provenance": {"produced_by": "tools/verified_gold_driver.py",
-                                             "spec": "analysis/verified_gold/README.md",
-                                             "date": time.strftime("%Y-%m-%d")}}, indent=1))
+            "fidelity": "n/a",
+            "provenance": {"produced_by": "tools/verified_gold_driver.py",
+                           "spec": "analysis/verified_gold/README.md", "date": time.strftime("%Y-%m-%d")}}, indent=1))
         return {"verdict": "unresolved_file"}
+
     stem = Path(file).stem
     supplier_dir = str(Path(file).parent)
     d = bundle_dir(pr, f"B{cand['class_index']:02d}-{cand['class_slug']}")
-    content = (REPO / file).read_text()
+    original = (REPO / file).read_text()
+    content = _window(original, cand.get("line"), 90) if len(original) > 12000 else original
     diff = pr_file_diff(cand["pr"], file)
     notes, tin, tout = [], 0, 0
+    tp = f"{supplier_dir}/{stem}.verified.test.ts"
+    test_code, head_log, fixed_log, fix_diff = None, "", "", ""
+
+    # ---- 1. author a test that fails on head
     for attempt in range(1, k_retry + 1):
-        parsed, i1, o1 = await author(model, cand, file, content, diff, supplier_dir, stem)
+        parsed, i1, o1 = await author_test(model, cand, file, content, diff, supplier_dir, stem)
         tin += i1; tout += o1
-        tp = parsed.get("test_path") or f"{supplier_dir}/{stem}.verified.test.ts"
-        has_fix = bool(parsed.get("fixed_file_content") or parsed.get("fix_edits"))
-        if not parsed.get("test_code") or not has_fix:
-            notes.append(f"attempt {attempt}: model returned incomplete JSON (no test_code / no fix)")
-            diff = (diff or "") + ("\n\nNOTE: your previous reply did not parse. Return ONLY the JSON object; "
-                                   "keep test_code under ~200 lines and use fix_edits (never the whole file).")
+        tp = parsed.get("test_path") or tp
+        if not parsed.get("test_code"):
+            notes.append(f"test attempt {attempt}: incomplete JSON")
             continue
-        (REPO / tp).write_text(parsed["test_code"])
+        test_code = parsed["test_code"]
+        (REPO / tp).write_text(test_code)
         _rc, head_log = run_test(tp)
         if classify(head_log) == "PASS":
             clean_repo(head)
-            return write_bundle(d, cand, pr, "not_a_bug", {"head": head_log}, parsed["test_code"], "", tp,
-                                {"notes": notes,
-                                 "demotion_review": "test passes on unmodified head: no observable behaviour change demonstrated",
-                                 "model_tokens": {"in": tin, "out": tout}})
+            return write_bundle(d, cand, pr, "not_a_bug", {"head": head_log}, test_code, "", tp,
+                                {"notes": notes, "model_tokens": {"in": tin, "out": tout},
+                                 "demotion_review": "test passes on unmodified head: no observable behaviour change demonstrated"})
         if re.search(r"Failed to load|Cannot find module|Transform failed|SyntaxError", head_log) and attempt < k_retry:
-            notes.append(f"attempt {attempt}: test could not load/compile; retried")
+            notes.append(f"test attempt {attempt}: did not load/compile; retried")
             diff = (diff or "") + "\n\nLAST TEST RUN ERROR (fix the test):\n" + head_log[-1500:]
             continue
-        if parsed.get("fixed_file_content"):
-            (REPO / file).write_text(parsed["fixed_file_content"])
-        else:
-            try:
-                apply_edits(file, parsed["fix_edits"])
-            except Exception as e:
-                notes.append(f"attempt {attempt}: fix_edits failed: {e}")
-                sh("git checkout -q -- .")
-                diff = (diff or "") + f"\n\nFIX EDIT ERROR: {e}\n(the `find` strings must match the current file exactly and once)"
-                continue
-        _rc2, fixed_log = run_test(tp)
-        _rc3, fix_diff = sh(f"git diff -- {file}")
-        if classify(fixed_log) != "PASS" and attempt < k_retry:
-            notes.append(f"attempt {attempt}: fix did not make the test pass; retried")
-            sh("git checkout -q -- .")
-            diff = (diff or "") + "\n\nFIX RUN ERROR (fix the source):\n" + fixed_log[-1500:]
-            continue
-        _rc4, base_log = sh(f"git checkout -q -f {base} && yarn vitest run {tp} --reporter=basic", timeout=420)
-        bc = classify(base_log)
-        verdict = ("behavior_change_not_regression" if bc == "N/A_module_absent"
-                   else "confirmed_regression" if bc == "PASS"
-                   else "defect_present_before_pr")   # base already fails on the same assertion
+        break
+    else:
         clean_repo(head)
-        return write_bundle(d, cand, pr, verdict, {"base": base_log, "head": head_log, "fixed": fixed_log},
-                            parsed["test_code"], fix_diff, tp,
-                            {"notes": notes, "claim_restated": parsed.get("claim_restated"),
-                             "expected_failure": parsed.get("expected_failure"),
-                             "model_confidence": parsed.get("confidence"),
+        return write_bundle(d, cand, pr, "inconclusive_env", {}, test_code or "", "", tp,
+                            {"notes": notes, "blocker": notes[-1] if notes else "test authoring failed",
                              "model_tokens": {"in": tin, "out": tout}})
+
+    # ---- 2. author the minimal fix as exact-match edits
+    fixed = False
+    for attempt in range(1, k_retry + 1):
+        fx, i2, o2 = await author_fix(model, cand, file, content, test_code, head_log, original)
+        tin += i2; tout += o2
+        edits = fx.get("fix_edits")
+        if not edits:
+            notes.append(f"fix attempt {attempt}: no fix_edits returned")
+            continue
+        sh("git checkout -q -- .")                      # reset source; keep the (untracked) test
+        try:
+            apply_edits(file, edits)
+        except Exception as e:
+            notes.append(f"fix attempt {attempt}: edits rejected: {e}")
+            continue
+        _rc, fixed_log = run_test(tp)
+        _rc2, fix_diff = sh(f"git diff -- {file}")
+        if classify(fixed_log) == "PASS":
+            fixed = True
+            break
+        notes.append(f"fix attempt {attempt}: test still failing after fix; retried")
+    if not fixed:
+        clean_repo(head)
+        return write_bundle(d, cand, pr, "inconclusive_env", {"head": head_log, "fixed": fixed_log},
+                            test_code or "", fix_diff, tp,
+                            {"notes": notes, "blocker": notes[-1] if notes else "fix authoring failed",
+                             "model_tokens": {"in": tin, "out": tout}})
+
+    # ---- 3. base comparison
+    _rc3, base_log = sh(f"git checkout -q -f {base} && yarn vitest run {tp} --reporter=basic", timeout=420)
+    bc = classify(base_log)
+    verdict = ("behavior_change_not_regression" if bc == "N/A_module_absent"
+               else "confirmed_regression" if bc == "PASS"
+               else "defect_present_before_pr")
     clean_repo(head)
-    return write_bundle(d, cand, pr, "inconclusive_env", {}, "", "", "",
-                        {"notes": notes, "blocker": notes[-1] if notes else "authoring failed"})
+    return write_bundle(d, cand, pr, verdict, {"base": base_log, "head": head_log, "fixed": fixed_log},
+                        test_code, fix_diff, tp,
+                        {"notes": notes, "model_tokens": {"in": tin, "out": tout}})
 
 
 async def main():
