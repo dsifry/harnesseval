@@ -59,13 +59,13 @@ REQUIREMENTS
 - Import the REAL module (relative path) and execute the real code path.
 - The test must FAIL on the current code with an assertion naming the claimed behavior.
 - Assert observable behavior (returned values, thrown errors, side effects), not implementation details.
-- Put it next to the source: `{dir}/{stem}.verified.test.ts`.
+- Put it next to the source: `{dir}/{stem}.verified.test{ext}` (use the SAME extension family as the source: .tsx when the source is .tsx, because JSX is only parsed in .tsx).
 - Set env vars BEFORE importing modules that read them at import time (dynamic `await import(...)`).
 - Mock only true externals (network, prisma, feature flags) — never the module under test.
 - Keep it under ~150 lines.
 
 Respond with ONLY this JSON object (no prose, no code fences):
-{{"test_path": "{dir}/{stem}.verified.test.ts",
+{{"test_path": "{dir}/{stem}.verified.test{ext}",
   "test_code": "<full test file contents>",
   "claim_restated": "<one sentence>",
   "expected_failure": "<assertion message expected on unfixed code>",
@@ -219,7 +219,8 @@ async def author_test(model, cand, file, content, diff, supplier_dir, stem, extr
                                 reports="\n".join(f"- {r}" for r in cand.get("reports", [])[:4]),
                                 content=content, diff=(diff or "(none)") + extra,
                                 tmpl=_template_test(file) or "(no neighbouring test found)",
-                                dir=supplier_dir, stem=stem)
+                                dir=supplier_dir, stem=stem,
+                                ext=(".tsx" if file.endswith(".tsx") else ".ts"))
     # reasoning models burn the output budget on large inputs: keep effort low and the budget large,
     # otherwise the call returns EMPTY content with 0 output tokens (observed on 87k-char files).
     parsed, tin, tout, _ = await call_model_json(model, SYSTEM, prompt, effort="low", max_tokens=16000)
@@ -312,7 +313,7 @@ async def do_candidate(cand, model, k_retry=3, k_fix=4):
     content = _window(original, cand.get("line"), 60) if len(original) > 9000 else original
     diff = pr_file_diff(cand["pr"], file)
     notes, tin, tout = [], 0, 0
-    tp = f"{supplier_dir}/{stem}.verified.test.ts"
+    tp = f"{supplier_dir}/{stem}.verified.test" + (".tsx" if file.endswith(".tsx") else ".ts")
     test_code, head_log, fixed_log, fix_diff = None, "", "", ""
 
     # ---- 1. author a test that fails on head
