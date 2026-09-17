@@ -231,8 +231,10 @@ async def author_fix(model, cand, file, content, test_code, head_log, original_c
 
 
 def run_test(test_path):
-    """Run vitest via the local binary (yarn's script resolution fails in copied checkouts:
+    """Env prep is re-applied here because resetting the worktree (git checkout -- .) reverts the
+    config patch; it is idempotent and cheap. Then run vitest via the local binary (yarn's script resolution fails in copied checkouts:
     'Couldn't find a script named "vitest"'). Falls back to yarn only if the binary is absent."""
+    prepare_env()
     if (REPO / "node_modules/.bin/vitest").exists():
         return sh(f"./node_modules/.bin/vitest run {test_path} --reporter=basic", timeout=420)
     return sh(f"yarn vitest run {test_path} --reporter=basic", timeout=420)
@@ -378,10 +380,8 @@ async def do_candidate(cand, model, k_retry=3):
                              "model_tokens": {"in": tin, "out": tout}})
 
     # ---- 3. base comparison
-    if (REPO / "node_modules/.bin/vitest").exists():
-        _rc3, base_log = sh(f"git checkout -q -f {base} && ./node_modules/.bin/vitest run {tp} --reporter=basic", timeout=420)
-    else:
-        _rc3, base_log = sh(f"git checkout -q -f {base} && yarn vitest run {tp} --reporter=basic", timeout=420)
+    sh(f"git checkout -q -f {base}")          # untracked test file survives
+    _rc3, base_log = run_test(tp)             # re-applies env prep for the base revision
     bc = classify(base_log)
     if not ran(base_log) and bc != "N/A_module_absent":
         clean_repo(head)
