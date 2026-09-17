@@ -132,6 +132,12 @@ def prepare_env():
         if '"c8"' in t:
             cfg.write_text(t.replace('"c8"', '"v8"'))
             patches.append("vitest.config.ts: coverage provider c8 -> v8")
+    ws = REPO / "vitest.workspace.ts"
+    if ws.exists():
+        t = ws.read_text()
+        if "{test,spec}.{ts,js}" in t:
+            ws.write_text(t.replace("{test,spec}.{ts,js}", "{test,spec}.{ts,js,tsx}"))
+            patches.append("vitest.workspace.ts: include glob widened to {ts,js,tsx} (repo excludes .tsx)")
     for pkg in ("resize-observer-polyfill", "@vitest/coverage-v8"):
         dest = REPO / "node_modules" / pkg
         src = ENV_CACHE / pkg
@@ -234,15 +240,59 @@ async def author_fix(model, cand, file, content, test_code, head_log, original_c
     return (parsed if isinstance(parsed, dict) else {}), tin, tout
 
 
+HARNESS_CFG = ".vitest.verify.config.ts"
+HARNESS_WS = ".vitest.verify.workspace.ts"
+LAST_FIDELITY = {"value": "repo_suite"}
+
+
+def _write_harness_cfg():
+    """Harness-owned vitest config (jsx automatic, tsx included, jsdom, no repo setup files)."""
+    (REPO / HARNESS_CFG).write_text(
+        'import { defineConfig } from "vitest/config";\n'
+        'export default defineConfig({\n'
+        '  esbuild: { jsx: "automatic" },\n'
+        '  test: { include: ["**/*.verified.test.{ts,tsx}"], environment: "jsdom",\n'
+        '          globals: true, setupFiles: [], coverage: { enabled: false } },\n'
+        '});\n')
+
+
+def _run_harness_cfg(bin_, test_path):
+    """Run under the harness config. The repo's vitest.workspace.ts takes precedence over --config,
+    so it is moved aside for the run and restored afterwards (clean_repo also restores it)."""
+    _write_harness_cfg()
+    ws, bak = REPO / "vitest.workspace.ts", REPO / "vitest.workspace.ts.harness-bak"
+    moved = False
+    if ws.exists():
+        ws.rename(bak); moved = True
+    try:
+        return sh(f"{bin_} run {test_path} --reporter=basic --config {HARNESS_CFG}", timeout=420)[1]
+    finally:
+        if moved and bak.exists():
+            bak.rename(ws)
+
+
 def run_test(test_path):
-    """Env prep is re-applied here because resetting the worktree (git checkout -- .) reverts the
-    config patch; it is idempotent and cheap. Then run vitest via the local binary (yarn's script resolution fails in copied checkouts:
-    'Couldn't find a script named "vitest"'). Falls back to yarn only if the binary is absent."""
+    """Fidelity ladder:
+       tsx targets  -> harness config (the repo workspace excludes .tsx and its tsconfig sets
+                       jsx: preserve, which makes JSX unparseable) => repo_suite_harness_config
+       other targets -> the repo's own config (repo_suite); if it cannot execute the file at all
+                       (excluded by glob, parse error, missing dep), retry under the harness config.
+    Env prep is re-applied first: resetting the worktree reverts the config patches."""
     prepare_env()
-    env_flag = " --environment jsdom" if test_path.endswith((".tsx",)) else ""
-    if (REPO / "node_modules/.bin/vitest").exists():
-        return sh(f"./node_modules/.bin/vitest run {test_path} --reporter=basic{env_flag}", timeout=420)
-    return sh(f"yarn vitest run {test_path} --reporter=basic", timeout=420)
+    bin_ = "./node_modules/.bin/vitest" if (REPO / "node_modules/.bin/vitest").exists() else "yarn vitest"
+    if test_path.endswith(".tsx"):
+        log = _run_harness_cfg(bin_, test_path)
+        LAST_FIDELITY["value"] = "repo_suite_harness_config" if ran(log) else "repo_suite"
+        return 0, log
+    log = sh(f"{bin_} run {test_path} --reporter=basic", timeout=420)[1]
+    broken = (not ran(log)) or ("No test files found" in log) or ("invalid JS syntax" in log) or ("MISSING DEP" in log)
+    if broken:
+        log2 = _run_harness_cfg(bin_, test_path)
+        if ran(log2):
+            LAST_FIDELITY["value"] = "repo_suite_harness_config"
+            return 0, log2
+    LAST_FIDELITY["value"] = "repo_suite"
+    return 0, log
 
 
 def ran(log):
@@ -268,7 +318,7 @@ def write_bundle(d, cand, pr, verdict, logs, test_code, fix_diff, test_path, ext
         (d / "logs" / f"{k}.log").write_text(v)
     meta = {
         "bug_id": f"{pr}-B{cand['class_index']:02d}", "authoring_model": AUTHOR_MODEL,
-        "candidate": cand, "pr": pr, "verdict": verdict, "fidelity": "repo_suite",
+        "candidate": cand, "pr": pr, "verdict": verdict, "fidelity": LAST_FIDELITY["value"],
         "three_way": {k: classify(v) for k, v in logs.items()},
         "test_path": test_path, "fix_scope": "minimal fix for the demonstrated instance only",
         "sibling_instances": {"note": "other instances of this class are unverified siblings; fix.patch does not address them"},
