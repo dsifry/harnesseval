@@ -59,11 +59,13 @@ REQUIREMENTS
 - Mock only true externals (network, prisma, feature flags) — never the module under test.
 - The fix must be MINIMAL: change only what the claimed defect requires.
 
-Respond with ONLY this JSON object:
+OUTPUT FORMAT (critical): return ONLY a JSON object. NEVER return the whole source file — use
+minimal exact-match edits. Keep test_code under ~200 lines. Each `find` string must appear EXACTLY ONCE
+in the current file (include a few surrounding lines to make it unique).
+
 {{"test_path": "{dir}/{stem}.verified.test.ts",
   "test_code": "<full test file contents>",
-  "fixed_file_path": "{file}",
-  "fixed_file_content": "<full corrected source file contents>",
+  "fix_edits": [{{"find": "<exact excerpt of the current file>", "replace": "<corrected excerpt>"}}],
   "claim_restated": "<one sentence: the behavior the test demonstrates>",
   "expected_failure": "<assertion message expected on unfixed code>",
   "confidence": 0.0-1.0}}"""
@@ -108,11 +110,40 @@ def pr_file_diff(pr_url, file):
     return ""
 
 
+def _window(content, line, span=140):
+    """For large files: the region around the claimed line plus the file head (imports)."""
+    lines = content.splitlines()
+    try:
+        ln = int(line)
+    except Exception:
+        ln = 0
+    if ln <= 0:
+        return content[:16000]
+    lo, hi = max(0, ln - span), min(len(lines), ln + span)
+    return ("// … (file head)\n" + "\n".join(lines[:40]) + "\n// … (region around the claim)\n"
+            + "\n".join(f"{i+1}: {l}" for i, l in enumerate(lines[lo:hi], start=lo)))
+
+
+def apply_edits(path, edits):
+    """Apply exact-match edits; every `find` must occur exactly once."""
+    p = REPO / path
+    s = p.read_text()
+    for i, e in enumerate(edits):
+        f, r = e.get("find"), e.get("replace")
+        if not f or r is None:
+            raise ValueError(f"edit {i}: missing find/replace")
+        if s.count(f) != 1:
+            raise ValueError(f"edit {i}: `find` occurs {s.count(f)} times (need exactly 1)")
+        s = s.replace(f, r)
+    p.write_text(s)
+
+
 async def author(model, cand, file, content, diff, supplier_dir, stem):
     prompt = PROMPT.format(file=file, line=cand.get("line") or "?", title=cand.get("title") or "",
                            severity=cand.get("severity") or "?",
                            reports="\n".join(f"- {r}" for r in cand.get("reports", [])[:6]),
-                           content=content[:14000], diff=diff or "(none)",
+                           content=(content if len(content) <= 16000 else _window(content, cand.get("line"))),
+                           diff=diff or "(none)",
                            dir=supplier_dir, stem=stem)
     parsed, tin, tout, _ = await call_model_json(model, SYSTEM, prompt, effort="medium", max_tokens=8000)
     return (parsed if isinstance(parsed, dict) else {}), tin, tout
@@ -185,8 +216,11 @@ async def do_candidate(cand, model, k_retry=3):
         parsed, i1, o1 = await author(model, cand, file, content, diff, supplier_dir, stem)
         tin += i1; tout += o1
         tp = parsed.get("test_path") or f"{supplier_dir}/{stem}.verified.test.ts"
-        if not parsed.get("test_code") or not parsed.get("fixed_file_content"):
-            notes.append(f"attempt {attempt}: model returned incomplete JSON")
+        has_fix = bool(parsed.get("fixed_file_content") or parsed.get("fix_edits"))
+        if not parsed.get("test_code") or not has_fix:
+            notes.append(f"attempt {attempt}: model returned incomplete JSON (no test_code / no fix)")
+            diff = (diff or "") + ("\n\nNOTE: your previous reply did not parse. Return ONLY the JSON object; "
+                                   "keep test_code under ~200 lines and use fix_edits (never the whole file).")
             continue
         (REPO / tp).write_text(parsed["test_code"])
         _rc, head_log = run_test(tp)
@@ -200,7 +234,16 @@ async def do_candidate(cand, model, k_retry=3):
             notes.append(f"attempt {attempt}: test could not load/compile; retried")
             diff = (diff or "") + "\n\nLAST TEST RUN ERROR (fix the test):\n" + head_log[-1500:]
             continue
-        (REPO / file).write_text(parsed["fixed_file_content"])
+        if parsed.get("fixed_file_content"):
+            (REPO / file).write_text(parsed["fixed_file_content"])
+        else:
+            try:
+                apply_edits(file, parsed["fix_edits"])
+            except Exception as e:
+                notes.append(f"attempt {attempt}: fix_edits failed: {e}")
+                sh("git checkout -q -- .")
+                diff = (diff or "") + f"\n\nFIX EDIT ERROR: {e}\n(the `find` strings must match the current file exactly and once)"
+                continue
         _rc2, fixed_log = run_test(tp)
         _rc3, fix_diff = sh(f"git diff -- {file}")
         if classify(fixed_log) != "PASS" and attempt < k_retry:
