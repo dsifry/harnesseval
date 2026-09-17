@@ -177,8 +177,11 @@ def _window(content, line, span=140):
     if ln <= 0:
         return content[:16000]
     lo, hi = max(0, ln - span), min(len(lines), ln + span)
-    return ("// … (file head)\n" + "\n".join(lines[:40]) + "\n// … (region around the claim)\n"
-            + "\n".join(f"{i+1}: {l}" for i, l in enumerate(lines[lo:hi], start=lo)))
+    # NOTE: no line-number prefixes — the model must be able to copy `find` strings verbatim,
+    # and numbering them made every exact-match edit fail.
+    return (f"// … file head (1-40 of {len(lines)} lines)\n" + "\n".join(lines[:40])
+            + f"\n// … region around the claim (lines {lo + 1}-{hi} of {len(lines)})\n"
+            + "\n".join(lines[lo:hi]))
 
 
 def apply_edits(path, edits):
@@ -235,8 +238,9 @@ def run_test(test_path):
     config patch; it is idempotent and cheap. Then run vitest via the local binary (yarn's script resolution fails in copied checkouts:
     'Couldn't find a script named "vitest"'). Falls back to yarn only if the binary is absent."""
     prepare_env()
+    env_flag = " --environment jsdom" if test_path.endswith((".tsx",)) else ""
     if (REPO / "node_modules/.bin/vitest").exists():
-        return sh(f"./node_modules/.bin/vitest run {test_path} --reporter=basic", timeout=420)
+        return sh(f"./node_modules/.bin/vitest run {test_path} --reporter=basic{env_flag}", timeout=420)
     return sh(f"yarn vitest run {test_path} --reporter=basic", timeout=420)
 
 
@@ -284,7 +288,7 @@ def write_bundle(d, cand, pr, verdict, logs, test_code, fix_diff, test_path, ext
     return meta
 
 
-async def do_candidate(cand, model, k_retry=3):
+async def do_candidate(cand, model, k_retry=3, k_fix=4):
     pr = cand["pr_slug"]; base, head = PR_HEADS[pr]
     clean_repo(head)                                  # worktree at head before any check
     file = cand.get("file_resolved") or ""
@@ -350,7 +354,7 @@ async def do_candidate(cand, model, k_retry=3):
 
     # ---- 2. author the minimal fix as exact-match edits
     fixed = False
-    for attempt in range(1, k_retry + 1):
+    for attempt in range(1, k_fix + 1):
         fx, i2, o2 = await author_fix(model, cand, file, content, test_code, head_log, original)
         tin += i2; tout += o2
         edits = fx.get("fix_edits")
