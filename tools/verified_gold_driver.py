@@ -233,6 +233,49 @@ async def author_test(model, cand, file, content, diff, supplier_dir, stem, extr
     return (parsed if isinstance(parsed, dict) else {}), tin, tout
 
 
+REFUTE_PROMPT = """A test that was written to demonstrate the claim below PASSED on the UNMODIFIED code.
+That means either (a) the claim is false, or (b) the test did not actually exercise the claimed behaviour.
+
+CLAIM
+  file: {file}
+  title: {title}
+  reports:
+{reports}
+
+THE TEST THAT PASSED (do not simply repeat it):
+```ts
+{test_code}
+```
+
+RELEVANT SOURCE:
+```ts
+{content}
+```
+
+Write a DIFFERENT, adversarial test that FAILS if the claim is true. Requirements:
+- Construct exactly the input/state the claim asserts is mishandled, and assert on the SPECIFIC
+  claimed consequence and the SPECIFIC field/path involved (e.g. assert the validation error is about
+  that field, or assert the exact returned value), never a generic "something failed".
+- Make sure the rest of the input is valid, so a failure cannot come from an unrelated field.
+- If the code genuinely handles the claimed case correctly, your test will pass — that is a valid
+  outcome, but only if it truly exercises the claim.
+
+Respond with ONLY this JSON object:
+{{"test_code": "<full test file contents>",
+  "exercises_claim": "one sentence on what input/assertion makes this a genuine test of the claim",
+  "claim_refuted": true|false,
+  "refutation_evidence": "<if refuted: the exact evidence from the source/test run>",
+  "confidence": 0.0-1.0}}"""
+
+
+async def author_refute(model, cand, file, content, test_code, head_log, supplier_dir, stem):
+    prompt = REFUTE_PROMPT.format(file=file, title=cand.get("title") or "",
+                                  reports="\n".join(f"- {r}" for r in cand.get("reports", [])[:4]),
+                                  test_code=test_code[:5000], content=content)
+    parsed, tin, tout, _ = await call_model_json(model, SYSTEM, prompt, effort="low", max_tokens=16000)
+    return (parsed if isinstance(parsed, dict) else {}), tin, tout
+
+
 async def author_fix(model, cand, file, content, test_code, head_log, original_content):
     prompt = FIX_PROMPT.format(title=cand.get("title") or "", file=file, test_code=test_code[:6000],
                                content=content, head_log=head_log[-2500:])
@@ -378,10 +421,33 @@ async def do_candidate(cand, model, k_retry=3, k_fix=4):
         (REPO / tp).write_text(test_code)
         _rc, head_log = run_test(tp)
         if classify(head_log) == "PASS":
+            # Demotion candidate — but a test can pass for the WRONG reason (e.g. an unrelated field
+            # makes the payload invalid), so require an adversarial confirmation before recording it.
+            first_test = test_code
+            conf, i2, o2 = await author_refute(model, cand, file, content, first_test, head_log, supplier_dir, stem)
+            tin += i2; tout += o2
+            if conf.get("test_code"):
+                (REPO / tp).write_text(conf["test_code"])
+                _rc2, head_log2 = run_test(tp)
+                if classify(head_log2) == "FAIL":
+                    notes.append("first test passed on head (likely did not exercise the claim); "
+                                 "adversarial test FAILS on head -> claim plausible, continuing to fix")
+                    test_code, head_log = conf["test_code"], head_log2
+                    break
+                clean_repo(head)
+                return write_bundle(d, cand, pr, "not_a_bug", {"head": head_log, "head_refutation": head_log2},
+                                    conf["test_code"], "", tp,
+                                    {"notes": notes, "first_test": first_test[:6000],
+                                     "demotion_review": "TWO independent tests pass on the unmodified code ("
+                                                        f"adversarial attempt: {str(conf.get('exercises_claim'))[:200]})",
+                                     "claim_refuted": conf.get("claim_refuted"),
+                                     "refutation_evidence": conf.get("refutation_evidence"),
+                                     "model_tokens": {"in": tin, "out": tout}})
             clean_repo(head)
-            return write_bundle(d, cand, pr, "not_a_bug", {"head": head_log}, test_code, "", tp,
-                                {"notes": notes, "model_tokens": {"in": tin, "out": tout},
-                                 "demotion_review": "test passes on unmodified head: no observable behaviour change demonstrated"})
+            return write_bundle(d, cand, pr, "not_a_bug_unconfirmed", {"head": head_log}, first_test, "", tp,
+                                {"notes": notes, "first_test": first_test[:6000],
+                                 "demotion_review": "test passed on unmodified head but the adversarial confirmation could not be produced",
+                                 "model_tokens": {"in": tin, "out": tout}})
         if not ran(head_log) and attempt < k_retry:
             notes.append(f"test attempt {attempt}: vitest did not execute (env); retried")
             diff = (diff or "") + "\n\nLAST RUN ERROR (the harness could not run the test):\n" + head_log[-1200:]

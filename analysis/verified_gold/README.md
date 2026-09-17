@@ -29,11 +29,16 @@ analysis/verified_gold/<pr_slug>/<class_slug>/
 | `inconclusive_env` | — | — | — | environment blocked the run (recorded, not counted) |
 | `flaky` | — | mixed | — | nondeterministic — must be re-run and recorded |
 | `unresolved_file` | — | — | — | the finding could not be pinned to a changed file; manual triage queue |
+| `not_a_bug_unconfirmed` | — | PASS | — | a test passed on head but the adversarial confirmation could not be produced; treat as triage, not demotion |
 
 Only `confirmed_regression` and `behavior_change_not_regression` qualify as verified hidden gold.
 Everything else is excluded from verified metrics and **never deleted**:
 
-- `not_a_bug` (test passes on head → no observable behavior change) is a **candidate for demotion**.
+- `not_a_bug` (TWO independent tests pass on unmodified head — the first, and an adversarial second
+  written specifically to fail if the claim is true) is a **candidate for demotion**. Requiring the
+  second test exists because a single passing test can pass for the wrong reason: our first demotion
+  candidate asserted only `safeParse().success === false` while sending an invalid `guests` payload,
+  so the failure came from an unrelated field and the claim was in fact true.
   Its full bundle is kept and indexed in `analysis/verified_gold/DEMOTION_REVIEW.md` so the claims can
   be reviewed together afterwards and either demoted permanently or re-argued with a sharper test.
 - `inconclusive_env` / `flaky` bundles are kept and indexed the same way, with the blocking reason
