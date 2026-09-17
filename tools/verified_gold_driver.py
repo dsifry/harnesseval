@@ -14,7 +14,7 @@ Verdicts: confirmed_regression | behavior_change_not_regression | not_a_bug (dem
 inconclusive_env. Every attempted candidate produces a bundle.
 """
 from __future__ import annotations
-import argparse, hashlib, json, re, subprocess, sys, time, asyncio
+import argparse, hashlib, json, re, shutil, subprocess, sys, time, asyncio
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -115,6 +115,31 @@ def clean_repo(head):
     sh(f"git checkout -q -f {head}")
     sh("git checkout -q -- .")
     sh("git clean -qfd -e node_modules -e .yarn -e .yarnrc.yml -e .pnp.cjs")
+
+
+ENV_CACHE = ROOT / ".cache/verify_env"
+
+
+def prepare_env():
+    """Idempotent preparation of the THROWAWAY verification checkout (disclosed in meta.env_patches):
+    - the repo's vitest config may declare coverage provider "c8", which the installed vitest rejects
+    - setupVitest.ts imports resize-observer-polyfill; the coverage provider package must be present
+    Never touches the campaign's frozen artifacts; only these scratch checkouts."""
+    patches = []
+    cfg = REPO / "vitest.config.ts"
+    if cfg.exists():
+        t = cfg.read_text()
+        if '"c8"' in t:
+            cfg.write_text(t.replace('"c8"', '"v8"'))
+            patches.append("vitest.config.ts: coverage provider c8 -> v8")
+    for pkg in ("resize-observer-polyfill", "@vitest/coverage-v8"):
+        dest = REPO / "node_modules" / pkg
+        src = ENV_CACHE / pkg
+        if not dest.exists() and src.exists():
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(src, dest)
+            patches.append(f"node_modules: installed missing dev dep {pkg}")
+    return patches
 
 
 def bundle_dir(pr, slug):
@@ -245,6 +270,7 @@ def write_bundle(d, cand, pr, verdict, logs, test_code, fix_diff, test_path, ext
     }
     if extra:
         meta.update(extra)
+    meta.setdefault("env_patches", [])
     (d / "meta.json").write_text(json.dumps(meta, indent=1))
     (d / "REPRO.md").write_text(
         f"# REPRO — {cand.get('title')}\n\n**Verdict:** `{verdict}` · repo suite (vitest)\n\n"
@@ -275,6 +301,7 @@ async def do_candidate(cand, model, k_retry=3):
     stem = Path(file).stem
     supplier_dir = str(Path(file).parent)
     d = bundle_dir(pr, f"B{cand['class_index']:02d}-{cand['class_slug']}")
+    env_patches = prepare_env()
     original = (REPO / file).read_text()
     content = _window(original, cand.get("line"), 60) if len(original) > 9000 else original
     diff = pr_file_diff(cand["pr"], file)
@@ -311,7 +338,13 @@ async def do_candidate(cand, model, k_retry=3):
         clean_repo(head)
         return write_bundle(d, cand, pr, "inconclusive_env", {}, test_code or "", "", tp,
                             {"notes": notes, "blocker": notes[-1] if notes else "test authoring failed",
-                             "model_tokens": {"in": tin, "out": tout}})
+                             "env_patches": env_patches, "model_tokens": {"in": tin, "out": tout}})
+    if not ran(head_log) or classify(head_log) != "FAIL":
+        clean_repo(head)
+        return write_bundle(d, cand, pr, "inconclusive_env", {"head": head_log}, test_code or "", "", tp,
+                            {"notes": notes,
+                             "blocker": "head run did not produce a genuine assertion failure (test never executed or could not load)",
+                             "env_patches": env_patches, "model_tokens": {"in": tin, "out": tout}})
 
     # ---- 2. author the minimal fix as exact-match edits
     fixed = False
