@@ -29,6 +29,8 @@ PR_HEADS = {
     "10967": ("a308075bc39b77ed7059b0cae9d443d669a7bf98", "de628295646d0848226618108a52f2f1e5d04ac0"),
 }
 AUTHOR_MODEL = 'deepseek-4.1-flash'   # LunarRoute; recorded per bundle
+STATIC_TEST_RE = re.compile(r"readFileSync|node:fs|from \"fs\"|require\(['\"]fs['\"]\)|readFile\(")
+
 SYSTEM = "You are a senior TypeScript engineer writing executable regression evidence. Respond with ONLY valid JSON."
 TEST_PROMPT = """A code-review campaign claims the following defect in this pull request. Write a vitest
 test that FAILS on the current (post-PR) code by asserting the claimed behavior.
@@ -422,7 +424,15 @@ async def do_candidate(cand, model, k_retry=3, k_fix=4):
             notes.append(f"test attempt {attempt}: incomplete JSON")
             continue
         test_code = parsed["test_code"]
+        if STATIC_TEST_RE.search(test_code):
+            notes.append(f"test attempt {attempt}: rejected — test reads the source file as TEXT "
+                         "(source-string assertions demonstrate no runtime behaviour)")
+            diff = (diff or "") + ("\n\nREJECTED TEST: it read the source file as text. Do not use fs/readFileSync "
+                                   "or assert on source strings. Execute the code and assert on values, thrown errors "
+                                   "or side effects.")
+            continue
         (REPO / tp).write_text(test_code)
+        head_test_sha = hashlib.sha256(test_code.encode()).hexdigest()
         _rc, head_log = run_test(tp)
         if classify(head_log) == "PASS":
             # Demotion candidate — but a test can pass for the WRONG reason (e.g. an unrelated field
@@ -430,6 +440,9 @@ async def do_candidate(cand, model, k_retry=3, k_fix=4):
             first_test = test_code
             conf, i2, o2 = await author_refute(model, cand, file, content, first_test, head_log, supplier_dir, stem)
             tin += i2; tout += o2
+            if conf.get("test_code") and STATIC_TEST_RE.search(conf["test_code"]):
+                notes.append("refutation test rejected: reads the source as text")
+                conf = {}
             if conf.get("test_code"):
                 (REPO / tp).write_text(conf["test_code"])
                 _rc2, head_log2 = run_test(tp)
@@ -492,6 +505,7 @@ async def do_candidate(cand, model, k_retry=3, k_fix=4):
         except Exception as e:
             notes.append(f"fix attempt {attempt}: edits rejected for {target}: {e}")
             continue
+        fixed_test_sha = hashlib.sha256((REPO / tp).read_text().encode()).hexdigest()
         _rc, fixed_log = run_test(tp)
         _rc2, fix_diff = sh(f"git diff -- {target}")
         if classify(fixed_log) == "PASS":
@@ -510,7 +524,18 @@ async def do_candidate(cand, model, k_retry=3, k_fix=4):
 
     # ---- 3. base comparison
     sh(f"git checkout -q -f {base}")          # untracked test file survives
+    base_test_sha = hashlib.sha256((REPO / tp).read_text().encode()).hexdigest()
     _rc3, base_log = run_test(tp)             # re-applies env prep for the base revision
+    if base_test_sha != head_test_sha or fixed_test_sha != head_test_sha:
+        clean_repo(head)
+        return write_bundle(d, cand, pr, "inconsistent_evidence",
+                            {"base": base_log, "head": head_log, "fixed": fixed_log},
+                            test_code, fix_diff, tp,
+                            {"notes": notes, "blocker": "the test file changed between phases "
+                             f"(head {head_test_sha[:12]}, fixed {fixed_test_sha[:12]}, base {base_test_sha[:12]}); "
+                             "the head failure and the fix result do not refer to the same test",
+                             "test_sha": {"head": head_test_sha, "fixed": fixed_test_sha, "base": base_test_sha},
+                             "model_tokens": {"in": tin, "out": tout}})
     bc = classify(base_log)
     if not ran(base_log) and bc != "N/A_module_absent":
         clean_repo(head)
@@ -524,7 +549,8 @@ async def do_candidate(cand, model, k_retry=3, k_fix=4):
     clean_repo(head)
     return write_bundle(d, cand, pr, verdict, {"base": base_log, "head": head_log, "fixed": fixed_log},
                         test_code, fix_diff, tp,
-                        {"notes": notes, "model_tokens": {"in": tin, "out": tout}})
+                        {"notes": notes, "test_sha": {"head": head_test_sha},
+                         "model_tokens": {"in": tin, "out": tout}})
 
 
 async def main():

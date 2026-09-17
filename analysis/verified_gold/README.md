@@ -29,9 +29,15 @@ analysis/verified_gold/<pr_slug>/<class_slug>/
 | `inconclusive_env` | — | — | — | environment blocked the run (recorded, not counted) |
 | `flaky` | — | mixed | — | nondeterministic — must be re-run and recorded |
 | `unresolved_file` | — | — | — | the finding could not be pinned to a changed file; manual triage queue |
+| `inconsistent_evidence` | — | — | — | the test file differed between the head/fixed/base runs; bundle void |
+| `static_text_test` | — | — | — | the test asserted on source text rather than executing code; no behaviour demonstrated |
 | `not_a_bug_unconfirmed` | — | PASS | — | a test passed on head but the adversarial confirmation could not be produced; treat as triage, not demotion |
 
-Only `confirmed_regression` and `behavior_change_not_regression` qualify as verified hidden gold.
+Only `confirmed_regression` and `behavior_change_not_regression` qualify as verified hidden gold, and
+**tests that read the source file as text are rejected**: asserting on a source string (e.g.
+`readFileSync(...).includes("?.push")`) "reproduces" head-FAIL/fix-PASS as a *textual* difference while
+demonstrating no runtime behaviour. Authoring now rejects such tests, and the audit flagged one
+pre-existing bundle as `static_text_test`.
 Everything else is excluded from verified metrics and **never deleted**:
 
 - `not_a_bug` (TWO independent tests pass on unmodified head — the first, and an adversarial second
