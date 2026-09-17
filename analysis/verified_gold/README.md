@@ -28,6 +28,7 @@ analysis/verified_gold/<pr_slug>/<class_slug>/
 | `defect_present_before_pr` | FAIL | FAIL | PASS | the behavior was already wrong before the PR (pre-existing, not introduced here) |
 | `inconclusive_env` | — | — | — | environment blocked the run (recorded, not counted) |
 | `flaky` | — | mixed | — | nondeterministic — must be re-run and recorded |
+| `unresolved_file` | — | — | — | the finding could not be pinned to a changed file; manual triage queue |
 
 Only `confirmed_regression` and `behavior_change_not_regression` qualify as verified hidden gold.
 Everything else is excluded from verified metrics and **never deleted**:

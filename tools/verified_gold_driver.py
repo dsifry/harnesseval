@@ -69,8 +69,11 @@ Respond with ONLY this JSON object:
   "confidence": 0.0-1.0}}"""
 
 
-def sh(cmd, cwd=REPO, timeout=300):
-    p = subprocess.run(cmd, cwd=cwd, shell=True, capture_output=True, text=True, timeout=timeout)
+def sh(cmd, cwd=None, timeout=300):
+    """Run a shell command. cwd defaults to the CURRENT module-level REPO (resolved at call
+    time — binding it as a default argument silently pinned every parallel stream to the
+    first checkout)."""
+    p = subprocess.run(cmd, cwd=str(cwd or REPO), shell=True, capture_output=True, text=True, timeout=timeout)
     return p.returncode, (p.stdout or "") + (p.stderr or "")
 
 
@@ -159,13 +162,22 @@ def write_bundle(d, cand, pr, verdict, logs, test_code, fix_diff, test_path, ext
 
 async def do_candidate(cand, model, k_retry=3):
     pr = cand["pr_slug"]; base, head = PR_HEADS[pr]
-    file = cand.get("file") or ""
-    if not file or file == "?" or not (REPO / file).exists():
-        return None
+    clean_repo(head)                       # worktree must be at head before any existence check
+    file = cand.get("file_resolved") or ""
+    exists = bool(file) and sh(f"git cat-file -e {head}:{file}")[0] == 0   # commit-based, worktree-independent
+    if not exists:
+        d = bundle_dir(pr, f"B{cand['class_index']:02d}-{cand['class_slug']}")
+        (d / "meta.json").write_text(json.dumps({
+            "bug_id": f"{pr}-B{cand['class_index']:02d}", "candidate": cand, "pr": pr,
+            "verdict": "unresolved_file",
+            "blocker": f"could not pin the finding to a file changed by this PR (card file: {cand.get('file')!r}); needs manual triage",
+            "fidelity": "n/a", "provenance": {"produced_by": "tools/verified_gold_driver.py",
+                                             "spec": "analysis/verified_gold/README.md",
+                                             "date": time.strftime("%Y-%m-%d")}}, indent=1))
+        return {"verdict": "unresolved_file"}
     stem = Path(file).stem
     supplier_dir = str(Path(file).parent)
     d = bundle_dir(pr, f"B{cand['class_index']:02d}-{cand['class_slug']}")
-    clean_repo(head)
     content = (REPO / file).read_text()
     diff = pr_file_diff(cand["pr"], file)
     notes, tin, tout = [], 0, 0
@@ -214,16 +226,18 @@ async def do_candidate(cand, model, k_retry=3):
 
 
 async def main():
+    global REPO
     ap = argparse.ArgumentParser()
     ap.add_argument("--pr", default="11059")
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--only", type=int, default=None)
     ap.add_argument("--model", default="gpt-5.2")
-    ap.add_argument("--repo", default=str(REPO))
+    ap.add_argument("--repo", default=None)
     ap.add_argument("--force", action="store_true")
     a = ap.parse_args()
-    global REPO
-    REPO = Path(a.repo)
+    if a.repo:
+        REPO = Path(a.repo)
+    print(f"repo={REPO}", flush=True)
     man = json.load(open(BUNDLE_ROOT / "_work/calcom_candidates.json"))
     cands = [c for c in man if c["pr_slug"] == a.pr]
     if a.only is not None:
