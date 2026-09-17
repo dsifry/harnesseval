@@ -201,7 +201,15 @@ async def _run_lens(model: str, lens: str, prompt_body: str, effort: str = "medi
 async def _run_all_lenses(model: str, pr: PRSample, effort: str = "medium") -> tuple[list[Finding], int, int, list[str], dict]:
     from harnesseval.usage import merge
     body = LENS_HEADER.format(pr_title=pr.pr_title, diff=_truncate(pr.diff))
-    sem = asyncio.Semaphore(6)  # 6 x 2 concurrent cells = 12 API calls/key — the -background tier's limit
+    # Lens concurrency: 4 (2026-09-15, operator decision). History: 6 (original) -> 3 -> 2 (gateway
+    # aggregate-output mitigation) -> 6 (reverted after Lunaroute reported a fix) -> 4.
+    # Rationale for 4: the gateway was measured serving only ~2 requests at a time (TTFT probe:
+    # 6 concurrent streaming calls came back in staggered PAIRS at 70/73, 163/159, 212/212s =
+    # ~3 waves, so requesting 6 buys little but piles into the queue and exposes the ~400k
+    # requested-aggregate limit). Two lanes are also reserved for the pi session + the mrv
+    # program's own subagent, so 4 is the honest budget: enough parallelism to keep the lens
+    # wave fed, without queueing the gateway into its 1195s request deadline.
+    sem = asyncio.Semaphore(4)
     async def bounded(l):
         async with sem:
             return await _run_lens(model, l, body, effort=effort)

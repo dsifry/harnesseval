@@ -1,5 +1,7 @@
 # AI Code-Review Frameworks — Empirical Comparison (Report)
 
+> **⚠️ DEPRECATED (2026-09-16): superseded by [`REPORT_FINAL.md`](REPORT_FINAL.md)** — see also [`EXECUTIVE_SUMMARY_FINAL.md`](EXECUTIVE_SUMMARY_FINAL.md) and [`analysis/COVERAGE_FINAL.md`](analysis/COVERAGE_FINAL.md). Content below is frozen as-is.
+
 > **What this is.** This report summarizes the `harnesseval` lab's comparison of four AI
 > code-review frameworks across a `(framework × model × effort)` matrix, reporting review
 > quality **and** cost together. It is the cleaned-up form of the working analysis in

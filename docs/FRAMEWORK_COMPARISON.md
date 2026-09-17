@@ -1,5 +1,7 @@
 # AI Code-Review Frameworks — Empirical Comparison for Practitioners
 
+> **⚠️ DEPRECATED (2026-09-16): superseded by [`REPORT_FINAL.md`](REPORT_FINAL.md)** — see also [`EXECUTIVE_SUMMARY_FINAL.md`](EXECUTIVE_SUMMARY_FINAL.md) and [`analysis/COVERAGE_FINAL.md`](analysis/COVERAGE_FINAL.md). Content below is frozen as-is.
+
 > **Status: complete (384/384 cells).** All numbers come from the full **384/384 pass-cell matrix** (batch_083, completed 2026-08-26T05:30Z after multiple Claude quota-window reruns and an output-cap fix to all three realistic adapters). N is small (6 PRs per cell; bootstrap CIs wide or undefined). Treat this as a directional, reproducible read — not a published ranking. Phase C (50 PRs + confidence intervals) remains the bar before any final claim. **Re-run `uv run python bin/analyze_batch_083.py` for the latest snapshot.**
 >
 > **What changed since the preliminary version:** the matrix finished; the marginal-axis tables (§4.1–4.3) are now the *complete* picture, not a partial one. §4.6–4.7 add the interaction analyses that test the practitioner hypotheses ("harnesses always beat vanilla at equivalent effort," "harnesses beat vanilla at higher effort," "the wins are cheap-model+harness+low-effort") and show where the naive axis view misleads. §8 is restructured around an ideal SDLC loop (discover → adjudicate → fix → repeat) that uses each model/harness where the data says it actually wins.

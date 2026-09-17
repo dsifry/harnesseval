@@ -113,8 +113,15 @@ def lunaroute_clients() -> list:
     for pth in files:
         k = load_keys(pth)
         if k.get("HARNESS_LUNAROUTE_API_KEY"):
+            # max_retries=0 (2026-09-14 root cause): the openai SDK defaults to max_retries=2,
+            # which SILENTLY retries a timed-out request twice -> an effective timeout of
+            # 3x the configured value (blackhole-probe: timeout=15s raised APITimeoutError at
+            # 46.9s). With timeout=900 that made every dead/queued gateway connection block for
+            # 2,700s (45 min) with NO ledger trace (SDK retries are invisible), which is exactly
+            # the all-day "wedge" on GLM lens calls. Our own ladders already retry (and log)
+            # timeout/connection/503/empty-content classes - the SDK must not double up.
             out.append(OpenAI(api_key=k["HARNESS_LUNAROUTE_API_KEY"], base_url=k["LUNAROUTE_BASE_URL"],
-                              timeout=LUNAROUTE_TIMEOUT_S))
+                              timeout=LUNAROUTE_TIMEOUT_S, max_retries=0))
     return out
 
 
@@ -127,7 +134,7 @@ def lunaroute_client():
     from openai import OpenAI
     k = load_keys()
     return OpenAI(api_key=k["HARNESS_LUNAROUTE_API_KEY"], base_url=k["LUNAROUTE_BASE_URL"],
-                  timeout=LUNAROUTE_TIMEOUT_S)
+                  timeout=LUNAROUTE_TIMEOUT_S, max_retries=0)  # see multi-client note: SDK 3x
 
 
 def martian_client():

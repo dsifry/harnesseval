@@ -1,0 +1,99 @@
+# DATA FREEZE — coverage snapshot for the final report
+# frozen at: 09:35:18 (2026-09-16)
+# All data-generating lanes stopped: glm_fillmatrix, glm_vanilla_fill, fable orchestrator.
+# Report must be computed on runs/*/summary.json as of this timestamp.
+
+claude-fable-5-1               compound-realistic   high     4/50  missing 46
+claude-fable-5-1               compound-realistic   low      7/50  missing 43
+claude-fable-5-1               compound-realistic   medium   5/50  missing 45
+claude-fable-5-1               metareview-realistic high     4/50  missing 46
+claude-fable-5-1               metareview-realistic low      4/50  missing 46
+claude-fable-5-1               metareview-realistic medium   4/50  missing 46
+claude-fable-5-1               vanilla-engineered   high    14/50  missing 36
+claude-fable-5-1               vanilla-engineered   low     50/50  missing 0
+claude-fable-5-1               vanilla-engineered   medium  17/50  missing 33
+claude-opus-4-5-20251101       vanilla-engineered   low      1/50  missing 49
+claude-opus-4-5-20251101       vanilla-engineered   medium   2/50  missing 48
+claude-opus-4-5-20251101       vanilla-engineered   xhigh    2/50  missing 48
+claude-opus-5                  compound-realistic   high    50/50  missing 0
+claude-opus-5                  compound-realistic   low     50/50  missing 0
+claude-opus-5                  compound-realistic   medium  50/50  missing 0
+claude-opus-5                  metareview-realistic high     6/50  missing 44
+claude-opus-5                  metareview-realistic low      6/50  missing 44
+claude-opus-5                  metareview-realistic medium   6/50  missing 44
+claude-opus-5                  vanilla-engineered   high     6/50  missing 44
+claude-opus-5                  vanilla-engineered   low      6/50  missing 44
+claude-opus-5                  vanilla-engineered   medium   6/50  missing 44
+claude-opus-5                  vanilla-engineered   xhigh    6/50  missing 44
+claude-sonnet-5                compound-realistic   high    50/50  missing 0
+claude-sonnet-5                compound-realistic   low     50/50  missing 0
+claude-sonnet-5                compound-realistic   medium  50/50  missing 0
+claude-sonnet-5                metareview-realistic high     6/50  missing 44
+claude-sonnet-5                metareview-realistic low      6/50  missing 44
+claude-sonnet-5                metareview-realistic medium   6/50  missing 44
+claude-sonnet-5                vanilla-engineered   high     6/50  missing 44
+claude-sonnet-5                vanilla-engineered   low      6/50  missing 44
+claude-sonnet-5                vanilla-engineered   medium   6/50  missing 44
+claude-sonnet-5                vanilla-engineered   xhigh    6/50  missing 44
+glm-5.2-vision-flex            vanilla-engineered   medium   5/50  missing 45
+glm-5.2-vision-flex            vanilla-engineered   xhigh    6/50  missing 44
+glm-5.3-background             vanilla-engineered   low      6/50  missing 44
+glm-5.3-background             vanilla-engineered   medium   1/50  missing 49
+glm-5.3-background             vanilla-engineered   xhigh    6/50  missing 44
+glm-5.3-flash-background       compound-realistic   high    24/50  missing 26
+glm-5.3-flash-background       compound-realistic   low     50/50  missing 0
+glm-5.3-flash-background       compound-realistic   medium  20/50  missing 30
+glm-5.3-flash-background       metareview-realistic high    24/50  missing 26
+glm-5.3-flash-background       metareview-realistic low     50/50  missing 0
+glm-5.3-flash-background       metareview-realistic medium  50/50  missing 0
+glm-5.3-flash-background       vanilla-engineered   high    31/50  missing 19
+glm-5.3-flash-background       vanilla-engineered   low     31/50  missing 19
+glm-5.3-flash-background       vanilla-engineered   medium  31/50  missing 19
+glm-5.3-flash-background       vanilla-engineered   xhigh    6/50  missing 44
+glm-5.3-vision-background      compound-realistic   high    23/50  missing 27
+glm-5.3-vision-background      compound-realistic   low     50/50  missing 0
+glm-5.3-vision-background      compound-realistic   medium  18/50  missing 32
+glm-5.3-vision-background      metareview-realistic high    14/50  missing 36
+glm-5.3-vision-background      metareview-realistic low     50/50  missing 0
+glm-5.3-vision-background      metareview-realistic medium  24/50  missing 26
+glm-5.3-vision-background      vanilla-engineered   high    30/50  missing 20
+glm-5.3-vision-background      vanilla-engineered   low     31/50  missing 19
+glm-5.3-vision-background      vanilla-engineered   medium  30/50  missing 20
+gpt-5.2                        vanilla-engineered   medium   1/50  missing 49
+gpt-5.2                        vanilla-engineered   xhigh    1/50  missing 49
+gpt-5.6-sol                    compound-realistic   high    50/50  missing 0
+gpt-5.6-sol                    compound-realistic   low     50/50  missing 0
+gpt-5.6-sol                    compound-realistic   medium  50/50  missing 0
+gpt-5.6-sol                    metareview-realistic high    50/50  missing 0
+gpt-5.6-sol                    metareview-realistic low     50/50  missing 0
+gpt-5.6-sol                    metareview-realistic medium  48/50  missing 2
+gpt-5.6-sol                    vanilla-engineered   high    50/50  missing 0
+gpt-5.6-sol                    vanilla-engineered   low     50/50  missing 0
+gpt-5.6-sol                    vanilla-engineered   medium  50/50  missing 0
+gpt-5.6-sol                    vanilla-engineered   xhigh    6/50  missing 44
+gpt-5.6-terra                  compound-realistic   high    50/50  missing 0
+gpt-5.6-terra                  compound-realistic   low     50/50  missing 0
+gpt-5.6-terra                  compound-realistic   medium  50/50  missing 0
+gpt-5.6-terra                  metareview-realistic high    50/50  missing 0
+gpt-5.6-terra                  metareview-realistic low     49/50  missing 1
+gpt-5.6-terra                  metareview-realistic medium  50/50  missing 0
+gpt-5.6-terra                  vanilla-engineered   high    49/50  missing 1
+gpt-5.6-terra                  vanilla-engineered   low     50/50  missing 0
+gpt-5.6-terra                  vanilla-engineered   medium  47/50  missing 3
+gpt-5.6-terra                  vanilla-engineered   xhigh    6/50  missing 44
+gpt-6-astra                    compound-realistic   high    12/50  missing 38
+gpt-6-astra                    compound-realistic   low     23/50  missing 27
+gpt-6-astra                    compound-realistic   medium  10/50  missing 40
+gpt-6-astra                    metareview-realistic high    34/50  missing 16
+gpt-6-astra                    metareview-realistic low     13/50  missing 37
+gpt-6-astra                    metareview-realistic medium  13/50  missing 37
+gpt-6-astra                    vanilla-engineered   high    48/50  missing 2
+gpt-6-astra                    vanilla-engineered   low     48/50  missing 2
+gpt-6-astra                    vanilla-engineered   medium  48/50  missing 2
+kimi-k3                        vanilla-engineered   medium   1/50  missing 49
+kimi-k3                        vanilla-engineered   xhigh    1/50  missing 49
+None                           vanilla-engineered   None     5/50  missing 45
+# TOTAL missing PR-runs across all cells: 2228
+
+# Top-6 hitlist state:
+hitlist: 111 rows — 82 done, 29 remaining

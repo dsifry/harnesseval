@@ -1,5 +1,7 @@
 # The Harness Beats the Model: open-weight GLM-5.3 review harnesses find ~5× more real bugs than frontier models run vanilla — at 1/26th the $ per real bug
 
+> **⚠️ DEPRECATED (2026-09-16): superseded by [`REPORT_FINAL.md`](REPORT_FINAL.md)** — see also [`EXECUTIVE_SUMMARY_FINAL.md`](EXECUTIVE_SUMMARY_FINAL.md) and [`analysis/COVERAGE_FINAL.md`](analysis/COVERAGE_FINAL.md). Content below is frozen as-is.
+
 > ### The finding
 >
 > **Open-source near-frontier models driven by review harnesses find more real bugs — at a

@@ -6,14 +6,22 @@
 # DRY RUN BY DEFAULT: pass DRY=0 for live.
 set -u
 cd "$(dirname "$0")/.."
+# FD headroom (2026-09-15): macOS soft limit is 256; a runner holding 6 concurrent SSL conns +
+# lens/diff/result files can exhaust it, surfacing as "lenses: Connection error." (Errno 24 hit
+# 45x historically). Raise for everything this script spawns.
+ulimit -n 10240 2>/dev/null || true
 LOG=logs/campaign_glm_top6_finish.log
 log() { echo "$(date +%H:%M) $*" | tee -a "$LOG"; }
 DRY=${DRY:-1}
 BATCH=20260910-mrv0120-manifold
-export HARNESS_KEYS_FILE=~/.config/harnesseval/keys.env.bench
-export HARNESS_KEY_BUDGETS=12,6
-export HARNESS_LUNAROUTE_TIMEOUT_S=2400
-export HARNESS_LUNAROUTE_KEY_FILES=~/.config/harnesseval/keys.env.bench:~/.config/harnesseval/keys.env
+export HARNESS_KEYS_FILE="${GLMFIN_KEYS_FILE:-$HOME/.config/harnesseval/keys.env.bench}"
+export HARNESS_KEY_BUDGETS="${GLMFIN_KEY_BUDGETS:-12,6}"
+# 900s: the ONLY successful landing tonight (flash mrv-high, 2026-09-15 01:41, 3129s wall) ran
+# under 900s; vision lens calls are the longest (peer probe: 351s; failures at 2610-2908s). 600s
+# was trialled briefly and reverted — it risks killing legitimate long vision calls before the
+# gateway's ~600s wall resolves them. Fast-fail tuning belongs in the retry ladder, not here.
+export HARNESS_LUNAROUTE_TIMEOUT_S=900
+export HARNESS_LUNAROUTE_KEY_FILES="${GLMFIN_KEY_FILES:-$HOME/.config/harnesseval/keys.env.bench:$HOME/.config/harnesseval/keys.env}"
 [ "$DRY" = "0" ] && log "=== LIVE MODE — sequential lunaroute lane ===" || log "=== DRY RUN MODE — zero tokens ==="
 
 missing_for() {  # model fw eff -> missing top-6 PR urls
@@ -48,11 +56,13 @@ PYEOF
 }
 
 # deterministic cell order: partials first (cheapest/closest first), held cell LAST
-CELLS="glm-5.3-vision-background/compound-realistic/high \
+# GLMFIN_CELLS overrides the cell subset (e.g. flash-only tonight, vision-mrv cells held for the
+# morning pool: night degenerate-empty mode hits vision mrv lens calls at ANY effort — 2026-09-14).
+CELLS=${GLMFIN_CELLS:-"glm-5.3-vision-background/compound-realistic/high \
 glm-5.3-vision-background/metareview-realistic/medium \
 glm-5.3-flash-background/compound-realistic/high \
 glm-5.3-flash-background/metareview-realistic/high \
-glm-5.3-vision-background/metareview-realistic/high"
+glm-5.3-vision-background/metareview-realistic/high"}
 
 # ---- PHASE 1: census ----
 log "phase 1: census of the 5 remaining GLM cells against the severity top-6"
@@ -65,7 +75,8 @@ for cell in $CELLS; do
   log "  $model $fw $eff: missing $N/6"
   if [ "$DRY" = "1" ]; then echo "$M" | while IFS= read -r u; do [ -n "$u" ] && log "    would run: $fw/$model/$eff/$u"; done; fi
 done
-log "phase 1 result: $TOTAL runs needed across 5 cells"
+NCELLS=$(echo "$CELLS" | wc -w | tr -d ' ')
+log "phase 1 result: $TOTAL runs needed across $NCELLS cells"
 
 # ---- PHASE 2: launch mechanics (zero tokens) ----
 if [ "$DRY" = "1" ]; then
@@ -93,11 +104,15 @@ while :; do
     [ -z "$URL" ] && continue
     RUN=$((RUN + 1))
     log "run $RUN: $model $fw $eff +1 PR (sequential lane)"
+    VER_BEFORE=$(.venv/bin/python tools/verify_hitlist.py 2>/dev/null | head -1)
     bash tools/with_ceiling.sh 10800 .venv/bin/python -u -m harnesseval.run_model_matrix --prs 50 \
       --frameworks "$fw" --models "$model" --efforts "$eff" --mode api --concurrency 1 \
       --run-batch $BATCH --skip-batch $BATCH \
       --fill "$fw/$model/$eff/$URL" >> "logs/mx_campaign_glmfinish_${fw}_${eff}.log" 2>&1
-    log "run $RUN done — verifier: $(.venv/bin/python tools/verify_hitlist.py 2>/dev/null | head -1)"
+    RC=$?
+    VER_AFTER=$(.venv/bin/python tools/verify_hitlist.py 2>/dev/null | head -1)
+    log "run $RUN done rc=$RC — verifier: $VER_AFTER"
+    [ "$VER_BEFORE" = "$VER_AFTER" ] && log "run $RUN WARNING: verifier did not advance — degenerate or failed landing (see mx log)"
   done
   [ "$DONE" -eq 1 ] && { log "ALL 5 GLM cells complete on the severity top-6 — done"; exit 0; }
 done

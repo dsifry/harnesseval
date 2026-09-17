@@ -151,6 +151,73 @@ def set_session(session_id: str) -> None:
     _KEY_SESSION.set(session_id)
 
 
+# Streaming for lunaroute chat calls (2026-09-15). WHY: a non-streaming request makes the
+# gateway buffer the ENTIRE response server-side (150-300KB here) before sending a single byte,
+# which is the suspected trigger for the aggregate-concurrency wedges (6 concurrent x 65k cap).
+# Streaming keeps bytes flowing, keeps the connection observably active, and exposes reasoning
+# deltas (live thinking-token visibility). The assembled text is byte-identical to the
+# non-streaming path, so frozen instruments are unaffected: transport only.
+# Escape hatch: HARNESS_LUNAROUTE_STREAM=0 restores the plain blocking call.
+_STREAM_LUNAROUTE = os.environ.get("HARNESS_LUNAROUTE_STREAM", "1") != "0"
+
+
+class _ReassembledResponse:
+    """Stand-in for a chat.completions response (only .usage + .choices[0].message are read)."""
+
+    def __init__(self, content, reasoning, finish_reason, usage):
+        class _Msg:
+            pass
+
+        class _Choice:
+            pass
+
+        m = _Msg()
+        m.content = content
+        m.reasoning_content = reasoning
+        c = _Choice()
+        c.message = m
+        c.finish_reason = finish_reason
+        self.choices = [c]
+        self.usage = usage
+
+
+def _streamed_chat(client, call_kwargs):
+    """Blocking streaming call, reassembled to the non-streaming response shape."""
+    kw = dict(call_kwargs)
+    kw["stream"] = True
+    kw.setdefault("stream_options", {"include_usage": True})
+    parts, rparts = [], []
+    finish = None
+    usage = None
+    for chunk in client.chat.completions.create(**kw):
+        u = getattr(chunk, "usage", None)
+        if u is not None:
+            usage = u
+        choices = getattr(chunk, "choices", None) or []
+        if not choices:
+            continue
+        ch = choices[0]
+        if getattr(ch, "finish_reason", None):
+            finish = ch.finish_reason
+        d = getattr(ch, "delta", None)
+        if d is None:
+            continue
+        c = getattr(d, "content", None)
+        if c:
+            parts.append(c)
+        rc = getattr(d, "reasoning_content", None)
+        if rc:
+            rparts.append(rc)
+    return _ReassembledResponse("".join(parts), "".join(rparts), finish, usage)
+
+
+def _do_chat_call(client, call_kwargs):
+    """Lunaroute chat call: streaming (default) or the plain blocking call."""
+    if _STREAM_LUNAROUTE:
+        return _streamed_chat(client, call_kwargs)
+    return client.chat.completions.create(**call_kwargs)
+
+
 def _log_key_usage(idx: int, model: str, seconds: float, resp, ok: bool, ev: str = "end") -> None:
     """Append one utilization record per key-pool attempt to the key-usage ledger (JSONL).
 
@@ -195,9 +262,17 @@ async def _call_openai_compat(model, system, user, effort, max_tokens, temperatu
     # -> empty string. Verified 2026-08-23: GLM+Kimi both need 16384 to reach finish_reason=stop and
     # produce content on the real review prompts. Without this floor, every GLM/Kimi cell scored
     # 0.00 (review prose produced at 2048 but the extract step at 1024 returned empty -> 0 findings).
-    # Enforce a 16384 floor for both Lunaroute reasoning models on every call (review + extract).
+    # RAISED 16384 -> 65536 (2026-09-15, spy-lane wire evidence): on the v0.12 lens prompts at
+    # effort=high the vision model needs ~31k completion tokens (hidden reasoning), so the 16384
+    # first attempt ALWAYS truncated (finish_reason=length, completion_tokens==cap) and the
+    # empty-content ladder then burned 16384 (80s) + 32768 (204s) before the 131072 retry finally
+    # completed (260s, finish=stop, tok=31148). That is ~544s per lens instead of ~260s, which is
+    # what pushed every vision run past its timeout and produced the multi-hour "storm"/hang
+    # profile. A 65536 floor lets the FIRST call complete: no truncation, no escalation, no storm.
+    # Cap, not target -- models that finish early still stop early (observed: finish=stop at 31148
+    # under a 131072 cap), so small extract/judge calls are unaffected in cost.
     if is_lunaroute:
-        max_tokens = max(max_tokens, 16384)
+        max_tokens = max(max_tokens, 65536)
     call_kwargs = dict(model=model, messages=[{"role": "system", "content": system},
                                               {"role": "user", "content": user}],
                        max_completion_tokens=max_tokens, temperature=temperature if not kwargs else 1)
@@ -242,7 +317,7 @@ async def _call_openai_compat(model, system, user, effort, max_tokens, temperatu
             ok = False
             _log_key_usage(idx, model, 0.0, None, None, ev="start")
             try:
-                resp = await asyncio.to_thread(clients[idx].chat.completions.create, **call_kwargs)
+                resp = await asyncio.to_thread(_do_chat_call, clients[idx], call_kwargs)
                 ok = True
                 break
             except (APITimeoutError, APIConnectionError, RateLimitError) as e:
@@ -262,11 +337,11 @@ async def _call_openai_compat(model, system, user, effort, max_tokens, temperatu
     elif is_lunaroute:
         t0 = time.time()
         try:
-            resp = await asyncio.to_thread(clients[0].chat.completions.create, **call_kwargs)
+            resp = await asyncio.to_thread(_do_chat_call, clients[0], call_kwargs)
             _log_key_usage(0, model, time.time() - t0, resp, True)
         except APITimeoutError:
             _log_key_usage(0, model, time.time() - t0, None, False)
-            resp = await asyncio.to_thread(clients[0].chat.completions.create, **call_kwargs)
+            resp = await asyncio.to_thread(_do_chat_call, clients[0], call_kwargs)
             _log_key_usage(0, model, time.time() - t0, resp, True)
     else:
         resp = await asyncio.to_thread(clients[0].chat.completions.create, **call_kwargs)
@@ -283,14 +358,19 @@ async def _call_openai_compat(model, system, user, effort, max_tokens, temperatu
         # with zero findings). Retry with a DOUBLED cap, up to two raises — same contract
         # as the output-cap ladder: transport headroom only, the prompt is untouched.
         for _raise in range(2):
-            call_kwargs["max_completion_tokens"] = max(call_kwargs["max_completion_tokens"], 16384) * (2 ** (_raise + 1))
+            # Cap the escalation at 131072 (2026-09-15): with the lens semaphore at 3,
+            # 3x131072=393k stays under the gateway's ~400k aggregate-output limit; the old
+            # uncapped rung (262144 -> 786k at 3-wide, 1.5M at 6-wide) is exactly the
+            # configuration measured to hang every call in the batch.
+            call_kwargs["max_completion_tokens"] = min(
+                max(call_kwargs["max_completion_tokens"], 16384) * (2 ** (_raise + 1)), 131072)
             # go through the key pool's least-in-flight pick — a stale `client` reference
             # here (pre-multiplexer name) crashed every empty-content retry with
             # NameError: name 'client' is not defined, killing whole cells (2026-09-11)
             _ki = min(range(len(clients)), key=lambda i: _KEY_INFLIGHT.get(i, 0))
             _KEY_INFLIGHT[_ki] = _KEY_INFLIGHT.get(_ki, 0) + 1
             try:
-                resp = await asyncio.to_thread(clients[_ki].chat.completions.create, **call_kwargs)
+                resp = await asyncio.to_thread(_do_chat_call, clients[_ki], call_kwargs)
             finally:
                 _KEY_INFLIGHT[_ki] = max(0, _KEY_INFLIGHT.get(_ki, 1) - 1)
             _log_key_usage(_ki, model, 0.0, resp, True)
@@ -338,6 +418,20 @@ async def call_model_json(model: str, system: str, user: str, *, effort: str = "
                 # and poisoned whole cells during the vision refills)
                 await _aio.sleep(min(20 * (_attempt + 1), 60))
                 continue
+            # timeout / connection / 503-class on the FIRST attempt (2026-09-14 root cause #2):
+            # the retry ladder below only fired when call_model RETURNED empty/unparseable text;
+            # a first-attempt APITimeoutError or connection drop raised straight out of this
+            # loop and failed the WHOLE cell (observed: a 20-min run with 20 good calls died to
+            # one dead 900s connection, error="lenses: Request timed out.", with no ledger trace
+            # because the raise path skips _log_key_usage). Mirror the later ladder's transient
+            # set here so those retries actually fire.
+            esl = (type(e).__name__ + " " + es).lower()
+            transient = ("timeout" in esl or "timed out" in esl or "connection" in esl
+                         or "503" in esl or "upstream" in esl or "backend unavailable" in esl
+                         or "overloaded" in esl)
+            if transient and _attempt < 2:
+                await _aio.sleep(min(5 * (_attempt + 1), 15))
+                continue
             raise
     def _try_parse(t):
         try:
@@ -358,15 +452,26 @@ async def call_model_json(model: str, system: str, user: str, *, effort: str = "
         import asyncio as _aio
         for attempt in range(2, 4):
             try:
-                text2, tin2, tout2, per_model2 = await call_model(model, system, user, effort=effort, max_tokens=max_tokens, execution_mode=execution_mode)
+                # empty-content escalation (2026-09-14, spy-lane + probe validated): GLM vision
+                # lens calls at the 16384 floor return finish_reason=length with content="" (whole
+                # budget consumed by reasoning_content). Probe at 32768: vision lands real findings
+                # JSON, finish_reason=stop, 351s — under the gateway's 600s stream wall. Also fixes
+                # the retry storm (6 lenses -> 28 requests) that overflowed the key budget into
+                # the gateway's header-wait queue (the multi-hour 'hangs'). Retry-path only:
+                # healthy first calls, banked cells, and frozen instruments unaffected.
+                text2, tin2, tout2, per_model2 = await call_model(model, system, user, effort=effort, max_tokens=max(32768, max_tokens * 4), execution_mode=execution_mode)
             except Exception as e2:
                 # retryable-transient: timeouts AND 503-class gateway unavailability
                 # (UPSTREAM_ERROR / "backend unavailable") — both are provider-side and
                 # both were poisoning cells during flap windows (harnesseval, 2026-09-10)
                 es = (type(e2).__name__ + " " + str(e2)).lower()
+                # connection-class added 2026-09-14: a mid-stream disconnect (gateway flap)
+                # was treated as permanent and killed a whole 59-min run, discarding a landed
+                # lens (error="lenses: Connection error.", 5224194d273d). Connection resets
+                # are exactly as transient as timeouts — retry them on the same ladder.
                 transient = ("timeout" in es or "timed out" in es or "503" in es
                              or "upstream" in es or "backend unavailable" in es
-                             or "overloaded" in es)
+                             or "overloaded" in es or "connection" in es)
                 if not (transient and attempt < 3):
                     break  # permanent error, or retries exhausted — the poison guard catches it
                 await _aio.sleep(min(5 * (attempt - 1), 15))

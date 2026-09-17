@@ -290,6 +290,18 @@ def main():
                     s = json.load(open(sp))
                 except Exception:
                     continue
+                # HEALTH GATE (2026-09-15, third root cause): a registry status of "pass" is NOT
+                # sufficient to lock a cell out of re-runs. The batch accumulated 48 ZERO-TOKEN
+                # "pass" entries (vision-high and others) whose summaries show no error but no
+                # tokens/findings either. skip-batch trusted only status=="pass", so those cells
+                # entered the skip set while the campaign's health census still (correctly) reported
+                # them missing: the runner would print "running 0 cells", exit rc=1 instantly, and
+                # the finisher would re-select the same pair forever (the observed instant-fail
+                # loop, present in yesterday's thrash too). Mirror the health rules the verifier
+                # uses: an errored or zero-token run never counts as an already-passed cell.
+                tok = (s.get("tokens_in") or 0) + (s.get("tokens_out") or 0)
+                if s.get("error") or tok == 0:
+                    continue
                 url = s.get("url", "")
                 skip_keys.add((r["framework"], r["model"], r["effort"], url))
             print(f"[mx] --skip-batch {sb}: +{len(skip_keys)-n_before} already-pass cells")
