@@ -50,6 +50,11 @@ PR DIFF for this file (context; may be empty):
 {diff}
 ```
 
+AN EXISTING TEST FROM THIS PACKAGE — follow its conventions (imports, mocking style, dynamic imports):
+```ts
+{tmpl}
+```
+
 REQUIREMENTS
 - Import the REAL module with a relative path and execute the real code path.
 - The test must FAIL on the current code with an assertion naming the claimed behavior, and PASS once the
@@ -138,12 +143,29 @@ def apply_edits(path, edits):
     p.write_text(s)
 
 
+def _template_test(file):
+    """Nearest existing *.test.ts from the same package, first ~55 lines, as a conventions anchor."""
+    base = REPO / Path(file).parent
+    for up in [base] + list(base.parents)[:4]:
+        if not str(up).startswith(str(REPO)):
+            break
+        hits = sorted(up.rglob("*.test.ts"))
+        hits = [h for h in hits if "node_modules" not in str(h) and h.name != "index.test.ts"]
+        if hits:
+            try:
+                return "\n".join(hits[0].read_text().splitlines()[:55])
+            except Exception:
+                return ""
+    return ""
+
+
 async def author(model, cand, file, content, diff, supplier_dir, stem):
+    w = _window(content, cand.get("line"), span=90) if len(content) > 12000 else content
     prompt = PROMPT.format(file=file, line=cand.get("line") or "?", title=cand.get("title") or "",
                            severity=cand.get("severity") or "?",
                            reports="\n".join(f"- {r}" for r in cand.get("reports", [])[:6]),
-                           content=(content if len(content) <= 16000 else _window(content, cand.get("line"))),
-                           diff=diff or "(none)",
+                           content=w, diff=diff or "(none)",
+                           tmpl=_template_test(file) or "(no neighbouring test found)",
                            dir=supplier_dir, stem=stem)
     parsed, tin, tout, _ = await call_model_json(model, SYSTEM, prompt, effort="medium", max_tokens=8000)
     return (parsed if isinstance(parsed, dict) else {}), tin, tout
