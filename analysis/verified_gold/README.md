@@ -25,6 +25,7 @@ analysis/verified_gold/<pr_slug>/<class_slug>/
 | `confirmed_regression` | PASS | FAIL | PASS | the PR introduced a testable behavior regression |
 | `behavior_change_not_regression` | N/A or PASS | FAIL | PASS | new/one-way code path added by the PR behaves wrongly |
 | `not_a_bug` | — | PASS | — | no observable behavior change → demote to quality/ops finding |
+| `defect_present_before_pr` | FAIL | FAIL | PASS | the behavior was already wrong before the PR (pre-existing, not introduced here) |
 | `inconclusive_env` | — | — | — | environment blocked the run (recorded, not counted) |
 | `flaky` | — | mixed | — | nondeterministic — must be re-run and recorded |
 

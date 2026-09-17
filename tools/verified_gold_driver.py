@@ -122,7 +122,9 @@ def run_test(test_path):
 def classify(log):
     if re.search(r"Test Files\s+1 passed", log):
         return "PASS"
-    if re.search(r"Test Files\s+1 failed|AssertionError|Failed to load|Cannot find module", log):
+    if re.search(r"Failed to load url|Cannot find module", log):
+        return "N/A_module_absent"
+    if re.search(r"Test Files\s+1 failed|AssertionError", log):
         return "FAIL"
     return "?"
 
@@ -134,6 +136,7 @@ def write_bundle(d, cand, pr, verdict, logs, test_code, fix_diff, test_path, ext
     for k, v in logs.items():
         (d / "logs" / f"{k}.log").write_text(v)
     meta = {
+        "bug_id": f"{pr}-B{cand['class_index']:02d}",
         "candidate": cand, "pr": pr, "verdict": verdict, "fidelity": "repo_suite",
         "three_way": {k: classify(v) for k, v in logs.items()},
         "test_path": test_path, "fix_scope": "minimal fix for the demonstrated instance only",
@@ -161,7 +164,7 @@ async def do_candidate(cand, model, k_retry=3):
         return None
     stem = Path(file).stem
     supplier_dir = str(Path(file).parent)
-    d = bundle_dir(pr, cand["class_slug"])
+    d = bundle_dir(pr, f"B{cand['class_index']:02d}-{cand['class_slug']}")
     clean_repo(head)
     content = (REPO / file).read_text()
     diff = pr_file_diff(cand["pr"], file)
@@ -194,7 +197,10 @@ async def do_candidate(cand, model, k_retry=3):
             diff = (diff or "") + "\n\nFIX RUN ERROR (fix the source):\n" + fixed_log[-1500:]
             continue
         _rc4, base_log = sh(f"git checkout -q -f {base} && yarn vitest run {tp} --reporter=basic", timeout=420)
-        verdict = "behavior_change_not_regression" if re.search(r"Failed to load|Cannot find module", base_log) else "confirmed_regression"
+        bc = classify(base_log)
+        verdict = ("behavior_change_not_regression" if bc == "N/A_module_absent"
+                   else "confirmed_regression" if bc == "PASS"
+                   else "defect_present_before_pr")   # base already fails on the same assertion
         clean_repo(head)
         return write_bundle(d, cand, pr, verdict, {"base": base_log, "head": head_log, "fixed": fixed_log},
                             parsed["test_code"], fix_diff, tp,
@@ -213,13 +219,24 @@ async def main():
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--only", type=int, default=None)
     ap.add_argument("--model", default="gpt-5.2")
+    ap.add_argument("--repo", default=str(REPO))
+    ap.add_argument("--force", action="store_true")
     a = ap.parse_args()
+    global REPO
+    REPO = Path(a.repo)
     man = json.load(open(BUNDLE_ROOT / "_work/calcom_candidates.json"))
     cands = [c for c in man if c["pr_slug"] == a.pr]
     if a.only is not None:
         cands = [c for c in cands if c["class_index"] == a.only]
     if a.limit:
         cands = cands[:a.limit]
+    # resume-safe: skip candidates that already have a bundle unless --force
+    if not a.force:
+        before = len(cands)
+        cands = [c for c in cands
+                 if not (BUNDLE_ROOT / c["pr_slug"] / f"B{c['class_index']:02d}-{c['class_slug']}" / "meta.json").exists()]
+        if before != len(cands):
+            print(f"skipping {before - len(cands)} already-bundled candidate(s); {len(cands)} to run", flush=True)
     index = []
     for i, c in enumerate(cands, 1):
         t0 = time.time()
