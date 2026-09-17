@@ -29,7 +29,15 @@ analysis/verified_gold/<pr_slug>/<class_slug>/
 | `flaky` | — | mixed | — | nondeterministic — must be re-run and recorded |
 
 Only `confirmed_regression` and `behavior_change_not_regression` qualify as verified hidden gold.
-Everything else is reported in a separate tier and excluded from verified metrics.
+Everything else is excluded from verified metrics and **never deleted**:
+
+- `not_a_bug` (test passes on head → no observable behavior change) is a **candidate for demotion**.
+  Its full bundle is kept and indexed in `analysis/verified_gold/DEMOTION_REVIEW.md` so the claims can
+  be reviewed together afterwards and either demoted permanently or re-argued with a sharper test.
+- `inconclusive_env` / `flaky` bundles are kept and indexed the same way, with the blocking reason
+  recorded in `meta.json.blocker`.
+- Every candidate therefore produces a bundle regardless of outcome; absence of a bundle means the
+  candidate was not yet attempted, never that it was discarded.
 
 ## Acceptance rules (checked mechanically)
 
