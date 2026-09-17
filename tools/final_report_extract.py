@@ -108,6 +108,10 @@ def extract(f, models=MODELS):
     # per-profile TP/FN from per_golden_matches
     prof = {}
     pgm = s.get("per_golden_matches") or []
+    # identities of the goldens the official matcher credited (for the §10c double-count
+    # correction: a golden found officially AND via a golden-overlapping cluster must be
+    # counted once)
+    matched_goldens = [g.get("golden_comment") for g in pgm if g.get("matched_candidate")]
     for name, cats in PROFILE.items():
         tp_p = fn_p = 0
         for g in pgm:
@@ -193,7 +197,7 @@ def extract(f, models=MODELS):
         "judge": s.get("primary_judge"), "adj_judge": s.get("adjudicating_judge"),
         "tp": s["tp"], "fn": s["fn"], "fp": s.get("fp") or 0,
         "n_findings": len(s.get("findings") or []),
-        "prof": prof, "inrun": inrun, "rj3": rj3,
+        "prof": prof, "matched_goldens": matched_goldens, "inrun": inrun, "rj3": rj3,
         "fresh_in": fresh_in, "cached_in": cached_in, "cache_w": cache_w,
         "out_tok": out_tok, "pmu_cost_usd": pmu_cost, "pmu_missing": pmu_missing,
         "tokens_in": s.get("tokens_in") or 0, "tokens_out": s.get("tokens_out") or 0,
