@@ -71,9 +71,10 @@ def main():
     f = reg["_final"]
     print(json.dumps({**f, "ratio_total": round(f["total_gold"] / 42, 2),
                       "ratio_validated": round(f["test_validated"] / 42, 2)}, indent=1))
+    rt, rv = round(f["total_gold"] / 42, 2), round(f["test_validated"] / 42, 2)
     L = ["# Defect registry — final state (after the orthogonality experiment)", "",
-         f"**Total gold = 42 goldens + {f['total_defects']} defects = {f['total_gold']} ({f['ratio_total']}x goldens)**  ·  "
-         f"**test-validated hidden gold = {f['test_validated']} ({f['ratio_validated']}x goldens)**", "",
+         f"**Total gold = 42 goldens + {f['total_defects']} defects = {f['total_gold']} ({rt}x goldens)**  ·  "
+         f"**test-validated hidden gold = {f['test_validated']} ({rv}x goldens)**", "",
          f"- {f['merged_away']} labels were MERGED away: the sibling fix also cured them, so they were the bundle's own defect restated.",
          f"- {f['undemonstrated_in_harness']} defects are undemonstrated in this harness, each with a specific reason.", "",
          "| defect | bundle | class | why not demonstrated |", "|---|---|---|---|"]
