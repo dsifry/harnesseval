@@ -101,10 +101,10 @@ figure.callout .fig-title { margin:0 0 .5rem; font-size:1.02rem; color:var(--ink
 .fig-how { margin:.35rem 0 .9rem; color:var(--muted); font-style:italic; font-size:.93em; }
 .fig-body { margin:.4rem 0 .9rem; }
 .fig-body img { width:100%; max-width:100%; height:auto; display:block; margin:0 auto; }
-.plotly-fig { width:100%; height:clamp(420px, 58vh, 820px); }
+.plotly-fig { width:100%; height:clamp(480px, 62vh, 900px); }
 .fig-controls { margin:.2rem 0 .5rem; font-size:.85em; color:var(--muted); }
 .fig-controls label { cursor:pointer; user-select:none; }
-@media (max-width: 760px) { main { width: 100%; padding: 1.5rem .9rem 3rem; } .plotly-fig { height: 420px; } }
+@media (max-width: 760px) { main { width: 100%; padding: 1.5rem .9rem 3rem; } .plotly-fig { height: 460px; } }
 .fig-fallback { margin-top:.6rem; }
 .fig-fallback summary { cursor:pointer; color:var(--muted); font-size:.85em; }
 .fig-fallback img { margin-top:.6rem; }figcaption.fig-takeaway { margin-top:.4rem; padding-left:.8rem; border-left:3px solid var(--rule);
@@ -314,11 +314,14 @@ def render_callout(blk: list[str], inline_md: markdown.Markdown, interactive_cou
 
     if live:
         spec = json.loads(spec_path.read_text())
+        spec.get("layout", {}).pop("updatemenus", None)   # floating menus overlap titles; we use checkboxes
         payload = json.dumps(spec).replace("</", "<\\/")
         ci_path = INTERACTIVE / f"{base}_ci.json"
         ci_payload = None
         if ci_path.exists():
-            ci_payload = json.dumps(json.loads(ci_path.read_text())).replace("</", "<\\/")
+            ci_spec = json.loads(ci_path.read_text())
+            ci_spec.get("layout", {}).pop("updatemenus", None)
+            ci_payload = json.dumps(ci_spec).replace("</", "<\\/")
         uri = _data_uri(asset)
         interactive_count[0] += 1
         parts.append('<div class="fig-body">')

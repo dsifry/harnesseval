@@ -71,28 +71,43 @@ manifest: dict[str, dict] = {}
 
 
 def save(fig: go.Figure, name: str, title: str, source: str) -> None:
+    """Write <name>.json (CI off) and <name>_ci.json (CI on).
+
+    The CI toggle is NOT a Plotly button menu: those float over the plot area and overlap the chart
+    title. Instead the two states are separate specs, and the HTML renderer exposes them through the
+    same checkbox it uses for the dashboard panels (see tools/report_to_html.py). Error-bar
+    visibility is the only difference between the two specs.
+    """
     raw = json.loads(fig.to_json())            # JSON-safe by construction (no NaN/Inf)
-    frag = {"traces": raw["data"], "layout": raw["layout"], "config": CONFIG}
-    (open(f"{OUT}/{name}.json", "w")).write(json.dumps(frag, indent=1, allow_nan=False))
+    layout = raw["layout"]
+    layout.pop("updatemenus", None)            # never ship the floating button menu
+    # keep room for the in-chart title
+    layout.setdefault("margin", {})["t"] = max(int(layout.get("margin", {}).get("t", 0) or 0), 72)
+
+    traces = raw["data"]
+
+    def variant(ci_on: bool) -> list[dict]:
+        out = []
+        for t in traces:
+            t2 = json.loads(json.dumps(t))
+            for key in ("error_x", "error_y"):
+                if isinstance(t2.get(key), dict):
+                    t2[key]["visible"] = ci_on
+            out.append(t2)
+        return out
+
+    base = {"traces": variant(False), "layout": layout, "config": CONFIG}
+    has_err = any(isinstance(t.get("error_x"), dict) or isinstance(t.get("error_y"), dict) for t in traces)
+    with open(f"{OUT}/{name}.json", "w") as fh:
+        json.dump(base, fh, indent=1, allow_nan=False)
+    if has_err:
+        ci = {"traces": variant(True), "layout": layout, "config": CONFIG}
+        with open(f"{OUT}/{name}_ci.json", "w") as fh:
+            json.dump(ci, fh, indent=1, allow_nan=False)
     manifest[name] = {"title": title, "source": source}
-    print(f"  {name}.json: {len(frag['traces'])} traces, "
-          f"{sum(len(t.get('x', [])) for t in frag['traces'])} x-points, "
-          f"updatemenus={'yes' if frag['layout'].get('updatemenus') else 'no'}")
-
-
-def ci_toggle(indices: list[int], x: float = 0.0, y: float = 1.10) -> dict:
-    """A two-button menu that flips error-bar visibility on the given trace indices."""
-    return {
-        "type": "buttons", "direction": "right", "x": x, "y": y,
-        "xanchor": "left", "yanchor": "top", "showactive": False, "pad": {"t": 0, "r": 8},
-        "bgcolor": "#eef2f6", "bordercolor": "#d9dee5",
-        "buttons": [
-            {"label": "95% CI: on", "method": "restyle",
-             "args": [{"error_x.visible": True, "error_y.visible": True}, indices]},
-            {"label": "95% CI: off", "method": "restyle",
-             "args": [{"error_x.visible": False, "error_y.visible": False}, indices]},
-        ],
-    }
+    print(f"  {name}.json: {len(base['traces'])} traces, "
+          f"{sum(len(t.get('x', [])) for t in base['traces'])} x-points, "
+          f"error-bar CI variant={'yes' if has_err else 'no'}, updatemenus=no")
 
 
 def cell_rows(complete_only: bool = True):
@@ -222,7 +237,6 @@ def chart_defects_found() -> None:
         legend=dict(itemclick="toggle", itemdoubleclick="toggleothers", font=dict(size=9),
                     orientation="v", x=1.02, y=1, bordercolor="#d9dee5", borderwidth=1),
         margin=dict(l=60, r=210, t=110, b=120), font=FONT, plot_bgcolor="white",
-        updatemenus=[ci_toggle(err_idx, x=0.0, y=1.16)],
     )
     save(fig, "fig_true_gold_defects_found",
          "Findings per cell, decomposed (goldens / hidden-gold defects / hallucinations / nitpicks)",
@@ -290,7 +304,6 @@ def chart_true_gold_pareto() -> None:
         legend=dict(itemclick="toggle", itemdoubleclick="toggleothers", font=dict(size=10),
                     x=1.02, y=1, bordercolor="#d9dee5", borderwidth=1),
         margin=dict(l=70, r=240, t=100, b=70), font=FONT, plot_bgcolor="white",
-        updatemenus=[ci_toggle(err_idx)],
     )
     save(fig, "fig_true_gold_pareto",
          "Recall vs F2′ on the 147-bug true golden set, with 95% CIs",
@@ -355,7 +368,6 @@ def chart_pareto_frontier() -> None:
         legend=dict(itemclick="toggle", itemdoubleclick="toggleothers", font=dict(size=10),
                     x=1.02, y=1, bordercolor="#d9dee5", borderwidth=1),
         margin=dict(l=70, r=200, t=110, b=70), font=FONT, plot_bgcolor="white",
-        updatemenus=[ci_toggle(err_idx)],
     )
     save(fig, "fig_pareto_frontier",
          "Cost/quality frontier: dollars per real finding vs recall and vs F2′, with the Pareto envelope",
@@ -416,7 +428,6 @@ def chart_selection_effect() -> None:
         legend=dict(itemclick="toggle", itemdoubleclick="toggleothers", font=dict(size=10),
                     x=1.02, y=1, bordercolor="#d9dee5", borderwidth=1),
         margin=dict(l=70, r=190, t=110, b=70), font=FONT, plot_bgcolor="white",
-        updatemenus=[ci_toggle(err_idx)],
     )
     save(fig, "fig_selection_effect",
          "Selection effect: top-6 vs full-50 per cell (the corrected direction)",
