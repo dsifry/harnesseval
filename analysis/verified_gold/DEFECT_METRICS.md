@@ -1,6 +1,6 @@
 # §10d — defect-level metrics (per-run matching at the individual-bug unit)
 
-Denominators: **verified** = 42 goldens + 91 D-verified defects (133 total); **full** = 42 + 145 (187 total). recall = (golden TP + distinct defects hit) / denominator; adjP charges hallucinations, adjP' also charges nitpicks.
+Denominators are computed from the registry (see _final in analysis/verified_gold/DEFECT_REGISTRY.json): verified = 42 goldens + every D-verified defect; full = 42 + all registry defects. recall = (golden TP + distinct defects hit) / denominator; adjP charges hallucinations, adjP' also nitpicks.
 
 ## variant: verified
 

@@ -53,16 +53,18 @@ for k, v in M["matrix"].items():
     if ex:
         c["TP_exp"] = ex["TP_exp"]
         c["usd_per_tp_exp"] = (v["ci"]["cost_run"][0] * v["n_pr"] / ex["TP_exp"]) if ex["TP_exp"] else None
-    se = M["expanded_gold_verified"]["matrix_sem"].get(kx)
+    # TRUE golden set (§10d): 42 goldens + the deduplicated, individually test-validated defects
+    se = M["true_gold_defects"]["verified"]["cells"].get(kx)
     if se:
-        c["TP_sem"] = se["TP_sem"]
-        c["usd_per_tp_sem"] = (v["ci"]["cost_run"][0] * v["n_pr"] / se["TP_sem"]) if se["TP_sem"] else None
-        c["recall_sem"] = se["recall_sem"]; c["recall_sem_lo"] = se["ci"]["recall_sem"][1]; c["recall_sem_hi"] = se["ci"]["recall_sem"][2]
+        c["TP_sem"] = se["TP"]
+        c["usd_per_tp_sem"] = (v["ci"]["cost_run"][0] * v["n_pr"] / se["TP"]) if se["TP"] else None
+        c["recall_sem"] = se["recall"]; c["recall_sem_lo"] = se["ci"]["recall"][1]; c["recall_sem_hi"] = se["ci"]["recall"][2]
         c["F1_sem"] = se["F1"]; c["F1_sem_lo"] = se["ci"]["F1"][1]; c["F1_sem_hi"] = se["ci"]["F1"][2]
         c["F1p_sem"] = se["F1p"]; c["F1p_sem_lo"] = se["ci"]["F1p"][1]; c["F1p_sem_hi"] = se["ci"]["F1p"][2]
         c["adjP_sem"] = se["adjP"]; c["adjPp_sem"] = se["adjPp"]
     c["TP_golden"] = v.get("TP")
-    _pp = {u: (M["expanded_gold_verified"]["per_pr"][u] | {"union_sem": M["expanded_gold_verified"]["per_pr"][u]["n_verified_additional"]}) for u in M["expanded_gold_verified"]["per_pr"]}
+    _pp = {u: {"goldens": v["goldens"], "union_sem": v["verified_defects"]}
+           for u, v in M["true_gold_defects"]["per_pr"].items()}
     _cov = [r["url"] for r in D["selected_runs"] if r["model"] == m and r["framework"] == fw and r["effort"] == e and r["url"] in _pp]
     c["ceiling"] = sum(_pp[u]["goldens"] + _pp[u]["union_sem"] for u in _cov)
     c["instruments"] = "/".join(v["instruments"]); c["judges"] = "/".join(v["judges"])
@@ -124,12 +126,12 @@ def round5(o):
     return o
 
 expd = {}
-for k, v in M["expanded_gold_verified"]["matrix_sem"].items():
+for k, v in M["true_gold_defects"]["verified"]["cells"].items():
     st = M["matrix"].get(k)
     if not st:
         continue
     expd[k] = {"recall": st["recall"], "F1": st["F1"],
-               "recall_sem": v["recall_sem"], "ci_recall_sem": list(v["ci"]["recall_sem"]),
+               "recall_sem": v["recall"], "ci_recall_sem": list(v["ci"]["recall"]),
                "F1_sem": v["F1"], "ci_F1_sem": list(v["ci"]["F1"]),
                "F1p_sem": v["F1p"], "adjP_sem": v["adjP"], "adjPp_sem": v["adjPp"]}
 
@@ -174,7 +176,7 @@ HTML = """<!DOCTYPE html>
 <body>
 <div class="wrap">
   <h1>Automated code review — final campaign explorer</h1>
-  <div class="sub">8 models × 3 frameworks × 3 efforts on the six severity-hardest Martian-benchmark PRs · 66 complete cells · data freeze 2026-09-16 09:35 · quality panels use the <b>true golden set</b> (42 goldens + 359 real bugs — REPORT_FINAL §10b; evidence: TRUE_GOLDEN_EVIDENCE.md)</div>
+  <div class="sub">8 models × 3 frameworks × 3 efforts on the six severity-hardest Martian-benchmark PRs · 66 complete cells · data freeze 2026-09-16 09:35 · quality panels use the <b>true golden set</b> (42 goldens + 110 individually test-validated defects — REPORT_FINAL §10d; catalogue: GOLD_DEFECT_CATALOG.md)</div>
   <div class="panel">
     <h2>Filters — one key area, applies to every panel below</h2>
     <div class="controls" style="flex-wrap:wrap;column-gap:14px">
@@ -237,7 +239,7 @@ HTML = """<!DOCTYPE html>
 
   <div class="panel">
     <h2>1f · What each setup actually found — golden bugs vs verified real bugs the benchmark missed</h2>
-    <div class="note">One bar per cell, sorted by total real bugs found. <b style="color:#888">Gray segment</b> = golden defects found (the only thing the strict benchmark scores). <b style="color:#B07AA1">Colored segment</b> = additional distinct real bugs found from the <b>verified</b> set (LLM-deduplicated and golden-overlap-corrected from all 2,416 runs; hallucinations and nitpicks excluded; evidence pack in the repo). The longer the colored part, the more the setup finds that the benchmark never credits. The dashed line at 253 marks the <b>"perfect" agent</b> (as far as we know — and we are being facetious): all 42 goldens + all 211 verified additional bugs on the six PRs. The small gray tick on each row is that cell's reachable ceiling (some cells cover fewer than the six PRs and cannot reach 253). Hover for details.</div>
+    <div class="note">One bar per cell, sorted by total real bugs found. <b style="color:#888">Gray segment</b> = golden defects found (the only thing the strict benchmark scores). <b style="color:#B07AA1">Colored segment</b> = additional distinct real bugs found from the <b>verified</b> set (the deduplicated, individually test-validated defect set: every defect has its own test that fails on the PR head and a minimal fix that makes it pass; REPORT_FINAL §10d; GOLD_DEFECT_CATALOG.md). The longer the colored part, the more the setup finds that the benchmark never credits. The dashed line at 152 marks the <b>"perfect" agent</b> (as far as we know — and we are being facetious): all 42 goldens + all 110 verified defects on the six PRs. The small gray tick on each row is that cell's reachable ceiling (some cells cover fewer than the six PRs and cannot reach 152). Hover for details.</div>
     <div id="chart1f" style="height:920px"></div>
     <div id="takeaway1f" style="margin-top:10px;padding:10px 14px;border-left:4px solid #B07AA1;background:#faf7fa;font-size:13.5px;border-radius:0 8px 8px 0"></div>
   </div>
@@ -258,7 +260,7 @@ HTML = """<!DOCTYPE html>
 
   <div class="panel">
     <h2>4 · Do the 6 hardest PRs give the same numbers as all 50?</h2>
-    <div class="note">One row per cell (33 cells with full-50 runs), under the <b>expanded key-union</b> metrics (the full-50 true-golden-set re-cluster is future work — read <i>directions</i> here, not levels; §10b supersedes levels). The x-axis is the <b>Δ (top-6 − full-50)</b> of the selected expanded metric: dot right of the dashed zero line = the 6-PR number <i>overstates</i> the full-set number, left = understates, on zero = unbiased sample. Hover a dot to see the actual pair (top-6 first, then full-50) and the Δ. <b>Switch the metric to F1 to see the revised F1 divergence.</b> Note on row order: rows are sorted by |Δ| (largest first) for the selected metric; it is not a model ranking.</div>
+    <div class="note">One row per cell (33 cells with full-50 runs), under the <b>expanded key-union</b> metrics (the full-50 true-golden-set re-cluster is future work — read <i>directions</i> here, not levels; §10d supersedes levels). The x-axis is the <b>Δ (top-6 − full-50)</b> of the selected expanded metric: dot right of the dashed zero line = the 6-PR number <i>overstates</i> the full-set number, left = understates, on zero = unbiased sample. Hover a dot to see the actual pair (top-6 first, then full-50) and the Δ. <b>Switch the metric to F1 to see the revised F1 divergence.</b> Note on row order: rows are sorted by |Δ| (largest first) for the selected metric; it is not a model ranking.</div>
     <div class="controls"><label>metric <select id="selmet"><option value="recall">recall</option><option value="F1">F1</option></select></label></div>
     <div id="chart4" style="height:720px"></div>
     <div id="takeaway4" style="margin-top:10px;padding:10px 14px;border-left:4px solid #B07AA1;background:#faf7fa;font-size:13.5px;border-radius:0 8px 8px 0"></div>
@@ -266,7 +268,7 @@ HTML = """<!DOCTYPE html>
 
   <div class="panel">
     <h2>5 · Selection view — where the six chosen PRs sit (expanded, real-world)</h2>
-    <div class="note">Per-PR scatter for one cell (dropdown): x = golden-comment severity weight (Critical=4…Low=1), y = that PR's <b>expanded recall</b> (key-union lens; superseded by §10b for levels — top-6 PRs only there) for the chosen cell. The six selected PRs are in bold color; the other 44 are gray. Dashed lines = mean expanded recall of the top-6 (colored) vs the rest (gray).</div>
+    <div class="note">Per-PR scatter for one cell (dropdown): x = golden-comment severity weight (Critical=4…Low=1), y = that PR's <b>expanded recall</b> (key-union lens; superseded by §10d for levels — top-6 PRs only there) for the chosen cell. The six selected PRs are in bold color; the other 44 are gray. Dashed lines = mean expanded recall of the top-6 (colored) vs the rest (gray).</div>
     <div class="controls"><label>cell <select id="cellsel"></select></label></div>
     <div id="chart5"></div>
   </div>
@@ -382,16 +384,16 @@ function draw6(){
     {x:rows.map(r=>r.ceiling), y:yx, mode:'markers', name:'reachable ceiling for this cell', marker:{color:'#666',symbol:'line-ns-open',size:8,line:{width:1}},
      customdata:rows, hovertemplate:'<b>%{customdata.k}</b><br>reachable ceiling (covered PRs): %{x}<extra></extra>'},
   ];
-  const PERFECT = 253; // "perfect" agent = 42 goldens + 211 verified additional bugs (facetious: bounded by what the campaign found)
+  const PERFECT = 152; // "perfect" agent = 42 goldens + 110 individually test-validated defects (facetious: bounded by what the campaign found)
   const shapes=[{type:'line', xref:'x', x0:PERFECT, x1:PERFECT, yref:'y', y0:-0.5, y1:rows.length-0.5,
     line:{color:'#333', width:1.2, dash:'dash'}, layer:'below'}];
-  const annotations=[{xref:'x', x:PERFECT, yref:'y', y:-0.5, text:'"perfect" agent (as far as we know): 42 goldens + 211 verified additional bugs', showarrow:false, font:{size:9}, xanchor:'right', yanchor:'bottom'}];
+  const annotations=[{xref:'x', x:PERFECT, yref:'y', y:-0.5, text:'"perfect" agent (as far as we know): 42 goldens + 110 verified defects', showarrow:false, font:{size:9}, xanchor:'right', yanchor:'bottom'}];
   Plotly.react('chart1f', ts, {shapes:shapes, annotations:annotations, barmode:'stack', margin:{l:150,r:16,t:8,b:44},
-    xaxis:{title:'distinct real bugs found (of 42 goldens + 211 verified additional bugs)', gridcolor:'#eee'},
+    xaxis:{title:'distinct real bugs found (of 42 goldens + 110 verified defects)', gridcolor:'#eee'},
     yaxis:{tickvals:yx, ticktext:labels, tickfont:{size:9.5}, autorange:'reversed'},
     legend:{font:{size:11},orientation:'h',y:-0.06}, paper_bgcolor:'rgba(0,0,0,0)'}, {displayModeBar:false, responsive:true});
   const el=document.getElementById('takeaway1f');
-  el.innerHTML='<b>Takeaway:</b> the colored segments are nearly invisible for vanilla cells — single-pass finds the goldens and little else — while harness cells (especially GLM at any effort, and fable-5.1 on metareview) pile up long colored sections: dozens of real bugs the strict benchmark never scores. This is the whole §10b story in one chart.';
+  el.innerHTML='<b>Takeaway:</b> the colored segments are nearly invisible for vanilla cells — single-pass finds the goldens and little else — while harness cells (especially GLM at any effort, and fable-5.1 on metareview) pile up long colored sections: dozens of real bugs the strict benchmark never scores. This is the whole true-gold (§10d) story in one chart.';
 }
 draw6();
 

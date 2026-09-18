@@ -107,6 +107,7 @@ def main():
                         "n_pr": n, "TP": int(rows[:, 0].sum()), "den": int(rows[:, 1].sum()),
                         "recall": p[0], "adjP": p[1], "adjPp": p[2], "F1": p[3], "F1p": p[4],
                         "ci": {"recall": (float(p[0]), float(np.percentile(rec, 2.5)), float(np.percentile(rec, 97.5)), 1.0),
+                               "F1": (float(p[3]), float(np.percentile(f1, 2.5)), float(np.percentile(f1, 97.5)), 1.0),
                                "F1p": (float(p[4]), float(np.percentile(f1p, 2.5)), float(np.percentile(f1p, 97.5)), 1.0)},
                     }
         # pairs
@@ -133,9 +134,9 @@ def main():
     (VG / "DEFECT_METRICS.json").write_text(json.dumps(out, indent=1))
 
     L = ["# §10d — defect-level metrics (per-run matching at the individual-bug unit)", "",
-         "Denominators: **verified** = 42 goldens + 91 D-verified defects (133 total); "
-         "**full** = 42 + 145 (187 total). recall = (golden TP + distinct defects hit) / denominator; "
-         "adjP charges hallucinations, adjP' also charges nitpicks.", ""]
+         "Denominators are computed from the registry (see _final in analysis/verified_gold/DEFECT_REGISTRY.json): "
+         "verified = 42 goldens + every D-verified defect; full = 42 + all registry defects. "
+         "recall = (golden TP + distinct defects hit) / denominator; adjP charges hallucinations, adjP' also nitpicks.", ""]
     for variant in ("verified", "full"):
         L += [f"## variant: {variant}", "", "| cell | n PRs | recall [CI] | adjP | adjP' | F1 | F1' |", "|---|---|---|---|---|---|---|"]
         for k, c in sorted(out[variant]["cells"].items(), key=lambda kv: -kv[1]["F1p"]):

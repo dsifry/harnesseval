@@ -44,7 +44,7 @@ def headline(block):
 
 def main():
     met = json.load(open(MET))
-    before = {k: json.dumps(v, sort_keys=True) for k, v in met.items()}
+    before = {k: json.dumps(v, sort_keys=True) for k, v in met.items() if k != "true_gold_defects"}
     dm = json.load(open(DM))
     for variant in ("verified", "full"):
         if variant not in dm:
@@ -57,6 +57,17 @@ def main():
             "adjP": "adjusted precision after adjudication (a reported finding counts only if the adjudicator "
                     "accepted it as a real defect)",
         }
+    # per-PR counts so downstream panels can compute each cell's reachable ceiling on the true set
+    reg = json.load(open(ROOT / "analysis/verified_gold/DEFECT_REGISTRY.json"))
+    ds = json.load(open(ROOT / "analysis/final_report_dataset.json"))
+    from collections import Counter
+    per_pr_slug = Counter(d["pr"] for d in reg["defects"])
+    gold_pr = {u: v.get("goldens") for u, v in (met.get("expanded_gold_verified", {}).get("per_pr") or {}).items()}
+    per_pr = {}
+    for url, gold in gold_pr.items():          # gold_pr is keyed by the 6 campaign PR urls
+        slug = url.rstrip("/").split("/")[-1]
+        per_pr[url] = {"goldens": gold, "verified_defects": per_pr_slug.get(slug, 0)}
+    dm["per_pr"] = per_pr
     met["true_gold_defects"] = dm
     met["true_gold_defects"]["role"] = ("PRIMARY true-gold analysis: the deduplicated verified hidden-gold "
                                        "defect set (see analysis/verified_gold/GOLD_DEFECT_CATALOG.md). "
@@ -68,7 +79,7 @@ def main():
         print("ABORT: frozen keys would change:", changed, file=sys.stderr)
         sys.exit(2)
     json.dump(met, open(MET, "w"), indent=1)
-    print("added true_gold_defects; frozen keys byte-identical:", len(before))
+    print("wrote true_gold_defects; frozen keys byte-identical:", len(before))
     print(json.dumps(met["true_gold_defects"]["verified"]["headline"], indent=1))
 
 

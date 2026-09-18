@@ -54,23 +54,24 @@ adjudication, judge gpt-5.2 for the Anthropic/GLM rows.
 
 ## Our results are the expanded (real-world) numbers; the strict benchmark is the artificial lens kept for comparison
 
-We report the **verified true-golden-set analysis** (REPORT_FINAL §10c) as our results throughout; the strict benchmark (goldens only) and the earlier unions (§5b, §10b) are kept for provenance.
+We report the **verified true-golden-set analysis** (REPORT_FINAL §10d) as our results throughout; the strict benchmark (goldens only) and the earlier unions (§5b, §10b, §10c) are kept for provenance.
 
 The benchmark's golden set is a floor, not a ceiling. We rebuilt the hidden-gold set from every
 confirmed-bug finding across all 2,416 healthy runs (hallucinations and nitpicks excluded at the
-adjudication gate), then audited the rebuild twice: an LLM semantic merge, a stricter whole-PR
-re-merge (which collapsed the candidate clusters 359 → 258), and a finding-level golden-overlap
-check that identified **47 clusters as duplicates of goldens the official matcher had missed** —
-those are removed, because counting them double-counts both the denominator and the credit. The
-verified universe is **42 goldens + 211 additional real bugs =
-253 distinct bugs**, each with a human-verifiable evidence card (location,
-why-real, replication steps, found-by list) in `analysis/TRUE_GOLDEN_EVIDENCE.md`.
+adjudication gate), then **executed** it: for every candidate, a test that fails on the PR head, a
+minimal fix that makes it pass, and — where a sibling defect shares the site — an orthogonality
+check that the bundle's fix leaves it red. Independent duplicate passes (six reviewers, then a
+fix-location adjudication) removed 23 restatements and container folding removed 17 more, while a
+walk of the audits' own label lists restored 10 defects that had been dropped. The verified universe
+is **42 goldens + 110 individually test-validated defects = 152 distinct bugs**, every one owning its
+own test, fix and logs (`analysis/verified_gold/GOLD_DEFECT_CATALOG.md`; none undemonstrated).
 
-Under those honest denominators: **the harness-vs-vanilla comparison holds** — 39/43 paired
-recall deltas resolve positive — and the recommendation cell carries **~1.4× fable vanilla's real-bug recall**
-(0.375 vs 0.261) at the same fraction of the cost. **MRV beats CE overall**
-(mean ΔF1 +0.044 [+0.019, +0.073], 17+/4− over
-21 matched pairs), and the gap widens under the user lens that charges nitpicks against precision.
+Under those honest denominators: **harnesses still find more real bugs** — Δrecall > 0 in **45/48**
+matched model·effort pairs (mean **+0.107**; peak-recall ratio **1.51×** versus the best vanilla cell,
+0.487 vs 0.322) — but the recall lead now costs precision, so on **F1′ the best cell is vanilla**
+(fable·van·high 0.441 vs the best harness 0.415; ΔF1′ > 0 in only 25/48 pairs, mean +0.008).
+**MRV is ahead of CE on average, not uniformly** (ΔF1′ point estimate +19/−2 over 21 matched pairs,
+mean +0.047; 8/21 resolve positive at 95%).
 
 **Why even the best harness misses what it misses.** Three mechanisms, separated: (1) *denominator
 inflation* — paraphrase splits and golden duplicates (now fixed) made the universe look ~1.6× bigger

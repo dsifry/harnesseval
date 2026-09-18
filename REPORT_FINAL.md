@@ -26,21 +26,22 @@ more hallucinated noise (adjP 0.54 vs 0.67). The operator's working figures of "
 flash-vs-fable numbers are 1/57 per blended token and 1/38 per task — still a large win, but state
 the measured ratios, not the folklore.
 
-**Update (§10c, PRIMARY — audited three times):** the hidden-gold set was rebuilt by LLM semantic
-merge, then audited again: a stricter re-merge collapsed the candidate clusters 359 → 258, and 47 of
-them turned out to be **duplicates of the goldens** (the official text-only matcher had missed them),
-so both the denominator and the credited discoveries were inflated. The verified universe is
-**42 goldens + 211 additional real bugs = 253 distinct bugs**
-(every one with a human-verifiable card — location, why-real, replication, found-by — in
-`analysis/TRUE_GOLDEN_EVIDENCE.md`). Under those honest denominators: harnesses beat matched
-single-pass on real-bug recall in **39/43** paired cells (glm-vis·MRV·low
-0.375 vs fable vanilla 0.261 — **~1.4×**), and **MRV beats CE
-overall** (mean ΔF1 +0.044 [+0.019, +0.073],
-17+/4− over 21 matched pairs). The cost
-advantages above are unchanged; only the recall levels and gap magnitude are corrected. Where the best
-single cell still misses, it is mostly **variance, not blindness**: 91% of the best cell's misses were
-found by another harness cell, and only 12 verified bugs were found by no harness cell at all — a
-different class of defect (perf/N+1, test quality, framework idioms).
+**Update (§10d, PRIMARY — the hidden-gold set was rebuilt, then deduplicated and individually verified):**
+the §10b/§10c LLM-merged bug sets were still clusters, carrying both over-counts (one defect restated
+several ways) and under-counts (defects the audit split away). Every candidate was therefore **executed**:
+a test that fails on the PR head, a minimal fix that makes it pass, and — where a sibling defect shares the
+site — an orthogonality check that the bundle's fix leaves it red. Independent duplicate passes
+(six reviewers + fix-location adjudication) removed 23 restatements and container folding removed 17 more,
+while a walk of the audits' own label lists restored 10 dropped defects. The verified universe is
+**42 goldens + 110 individually test-validated defects = 152 distinct bugs**
+(`analysis/verified_gold/GOLD_DEFECT_CATALOG.md`; none undemonstrated). Under those denominators:
+harnesses still find more real bugs — Δrecall > 0 in **45/48** matched model·effort pairs
+(mean **+0.107**; peak-recall ratio **1.51×** versus the best vanilla cell) — but the recall lead now costs
+precision, so on **F1′ a vanilla cell leads** (fable·van·high 0.441 vs best harness 0.415;
+ΔF1′ > 0 in only 25/48 pairs, mean +0.008). **MRV is ahead of CE on average** (ΔF1′ point estimate
++19/−2 over 21 matched pairs, mean +0.047; 8/21 resolve positive at 95%). The cost advantages above are
+unchanged. Where the best single cell still misses, it is mostly **variance, not blindness**: 91% of the
+best cell's misses were found by another harness cell.
 
 ## 2. What we measured (benchmark-defined vs our extensions)
 
@@ -714,6 +715,74 @@ Resolved positive 39/43 (vs 38/42 under the frozen key-union, 17/42 strict).
 
 Total: 42 goldens + 211 verified additional bugs = 253 distinct bugs (258 merged clusters; 47 golden-duplicates removed, not counted).
 Per-bug verification cards (location, why-real, replication, found-by): `analysis/TRUE_GOLDEN_EVIDENCE.md`.
+
+## 10d. The TRUE golden set (PRIMARY): deduplicated, individually test-validated defects
+
+§10c's "211 additional bugs" were still *clusters* — produced by an LLM merge over candidate keys, so they
+carried both over-counts (one defect restated several ways) and under-counts (real defects the audit split
+away and never restored). §10d replaces them with **individually executed defects**.
+
+**Construction (all artifacts in `analysis/verified_gold/`).** For each candidate the pipeline authored a
+test, ran it on the PR head (must **FAIL**), authored a minimal fix, ran it again (must **PASS**), and — where
+a sibling defect existed at the same site — re-ran under the *bundle's* fix, which must leave it **RED**
+(orthogonality: a defect is only counted separately if its own fix is required). The merge audit
+(`MERGE_AUDIT.json`) then split multi-concern bundles; an independent six-reviewer duplicate pass plus
+fix-location adjudication removed **23 defect-level** restatements; container-level folding removed **17**
+more. Finally the audits' own label lists were walked for **under**-counts, restoring **10 defects** that had
+been dropped (including an unset-secret **auth bypass** and a missing scheme check before `open(url)`).
+Every defect now owns `defects/<id>/{test.diff,fix.patch,logs/,meta.json}`; the canonical list is
+**`analysis/verified_gold/GOLD_DEFECT_CATALOG.md`** (110 entries, one per defect, each with its test, its fix
+and its provenance).
+
+**Verified universe: 42 goldens + 110 verified defects = 152 distinct bugs.**
+All 110 are `D-verified` (fail-on-head → own-fix-pass); none is undemonstrated.
+Metrics: `tools/verified_gold_defect_metrics.py` (cluster bootstrap, B=10,000, seed 20260916); the section is
+also exposed as `true_gold_defects` in `analysis/final_report_metrics.json`.
+
+**Headline (true set).**
+
+| | cell | recall | F1′ | adjusted precision |
+|---|---|---|---|---|
+| best harness recall | `claude-opus-5 · CE · medium` | **0.487** | 0.292 | 0.474 |
+| best harness F1′ | `gpt-6-astra · MRV · high` | 0.289 | **0.415** | **0.846** |
+| best vanilla (recall **and** F1′) | `claude-fable-5-1 · van · high` | 0.322 [0.244, 0.443] | **0.441** [0.370, 0.533] | 0.700 |
+
+Top-by-F1′ cells: fable·van·high 0.441, fable·van·medium 0.423, astra·MRV·high 0.415,
+glm-vis·MRV·high 0.412 (recall **0.454** [0.398, 0.551], P 0.908), sol·CE·high 0.407.
+
+**What the true set changes.**
+- **Recall levels rise** (denominator 253 → 152) but the **leaderboard changes**: on the deduplicated set the
+  best F1′ is a **vanilla** cell, and the harness's recall lead now costs precision.
+- **Harnesses still find more real bugs**: across 48 matched model·effort pairs, Δrecall > 0 in **45/48**
+  (mean **+0.107**). But ΔF1′ > 0 in only **25/48** (mean +0.008) — the recall advantage is close to
+  cancelled by the extra unadjudicated noise.
+- **Peak-recall ratio** harness ÷ vanilla = **1.51×** (0.487 vs 0.322); **best-F1′ ratio = 0.94×**
+  (vanilla ahead).
+- **MRV vs CE** (21 matched model·effort pairs): point estimate **+19 / −2** on ΔF1′, mean **+0.047**;
+  **8/21** resolve positive at 95%. Δrecall: +17 / −4, mean +0.043. MRV is ahead on average, not
+  uniformly.
+- The §10c cost and token conclusions are untouched (they do not depend on the gold set).
+
+**Per PR (§10d).**
+
+| PR | goldens | verified defects | universe |
+|---|---|---|---|
+| calcom/cal.com/pull/4 | 8 | **44** | 52 |
+| ai-code-review-evaluation/discourse-graphite/pull/8 | 6 | **6** | 12 |
+| ai-code-review-evaluation/discourse-graphite/pull/10 | 7 | **20** | 27 |
+| calcom/cal.com/pull/10967 | 6 | **5** | 11 |
+| calcom/cal.com/pull/11059 | 9 | **18** | 27 |
+| calcom/cal.com/pull/14740 | 6 | **17** | 23 |
+| **total** | **42** | **110** | **152** |
+
+**Charts.** `analysis/figures/fig_true_gold_pareto.png` (recall vs F1′ with cluster-bootstrap CIs) and
+`analysis/figures/fig_true_gold_efficiency.png` ($ per true bug found vs recall).
+
+**Honest limitations.** The adjudication/duplicate judges are non-deterministic (documented); duplicate
+calls used majority rules and fix-location evidence rather than a single judge's word. The 110 defects are
+those the pipeline could *execute*; the earlier audits' label lists suggest a small number of further claims
+whose tests did not converge, which we report as in-doubt plumbing rather than as verified bugs (see
+`UNDERCOUNT_2026-09-18.md`).
 
 ## 6. Cost, tokens, wall-clock (the §9 economics)
 
