@@ -813,7 +813,7 @@ were picked *after* observing the results, which biases exactly this kind of pos
 optimistic — the MRV-high-vs-vanilla-high pair below resolves at 95% while this best-vs-best pair does not,
 which is the fragility that selection induces.
 
-**Top by F2′ (our evaluator):** glm-vis·CE·medium 0.494 [0.443, 0.593], glm-vis·MRV·medium 0.491,
+**Top by F2′ (our evaluator, complete cells only):** glm-vis·CE·medium 0.494 [0.443, 0.593], glm-vis·MRV·medium 0.491,
 glm-vis·MRV·high 0.488, glm-vis·MRV·low 0.470, glm-flash·MRV·high 0.463, opus·CE·medium 0.460 — the top six
 are all harness cells; the best vanilla cell is fable·van·medium at 0.406 (14th; v1 instrument — see the
 caveat below). The ordering within the top three is inside the mutual CIs (glm-vis·CE·medium vs
@@ -1312,7 +1312,8 @@ also lower (more noise). Below the matrix, the legacy rows show the collapse out
 vision-flex vanilla on the top-6 recalls **0.28** (medium, n=5) / 0.45 (xhigh, n=6) and ~3
 real/PR vs glm-vis vanilla's 0.55–0.62 and 9.5–12.7/PR; kimi-k3 and gpt-5.2 have 1–2 healthy
 top-6 runs (unusable as cells). The capability floor sits between glm-5.2 and glm-5.3; **flash is
-inside the safe zone for golden recall but measurably weaker on breadth**.
+inside the safe zone for golden recall but measurably weaker on breadth where that drop is demonstrated**
+(CE low/medium and MRV medium; at MRV low the delta is +3 [−56, +64] — no demonstrated drop).
 
 ### 7.5 The recommendation (supported by this sample, with its stop-holding conditions)
 
@@ -1546,8 +1547,9 @@ message if a required input is missing, rather than writing a degenerate artifac
 
 ### 11.3 What reproduces exactly, and what does not (measured, not asserted)
 
-**Expected output checksums** (sha256; verify with `shasum -a 256 -c <file>` after cloning at the pin —
-they let you confirm your checkout carries the published artifacts exactly. Given the pinned inputs and
+**Expected output checksums** (sha256; verify with `shasum -a 256 -c analysis/verified_gold/OUTPUT_SHA256SUMS`
+after cloning at the pin — the committed list covers the artifacts below and confirms your checkout
+carries the published artifacts exactly. Given the pinned inputs and
 requirements, the §11.2 chain regenerates the four deterministic artifacts byte-for-byte;
 `DEFECT_ASSIGN.json` is a stored mode-(iii) artifact the chain *consumes*, not one it regenerates.
 Figures may still differ in bytes across matplotlib versions, which the pins narrow):

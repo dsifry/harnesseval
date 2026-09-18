@@ -19,3 +19,8 @@ Verification corrections: 0 (see DEFECT_ASSIGN_AUDIT.json).
 
 Per-bundle detail (chunks, nulls, suspects, corrections): DEFECT_ASSIGN_AUDIT.json
 
+Note: 73 of the 2,852 mapped findings are assigned to withdrawn- or duplicate-tier defect ids
+(4-D04: 50, 4-D29: 12, 11059-D14: 9, 11059-D28: 1, 11059-D32: 1) — kept as historical record; the
+scorer filters these tiers, so they are effectively nulls for all published metrics (effective
+mapped count for scoring: 2,779).
+

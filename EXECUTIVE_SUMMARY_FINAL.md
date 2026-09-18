@@ -106,7 +106,7 @@ Under those honest denominators, the load-bearing findings are **pair-level, not
 - On **F2′** the best harness cell leads the best vanilla cell **0.494 to 0.406 (1.22×)** — a **point
   estimate, not an established win**: the paired 95% CI (−0.007 to +0.169) **crosses zero**, and selecting
   the best configurations after observing their results is a disclosed, favorable caveat. The equal-weight
-  **F1′** lens ranks a vanilla cell first (0.482 vs 0.451); it is reported as a **legitimate alternative
+  **F1′** lens ranks a vanilla cell first (0.482 vs 0.472); it is reported as a **legitimate alternative
   preference**, not an artifact, for the volume-sensitivity and instrument reasons set out below.
 
 **Our evaluator is F2′, on the full 147-bug true golden set.** The choice is deliberate — a stated

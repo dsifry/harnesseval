@@ -94,11 +94,18 @@ def main():
     print(json.dumps({**f, "ratio_total": round(f["total_gold"] / 42, 2),
                       "ratio_validated": round(f["test_validated"] / 42, 2)}, indent=1))
     rt, rv = round(f["total_gold"] / 42, 2), round(f["test_validated"] / 42, 2)
-    L = ["# Defect registry — final state (after the orthogonality experiment)", "",
-         f"**Total gold = 42 goldens + {f['total_defects']} defects = {f['total_gold']} ({rt}x goldens)**  ·  "
+    distinct_gold = 42 + f["test_validated"]
+    rd = round(distinct_gold / 42, 2)
+    L = ["# Defect registry — final state (after the orthogonality experiment and the 2026-09-18 audit)", "",
+         f"**Registry: {f['total_defects']} defect entries = {f['test_validated']} verified distinct + "
+         f"{f['withdrawn']} withdrawn + {f['duplicates']} duplicates (2026-09-18 audit).**", "",
+         f"**Distinct true gold = 42 goldens + {f['test_validated']} verified defects = {distinct_gold} ({rd}x goldens)**  ·  "
          f"**test-validated hidden gold = {f['test_validated']} ({rv}x goldens)**", "",
          f"- {f['merged_away']} labels were MERGED away: the sibling fix also cured them, so they were the bundle's own defect restated.",
-         f"- {f['undemonstrated_in_harness']} defects are undemonstrated in this harness, each with a specific reason.", "",
+         f"- {f['undemonstrated_in_harness']} defects are undemonstrated in this harness, each with a specific reason.",
+         f"- {f['withdrawn']} defects were WITHDRAWN on 2026-09-18: their tests do not demonstrate the claimed behavior.",
+         f"  Marked, retained, excluded from the verified universe (evidence: WITHDRAWALS_AND_DEDUP_2026-09-18.md).",
+         f"- {f['duplicates']} entries were merged as DUPLICATES of kept defects / original goldens on 2026-09-18.", "",
          "| defect | bundle | class | why not demonstrated |", "|---|---|---|---|"]
     for d in kept:
         if d["tier"] == "D-labelled":

@@ -1,5 +1,12 @@
 # Replication test — following §11 as an outside researcher (2026-09-18)
 
+> **Note (2026-09-18, post-audit):** this record predates the evidence audit and metrics regeneration
+> (commits `d8645b27`..; `WITHDRAWALS_AND_DEDUP_2026-09-18.md`). The byte-identical results below were
+> measured against the pre-audit committed state; re-run the §11 chain at the `report-2026-09-18` tag
+> (and compare against `analysis/verified_gold/OUTPUT_SHA256SUMS`) to re-verify against the published
+> post-audit artifacts. Registry-adjacent generated files (e.g. `DEFECT_REGISTRY.md`) changed in the
+> audit, so only the checksummed artifacts carry the byte-identical guarantee.
+
 Method: clone the committed state into a clean tmp directory, create a venv, `pip install -r requirements.txt`,
 and run the §11 chain **after deleting every chain output**, so a byte-identical result cannot be a false pass
 (a stale committed file trivially "matches itself").

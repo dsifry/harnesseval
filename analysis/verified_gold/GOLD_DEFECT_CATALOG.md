@@ -15,10 +15,12 @@ Merged duplicates and restored/renamed entries carry a provenance note.
 
 - `label_vs_test_mismatch`: where a defect's own test declares a claim that does not match the
   registry label, the TEST is the truth (the label was inherited from an LLM merge audit).
-- Under-count: the audits' claim lists imply further distinct defects not in the registry yet
-  (4/B33 nil-`downcase` crash, 4/B39 case-sensitive host compare, 4/B26 wrong-rescue, 4/B24
-  locale-dependent content_sha1, 4/B07 missing scheme validation, 8/B05 API-contract break,
-  several 11059/B19 + 11059/B23 facets). The count is a **floor**, not a ceiling.
+- Under-count (historical, resolved): the claim-list items below were restored by the 2026-09-18
+  under-count triage — 4/B33 nil-`downcase` crash (4-D56), 4/B39 case-sensitive host compare
+  (4-D57), 4/B26 wrong-rescue (4-D29, WITHDRAWN 2026-09-18), 4/B07 missing scheme validation
+  (4-D58), 8/B05 API-contract break (8-D07), and the 11059/B19 + 11059/B23 facets (11059-D30,
+  -D32 (duplicate), -D33, -D34). The verified count remains a **floor**, not a ceiling: claims
+  whose tests did not converge are reported as in-doubt plumbing, not verified bugs.
 
 ## PR 4 — 44 defects
 

@@ -1,9 +1,14 @@
-# Defect registry — final state (after the orthogonality experiment)
+# Defect registry — final state (after the orthogonality experiment and the 2026-09-18 audit)
 
-**Total gold = 42 goldens + 110 defects = 152 (3.62x goldens)**  ·  **test-validated hidden gold = 110 (2.62x goldens)**
+**Registry: 110 defect entries = 105 verified distinct + 3 withdrawn + 2 duplicates (2026-09-18 audit).**
+
+**Distinct true gold = 42 goldens + 105 verified defects = 147 (3.5x goldens)**  ·  **test-validated hidden gold = 105 (2.5x goldens)**
 
 - 17 labels were MERGED away: the sibling fix also cured them, so they were the bundle's own defect restated.
 - 0 defects are undemonstrated in this harness, each with a specific reason.
+- 3 defects were WITHDRAWN on 2026-09-18: their tests do not demonstrate the claimed behavior.
+  Marked, retained, excluded from the verified universe (evidence: WITHDRAWALS_AND_DEDUP_2026-09-18.md).
+- 2 entries were merged as DUPLICATES of kept defects / original goldens on 2026-09-18.
 
 | defect | bundle | class | why not demonstrated |
 |---|---|---|---|
