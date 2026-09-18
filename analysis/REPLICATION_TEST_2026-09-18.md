@@ -36,3 +36,41 @@ Fresh clone, **all chain outputs deleted**, chain run in the documented order:
 
 With the vendored golden comments hidden: `final_report_extract.py` and `final_report_compute.py` both abort
 with exit 1 and a FATAL message naming the expected paths — instead of writing a degenerate dataset/metrics.
+
+## End-to-end test with API keys (final)
+
+Run in a fresh temp directory, following **only** §11 (the report's bash blocks were extracted verbatim and
+executed), with the campaign's keys copied to a file outside the repo (`/tmp/e2e/keys.env`, chmod 600) and
+`HARNESS_KEYS_FILE` pointing at it:
+
+```
+fable keys file contained (names only, values never printed or committed):
+  HARNESS_OPENAI_API_KEY, HARNESS_ANTHROPIC_API_KEY, HARNESS_LUNAROUTE_API_KEY, LUNAROUTE_BASE_URL,
+  HARNESS_MARTIAN_API_KEY, TEST_HARNESS_ANTHROPIC_API_KEY
+```
+
+| step | result |
+|---|---|
+| `final_report_extract.py` | OK |
+| `verified_gold_defect_metrics.py` | OK |
+| `verified_gold_registry_sync.py` | OK |
+| `final_report_compute.py` | OK |
+| `gold_defect_catalog.py` | OK |
+| `final_report_figures.py` | OK |
+| `final_report_figures_true_gold.py` | OK |
+| `final_report_tables.py` | OK |
+| `final_report_html.py` | OK |
+| `key_usage_report.py` | OK (ledger: 5,628 ok / 5,005 failed calls) |
+| `verify_hitlist.py` | exit 1 — informational: 29/111 hitlist rows unrun (the disclosed fable coverage gap) |
+
+**Then every chain output was deleted and the chain re-run from scratch**: all steps OK, and
+`final_report_dataset.json`, `final_report_metrics.json` (incl. the §10d block), `DEFECT_METRICS.json`,
+`GOLD_DEFECT_CATALOG.{json,md}`, `DEFECT_REGISTRY.md` and `interactive_dashboard.html` all regenerated
+**byte-identical** to the committed state.
+
+**Keys are not needed for the published numbers** — proven, not asserted: with an *empty* keys file
+`final_report_compute.py` still exits 0 and reproduces the metrics exactly, and
+`verified_gold_defect_metrics.py` exits 0 with all key environment variables unset. Keys are only used by the
+model-running steps (`INSTALL.md` §3), where you should supply **your own** OpenAI/Anthropic credentials.
+**Lunarroute is optional**: it is just the OpenAI-compatible gateway this campaign used for the open-weight
+GLM/Kimi lanes — any router or direct provider works.

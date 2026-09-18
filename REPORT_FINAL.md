@@ -1348,7 +1348,7 @@ high-cost and mostly move sideways (§7.3). `fig_cost_per_cell.png`: $/run per c
 ### 11.1 Setup
 
 ```bash
-git clone <this repo> && cd harnesseval
+git clone https://github.com/dsifry/harnesseval.git && cd harnesseval
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt     # numpy + matplotlib — the published numbers need nothing else
 ```
