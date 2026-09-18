@@ -1394,3 +1394,12 @@ print("=== Anthropic metered/billed reconciliation ===")
 for r in recon:
     print(f"  {r['model']}: n={r['n']} median metered/billed={r['median_metered_over_billed']:.3f} "
           f"[p10 {r['p10']:.3f}, p90 {r['p90']:.3f}]")
+
+# ------------------------------------------------------------------------------------------------
+# Append the TRUE-golden-set section (the PRIMARY analysis) so a rebuild of this artifact cannot drop it.
+# The section is written by tools/final_report_true_gold.py, which guards that every pre-existing
+# top-level key survives byte-identical.
+import subprocess as _sp, sys as _sys  # noqa: E402
+_r = _sp.run([_sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "final_report_true_gold.py")],
+             capture_output=True, text=True)
+print(_r.stdout.strip() or _r.stderr.strip()[-400:])
