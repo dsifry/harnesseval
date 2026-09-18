@@ -407,7 +407,7 @@ def run_test(test_path):
         log = _run_harness_cfg(bin_, test_path)
         LAST_FIDELITY["value"] = "repo_suite_harness_config" if ran(log) else "repo_suite"
         return 0, log
-    log = sh(f"{bin_} run {test_path} --reporter=basic", timeout=420)[1]
+    log = sh(f"{bin_} run {test_path} --reporter=basic", timeout=180)[1]
     broken = (not ran(log)) or ("No test files found" in log) or ("invalid JS syntax" in log) or ("MISSING DEP" in log)
     if broken:
         log2 = _run_harness_cfg(bin_, test_path)
