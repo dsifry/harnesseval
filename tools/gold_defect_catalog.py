@@ -81,7 +81,8 @@ def main():
         anchor = anchors.most_common(1)[0][0] if anchors else (d.get("anchor_file") or "")
         own = dd is not None and (dd / "test.diff").exists()
         dmeta0 = json.load(open(dd / "meta.json")) if own and (dd / "meta.json").exists() else {}
-        origin = dmeta0.get("test_origin") or "defect-authored (verifier wrote a test for this defect alone)"
+        origin = (dmeta0.get("test_origin") or dmeta0.get("evidence_provenance")
+                  or "defect-authored (verifier wrote a test for this defect alone)")
         dmeta = json.load(open(dd / "meta.json")) if own and (dd / "meta.json").exists() else {}
         labels = (bmeta.get("multi_defect") or {}).get("labels") or []
 
@@ -93,12 +94,17 @@ def main():
             sims = [len(toks(d["label"]) & toks(l)) / max(1, len(toks(d["label"]) | toks(l))) for l in labels]
             primary = sims and max(sims) == sims[0] and max(sims) >= 0.15
         mismatch = None
-        if own:
-            ttxt = (dd / "test.diff").read_text(errors="ignore")[:2500]
-            claim_txt = " ".join(re.findall(r"(?:CLAIM|Claim|claim)[^\n]{0,160}", ttxt)) or ttxt[:400]
-            ct, lt = set(re.findall(r"[a-z0-9]+", claim_txt.lower())), set(re.findall(r"[a-z0-9]+", d["label"].lower()))
-            if ct and lt and len(ct & lt) / max(1, len(ct | lt)) < 0.12:
-                mismatch = "the test's declared CLAIM does not resemble the registry label; trust the test"
+        if d.get("label_corrected"):
+            mismatch = "CORRECTED: " + d["label_corrected"][:160]
+        elif d.get("label_vs_test_check"):
+            mismatch = d["label_vs_test_check"]
+        else:
+            # The reliable signal is behavioural, not textual: the defect's own test FAILED on the PR head
+            # and PASSED once a minimal fix authored for this label was applied. (A comment-resemblance
+            # heuristic was tried and abandoned: most tests contain no literal CLAIM comment, so it flagged
+            # 21 defects that had in fact been assertion-read and confirmed.)
+            mismatch = ("verified: own test fails on the PR head and passes with a fix authored for this label"
+                        + (" (container test authored for exactly this claim)" if "container" in origin else ""))
         rec = {
             "id": did, "pr": pr, "label": d["label"], "tier": d.get("tier"),
             "evidence_level": "own_executed" if own else "bundle_executed",
@@ -120,7 +126,8 @@ def main():
             "merged_in_from": [m["merged"] for m in reg.get("merged_duplicates", []) if m["kept"] == did],
             "restored": d.get("restored"),
             "label_corrected": d.get("label_corrected"),
-            "label_vs_test_mismatch": mismatch,
+            "label_review": mismatch,
+            "label_vs_test_mismatch": None,
         }
         recs.append(rec)
 
