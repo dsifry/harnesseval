@@ -1,64 +1,62 @@
 import { describe, expect, it, vi } from "vitest";
 
-process.env.NEXT_PUBLIC_WEBAPP_URL = "http://localhost:3000";
-process.env.NEXT_PUBLIC_WEBSITE_URL = "http://localhost:3000";
+// Hoisted spies (vi.mock factories are hoisted, so they must not close over ordinary locals).
+const spies = vi.hoisted(() => ({
+  renderEmail: vi.fn(async () => "<html>mocked</html>"),
+  ics: vi.fn(() => "ICS"),
+}));
+
+vi.mock("../", () => ({ renderEmail: spies.renderEmail }));
+vi.mock("../lib/generateIcsString", () => ({ default: spies.ics }));
+vi.mock("@calcom/prisma", () => ({ default: {} }));                       // _base-email imports prisma
+vi.mock("@calcom/features/flags/server/utils", () => ({ getFeatureFlag: vi.fn() }));
+vi.mock("@calcom/lib/serverConfig", () => ({ serverConfig: { email: { from: "test@example.com" } } }));
+vi.mock("@calcom/lib/testEmails", () => ({ setTestEmail: vi.fn() }));
+vi.mock("@calcom/lib/CalEventParser", () => ({ getRichDescription: vi.fn(() => "desc") }));
+vi.mock("@calcom/dayjs", () => {
+  const mk = (): any => ({
+    tz: mk, locale: mk, utc: mk, add: mk, subtract: mk, startOf: mk, endOf: mk,
+    format: () => "2024-01-01T00:00:00Z", toISOString: () => "2024-01-01T00:00:00Z",
+    isBefore: () => false, isAfter: () => false, valueOf: () => 0, toDate: () => new Date(0),
+  });
+  const dayjs: any = () => mk();
+  dayjs.extend = () => {};
+  return { default: dayjs };
+});
+
 process.env.EMAIL_FROM = "test@example.com";
-process.env.EMAIL_SERVER = JSON.stringify({
-  host: "localhost",
-  port: 1025,
-  auth: { user: "user", pass: "pass" },
-});
+process.env.EMAIL_SERVER = JSON.stringify({ host: "localhost", port: 1025, auth: { user: "u", pass: "p" } });
 
-vi.mock("../", async () => {
-  const actual = await vi.importActual<any>("../");
-  return {
-    ...actual,
-    renderEmail: vi.fn(async () => "<html>mocked</html>"),
-  } as any;
-});
-
-describe("OrganizerAddGuestsEmail (team-member variant)", () => {
-  it("personalizes content for the team member and does not leak attendee emails via replyTo", async () => {
+describe("OrganizerAddGuestsEmail — team-member variant", () => {
+  it("personalizes the email for the team member, not the organizer", async () => {
     const { default: OrganizerAddGuestsEmail } = await import("./organizer-add-guests-email");
-    const { buildCalendarEvent, buildPerson } = await import("../../lib/test/builder");
-    const { renderEmail } = await import("../");
 
-    const organizer = buildPerson({ email: "organizer@example.com", name: "Organizer Name" });
-    const attendeeOne = buildPerson({ email: "attendee.one@example.com", name: "Attendee One" });
-    const attendeeTwo = buildPerson({ email: "attendee.two@example.com", name: "Attendee Two" });
-    const teamMember = buildPerson({ email: "team.member@example.com", name: "Team Member Name" });
-
-    const calEvent = buildCalendarEvent({
-      organizer,
-      attendees: [attendeeOne, attendeeTwo],
-    });
-
-    const email = new OrganizerAddGuestsEmail(calEvent, teamMember);
-    const payload = (await (email as unknown as {
-      getNodeMailerPayload(): Promise<Record<string, unknown>>;
-    }).getNodeMailerPayload()) as {
-      to: string;
-      replyTo: string[];
+    const t = (key: string) => key;
+    const organizer = {
+      email: "organizer@example.com", name: "Organizer", timeZone: "UTC",
+      language: { translate: t },
+    };
+    const teamMember = { email: "team.member@example.com", name: "Team Member", timeZone: "UTC", language: { translate: t } };
+    const attendees = [
+      { email: "a1@example.com", name: "A1", timeZone: "UTC", language: { translate: t } },
+      { email: "a2@example.com", name: "A2", timeZone: "UTC", language: { translate: t } },
+    ];
+    const calEvent: any = {
+      type: "team-event", title: "Test", uid: "uid-1",
+      startTime: new Date().toISOString(), endTime: new Date().toISOString(),
+      organizer, attendees, location: "integrations:google:meet", destinationCalendar: null,
+      description: "", additionalInformation: "", seatsPerTimeSlot: undefined,
     };
 
-    expect(payload.to).toBe("team.member@example.com");
+    const email = new OrganizerAddGuestsEmail({ calEvent, teamMember } as any);
+    const payload: any = await (email as any).getNodeMailerPayload();
 
-    expect(payload.replyTo).not.toContain("attendee.one@example.com");
-    expect(payload.replyTo).not.toContain("attendee.two@example.com");
-    expect(payload.replyTo).toEqual(["team.member@example.com"]);
-
-    const renderEmailMock = renderEmail as unknown as ReturnType<typeof vi.fn>;
-    renderEmailMock.mockClear();
-
-    await (email as unknown as {
-      getNodeMailerPayload(): Promise<Record<string, unknown>>;
-    }).getNodeMailerPayload();
-
-    expect(renderEmailMock).toHaveBeenCalledWith(
+    // sanity: the mail is actually addressed to the team member
+    expect(payload.to).toContain("team.member@example.com");
+    // the defect: the body is rendered as the ORGANIZER's variant even when a teamMember receives it
+    expect(spies.renderEmail).toHaveBeenCalledWith(
       "OrganizerAddGuestsEmail",
-      expect.objectContaining({
-        attendee: expect.objectContaining({ email: "team.member@example.com" }),
-      })
+      expect.objectContaining({ attendee: expect.objectContaining({ email: "team.member@example.com" }) })
     );
   });
 });

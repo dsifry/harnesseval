@@ -92,7 +92,7 @@ def main():
         L.append(f"| {m['id']} | {m['bundle']} | {str(m['label'])[:100]} |")
     (VG / "DEFECT_REGISTRY.md").write_text("\n".join(L) + "\n")
     print("undemonstrated:", [d["id"] for d in kept if d["tier"] != "D-verified"])
-    print("merged away:", len(merged))
+    print("merged away:", len(reg["merged_same_defect"]))
 
 
 if __name__ == "__main__":

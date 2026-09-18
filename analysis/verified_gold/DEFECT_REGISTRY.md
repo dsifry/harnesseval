@@ -1,14 +1,12 @@
 # Defect registry — final state (after the orthogonality experiment)
 
-**Total gold = 42 goldens + 120 defects = 162 (3.86x goldens)**  ·  **test-validated hidden gold = 118 (2.81x goldens)**
+**Total gold = 42 goldens + 120 defects = 162 (3.86x goldens)**  ·  **test-validated hidden gold = 120 (2.86x goldens)**
 
 - 15 labels were MERGED away: the sibling fix also cured them, so they were the bundle's own defect restated.
-- 2 defects are undemonstrated in this harness, each with a specific reason.
+- 0 defects are undemonstrated in this harness, each with a specific reason.
 
 | defect | bundle | class | why not demonstrated |
 |---|---|---|---|
-| 10967-D05 | 10967-B14 | `test_fixture_inadequate` | the test asserts the right behaviour but its fixture yields a past booking ('Cannot cancel past events'), so it never reaches the multi-reference dele |
-| 14740-D12 | 14740-B17 | `test_harness_invalid` | the suite cannot run: vi.mock factory hoisting error + 'Failed to load url @prisma/extension-accelerate'; needs valid module mocking for the email tem |
 
 ## Merged away (same defect as their bundle's label)
 
