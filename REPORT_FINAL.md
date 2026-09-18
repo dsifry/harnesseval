@@ -750,6 +750,31 @@ also exposed as `true_gold_defects` in `analysis/final_report_metrics.json`.
 Top-by-F1′ cells: fable·van·high 0.441, fable·van·medium 0.423, astra·MRV·high 0.415,
 glm-vis·MRV·high 0.412 (recall **0.454** [0.398, 0.551], P 0.908), sol·CE·high 0.407.
 
+**Read this before the leaderboard: F1′ is volume-sensitive, recall is not.**
+F1′ pairs recall with adjP′, and adjP′ charges every finding the adjudicator files as an *improvement*
+(nitpick). A terse reviewer can therefore register **zero** nitpicks, and a verbose one is charged for every
+extra real-but-minor item it reports — even though the verbose one finds more real bugs:
+
+| cell | reported findings | goldens | **hidden-gold defects** | total real | halluc. | nitpick-class. | halluc. % of findings | nitpick % of findings | adjP | adjP′ | F1′ |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| fable · vanilla · high | 0 | 30 | **19** | 49 | 21 | 0 | 2100% | 0% | 0.700 | 0.700 | 0.441 |
+| glm-vis · MRV · high | 0 | 32 | **37** | 69 | 7 | 107 | 700% | 10700% | 0.908 | 0.377 | 0.412 |
+| glm-flash · MRV · high | 0 | 32 | **38** | 70 | 6 | 122 | 600% | 12200% | 0.921 | 0.354 | 0.400 |
+| opus · CE · medium | 0 | 35 | **39** | 74 | 82 | 198 | 8200% | 19800% | 0.474 | 0.209 | 0.292 |
+| astra · MRV · high | 0 | 25 | **19** | 44 | 8 | 8 | 800% | 800% | 0.846 | 0.733 | 0.415 |
+| opus · MRV · high | 0 | 31 | **33** | 64 | 49 | 111 | 4900% | 11100% | 0.566 | 0.286 | 0.340 |
+
+The consequence is visible in the ranking: by **hidden-gold defects found** the leaders are
+`opus · CE · medium` (39), `glm-flash · MRV · high` (38) and `glm-vis · MRV · high` (37) — while the F1′
+leader `fable · vanilla · high` ranks far down that list with **19**, on a run that reports only 17–25
+findings per PR and whose hallucinations are 20% of everything it says. Conversely GLM's hallucination rate
+is 1–4% and its claim soundness adjP is 0.91–0.92, but 16–22% of its findings are nitpick-classified, which
+is what pushes adjP′ to ~0.35–0.38 and F1′ below vanilla.
+
+**So: for "did it find the real bugs", read hidden-gold defects found / recall (harness cells lead). For
+"how much noise per real bug", read adjP (claim soundness) and the nitpick share. F1′ compresses both, and
+its leaderboard is driven by the nitpick term.** Chart: `analysis/figures/fig_true_gold_defects_found.png`.
+
 **What the true set changes.**
 - **Recall levels rise** (denominator 253 → 152) but the **leaderboard changes**: on the deduplicated set the
   best F1′ is a **vanilla** cell, and the harness's recall lead now costs precision.

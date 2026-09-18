@@ -126,3 +126,66 @@ L += ["", f"- peak-recall ratio, harness ÷ vanilla: **{HEAD['peak_recall_ratio_
       f"({'vanilla ahead' if HEAD['best_f1p_ratio_harness_over_vanilla'] < 1 else 'harness ahead'})", ""]
 open(f"{ROOT}/analysis/verified_gold/TRUE_GOLD_HEADLINES.md", "w").write("\n".join(L))
 print("\n".join(L))
+
+# ---- fig 3: hidden-gold defects found vs F1' rank (the "F1' misleads" chart) ----
+import hashlib
+VG = f"{ROOT}/analysis/verified_gold"
+D = json.load(open(f"{ROOT}/analysis/final_report_dataset.json"))
+ASSIGN = json.load(open(f"{VG}/DEFECT_ASSIGN.json"))
+VALID = {d["id"] for d in json.load(open(f"{VG}/DEFECT_REGISTRY.json"))["defects"]}
+SEL = {(r["model"], r["framework"], r["effort"], r["url"]): r for r in D["selected_runs"]}
+SLUG = {u: u.rstrip("/").split("/")[-1] for u in M["expanded_gold"]["per_pr"]}
+
+
+def sha(t):
+    return hashlib.sha1(t.encode()).hexdigest()[:16]
+
+
+def found(m, fw, e):
+    G = Dp = H = I = 0
+    for u, pr in SLUG.items():
+        r = SEL.get((m, fw, e, u))
+        if not r:
+            return None
+        amap = ASSIGN.get(pr, {})
+        own = {amap.get(sha(t)) for t in (r.get("bugtexts") or [])}
+        own = {d for d in own if d and d in VALID}
+        v = r["rj3"] or r["inrun"]
+        G += r["tp"]; Dp += len(own); H += v["hal"]; I += v["imp"]
+    return G, Dp, H, I
+
+
+bars = []
+for k, c in CELLS.items():
+    m, fw, e = k.split("|")
+    f = found(m, fw, e)
+    if not f or c["n_pr"] != 6:
+        continue
+    G, Dp, H, I = f
+    bars.append({"k": k, "label": f"{M_SHORT.get(m, m)} {FW_SHORT[fw]} {e[:1]}", "fw": fw,
+                 "gold": G, "def": Dp, "F1p": c["F1p"], "recall": c["recall"],
+                 "nit": I / max(1, G + Dp + H + I)})
+bars.sort(key=lambda b: -(b["gold"] + b["def"]))
+fig, ax = plt.subplots(figsize=(9.5, 6.4))
+ys = list(range(len(bars)))[::-1]
+for i, b in zip(ys, bars):
+    ax.barh(i, b["gold"], color="#c9c9c9", height=0.7)
+    ax.barh(i, b["def"], left=b["gold"], color=FWCOL[b["fw"]], height=0.7)
+    ax.text(b["gold"] + b["def"] + 1.0, i, f"F1′ rank {sorted(bars, key=lambda x: -x['F1p']).index(b)+1:<2d} "
+            f"· nitpick {b['nit']:.0%}", fontsize=5.6, va="center", color="#444")
+ax.set_yticks(ys); ax.set_yticklabels([b["label"] for b in bars], fontsize=5.6)
+ax.set_xlabel("real bugs found on the true golden set  ·  gray = Martian goldens, "
+              "color = hidden-gold defects the benchmark never scores")
+ax.set_title("Finding real bugs ≠ winning F1′\n"
+             "cells sorted by real bugs found; the F1′ leaderboard penalty is dominated by how many of a "
+             "cell's findings the adjudicator classifies as nitpicks",
+             fontsize=9, loc="left")
+ax.set_xlim(0, max(b["gold"] + b["def"] for b in bars) * 1.30)
+for fw in ("vanilla-engineered", "compound-realistic", "metareview-realistic"):
+    if any(b["fw"] == fw for b in bars):
+        ax.barh(0, 0, color=FWCOL[fw],
+                label={"vanilla-engineered": "vanilla", "compound-realistic": "Compound Engineering (CE)",
+                       "metareview-realistic": "metareview (MRV)"}[fw])
+ax.legend(loc="lower right", frameon=False, fontsize=7)
+fig.tight_layout(); fig.savefig(f"{FIG}/fig_true_gold_defects_found.png"); plt.close(fig)
+print("wrote fig_true_gold_defects_found.png")
