@@ -1,6 +1,6 @@
 # Verified hidden gold — PR 11059
 
-Candidates: 25 · verdicts: {'golden_duplicate': 1, 'behavior_change_not_regression': 15, 'defect_present_before_pr': 2, 'unresolved_file': 7}
+Candidates: 25 · verdicts: {'golden_duplicate': 1, 'behavior_change_not_regression': 14, 'defect_present_before_pr': 2, 'unresolved_file': 7, 'duplicate_of': 1}
 
 | bug id | bug | verdict | head | base | fix | file | tarball sha256 |
 |---|---|---|---|---|---|---|---|
@@ -18,9 +18,9 @@ Candidates: 25 · verdicts: {'golden_duplicate': 1, 'behavior_change_not_regress
 | 11059-B26 | B26-parserefreshtokenresponse-now-throws-on-zod-safeparse-fail | `behavior_change_not_regression` | FAIL | N/A_module_absent | PASS | `packages/lib/integrations/oauth/parseRefreshTokenResponse.ts` | `0241c0b57089…` |
 | 11059-B31 | B31-api-route-default-imports-zod-making-z-undefined-and-cras | `behavior_change_not_regression` | FAIL | N/A_module_absent | PASS | `apps/web/pages/api/webhook/app-credential.ts` | `0574c6601804…` |
 | 11059-B32 | B32-webhook-secret-check-has-no-rate-limiting-enabling-unlimit | `behavior_change_not_regression` | FAIL | N/A_module_absent | PASS | `apps/web/pages/api/webhook/app-credential.ts` | `4e821f1ca226…` |
-| 11059-B33 | B33-webhook-app-credential-sync-updates-keys-but-leaves-creden | `behavior_change_not_regression` | FAIL | N/A_module_absent | PASS | `apps/web/pages/api/webhook/app-credential.ts` | `8570ba17619b…` |
 | 11059-B12 | B12-salesforce-calendarservice-references-prisma-without-impor | `defect_present_before_pr` | FAIL | FAIL | PASS | `packages/app-store/salesforce/lib/calendarservice.ts` | `2f61518d5685…` |
 | 11059-B17 | B17-envexample-suggests-wrong-length-aes-256-encryption-key-ge | `defect_present_before_pr` | ? | ? | ? | `.env.example` | `d26e0d430757…` |
+| 11059-B33 | B33-webhook-app-credential-sync-updates-keys-but-leaves-creden | `duplicate_of` | FAIL | N/A_module_absent | PASS | `apps/web/pages/api/webhook/app-credential.ts` | `c8e53b59200b…` |
 | 11059-B04 | B04-parseRefreshTokenResponse-strips-expiry | `golden_duplicate` | FAIL - AssertionError: expected undefined to be 3600 | N/A - module absent on base (vitest: Failed to load url ./parseRefreshTokenResponse) | PASS - 1 passed (1) | `packages/app-store/_utils/oauth/parseRefreshTokenResponse.ts` | `026b19f728b0…` |
 | 11059-B20 | B20-feature-flag-constant-evaluates-to-raw-encryption-key-stri | `unresolved_file` | — | — | — | `packages/lib/constants.ts` | `dd720cd0db53…` |
 | 11059-B25 | B25-some-oauth-integrations-refresh-via-refreshoauthtokens-but | `unresolved_file` | — | — | — | `packages/app-store/lark/lib/getAccessToken.ts` | `090e767f9d09…` |
