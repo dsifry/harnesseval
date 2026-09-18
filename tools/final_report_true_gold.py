@@ -30,15 +30,20 @@ def headline(block):
             continue
         brk, brv = max(grp.items(), key=lambda kv: kv[1]["recall"])
         bfk, bfv = max(grp.items(), key=lambda kv: kv[1]["F1p"])
+        b2k, b2v = max(grp.items(), key=lambda kv: kv[1].get("F2p", 0))
         out[name] = {
             "best_recall": {"cell": brk, **{k: brv[k] for k in ("recall", "F1p", "adjP", "TP", "den")}},
             "best_f1p": {"cell": bfk, **{k: bfv[k] for k in ("recall", "F1p", "adjP", "TP", "den")}},
+            "best_f2p": {"cell": b2k, **{k: b2v[k] for k in ("recall", "F2p", "F1p", "adjP", "TP", "den")}},
         }
     if "harness" in out and "vanilla" in out:
         hr, vr = out["harness"]["best_recall"]["recall"], out["vanilla"]["best_recall"]["recall"]
         out["peak_recall_ratio_harness_over_vanilla"] = hr / vr if vr else None
         hf, vf = out["harness"]["best_f1p"]["F1p"], out["vanilla"]["best_f1p"]["F1p"]
         out["best_f1p_ratio_harness_over_vanilla"] = hf / vf if vf else None
+        h2 = out["harness"]["best_f2p"]["F2p"]
+        v2 = out["vanilla"]["best_f2p"]["F2p"]
+        out["best_f2p_ratio_harness_over_vanilla"] = h2 / v2 if v2 else None
     return out
 
 
@@ -53,7 +58,10 @@ def main():
         dm[variant]["definition"] = {
             "denominator": "42 Martian goldens + every verified hidden-gold defect in this set",
             "recall": "TP / denominator (cluster/PR-level bootstrap CI)",
-            "F1p": "F-beta prime: penalised F1 over the adjudicated match profiles",
+            "F1p": "F1 with the nitpick-charged precision (adjP') - an EQUAL-weight, nitpick-averse lens; "
+                   "it is volume-sensitive and can rank a terse cell above a higher-recall cell",
+            "F2p": "F_beta with beta=2 (recall weighted 4:1) using adjP' - matches the campaign's declared cost "
+                   "asymmetry (a missed bug costs more than a false alarm) and is the recommended composite",
             "adjP": "adjusted precision after adjudication (a reported finding counts only if the adjudicator "
                     "accepted it as a real defect)",
         }

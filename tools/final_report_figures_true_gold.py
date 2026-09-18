@@ -78,7 +78,9 @@ def scatter(ax, xk, xlo, xhi, yk, ylo, yhi, xlog=False):
 # ---- fig 1: recall vs F1' -------------------------------------------------------
 fig, ax = plt.subplots(figsize=(7.2, 5.0))
 scatter(ax, "F1p", "flo", "fhi", "recall", "rlo", "rhi")
-ax.set_xlabel("F1′  (precision-aware F-score over adjudicated findings)  →  better")
+ax.set_xlabel("F1′  (equal-weight, nitpick-averse F-score)  →  better\n"
+              "NOTE: F2′ (recall-weighted 4:1) is the recommended composite — it reverses this ordering for "
+              "high-recall cells; see REPORT_FINAL §10d")
 ax.set_ylabel("recall of the true golden set  (152 = 42 goldens + 110 verified defects)  →  better")
 ax.set_title("True-gold frontier: does a harness actually find more real bugs per unit of noise?\n"
              "each point is one (model, framework, effort) cell; bars are cluster-bootstrap 95% CIs",

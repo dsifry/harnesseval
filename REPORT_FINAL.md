@@ -741,11 +741,19 @@ also exposed as `true_gold_defects` in `analysis/final_report_metrics.json`.
 
 **Headline (true set).**
 
-| | cell | recall | F1′ | adjusted precision |
-|---|---|---|---|---|
-| best harness recall | `claude-opus-5 · CE · medium` | **0.487** | 0.292 | 0.474 |
-| best harness F1′ | `gpt-6-astra · MRV · high` | 0.289 | **0.415** | **0.846** |
-| best vanilla (recall **and** F1′) | `claude-fable-5-1 · van · high` | 0.322 [0.244, 0.443] | **0.441** [0.370, 0.533] | 0.700 |
+| | cell | recall | adjP | **F2′ (recommended composite)** | F1′ (nitpick-averse lens) |
+|---|---|---|---|---|---|
+| best harness recall | `claude-opus-5 · CE · medium` | **0.487** | 0.474 | 0.385 | 0.292 |
+| best harness composite | `glm-vis · MRV · high` | 0.454 [0.398, 0.551] | 0.908 | **0.436** [0.396, 0.491] | 0.412 |
+| best vanilla (recall, composite **and** F1′) | `claude-fable-5-1 · van · high` | 0.322 [0.244, 0.443] | 0.700 | 0.361 | **0.441** |
+
+**Which composite to read.** The campaign's declared cost asymmetry is that *a missed bug costs more than a
+false alarm* (4:1) — which is β=2, i.e. **F2**, not F1. Reporting F1′ (β=1) contradicted our own stated
+preference, and because adjP′ charges nitpicks it also made the ranking volume-sensitive (see below). We
+therefore report **F2′** (recall-weighted, nitpicks charged) as the composite, next to **recall** and
+**adjP** (real-bug precision), and keep **F1′** only as the labelled equal-weight, nitpick-averse lens. On
+F2′ the harness leads the best vanilla cell by **1.21×** (0.436 vs 0.361) and the top six cells are all
+harness cells; only F1′ ranks a vanilla cell first.
 
 Top-by-F1′ cells: fable·van·high 0.441, fable·van·medium 0.423, astra·MRV·high 0.415,
 glm-vis·MRV·high 0.412 (recall **0.454** [0.398, 0.551], P 0.908), sol·CE·high 0.407.
@@ -772,8 +780,10 @@ is 1–4% and its claim soundness adjP is 0.91–0.92, but 16–22% of its findi
 is what pushes adjP′ to ~0.35–0.38 and F1′ below vanilla.
 
 **So: for "did it find the real bugs", read hidden-gold defects found / recall (harness cells lead). For
-"how much noise per real bug", read adjP (claim soundness) and the nitpick share. F1′ compresses both, and
-its leaderboard is driven by the nitpick term.** Chart: `analysis/figures/fig_true_gold_defects_found.png`.
+"how much noise per real bug", read adjP (claim soundness) and the nitpick share. For a single composite,
+read **F2′** — recall-weighted 4:1, which is the asymmetry this campaign actually claims, and on which the
+harness leads 0.436 to 0.361. Read **F1′** only as a diagnostic of how hard a cell is charged for
+nitpick-class findings.** Chart: `analysis/figures/fig_true_gold_defects_found.png`.
 
 **What the true set changes.**
 - **Recall levels rise** (denominator 253 → 152) but the **leaderboard changes**: on the deduplicated set the
@@ -783,9 +793,9 @@ its leaderboard is driven by the nitpick term.** Chart: `analysis/figures/fig_tr
   cancelled by the extra unadjudicated noise.
 - **Peak-recall ratio** harness ÷ vanilla = **1.51×** (0.487 vs 0.322); **best-F1′ ratio = 0.94×**
   (vanilla ahead).
-- **MRV vs CE** (21 matched model·effort pairs): point estimate **+19 / −2** on ΔF1′, mean **+0.047**;
-  **8/21** resolve positive at 95%. Δrecall: +17 / −4, mean +0.043. MRV is ahead on average, not
-  uniformly.
+- **MRV vs CE** (21 matched model·effort pairs): point estimate **+19 / −2** on ΔF1′ (mean +0.047;
+  **8/21** resolve at 95%) and **+18 / −3** on ΔF2′ (**7/21** resolve). Δrecall: +17 / −4, mean +0.043.
+  MRV is ahead on average, not uniformly.
 - The §10c cost and token conclusions are untouched (they do not depend on the gold set).
 
 **Per PR (§10d).**

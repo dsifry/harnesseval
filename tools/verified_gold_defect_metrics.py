@@ -79,14 +79,22 @@ def main():
         adjp = np.where(t + h + im > 0, t / np.where(t + h + im > 0, t + h + im, 1), 0)
         f1 = np.where(rec + adj > 0, 2 * rec * adj / np.where(rec + adj > 0, rec + adj, 1), 0)
         f1p = np.where(rec + adjp > 0, 2 * rec * adjp / np.where(rec + adjp > 0, rec + adjp, 1), 0)
-        return rec, adj, adjp, f1, f1p
+        # F_beta with beta=2 (recall weighted 4:1 - the campaign's declared cost asymmetry:
+        # a missed bug costs more than a false alarm). F1' contradicts that preference.
+        f2 = np.where(4 * adj + rec > 0, 5 * rec * adj / np.where(4 * adj + rec > 0, 4 * adj + rec, 1), 0)
+        f2p = np.where(4 * adjp + rec > 0, 5 * rec * adjp / np.where(4 * adjp + rec > 0, 4 * adjp + rec, 1), 0)
+        return rec, adj, adjp, f1, f1p, f2, f2p
 
     def pt(X):
         t, d, h, im = float(X[:, 0].sum()), float(X[:, 1].sum()), float(X[:, 2].sum()), float(X[:, 3].sum())
         rec = t / d if d else 0
         adj = t / (t + h) if (t + h) else 0
         adjp = t / (t + h + im) if (t + h + im) else 0
-        return rec, adj, adjp, (2 * rec * adj / (rec + adj) if rec + adj else 0), (2 * rec * adjp / (rec + adjp) if rec + adjp else 0)
+        f1 = 2 * rec * adj / (rec + adj) if rec + adj else 0
+        f1p = 2 * rec * adjp / (rec + adjp) if rec + adjp else 0
+        f2 = 5 * rec * adj / (4 * adj + rec) if (4 * adj + rec) else 0
+        f2p = 5 * rec * adjp / (4 * adjp + rec) if (4 * adjp + rec) else 0
+        return rec, adj, adjp, f1, f1p, f2, f2p
 
     out = {}
     for variant in ("verified", "full"):
@@ -101,14 +109,17 @@ def main():
                     n = len(rows)
                     idx = rng.integers(0, n, size=(B, n))
                     S = rows[idx]
-                    rec, adj, adjp, f1, f1p = vec(S)
+                    rec, adj, adjp, f1, f1p, f2, f2p = vec(S)
                     p = pt(rows)
                     cells[f"{m}|{fw}|{e}"] = {
                         "n_pr": n, "TP": int(rows[:, 0].sum()), "den": int(rows[:, 1].sum()),
                         "recall": p[0], "adjP": p[1], "adjPp": p[2], "F1": p[3], "F1p": p[4],
+                        "F2": p[5], "F2p": p[6],
                         "ci": {"recall": (float(p[0]), float(np.percentile(rec, 2.5)), float(np.percentile(rec, 97.5)), 1.0),
                                "F1": (float(p[3]), float(np.percentile(f1, 2.5)), float(np.percentile(f1, 97.5)), 1.0),
-                               "F1p": (float(p[4]), float(np.percentile(f1p, 2.5)), float(np.percentile(f1p, 97.5)), 1.0)},
+                               "F1p": (float(p[4]), float(np.percentile(f1p, 2.5)), float(np.percentile(f1p, 97.5)), 1.0),
+                               "F2": (float(p[5]), float(np.percentile(f2, 2.5)), float(np.percentile(f2, 97.5)), 1.0),
+                               "F2p": (float(p[6]), float(np.percentile(f2p, 2.5)), float(np.percentile(f2p, 97.5)), 1.0)},
                     }
         # pairs
         pairs = {}
@@ -123,12 +134,13 @@ def main():
                 Xa, Xb = R(A), R(Bc)
                 n = len(urls)
                 idx = rng.integers(0, n, size=(B, n))
-                ra, _, _, f1a, f1pa = vec(Xa[idx])
-                rb, _, _, f1b, f1pb = vec(Xb[idx])
+                ra, _, _, f1a, f1pa, f2a, f2pa = vec(Xa[idx])
+                rb, _, _, f1b, f1pb, f2b, f2pb = vec(Xb[idx])
                 pa, pb = pt(Xa), pt(Xb)
                 pairs[f"{m}|{e}"] = {"n_pr": n,
                     "dRecall": (float(pb[0] - pa[0]), float(np.percentile(rb - ra, 2.5)), float(np.percentile(rb - ra, 97.5))),
-                    "dF1p": (float(pb[4] - pa[4]), float(np.percentile(f1pb - f1pa, 2.5)), float(np.percentile(f1pb - f1pa, 97.5)))}
+                    "dF1p": (float(pb[4] - pa[4]), float(np.percentile(f1pb - f1pa, 2.5)), float(np.percentile(f1pb - f1pa, 97.5))),
+                    "dF2p": (float(pb[6] - pa[6]), float(np.percentile(f2pb - f2pa, 2.5)), float(np.percentile(f2pb - f2pa, 97.5)))}
         out[variant] = {"cells": cells, "pairs": pairs,
                         "totals": {"TP": sum(c["TP"] for c in cells.values()), "den": sum(c["den"] for c in cells.values())}}
     (VG / "DEFECT_METRICS.json").write_text(json.dumps(out, indent=1))
@@ -138,11 +150,11 @@ def main():
          "verified = 42 goldens + every D-verified defect; full = 42 + all registry defects. "
          "recall = (golden TP + distinct defects hit) / denominator; adjP charges hallucinations, adjP' also nitpicks.", ""]
     for variant in ("verified", "full"):
-        L += [f"## variant: {variant}", "", "| cell | n PRs | recall [CI] | adjP | adjP' | F1 | F1' |", "|---|---|---|---|---|---|---|"]
+        L += [f"## variant: {variant}", "", "| cell | n PRs | recall [CI] | adjP | adjP' | F1 | F1' | F2 | F2' |", "|---|---|---|---|---|---|---|"]
         for k, c in sorted(out[variant]["cells"].items(), key=lambda kv: -kv[1]["F1p"]):
             m, fw, e = k.split("|")
             L.append(f"| {m} · {fw} · {e} | {c['n_pr']} | {c['recall']:.3f} [{c['ci']['recall'][1]:.3f}, {c['ci']['recall'][2]:.3f}] "
-                     f"| {c['adjP']:.3f} | {c['adjPp']:.3f} | {c['F1']:.3f} | {c['F1p']:.3f} |")
+                     f"| {c['adjP']:.3f} | {c['adjPp']:.3f} | {c['F1']:.3f} | {c['F1p']:.3f} | {c['F2']:.3f} | {c['F2p']:.3f} |")
         pos = sum(1 for v in out[variant]["pairs"].values() if v["dF1p"][1] > 0)
         L += ["", f"MRV-vs-CE: {pos}/{len(out[variant]['pairs'])} pairs resolve positive on ΔF1'.", ""]
     (VG / "DEFECT_METRICS.md").write_text("\n".join(L) + "\n")
