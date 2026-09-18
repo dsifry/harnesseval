@@ -652,8 +652,24 @@ async def main():
         cands = [c for c in cands if c["class_index"] == a.only]
     if a.limit:
         cands = cands[:a.limit]
+    # rescue mode: select only candidates whose existing bundle carries a given verdict, and do not
+    # let the resume-skip filter them out
+    if a.only_verdict:
+        import glob as _g
+        keep_idx = set()
+        for mf in _g.glob(f'{BUNDLE_ROOT}/{a.pr}/*/meta.json'):
+            try:
+                mm = json.load(open(mf))
+            except Exception:
+                continue
+            if mm.get("verdict") == a.only_verdict:
+                bid = mm.get("bug_id") or ""
+                if "B" in bid:
+                    keep_idx.add(int(bid.split("B")[1]))
+        cands = [c for c in cands if c["class_index"] in keep_idx]
+        print(f"selected {len(cands)} candidate(s) with verdict {a.only_verdict}", flush=True)
     # resume-safe: skip candidates that already have a bundle unless --force
-    if not a.force:
+    elif not a.force:
         before = len(cands)
         cands = [c for c in cands
                  if not (BUNDLE_ROOT / c["pr_slug"] / f"B{c['class_index']:02d}-{c['class_slug']}" / "meta.json").exists()]
