@@ -161,7 +161,7 @@ for k, c in CELLS.items():
         continue
     G, Dp, H, I = f
     bars.append({"k": k, "label": f"{M_SHORT.get(m, m)} {FW_SHORT[fw]} {e[:1]}", "fw": fw,
-                 "gold": G, "def": Dp, "F1p": c["F1p"], "recall": c["recall"],
+                 "gold": G, "def": Dp, "F2p": c["F2p"], "F1p": c["F1p"], "recall": c["recall"],
                  "nit": I / max(1, G + Dp + H + I)})
 bars.sort(key=lambda b: -(b["gold"] + b["def"]))
 fig, ax = plt.subplots(figsize=(9.5, 6.4))
