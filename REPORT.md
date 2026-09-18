@@ -20,7 +20,10 @@ Companion documents: **`EXECUTIVE_SUMMARY.md`** (1–2 pages, decision-first),
 
 Agentic code-review harnesses — orchestrators that dispatch several model passes and synthesise the
 result — are increasingly positioned as a step change over single-prompt review, and priced like one.
-This report measures that claim against ground truth that can be *executed*, not only read. Eight models
+Almost all of the advice about them is anecdotal: a setup that worked for someone, argued from opinion
+and resonance rather than evidence, with cost claims quoted per token instead of per review. This report
+takes one important, difficult, yet fungible workflow — code review — and studies it with the scientific
+method and repeatable methods, against ground truth that can be *executed*, not only read. Eight models
 (three Claude-family, three OpenAI-family, two open-weight GLM) ran through three frameworks — one-shot
 prompting plus two agentic harnesses — at three reasoning-effort levels on the six highest-severity PRs
 of a public 50-PR benchmark: 2,416 healthy runs, 66 of 72 complete model×framework×effort cells. Quality
@@ -45,16 +48,22 @@ instrument-sensitive precision. Read the intervals, not the rankings.
 ## 1. Introduction
 
 **Why this report exists.** Code review is one of the largest recurring engineering costs in a software
-organisation, and automated review is sold as a way to cut it. The dominant claim is not that a model can
-read a diff — that is table stakes — but that an *agentic harness*, an orchestrator that dispatches
-several model passes and synthesises them, finds materially more real bugs than prompting once. That
-claim is plausible but rarely backed by evidence a buyer can check: quality figures usually rest on
-vendor-chosen examples or human-labelled ground truth nobody can execute, and cost claims are quoted per
-token rather than per review. A working figure inside this project — that open-weight models are
-"~1/200th per token, ~1/10th per task" — is a case in point: at published list prices the real ratios for
-the comparison it describes are **1/57 per blended token and 1/38 per task** (§3.5.2).
+organisation, and automated review is sold as a way to cut it. Almost everywhere you turn, however, the
+advice is vibe-driven: a practitioner's setup that worked well for them, a vendor's chosen example, a
+resonant blog post — stories with no controlled comparison behind them, and with costs quoted per token
+rather than per review. The dominant claim in that discourse is not that a model can read a diff — that
+is table stakes — but that an *agentic harness*, an orchestrator that dispatches several model passes
+and synthesises them, finds materially more real bugs than prompting once. Plausible, but rarely backed
+by evidence a buyer can check: quality figures usually rest on chosen examples or human-labelled ground
+truth nobody can execute, and the arithmetic behind the cost case is seldom shown. A working figure
+inside this project — that open-weight models are "~1/200th per token, ~1/10th per task" — is a case in
+point: at published list prices the real ratios for the comparison it describes are **1/57 per blended
+token and 1/38 per task** (§3.5.2).
 
-**What we set out to do.** We ran the same eight models through one-shot prompting and two agentic
+**What we set out to do.** We picked a workflow that is at once important, difficult, and fungible —
+code review: high-value enough to matter, hard enough that the answer is not obvious, and comparable
+enough that the same work can be run across tools and models — and studied it scientifically, with
+repeatable methods. We ran the same eight models through one-shot prompting and two agentic
 harnesses at three reasoning-effort levels, over a public 50-PR benchmark spanning five codebases,
 measuring for every cell the four things a buyer cares about: real bugs found, noise a human must triage,
 cost in money/tokens/wall-clock, and whether those answers survive honest adjudication. That last word is
