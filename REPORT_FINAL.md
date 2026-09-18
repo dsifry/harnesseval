@@ -810,9 +810,9 @@ nitpick-class findings.** Chart: `analysis/figures/fig_true_gold_defects_found.p
   despite its much heavier nitpick charge.
 - **Peak-recall ratio** harness ÷ vanilla = **1.51×** (0.487 vs 0.322); **F2′ ratio = 1.21×** (harness
   ahead). The equal-weight F1′ lens is the outlier (0.94×) and is treated as a diagnostic, not a result.
-- **MRV vs CE** (21 matched model·effort pairs): point estimate **+19 / −2** on ΔF1′ (mean +0.047;
-  **8/21** resolve at 95%) and **+18 / −3** on ΔF2′ (**7/21** resolve). Δrecall: +17 / −4, mean +0.043.
-  MRV is ahead on average, not uniformly.
+- **MRV vs CE** (21 matched model·effort pairs): on our evaluator, **+18 / −3** on ΔF2′ (mean +0.048;
+  **7/21** resolve at 95%); Δrecall +17 / −4, mean +0.043; for reference ΔF1′ is +19 / −2. MRV is ahead on
+  average, not uniformly.
 - The §10c cost and token conclusions are untouched (they do not depend on the gold set).
 
 **Per PR (§10d).**
@@ -827,7 +827,7 @@ nitpick-class findings.** Chart: `analysis/figures/fig_true_gold_defects_found.p
 | calcom/cal.com/pull/14740 | 6 | **17** | 23 |
 | **total** | **42** | **110** | **152** |
 
-**Charts.** `analysis/figures/fig_true_gold_pareto.png` (recall vs F1′ with cluster-bootstrap CIs) and
+**Charts.** `analysis/figures/fig_true_gold_pareto.png` (recall vs F2′, our evaluator, with cluster-bootstrap CIs) and
 `analysis/figures/fig_true_gold_efficiency.png` ($ per true bug found vs recall).
 
 **Why the recall levels — and therefore F2′ — look low, and why no cell finds everything.**
@@ -1000,9 +1000,9 @@ best F2′-per-dollar among sub-$0.30/run cells; the frontier-model harness cell
 sonnet CE/MRV, fable CE/MRV-gap cells) are dominated on both axes by the GLM harness cells.
 
 `analysis/figures/fig_efficiency_2x2.png` is the four-panel efficiency view, every point with its
-95% CI: **(a)** price/performance ($ per PR review vs F1′ — how much quality a dollar buys *per
-review*), **(b)** F1′ per $ (approx CI = F1′ CI / cost point), **(c)** F1′ vs wall-clock per
-run (latency/quality; the low-effort GLM cells sit in the fast/high-F1′ corner), and
+95% CI: **(a)** price/performance ($ per PR review vs F2′ — how much quality a dollar buys *per
+review*), **(b)** F2′ per $ (approx CI = F2′ CI / cost point), **(c)** F2′ vs wall-clock per
+run (latency/quality; the low-effort GLM cells sit in the fast/high-F2′ corner), and
 **(d)** $ per true bug found vs recall (true golden set; the buyer's panel: what a caught real
 bug costs, against how many are caught).
 
