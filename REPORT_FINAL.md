@@ -1353,6 +1353,12 @@ python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt     # numpy + matplotlib — the published numbers need nothing else
 ```
 
+**To re-run an eval yourself** (not needed to reproduce the published numbers, which are stored), see
+`INSTALL.md` §6–§7: install the harness deps (`pip install -e .`), provide the pinned `third_party/` checkout
+(or authenticated `gh` for PR diffs), then run one cell with `run_model_matrix --fill`. Verified end to end:
+`vanilla-engineered / glm-5.3-flash-background / low` on PR 8 ran in 42 s, produced 10 findings, was judged by
+gpt-5.2, adjudicated (4 real / 1 hallucination), scored TP=5 FP=6 FN=1, and registered in `runs/`.
+
 **API keys: none are needed for the published numbers.** Every step below is deterministic and offline. Only
 the model-running steps (which produced the `runs/` registry and the stored LLM artifacts) need keys: follow
 `INSTALL.md` §3 and use **your own** OpenAI / Anthropic credentials. **Lunarroute is optional** — it is merely

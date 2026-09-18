@@ -141,3 +141,37 @@ small (one PR, one model) before running the 384-cell matrix.
 - **Python entry points** are under `bin/` (`analyze_batch_083.py`,
   `analyze_083_interactions.py`, `run_sdlc_loop.py`, …) and `harnesseval/` (`run_model_matrix`,
   `analysis`, `report`, `calibrate`). All invoked via `uv run python …`.
+
+## 7. Smoke test — run ONE cell (recommended before any campaign)
+
+Verify the whole eval path (model call → findings → judging → adjudication → run registration) with a single
+cheap cell. `--fill` selects a cell **within** the `--prs × --models × --efforts × --frameworks` matrix, so the
+model/effort/framework must also be passed explicitly:
+
+```bash
+export HARNESS_KEYS_FILE=~/.config/harnesseval/keys.env          # your own keys (see §3)
+.venv/bin/python -u -m harnesseval.run_model_matrix \
+  --prs 6 --models glm-5.3-flash-background --efforts low --frameworks vanilla-engineered \
+  --fill vanilla-engineered/glm-5.3-flash-background/low/8 \
+  --mode api --run-batch smoke-$(date +%s) --out /tmp/smoke.json
+```
+
+(Use `--mode cli` for the Claude/Codex OAuth lanes; `api` is the paid, clean-token mode used for
+open-weight models like GLM/Kimi. `bin/metareview` is only needed for the metareview harness.)
+
+Expected: one line per cell plus a summary, e.g.
+
+```
+[mx] [1/1] vanilla-engineered glm-5.3-flash-background low ...
+[mx] [1/1] vanilla-engineered glm-5.3-flash-background low TP=5 FP=6 FN=1 rec=0.83 adj_p=0.83 incr_r=0.90 real=4 hal=1 11,803tok 42s
+```
+
+It writes `runs/<id>/{manifest.json,summary.json}` (findings with `issue_text`, per-model usage, the judge id
+and the adjudicated real/hallucination split) and appends a row to `runs/registry.jsonl`. Only one run per
+(cell, PR) is described above — the campaign's 72 cells × 6 PRs is the full sweep, and costs real money.
+
+**Two things to expect.** (1) Run-to-run variance on a single PR is large — the same cell scored TP 2/2/2 on
+PR 8 in the campaign and TP 5 in the smoke test above; that variance is why the report compares cells over
+several PRs with cluster-bootstrap CIs. (2) `cost_usd` comes from the provider/gateway response, so a gateway
+that does not return cost (some Lunarroute plans) yields `0.0`; the report's GLM costs were retrieved from the
+gateway's ledger, not computed locally.
