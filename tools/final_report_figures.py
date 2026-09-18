@@ -14,7 +14,14 @@ import matplotlib.pyplot as plt
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 D = json.load(open(f"{ROOT}/analysis/final_report_dataset.json"))
 M = json.load(open(f"{ROOT}/analysis/final_report_metrics.json"))
-SEM = M["expanded_gold_verified"]["matrix_sem"]
+# TRUE golden set (§10d, PRIMARY): 42 goldens + the deduplicated, individually test-validated defects.
+# Compatibility view: the figure code reads TP_sem / recall_sem / F1 / F1p + CIs, so map the defect-level
+# cells onto those names. (Previously this pointed at expanded_gold_verified.matrix_sem, the superseded
+# LLM-merged §10c keyset.)
+SEM = {k: {"TP_sem": c["TP"], "recall_sem": c["recall"], "F1": c["F1"], "F1p": c["F1p"],
+           "adjP": c["adjP"], "adjPp": c["adjPp"],
+           "ci": {"recall_sem": c["ci"]["recall"], "F1": c["ci"]["F1"], "F1p": c["ci"]["F1p"]}}
+       for k, c in M["true_gold_defects"]["verified"]["cells"].items()}
 
 def sem_cell(m, fw, e):
     return SEM.get(f"{m}|{fw}|{e}")

@@ -287,10 +287,10 @@ Figures: `analysis/figures/fig_recall_grid.png` (recall with CIs per cell),
 
 ## 5b. Two analyses: strict benchmark vs expanded gold (the hidden-gold union)
 
-> **SUPERSEDED by §10c (levels only; §10b was itself an intermediate step).** The T9/T10/T11 unions below overcount distinct
+> **SUPERSEDED by §10d (levels only; §10b/§10c were intermediate steps).** The T9/T10/T11 unions below overcount distinct
 > bugs ~17× (paraphrase splits) and, due to a since-fixed extract bug, omit all
 > rj3-adjudicated runs' confirmed bugs (706 findings, mostly vanilla cells). The paired
-> Δ *directions* survive; all levels should be read from §10b. Retained for provenance.
+> Δ *directions* survive; all levels should be read from §10d. Retained for provenance.
 
 The strict-benchmark numbers above answer the question Martian defines: *does the tool
 find the human-verified golden comments, without hallucinating?* They deliberately do
@@ -477,7 +477,7 @@ strengthens: recall_exp 0.054 [0.045, 0.064] — **9× fable-5.1 vanilla low (0.
 comparable to opus-5 harness cells, at the same fraction of the cost. Levels are
 conservative; the *ranking* and the *ratios* are the reportable quantities.
 
-## 10c. The VERIFIED true golden set (PRIMARY; supersedes §10b/§10b')
+## 10c. The verified key-union set (SUPERSEDED by §10d; retained for provenance)
 
 §10b introduced the semantic union and was then audited twice more. Both audits found real defects,
 and both are corrected here:
@@ -542,7 +542,7 @@ with adjP/adjP′. CIs: cluster bootstrap, B=10,000, seed 20260916, rng5=SEED+4;
    these are outside their brief. A scope explanation was tested and rejected: among anchored findings,
    227 are in the PR's changed files vs **1** out-of-diff.
 
-### T12 — VERIFIED-union matrix (§10c PRIMARY): per-cell real-world metrics with 95% cluster-bootstrap CIs
+### T12 — verified-union matrix (§10c; superseded by T16): per-cell metrics with 95% cluster-bootstrap CIs
 
 Union = distinct real bugs after (a) a stricter whole-PR re-merge and (b) removal of clusters verified
 to duplicate a golden (47 across the six PRs). recall_sem = (goldens found + additional bugs found) /
@@ -702,7 +702,7 @@ Pairs-level aggregate: mean ΔF1 +0.044 [+0.019, +0.073], mean ΔF1' +0.042 [+0.
 
 Resolved positive 39/43 (vs 38/42 under the frozen key-union, 17/42 strict).
 
-### T15 — verified true-golden set per PR (§10c; evidence pack)
+### T15 — verified key-union per PR (§10c; superseded by T17)
 
 | PR | goldens | verified additional | verified universe | merged clusters | golden-duplicates removed |
 |---|---|---|---|---|---|
@@ -912,9 +912,10 @@ throughput-limited by the gateway** (glm-vis MRV medium 2,282 s [1,458, 3,305]; 
 
 ### 6.5 The efficiency frontier (headline figure)
 
-Both figures below are rebuilt on the **verified true golden set** (§10c metrics): F1′ (nitpicks
-charged) as the quality axis; a strict-benchmark version of each remains in git history
-(data freeze 2026-09-16).
+Both figures below are rebuilt on the **true golden set** (§10d: 42 goldens + 110 individually
+test-validated defects): F1′ (nitpicks charged) is the quality axis and comes from the §10d metrics;
+the F1 panel remains the strict-benchmark (goldens-only) axis, and a strict-benchmark version of each
+figure remains in git history (data freeze 2026-09-16).
 
 `analysis/figures/fig_pareto_frontier.png` plots every complete cell as (metered $ per real
 finding = TP + beyond-gold real, log scale) vs F1 (left) and F1′ (right), both with 95% CIs.
