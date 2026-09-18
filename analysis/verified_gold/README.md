@@ -84,3 +84,23 @@ Everything else is excluded from verified metrics and **never deleted**:
 - The test proves the behavior change for the argued mechanism; it does not prove severity or
   business impact.
 - LLM-written tests/fixes are artifacts like any other: they are saved, versioned, and re-runnable.
+
+## The catalogue (start here)
+
+`GOLD_DEFECT_CATALOG.md` (also `.json` / `.csv`) is the canonical, deduplicated list of the verified
+hidden-gold defects — one entry per defect with its id, PR, label, `file:line` location, the exact test
+artifact that demonstrates it, its minimal fix, its logs, its evidence level, its orthogonality result and
+its provenance (merged duplicate / restored / corrected label). Rebuild with
+`python tools/gold_defect_catalog.py`.
+
+Evidence levels per defect:
+
+| level | count | meaning |
+|---|---|---|
+| `own_executed` | 22 | its own test failed on the PR head, its own fix made it pass, and the bundle's fix left it red |
+| bundle-primary claim | 77 | the bundle's executed test demonstrates exactly this claim |
+| bundle-level facet | 7 | split out by the merge audit; the bundle test exercises the bundle's claim, no isolating test yet |
+
+The catalogue's header lists the **known open items** (7 facets without their own test; 19 defects whose
+inherited label should be re-read against the test; an under-count side where audited claims from
+multi-concern bundles are not yet in the registry). 106 is a floor, not a ceiling.
