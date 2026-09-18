@@ -135,12 +135,12 @@ def defining_files(cand, limit=3):
     hits = {}
     for term in terms[:6]:
         try:
-            out = sh(f"grep -rl --include='*{ext}' --exclude-dir=node_modules --exclude-dir=.git {term} . | head -12")
-            for f in out.splitlines():
+            _rc, out = sh(f"grep -rl --include='*.rb' --exclude-dir=node_modules --exclude-dir=.git {term} . | head -12")
+            for f in (out or "").splitlines():
                 f = f.strip().lstrip("./")
                 if f: hits[f] = hits.get(f, 0) + 1
-        except Exception:
-            pass
+        except Exception as e:                    # never fail silently: this is what fed the fix author
+            print(f"  (defining_files: grep for {term!r} failed: {type(e).__name__} {e})", flush=True)
     ranked = sorted(hits.items(), key=lambda kv: -kv[1])[:limit]
     return [f for f, _ in ranked]
 
