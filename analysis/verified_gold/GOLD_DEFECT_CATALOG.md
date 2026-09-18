@@ -615,11 +615,13 @@ Merged duplicates and restored/renamed entries carry a provenance note.
 - **location**: `packages/app-store/salesforce/lib/CalendarService.ts`  ·  **evidence**: `own_executed`  ·  bundle `11059-B23` (pending)
 - **test**: `analysis/verified_gold/11059/B23-parserefreshtokenresponse-throws-on-schema-mismatch-and-ca/defects/11059-D33/test.diff`
 - **fix**: `analysis/verified_gold/11059/B23-parserefreshtokenresponse-throws-on-schema-mismatch-and-ca/defects/11059-D33/fix.patch`  ·  **logs**: `analysis/verified_gold/11059/B23-parserefreshtokenresponse-throws-on-schema-mismatch-and-ca/defects/11059-D33/logs`
+- **orthogonality**: bundle fix leaves it red = `True`
 
 ### 11059-D34 — Hardcoded Salesforce login host breaks sandbox orgs
-- **location**: `packages/app-store/salesforce/lib/CalendarService.ts`  ·  **evidence**: `bundle-executed`  ·  bundle `11059-B23` (pending)
-- **test**: `analysis/verified_gold/11059/B23-parserefreshtokenresponse-throws-on-schema-mismatch-and-ca/test.patch`
-- **fix**: `analysis/verified_gold/11059/B23-parserefreshtokenresponse-throws-on-schema-mismatch-and-ca/fix.patch`  ·  **logs**: `analysis/verified_gold/11059/B23-parserefreshtokenresponse-throws-on-schema-mismatch-and-ca/logs`
+- **location**: `packages/app-store/salesforce/lib/CalendarService.ts`  ·  **evidence**: `own_executed`  ·  bundle `11059-B23` (pending)
+- **test**: `analysis/verified_gold/11059/B23-parserefreshtokenresponse-throws-on-schema-mismatch-and-ca/defects/11059-D34/test.diff`
+- **fix**: `analysis/verified_gold/11059/B23-parserefreshtokenresponse-throws-on-schema-mismatch-and-ca/defects/11059-D34/fix.patch`  ·  **logs**: `analysis/verified_gold/11059/B23-parserefreshtokenresponse-throws-on-schema-mismatch-and-ca/defects/11059-D34/logs`
+- **orthogonality**: bundle fix leaves it red = `True`
 
 ## PR 14740 — 17 defects
 
