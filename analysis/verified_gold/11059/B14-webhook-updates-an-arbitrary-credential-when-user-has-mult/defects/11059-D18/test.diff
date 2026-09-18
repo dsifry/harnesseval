@@ -1,0 +1,102 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const mocks = vi.hoisted(() => ({
+  userFindUnique: vi.fn(),
+  appFindUnique: vi.fn(),
+  findFirst: vi.fn(),
+  update: vi.fn(),
+  create: vi.fn(),
+  symmetricDecrypt: vi.fn(),
+}));
+
+vi.mock("@calcom/prisma", () => ({
+  default: {
+    user: { findUnique: mocks.userFindUnique },
+    app: { findUnique: mocks.appFindUnique },
+    credential: {
+      findFirst: mocks.findFirst,
+      update: mocks.update,
+      create: mocks.create,
+    },
+  },
+}));
+
+vi.mock("@calcom/lib/constants", () => ({
+  APP_CREDENTIAL_SHARING_ENABLED: true,
+}));
+
+vi.mock("@calcom/lib/crypto", () => ({
+  symmetricDecrypt: mocks.symmetricDecrypt,
+}));
+
+vi.mock("@calcom/app-store/appStoreMetaData", () => ({
+  appStoreMetadata: {
+    "google-calendar": { slug: "google-calendar", type: "google_calendar" },
+  },
+}));
+
+const SECRET = "test-webhook-secret";
+
+// A user with MULTIPLE credentials for the same app (ambiguous userId+appId lookup).
+const credentials = [
+  { id: 1, userId: 42, appId: "google-calendar", createdAt: new Date("2024-01-01T00:00:00Z") },
+  { id: 2, userId: 42, appId: "google-calendar", createdAt: new Date("2024-06-01T00:00:00Z") },
+];
+
+function makeRes() {
+  const res: any = {};
+  res.status = vi.fn().mockReturnValue(res);
+  res.json = vi.fn().mockReturnValue(res);
+  return res;
+}
+
+describe("app-credential webhook credential disambiguation", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.CALCOM_WEBHOOK_SECRET = SECRET;
+    delete process.env.CALCOM_WEBHOOK_HEADER_NAME;
+
+    mocks.userFindUnique.mockResolvedValue({ id: 42 });
+    mocks.appFindUnique.mockResolvedValue({ slug: "google-calendar" });
+    mocks.symmetricDecrypt.mockReturnValue(JSON.stringify({ access_token: "fresh" }));
+    mocks.update.mockResolvedValue({});
+    mocks.create.mockResolvedValue({});
+
+    // Realistic DB mock: honours an orderBy (any key, asc/desc), otherwise returns
+    // rows in physical/insert order (i.e. nondeterministic "arbitrary" selection).
+    mocks.findFirst.mockImplementation(async (args: any) => {
+      const { where, orderBy } = args ?? {};
+      let rows = credentials.filter(
+        (c) => c.userId === where?.userId && c.appId === where?.appId
+      );
+      if (orderBy && typeof orderBy === "object") {
+        const key = Object.keys(orderBy)[0];
+        if (!Array.isArray(orderBy)) {
+          const dir = orderBy[key] === "desc" ? -1 : 1;
+          rows = [...rows].sort((a: any, b: any) => (a[key] - b[key]) * dir);
+        }
+      }
+      return rows.length > 0 ? { id: rows[0].id } : null;
+    });
+  });
+
+  it("updates the deterministically-selected most recent credential instead of an arbitrary one when multiple credentials exist", async () => {
+    const { default: handler } = await import("./app-credential");
+
+    const req: any = {
+      headers: { "calcom-webhook-secret": SECRET },
+      body: { userId: 42, appSlug: "google-calendar", keys: "encrypted-blob" },
+    };
+    const res = makeRes();
+
+    await handler(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(200);
+
+    const updatedId = mocks.update.mock.calls[0]?.[0]?.where?.id;
+    expect(
+      updatedId,
+      "The app-credential webhook resolves credentials only by userId+appId via an unordered findFirst, so when a user has multiple credentials for the same app it silently overwrites an arbitrary credential instead of the deterministically-selected most recent one (expected id 2)."
+    ).toBe(2);
+  });
+});
