@@ -1,0 +1,139 @@
+diff --git a/spec/verify/routes_verify.rb b/spec/verify/routes_verify.rb
+new file mode 100644
+--- /dev/null
++++ b/spec/verify/routes_verify.rb
+@@ -0,0 +1,134 @@
++# frozen_string_literal: true
++# Standalone verification: does config/routes.rb still expose
++# GET /admin/groups/:id/users ?
++#
++# Run from repo root:  ruby -I. spec/verify/routes_verify.rb
++
++# ---- minimal stubs so the real routes file can be loaded without Rails ----
++module Kernel
++  alias_method :__orig_require, :require
++  def require(name)
++    return false if name.to_s == "sidekiq/web"
++    __orig_require(name)
++  end
++  def require_dependency(*); end
++end
++
++module Sidekiq; end
++module Logster; end
++Sidekiq.const_set(:Web, Object.new) unless Sidekiq.const_defined?(:Web)
++Logster.const_set(:Web, Object.new) unless Logster.const_defined?(:Web)
++
++module Rails
++  def self.env; self; end
++  def self.development?; false; end
++end
++
++class AdminConstraint; end
++class StaffConstraint; end
++class HomepageConstraint; end
++class PermalinkConstraint; end
++
++# Tiny routing DSL that records (verb, path) pairs the way Rails would
++# expand them for `namespace` / `scope` / `resources`.
++class RouteDSL
++  attr_reader :routes
++
++  def initialize
++    @routes = []
++    @prefix = ""
++    @resource = nil
++    @mode = nil
++  end
++
++  def match(*a);  rec("MATCH", a);  end
++  def get(*a);    rec("GET", a);    end
++  def post(*a);   rec("POST", a);   end
++  def put(*a);    rec("PUT", a);    end
++  def delete(*a); rec("DELETE", a); end
++  def mount(*); end
++  def root(*); end
++  def constraints(*); yield if block_given?; end
++
++  def rec(verb, args)
++    path = args.first
++    path = path.keys.first if path.is_a?(Hash)
++    path = path.to_s.split("=>").first.to_s.strip
++    full = @prefix.dup
++    full += @resource if @resource
++    full += "/:id" if @resource && @mode == :member
++    full += "/#{path}"
++    @routes << [verb, full.gsub(%r{/+}, "/")]
++  end
++
++  def namespace(name, &b)
++    saved = @prefix
++    @prefix = (@prefix + "/#{name}").gsub(%r{/+}, "/")
++    instance_eval(&b) if b
++  ensure
++    @prefix = saved
++  end
++
++  def scope(path, &b)
++    saved = @prefix
++    @prefix = (@prefix + path.to_s).gsub(%r{/+}, "/")
++    instance_eval(&b) if b
++  ensure
++    @prefix = saved
++  end
++
++  def resources(name, _opts = {}, &b)
++    saved = [@resource, @mode]
++    @resource = (@resource || "") + "/#{name}"
++    @mode = :member
++    instance_eval(&b) if b
++  ensure
++    @resource, @mode = saved
++  end
++
++  def collection(&b)
++    saved = @mode; @mode = :collection
++    instance_eval(&b) if b
++  ensure
++    @mode = saved
++  end
++
++  def member(&b)
++    saved = @mode; @mode = :member
++    instance_eval(&b) if b
++  ensure
++    @mode = saved
++  end
++end
++
++module Discourse
++  class Application
++    def self.routes; @routes ||= Router.new; end
++  end
++  class Router
++    attr_reader :last
++    def draw(&block)
++      dsl = RouteDSL.new
++      dsl.instance_eval(&block)
++      @last = dsl.routes
++    end
++  end
++end
++
++# ---- load the REAL routes file ----
++routes_path = File.expand_path("../../config/routes.rb", __FILE__)
++begin
++  require routes_path
++rescue Exception => e
++  puts "RESULT: FAIL: could not load #{routes_path}: #{e.class}: #{e.message}"
++  exit
++end
++
++routes = Discourse::Application.routes.last || []
++target = routes.any? { |v, p| v == "GET" && p == "/admin/groups/:id/users" }
++
++if target
++  puts "RESULT: PASS"
++else
++  puts "RESULT: FAIL: GET /admin/groups/:id/users route is absent from config/routes.rb (no read replacement for the member list)"
++end

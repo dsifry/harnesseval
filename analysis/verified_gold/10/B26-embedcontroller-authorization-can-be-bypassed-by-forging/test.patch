@@ -1,0 +1,105 @@
+require 'ostruct'
+require 'uri'
+
+# --- Minimal stubs so the REAL controller can load and run without Rails/DB ---
+module Discourse
+  class InvalidAccess < StandardError; end
+end
+
+# ActiveSupport-ish #present?/#blank? on Object (needed by the code under test)
+class Object
+  def present?; !nil? && !(respond_to?(:empty?) && empty?); end
+  def blank?; !present?; end
+end
+
+module Rails
+  Env = Struct.new(:name) do
+    def development?; name == 'development'; end
+  end
+  def self.env; Env.new('test'); end
+end
+
+class ApplicationController
+  def self.skip_before_filter(*); end
+  def self.before_filter(*); end
+  def self.layout(*); end
+
+  attr_accessor :params, :request
+
+  def current_user; nil; end
+  def response; @response ||= OpenStruct.new(headers: {}); end
+  def render(*); end
+  def discourse_expires_in(*); end
+end
+
+# Simulates a server-side allowlist of embeddable hosts (the real EmbeddableHost).
+class EmbeddableHost
+  ALLOWED_HOSTS = ['allowed.example'].freeze
+  def self.host_allowed?(referer)
+    return false if referer.nil? || referer.empty?
+    URI.parse(referer).host.to_s.then { |h| ALLOWED_HOSTS.include?(h) }
+  rescue URI::InvalidURIError
+    false
+  end
+end
+
+class TopicEmbed
+  def self.topic_id_for_embed(*); nil; end
+end
+
+module Jobs
+  def self.enqueue(*); end
+end
+
+class TopicView
+  def initialize(*); end
+end
+
+module SiteSetting
+  def self.embed_post_limit; 50; end
+end
+
+module I18n
+  def self.t(key, opts = {}); key.to_s; end
+end
+
+# --- Load the REAL file under test (no redefinition) ---
+require_relative '../../app/controllers/embed_controller'
+
+# --- Simulate an anonymous, non-browser HTTP client forging the Referer header ---
+# curl/requests/postman can set any Referer they want. There is no session,
+# no cookie, and no CSRF (verify_authenticity_token is skipped) -- the only
+# input the authorization gate consults is this client-authored header.
+forged_referer = 'http://allowed.example/forged-by-curl'
+
+anonymous_request = OpenStruct.new(
+  referer: forged_referer,
+  headers: { 'User-Agent' => 'curl/7.68.0' }
+)
+
+controller = EmbedController.new
+controller.request = anonymous_request
+controller.params  = { topic_id: 1 } # arbitrary attacker-known topic id
+
+access_granted = begin
+  controller.send(:ensure_embeddable) # the entire authorization gate
+  true
+rescue Discourse::InvalidAccess
+  false
+end
+
+# Sanity check: a Referer for a non-allowed host must still be rejected.
+controller_bad = EmbedController.new
+controller_bad.request = OpenStruct.new(referer: 'http://evil.example/', headers: {})
+bad_referer_granted = begin
+  controller_bad.send(:ensure_embeddable)
+  true
+rescue Discourse::InvalidAccess
+  false
+end
+
+if access_granted && !bad_referer_granted
+  puts "RESULT: FAIL: EmbedController#ensure_embeddable authorizes an anonymous non-browser client solely on the client-supplied Referer header (forged '#{forged_referer}'); the host allowlist is bypassable and topic comments are readable off-site."
+else
+  puts "RESULT: PASS"
+end

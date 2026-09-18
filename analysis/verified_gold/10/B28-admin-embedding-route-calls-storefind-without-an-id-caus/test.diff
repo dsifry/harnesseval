@@ -1,0 +1,91 @@
+diff --git a/spec/verify/admin-embedding.js_verify.rb b/spec/verify/admin-embedding.js_verify.rb
+new file mode 100644
+--- /dev/null
++++ b/spec/verify/admin-embedding.js_verify.rb
+@@ -0,0 +1,86 @@
++#!/usr/bin/env ruby
++# Standalone regression evidence for the claimed defect in
++# app/assets/javascripts/admin/routes/admin-embedding.js.es6
++#
++# The real file's model() body is loaded from disk and executed against a
++# minimal fake of the 2015-era Ember Data store so the only real logic under
++# test is the route source itself -- nothing is re-implemented.
++
++source_path = File.join(__dir__, '..', '..', 'app', 'assets', 'javascripts', 'admin', 'routes', 'admin-embedding.js.es6')
++source = File.read(source_path)
++
++# Pull the REAL model() body out of the file under test.
++m = source.match(/model\s*\(\s*\)\s*\{([^}]*)\}/m)
++abort 'could not locate model() in file under test' unless m
++model_body = m[1]
++
++# Execute that exact body inside a lambda.  `this.store` is rebound to the
++# fake store passed at call time -- the route code itself is unchanged.
++model_fn = eval("->(store) { #{model_body.gsub('this.store', 'store')} }") # rubocop:disable Security/Eval
++
++# --- Minimal fake of the Ember Data store semantics being exercised ---
++# store.find('embedding') with no id dispatches to findAll, which extracts the
++# PLURAL root key ('embeddings') and returns a RecordArray -- never the
++# singular 'embedding' record that a singleton show route expects.
++class FakeStore
++  def initialize(payload)
++    @payload = payload
++  end
++
++  def find(type, id = nil)
++    id.nil? ? findAll(type) : findById(type, id)
++  end
++
++  def findAll(type)
++    RecordArray.new(Array(@payload["#{type}s"]))
++  end
++
++  def findById(type, _id)
++    Record.new(@payload.fetch(type))
++  end
++
++  class RecordArray
++    def initialize(records);   @records = records; end
++    def embeddableHosts;       nil;                end # collection has no singular attr
++  end
++
++  class Record
++    def initialize(attrs);     @attrs = attrs;     end
++    def embeddableHosts;       @attrs['embeddableHosts']; end
++  end
++end
++
++# The shape the server legitimately returns for this singleton resource.
++singular_payload = { 'embedding' => { 'embeddableHosts' => [{ 'id' => 1, 'host' => 'example.com' }] } }
++# The (wrong) plural shape the reported findall fixture used.
++plural_payload   = { 'embeddings' => [{ 'id' => 1 }] }
++
++def has_hosts?(model)
++  model.respond_to?(:embeddableHosts) && !model.embeddableHosts.nil? && model.embeddableHosts != false
++end
++
++had_hosts = {}
++[%w[singular singular_payload], %w[plural plural_payload]].each do |name, _|
++  payload = binding.local_variable_get("#{name}_payload")
++  had_hosts[name] = has_hosts?(model_fn.call(FakeStore.new(payload)))
++end
++
++# Reproduce the reported 'add host' crash: model.embeddableHosts.pushObject.
++model = model_fn.call(FakeStore.new(singular_payload))
++push_error = begin
++  model.embeddableHosts.pushObject({ 'host' => 'new.example.com' })
++  nil
++rescue StandardError => e
++  e.class
++end
++
++if had_hosts['singular']
++  puts 'RESULT: PASS'
++else
++  puts "RESULT: FAIL: store.find('embedding') without an id routes to findAll, " \
++       "which parses the plural 'embeddings' root key; the returned collection " \
++       "has no embeddableHosts (singular payload hosts?=#{had_hosts['singular'].inspect}, " \
++       "plural payload hosts?=#{had_hosts['plural'].inspect}) and " \
++       "embedding.embeddableHosts.pushObject raises #{push_error.inspect}, so the " \
++       "admin embedding page's host table never renders."
++end

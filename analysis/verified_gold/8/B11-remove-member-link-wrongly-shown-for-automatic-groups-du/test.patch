@@ -1,0 +1,82 @@
+require 'json'
+
+TEMPLATE_PATH = File.expand_path('../../app/assets/javascripts/admin/templates/group_member.hbs', __dir__)
+abort "RESULT: FAIL: template not found: #{TEMPLATE_PATH}" unless File.exist?(TEMPLATE_PATH)
+SOURCE = File.read(TEMPLATE_PATH)
+
+# --- Minimal Handlebars-compatible renderer covering the constructs in this template ---
+# It deliberately does NO implicit parent/fallback lookup: lookup is confined to the
+# implicit `this` context passed in, which mirrors the claim that `automatic` is
+# evaluated against the member item context and is therefore absent there.
+module MiniHbs
+  INLINE_NO_OP = %w[avatar action fa-icon].freeze
+
+  def self.lookup(ctx, key)
+    return nil unless ctx.is_a?(Hash)
+    sym = key.to_sym
+    ctx.key?(sym) ? ctx[sym] : ctx[key.to_s]
+  end
+
+  def self.truthy?(v)
+    !(v.nil? || v == false)
+  end
+
+  def self.render(tmpl, ctx)
+    out = +''
+    pos = 0
+    while (open = tmpl.index('{{', pos))
+      out << tmpl[pos...open]
+      if tmpl.start_with?('{{#', open)
+        decl_end = tmpl.index('}}', open)
+        helper, arg = tmpl[open + 3...decl_end].strip.split(/\s+/, 2)
+        close_tag = "{{/#{helper}}}"
+        close = tmpl.index(close_tag, decl_end)
+        body = tmpl[decl_end + 2...close]
+        val = lookup(ctx, arg)
+        cond = helper == 'unless' ? !truthy?(val) : truthy?(val)
+        out << render(body, ctx) if cond
+        pos = close + close_tag.length
+      else
+        tag_end = tmpl.index('}}', open)
+        out << render_inline(tmpl[open + 2...tag_end].strip, ctx)
+        pos = tag_end + 2
+      end
+    end
+    out << (tmpl[pos..] || '')
+    out
+  end
+
+  def self.render_inline(tag, ctx)
+    name = tag.split(/\s+/, 2).first
+    return '' if INLINE_NO_OP.include?(name)
+    if name.include?('.')
+      root, *path = name.split('.')
+      v = lookup(ctx, root)
+      path.each { |k| v = v.is_a?(Hash) ? (v[k.to_sym] || v[k.to_s]) : nil }
+      v.to_s
+    else
+      lookup(ctx, name).to_s
+    end
+  end
+end
+
+# Sanity: the real file must contain the construct under review.
+unless SOURCE.include?('{{#unless automatic}}')
+  puts 'RESULT: PASS: template no longer guards the remove link on `automatic` implicitly'
+  exit 0
+end
+
+# The template is rendered once per member with the member item as the implicit `this`.
+# `automatic` lives on the *group* (one level up) and is NOT present in this context.
+# The parent context ({ automatic: true }) is intentionally out of scope, matching the claim
+# that `automatic` does not resolve in the member item context.
+member_item_context = { member: { username: 'alice' } }
+rendered = MiniHbs.render(SOURCE, member_item_context)
+
+remove_link_shown = rendered.include?("class='remove'") || rendered.include?('class="remove"')
+
+if remove_link_shown
+  puts 'RESULT: FAIL: remove-member link rendered from member context where `automatic` is unresolvable (automatic-group members get a remove link)'
+else
+  puts 'RESULT: PASS'
+end

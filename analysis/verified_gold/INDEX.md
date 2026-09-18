@@ -10,11 +10,11 @@ Each bug has a browsable directory and an attachable tarball, per PR:
 Every attempted candidate produces a bundle whatever the verdict; `not_a_bug` and
 `inconclusive_env` are the demotion-review queue (`DEMOTION_REVIEW.md`).
 
-Generated 2026-09-18T00:31:28Z · verdicts: {'unresolved_file': 28, 'confirmed_regression': 8, 'behavior_change_not_regression': 69, 'inconclusive_env': 43, 'defect_present_before_pr': 20, 'not_a_bug': 3, 'static_text_test': 1, 'golden_duplicate': 1, 'base_not_comparable': 4}
+Generated 2026-09-18T01:02:17Z · verdicts: {'unresolved_file': 32, 'confirmed_regression': 8, 'behavior_change_not_regression': 78, 'inconclusive_env': 50, 'defect_present_before_pr': 32, 'not_a_bug': 4, 'static_text_test': 1, 'golden_duplicate': 1, 'base_not_comparable': 4}
 
-## PR 10 — 20 candidates · {'unresolved_file': 3, 'confirmed_regression': 1, 'behavior_change_not_regression': 8, 'inconclusive_env': 3, 'defect_present_before_pr': 4, 'not_a_bug': 1}
+## PR 10 — 32 candidates · {'unresolved_file': 5, 'confirmed_regression': 1, 'behavior_change_not_regression': 12, 'inconclusive_env': 6, 'defect_present_before_pr': 7, 'not_a_bug': 1}
 - per-bug tarballs: `bundles/10/`
-- PR bundle: `bundles/verified_gold_10.tar.gz` · sha256 `9f87a3c13dbb8bca…` · 83 KiB
+- PR bundle: `bundles/verified_gold_10.tar.gz` · sha256 `d8d0ba9aea9835a6…` · 131 KiB
 - table: `bundles/10/SUMMARY.md` · machine index: `bundles/10/MANIFEST.json`
 
 ## PR 10967 — 31 candidates · {'inconclusive_env': 19, 'static_text_test': 1, 'confirmed_regression': 4, 'defect_present_before_pr': 5, 'not_a_bug': 1, 'unresolved_file': 1}
@@ -37,6 +37,11 @@ Generated 2026-09-18T00:31:28Z · verdicts: {'unresolved_file': 28, 'confirmed_r
 - PR bundle: `bundles/verified_gold_4.tar.gz` · sha256 `b54007e5c132dc1f…` · 281 KiB
 - table: `bundles/4/SUMMARY.md` · machine index: `bundles/4/MANIFEST.json`
 
+## PR 8 — 21 candidates · {'not_a_bug': 1, 'defect_present_before_pr': 9, 'behavior_change_not_regression': 5, 'inconclusive_env': 4, 'unresolved_file': 2}
+- per-bug tarballs: `bundles/8/`
+- PR bundle: `bundles/verified_gold_8.tar.gz` · sha256 `00435c5e9031a36e…` · 87 KiB
+- table: `bundles/8/SUMMARY.md` · machine index: `bundles/8/MANIFEST.json`
+
 ## Roll-up
-- `bundles/verified_gold_all.tar.gz` · sha256 `fe0f2c2e58a05f9a…` · 786 KiB
+- `bundles/verified_gold_all.tar.gz` · sha256 `e9dee558104c05be…` · 922 KiB
 

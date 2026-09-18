@@ -1,0 +1,99 @@
+diff --git a/spec/verify/groups_controller_verify.rb b/spec/verify/groups_controller_verify.rb
+new file mode 100644
+--- /dev/null
++++ b/spec/verify/groups_controller_verify.rb
+@@ -0,0 +1,94 @@
++# frozen_string_literal: true
++# Standalone verification of app/controllers/groups_controller.rb #members
++# Claim: limit/offset are read from params with no validation (negative offset, unbounded limit)
++
++class FakeParams
++  def initialize(h); @h = h.transform_keys(&:to_s); end
++  def [](k); @h[k.to_s]; end
++  def require(k)
++    v = @h[k.to_s]
++    raise KeyError, "missing #{k}" if v.nil?
++    v
++  end
++end
++
++class Guardian
++  def ensure_can_see!(_g); true; end
++end
++
++$observed_limit  = nil
++$observed_offset = nil
++
++class FakeRelation
++  def initialize(arr); @arr = arr; end
++  def count; @arr.size; end
++  def order(_col); self; end
++  def limit(n); $observed_limit = n; @limit = n; self; end
++  def offset(n)
++    $observed_offset = n
++    raise "SQLException: OFFSET must not be negative" if n.negative?
++    @offset = n
++    self
++  end
++  def to_a
++    start = @offset || 0
++    len   = @limit  || @arr.size
++    @arr[start, len] || []
++  end
++end
++
++class Group
++  class << self; attr_accessor :stub; end
++  def self.find_by(_cond, _val); stub; end
++  def initialize(users); @rel = FakeRelation.new(users); end
++  def users; @rel; end
++end
++
++class ApplicationController
++  def initialize(params); @params = params; end
++  def params; @params; end
++  def guardian; Guardian.new; end
++  def render_serialized(obj, _s); obj; end
++  def render(opts); @rendered = opts; opts; end
++  def serialize_data(data, _s); data.to_a; end
++end
++
++GroupUserSerializer   = Object
++BasicGroupSerializer  = Object
++
++require File.expand_path('../../app/controllers/groups_controller.rb', __dir__)
++
++Group.stub = Group.new(%w[alice bob carol])
++
++def run_members(params)
++  $observed_limit  = nil
++  $observed_offset = nil
++  err = nil
++  begin
++    GroupsController.new(FakeParams.new(params)).members
++  rescue => e
++    err = e
++  end
++  [$observed_limit, $observed_offset, err]
++end
++
++# Case A: negative offset passed through to SQL layer
++lim_a, off_a, err_a = run_members('group_id' => 'g', 'offset' => '-5', 'limit' => '50')
++
++# Case B: unbounded limit
++lim_b, _off_b, err_b = run_members('group_id' => 'g', 'limit' => '1000000', 'offset' => '0')
++
++reasons = []
++if err_a || (off_a && off_a < 0)
++  detail = err_a ? "raised #{err_a.message}" : "offset=#{off_a.inspect}"
++  reasons << "negative offset reached SQL layer (#{detail})"
++end
++if lim_b && lim_b > 1000
++  reasons << "unbounded limit reached SQL layer (limit=#{lim_b})"
++end
++
++if reasons.empty?
++  puts 'RESULT: PASS'
++else
++  puts "RESULT: FAIL: #{reasons.join('; ')}"
++end

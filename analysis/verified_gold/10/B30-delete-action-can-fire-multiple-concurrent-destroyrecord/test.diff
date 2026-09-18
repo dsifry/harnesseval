@@ -1,0 +1,122 @@
+diff --git a/spec/verify/embeddable-host.js_verify.rb b/spec/verify/embeddable-host.js_verify.rb
+new file mode 100644
+--- /dev/null
++++ b/spec/verify/embeddable-host.js_verify.rb
+@@ -0,0 +1,117 @@
++#!/usr/bin/env ruby
++# Regression evidence for app/assets/javascripts/admin/components/embeddable-host.js.es6
++#
++# The file under test is ES6 JavaScript, so we load the REAL file from its
++# relative path, extract the exact `delete()` action source, and execute that
++# unchanged source in a Node sandbox with the minimum Ember/bootbox/I18n stubs.
++# The code under test is the only real logic exercised; nothing is redefined.
++
++require 'json'
++
++real_file = File.expand_path('app/assets/javascripts/admin/components/embeddable-host.js.es6', Dir.pwd)
++
++begin
++  src = File.read(real_file)
++rescue Errno::ENOENT => e
++  puts "RESULT: FAIL: real source file not found (#{real_file})"
++  exit 0
++end
++
++# Locate the delete() action and extract its body using brace balancing.
++idx = src.index('delete()')
++unless idx
++  puts 'RESULT: FAIL: could not locate delete() action in real source'
++  exit 0
++end
++
++brace = src.index('{', idx)
++depth = 0
++i = brace
++while i < src.length
++  c = src[i]
++  depth += 1 if c == '{'
++  depth -= 1 if c == '}'
++  break if depth.zero?
++  i += 1
++end
++delete_body = src[(brace + 1)...i]
++
++# Tiny in-process guard for when Node is unavailable.
++def structural_guard?(body)
++  !!(body =~ /isDeleting|isSaving|isDestroying|inFlight|in_flight|disabled/i)
++end
++
++body_literal = JSON.generate(delete_body)
++
++node_program = <<~JS
++  const deleteBody = #{body_literal};
++
++  const component = {
++    isDeleting: false,
++    get(k) {
++      if (k.indexOf('.') > -1) {
++        const parts = k.split('.');
++        const o = this[parts[0]];
++        return o ? o[parts[1]] : undefined;
++      }
++      return this[k];
++    },
++    set(k, v) { this[k] = v; return v; },
++    sendAction() {}
++  };
++
++  component.host = {
++    isDeleting: false,
++    set(k, v) { this[k] = v; return v; },
++    destroyRecord() {
++      component._destroyCount = (component._destroyCount || 0) + 1;
++      return { then(cb) { cb(); return this; } };
++    }
++  };
++
++  let confirmCallbacks = [];
++  global.bootbox = { confirm(msg, cb) { confirmCallbacks.push(cb); } };
++  global.I18n = { t() { return ''; } };
++
++  const deleteFn = eval('(function() {' + deleteBody + '})');
++
++  // Simulate a user triggering the delete control twice before the first
++  // request resolves, then confirming both dialogs.
++  deleteFn.call(component);
++  deleteFn.call(component);
++  confirmCallbacks.forEach(cb => cb(true));
++
++  console.log(JSON.stringify({
++    destroyCount: component._destroyCount || 0,
++    confirmCount: confirmCallbacks.length
++  }));
++JS
++
++begin
++  out = IO.popen(['node', '-e', node_program], &:read)
++rescue Errno::ENOENT
++  if structural_guard?(delete_body)
++    puts 'RESULT: PASS'
++  else
++    puts 'RESULT: FAIL: delete action has no in-flight guard (node unavailable; static guard check found none)'
++  end
++  exit 0
++end
++
++lines = out.lines.map(&:strip).reject(&:empty?)
++last = lines.last
++
++data = (JSON.parse(last) rescue nil)
++
++if data.nil?
++  puts "RESULT: FAIL: could not evaluate delete action (node output: #{out.inspect})"
++  exit 0
++end
++
++destroy_count = data['destroyCount'].to_i
++
++if destroy_count > 1
++  puts "RESULT: FAIL: no in-flight guard in delete(); two concurrent confirmations issued #{destroy_count} destroyRecord calls"
++else
++  puts 'RESULT: PASS'
++end

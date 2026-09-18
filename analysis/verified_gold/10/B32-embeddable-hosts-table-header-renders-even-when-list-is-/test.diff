@@ -1,0 +1,130 @@
+diff --git a/spec/verify/embedding_verify.rb b/spec/verify/embedding_verify.rb
+new file mode 100644
+--- /dev/null
++++ b/spec/verify/embedding_verify.rb
+@@ -0,0 +1,125 @@
++# Standalone verification for app/assets/javascripts/admin/templates/embedding.hbs
++#
++# Claim: {{#if embedding.embeddable_hosts}} makes the table header render even when
++# the list is an empty array, because empty arrays are truthy under Ember/JS semantics.
++#
++# We load the REAL template file from disk and run it through a tiny, faithful
++# subset of the Handlebars runtime that reproduces JS/Ember truthiness for {{if}}.
++
++TEMPLATE_PATH = File.expand_path('app/assets/javascripts/admin/templates/embedding.hbs', Dir.pwd)
++TEMPLATE = File.read(TEMPLATE_PATH)
++
++# --- minimal handlebars subset: parse `{{#if}}`, `{{#each x as |v|}}`, `{{else}}`, `{{tag}}` ---
++def parse_nodes(str, pos)
++  nodes = []
++  buf = +''
++  while pos < str.length
++    if str[pos, 2] == '{{'
++      nodes << [:text, buf] unless buf.empty?
++      buf = +''
++      close = str.index('}}', pos + 2)
++      raise "unclosed tag at #{pos}" unless close
++      tag = str[pos + 2...close].strip
++      pos = close + 2
++      if tag.start_with?('#')
++        name, rest = tag[1..].strip.split(/\s+/, 2)
++        expr = rest || ''
++        body, pos, term = parse_nodes(str, pos)
++        inverse = []
++        if term == 'else'
++          inverse, pos, term = parse_nodes(str, pos)
++        end
++        raise "mismatched block #{name}, got #{term.inspect}" unless term == "/#{name}"
++        if name == 'if'
++          nodes << [:if, expr, body, inverse]
++        elsif name == 'each'
++          m = expr.match(/\A(.+?)\s+as\s+\|(\w+)\|\z/)
++          raise "bad each expr: #{expr}" unless m
++          nodes << [:each, m[1], m[2], body, inverse]
++        else
++          raise "unsupported block: #{name}"
++        end
++      elsif tag.start_with?('/') || tag == 'else'
++        return nodes, pos, tag
++      else
++        nodes << [:tag, tag]
++      end
++    else
++      buf << str[pos]
++      pos += 1
++    end
++  end
++  [nodes, pos, nil]
++end
++
++def lookup(path, ctx)
++  cur = ctx
++  path.split('.').each do |key|
++    return nil unless cur.is_a?(Hash)
++    cur = cur[key]
++  end
++  cur
++end
++
++# Ember {{if}} uses JS truthiness: only nil, false, 0, "", NaN are falsy.
++# An empty Array is truthy.
++def js_truthy?(v)
++  return false if v.nil? || v == false
++  return false if v.is_a?(Numeric) && v == 0
++  return false if v == ''
++  true
++end
++
++def eval_tag(tag, _ctx)
++  case tag
++  when /\Ai18n\s+"(.+?)"\z/ then "i18n(#{$1})"
++  when /\Aembeddable-host\b/ then '[host-row]'
++  when /\Ad-button\b/ then '[button]'
++  else ''
++  end
++end
++
++def render_nodes(nodes, ctx, out)
++  nodes.each do |n|
++    case n[0]
++    when :text then out << n[1]
++    when :tag  then out << eval_tag(n[1], ctx)
++    when :if
++      _, expr, body, inv = n
++      render_nodes(js_truthy?(lookup(expr, ctx)) ? body : inv, ctx, out)
++    when :each
++      _, expr, var, body, inv = n
++      list = lookup(expr, ctx)
++      if list.is_a?(Array) && !list.empty?
++        list.each { |item| render_nodes(body, ctx.merge(var => item), out) }
++      else
++        render_nodes(inv, ctx, out)
++      end
++    end
++  end
++end
++
++def render(nodes, ctx)
++  out = +''
++  render_nodes(nodes, ctx, out)
++  out
++end
++
++nodes, _pos, term = parse_nodes(TEMPLATE, 0)
++raise "template parse did not terminate cleanly: #{term.inspect}" if term
++
++empty_out    = render(nodes, { 'embedding' => { 'embeddable_hosts' => [] } })
++nonempty_out = render(nodes, { 'embedding' => { 'embeddable_hosts' => [{ 'id' => 1 }] } })
++nil_out      = render(nodes, { 'embedding' => { 'embeddable_hosts' => nil } })
++
++HEADER = 'i18n(admin.embedding.host)'
++
++if nil_out.include?(HEADER)
++  puts 'RESULT: FAIL: table header rendered when embeddable_hosts is nil'
++elsif !nonempty_out.include?(HEADER)
++  puts 'RESULT: FAIL: table header missing for a non-empty list (harness problem)'
++elsif empty_out.include?(HEADER)
++  puts 'RESULT: FAIL: empty array is truthy in {{#if}}, header rendered with no rows'
++else
++  puts 'RESULT: PASS'
++end

@@ -1,0 +1,103 @@
+diff --git a/spec/verify/embeddable_hosts_controller_verify.rb b/spec/verify/embeddable_hosts_controller_verify.rb
+new file mode 100644
+--- /dev/null
++++ b/spec/verify/embeddable_hosts_controller_verify.rb
+@@ -0,0 +1,98 @@
++#!/usr/bin/env ruby
++# Regression: Admin::EmbeddableHostsController#destroy reports success even when
++# the underlying host.destroy is blocked (returns false).
++
++# --- Minimal stubs (only what the real file needs to load and run) ---
++
++module Admin
++  class AdminController
++    def self.before_filter(*); end
++    attr_reader :rendered
++    def initialize(params = {})
++      @params = params
++    end
++    def params; @params; end
++    def render(opts); @rendered = opts; end
++    def render_serialized(*args); @rendered = { serialized: args }; end
++    def render_json_error(err); @rendered = { error: err }; end
++    def success_json; { success: 'OK' }; end
++  end
++end
++
++class EmbeddableHostSerializer; end
++
++class SiteSetting
++  def self.uncategorized_category_id; 1; end
++end
++
++class EmbeddableHost
++  STORE = {}
++
++  attr_accessor :host, :category_id, :destroy_result
++
++  def initialize
++    @destroy_result = true
++  end
++
++  def save; true; end
++
++  def destroy
++    @destroy_result
++  end
++
++  def self.where(cond)
++    StubRelation.new(STORE[cond[:id].to_s])
++  end
++
++  def self.find(id)
++    STORE[id.to_s]
++  end
++
++  class StubRelation
++    def initialize(record); @record = record; end
++    def first; @record; end
++  end
++end
++
++# --- Load the real file under test with a relative path ---
++
++require File.expand_path('../../../app/controllers/admin/embeddable_hosts_controller.rb', __FILE__)
++
++# --- Control: a normal destroy must report success ---
++
++ok_host = EmbeddableHost.new
++EmbeddableHost::STORE['1'] = ok_host
++
++control = Admin::EmbeddableHostsController.new({ id: '1' })
++control.destroy
++unless control.rendered.is_a?(Hash) && control.rendered.key?(:json)
++  puts "RESULT: FAIL: harness control failed - normal destroy did not render success (#{control.rendered.inspect})"
++  exit 1
++end
++
++# --- Regression: a blocked destroy (returns false) must NOT report success ---
++
++blocked = EmbeddableHost.new
++blocked.destroy_result = false
++EmbeddableHost::STORE['2'] = blocked
++
++controller = Admin::EmbeddableHostsController.new({ id: '2' })
++
++verdict = nil
++begin
++  controller.destroy
++rescue => e
++  # Raising on a failed destroy is acceptable (defect absent).
++  verdict = 'RESULT: PASS'
++end
++
++if verdict.nil?
++  rendered = controller.rendered
++  if rendered.is_a?(Hash) && rendered.key?(:json)
++    verdict = "RESULT: FAIL: host.destroy returned false but the action still rendered success JSON (#{rendered.inspect})"
++  else
++    verdict = 'RESULT: PASS'
++  end
++end
++
++puts verdict
