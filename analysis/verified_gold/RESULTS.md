@@ -1,9 +1,15 @@
+> **SUPERSEDED (2026-09-18) — kept as the audit record of that stage.** The numbers below (100 verified
+> bundles, "up to 145") predate the defect-level deduplication, the under-count recovery and the
+> container-test normalisation. **Current canonical state: 42 goldens + 110 individually test-validated
+> defects = 152 true bugs**, in `GOLD_DEFECT_CATALOG.md` / `DEFECT_REGISTRY.json` (`_final`). See
+> also `DUP_REVIEW_2026-09-18.md` and `UNDERCOUNT_2026-09-18.md`.
+
 # Verified hidden gold — final results
 
 Every candidate from the hidden-gold union was executed against the real post-PR code. A candidate is
 promoted only when a runnable test FAILS on the pinned post-PR revision and PASSES with a minimal fix.
 
-**100 verified hidden gold** across 6 PRs, versus a 42-comment original golden set — 2.4x as many.
+**100 verified hidden gold** across 6 PRs, versus a 42-comment original golden set — 2.4x as many. *(Final count after deduplication and under-count recovery: 110.)*
 
 Those 100 bundles contain **45 additional distinct defects** (merge audit below), so the number of
 distinct real bugs present is up to **145**, of which 100 are individually verified.

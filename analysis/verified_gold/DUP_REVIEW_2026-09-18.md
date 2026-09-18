@@ -49,6 +49,10 @@ has no close registry match**:
 - `4/B39` (case-sensitive hostname comparison) vs "configured host contains scheme" — both are the single
   exact `!=` comparison at `invalid_host?` (line 15); likely one defect with two manifestations, not two.
 
+**Final state (after the later under-count recovery and the container normalisation): 110 defects, not 106**
+— 10 defects were restored from the audit's dropped claims and 2 further duplicates were merged, and every
+defect now owns its own test directory. See `UNDERCOUNT_2026-09-18.md` and `GOLD_DEFECT_CATALOG.md`.
+
 ## D. Result
 
 | | before | after |

@@ -16,10 +16,13 @@ compound-engineering cell**: **$0.22 vs $2.95 per PR review**, **$0.04 vs $0.52 
 found** ($0.004 vs $0.048 per real finding incl. beyond-gold), at the same latency (95 s vs 110 s
 per PR).
 
-*Lens note:* the figures just quoted are the **benchmark-defined** analysis (the 42 goldens only, scored
-as F1). On the **true golden set** — our reported lens — the same cell scores **F2′ 0.388** (best harness
-cell: glm-vis · MRV · high at 0.436; best vanilla: fable · van · high at 0.361). The recommendation does
-not change between the two lenses; only the levels do (§10d). If noise-tolerance is high and budget dominates, `glm-5.3-flash-background` at low effort
+*Lens note:* the figures just quoted are the **benchmark-defined** analysis (the 42 goldens only, scored as
+F1). On the **true golden set** — our reported lens — the same cell scores **F2′ 0.388**, narrowly beaten by
+`glm-flash · MRV · low` (**0.392**) at about a ninth of the per-review cost, with `glm-vis · MRV · high` best
+overall (**0.436**). The vision-over-flash choice rests on the benchmark-lens evidence quoted here — far
+fewer hallucinations (0.908 vs 0.921 adjP) and more real findings beyond the goldens (§7.4 T6) — so under
+the true-set lens *alone* the cheaper flash cell would be the pick; the two lenses agree on the harness
+family, not on the exact cell. §10d. If noise-tolerance is high and budget dominates, `glm-5.3-flash-background` at low effort
 delivers recall 0.83 [0.74–0.92] at **0.8% of the opus cost** — but with visibly lower precision
 (0.54) and far fewer real findings beyond the golden set (§"where it stops holding").
 
@@ -39,14 +42,15 @@ adjudication, judge gpt-5.2 for the Anthropic/GLM rows.
   table in the report); recall parity with frontier harness cells on the hardest PRs; the Pareto
   frontier of $-per-real-finding vs F1 is entirely GLM cells; harnesses raise recall for weak/mid
   models (median +0.12, 17/42 pairs resolved) but add 10× tokens median; **high vs medium effort
-  buys nothing measurable in 18/22 model×framework comparisons** while costing 1.1–4.2× — buy
+  buys nothing measurable in 18/22 model×framework comparisons** while costing 0.96×–4.2× — buy
   effort only where a resolved gain exists (our table lists them).
 - **Not supported — do not repeat:** the operator's "~1/200th per token, ~1/10th per task".
   Measured: flash is **1/57 per blended token and 1/38 per task** vs fable-5.1 vanilla; vs opus-5
   vanilla it is 1/26 per token and 1/17 per task. Vision tier is only ~1/3 of opus per token.
   Cheap per-token rates are partly eaten by the harness's 10–20× token overhead — always quote
   both ratios.
-- **Where it stops holding:** (1) at medium/high effort the GLM lane was 12–30× slower
+- **Where it stops holding:** (1) at medium/high effort the GLM lane ran 4–12× slower than same-effort frontier cells (up to ~30× against
+the fastest frontier low-effort cell)
   (gateway-throughput-limited) — this is a **low-effort** recommendation, and the Sep-14/15
   provider incident showed the cheap lane's capacity limits (an operational issue, not quality,
   but it is your operational issue if you adopt it); (2) every headline GLM cell predates the
@@ -71,8 +75,8 @@ walk of the audits' own label lists restored 10 defects that had been dropped. T
 is **42 goldens + 110 individually test-validated defects = 152 distinct bugs**, every one owning its
 own test, fix and logs (`analysis/verified_gold/GOLD_DEFECT_CATALOG.md`; none undemonstrated).
 
-Under those honest denominators: **harnesses still find more real bugs** — Δrecall > 0 in **45/48**
-matched model·effort pairs (mean **+0.107**; peak-recall ratio **1.51×** versus the best vanilla cell,
+Under those honest denominators: **harnesses still find more real bugs** — Δrecall > 0 in **39/42**
+matched model·effort pairs (mean **+0.111**; peak-recall ratio **1.51×** versus the best vanilla cell,
 0.487 vs 0.322) — and that advantage survives our evaluator: on **F2′ the best harness cell beats the
 best vanilla cell 0.436 to 0.361 (1.21×)**. The equal-weight **F1′** lens is the outlier that ranks a
 vanilla cell first (0.441 vs 0.415); it is reported only as a labelled diagnostic, for the volume-
@@ -93,11 +97,12 @@ harness cells. `adjP` is reported alongside F2′ so the noise story stays visib
 labelled diagnostic.
 
 **Why even the best harness misses what it misses.** Three mechanisms, separated: (1) *denominator
-inflation* — paraphrase splits and golden duplicates made the pre-merge universe look ~1.6× bigger
-than it is (fixed: 359 raw clusters → 152 true bugs); (2) *variance, not blindness* — the best single
-cell finds **74 of 152**, and of the misses that any cell found, **every one** was found by another
-cell; the union of all 66 cells reaches **133/152 (88%)** and the harness cells alone reach 130/152
-(86%); (3) a *genuine blind tail of 19 true bugs no cell found* — overwhelmingly a different
+inflation* — paraphrase splits and golden duplicates made the universe look ~1.6× bigger than it is:
+359 raw pre-merge clusters → 253 after the strict re-merge → **152** true bugs; (2) *variance, not
+blindness* — the best single
+cell finds **74 of 152**, and of the 59 it missed that any cell found, **all 59** were found by another
+cell; the union of all 66 complete cells reaches **133/152 (88%)** and the harness cells alone 130/152
+(86%) (derived block, `final_report_metrics.json`); (3) a *genuine blind tail of 19 true bugs no cell found* — overwhelmingly a different
 class (performance/N+1/eager-loading, test-quality gaps, framework idioms, migration-lock semantics),
 i.e. outside the correctness/security brief the lenses are built for. A scope explanation was tested
 and rejected: anchored findings are 227 in-diff vs 1 out-of-diff.

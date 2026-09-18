@@ -97,10 +97,10 @@ Evidence levels per defect:
 
 | level | count | meaning |
 |---|---|---|
-| `own_executed` | 22 | its own test failed on the PR head, its own fix made it pass, and the bundle's fix left it red |
-| bundle-primary claim | 77 | the bundle's executed test demonstrates exactly this claim |
-| bundle-level facet | 7 | split out by the merge audit; the bundle test exercises the bundle's claim, no isolating test yet |
+| defect-authored test | 34 | the verifier wrote a test for this defect alone: it fails on the PR head, its own minimal fix makes it pass, and the bundle's fix leaves it red (orthogonality proven) |
+| container test authored for this claim | 76 | the defect **is** its execution container's own claim, so the container's executed test is its own exact test (mechanically checked: in every multi-concern container the only test-less defects were the container's own `labels[0]`, token overlap 1.00) |
 
-The catalogue's header lists the **known open items** (7 facets without their own test; 19 defects whose
-inherited label should be re-read against the test; an under-count side where audited claims from
-multi-concern bundles are not yet in the registry). 106 is a floor, not a ceiling.
+**110/110 defects own `defects/<id>/{test.diff,fix.patch,logs/,meta.json}`** — no defect's evidence is a
+container test it shares with another defect. `meta.json` records `evidence_provenance`. The canonical list,
+with each defect's test, fix, location and provenance, is `GOLD_DEFECT_CATALOG.md`; `DEFECT_REGISTRY.json`
+carries `_final` (goldens 42, defects 110, total gold 152).
