@@ -147,7 +147,11 @@ def defining_files(cand, limit=3):
 
 
 def sh(cmd, cwd=None, timeout=300):
-    p = subprocess.run(cmd, cwd=str(cwd or REPO), shell=True, capture_output=True, text=True, timeout=timeout)
+    try:
+        p = subprocess.run(cmd, cwd=str(cwd or REPO), shell=True, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired as e:
+        out = ((e.stdout or b"").decode(errors="ignore") if isinstance(e.stdout, bytes) else (e.stdout or ""))
+        return 124, f"TIMEOUT: command did not finish within {timeout}s\n{out}"
     return p.returncode, (p.stdout or "") + (p.stderr or "")
 
 
@@ -173,7 +177,7 @@ def classify(log):
 
 
 def run_test(test_path):
-    return sh(f"ruby -I. {test_path}", timeout=180)
+    return sh(f"ruby -I. {test_path}", timeout=120)
 
 
 async def author_test(model, cand, file, content, supplier_dir, stem):
@@ -286,6 +290,12 @@ async def do_candidate(cand, model, k_retry=3, k_fix=6, escalate=None):
         (REPO / tp).write_text(test_code)
         _rc, head_log = run_test(tp)
         c = classify(head_log)
+        if head_log.startswith("TIMEOUT") and attempt < k_retry:
+            notes.append(f"test attempt {attempt}: the test hung (did not finish) — retried")
+            content = (content if content.endswith("\n") else content + "\n") + (
+                "\n\nLAST RUN HUNG (timeout). The test must not perform real I/O: mock network calls, the DB, "
+                "and timers; assert on the mocked behaviour instead.")
+            continue
         if c == "PASS":
             clean_repo(head)
             return write_bundle(d, cand, pr, "not_a_bug", {"head": head_log}, test_code, "", tp,

@@ -156,8 +156,13 @@ def defining_files(cand, limit=3):
 def sh(cmd, cwd=None, timeout=300):
     """Run a shell command. cwd defaults to the CURRENT module-level REPO (resolved at call
     time — binding it as a default argument silently pinned every parallel stream to the
-    first checkout)."""
-    p = subprocess.run(cmd, cwd=str(cwd or REPO), shell=True, capture_output=True, text=True, timeout=timeout)
+    first checkout). A timeout is returned as a recognisable log instead of raising, so a hanging
+    test becomes a retryable authoring failure rather than an uncaught error."""
+    try:
+        p = subprocess.run(cmd, cwd=str(cwd or REPO), shell=True, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired as e:
+        out = ((e.stdout or b"").decode(errors="ignore") if isinstance(e.stdout, bytes) else (e.stdout or ""))
+        return 124, f"TIMEOUT: command did not finish within {timeout}s\n{out}"
     return p.returncode, (p.stdout or "") + (p.stderr or "")
 
 
@@ -383,7 +388,7 @@ def _run_harness_cfg(bin_, test_path):
     if ws.exists():
         ws.rename(bak); moved = True
     try:
-        return sh(f"{bin_} run {test_path} --reporter=basic --config {HARNESS_CFG}", timeout=420)[1]
+        return sh(f"{bin_} run {test_path} --reporter=basic --config {HARNESS_CFG}", timeout=180)[1]
     finally:
         if moved and bak.exists():
             bak.rename(ws)
@@ -503,6 +508,11 @@ async def do_candidate(cand, model, k_retry=3, k_fix=6, escalate=None):
         (REPO / tp).write_text(test_code)
         head_test_sha = hashlib.sha256(test_code.encode()).hexdigest()
         _rc, head_log = run_test(tp)
+        if head_log.startswith("TIMEOUT") and attempt < k_retry:
+            notes.append(f"test attempt {attempt}: the test hung (did not finish) — retried")
+            diff = (diff or "") + ("\n\nLAST RUN HUNG (timeout). The test must not perform real I/O: mock network "
+                                   "calls, the DB and timers, and assert on the mocked behaviour.")
+            continue
         if classify(head_log) == "PASS":
             # Demotion candidate — but a test can pass for the WRONG reason (e.g. an unrelated field
             # makes the payload invalid), so require an adversarial confirmation before recording it.
