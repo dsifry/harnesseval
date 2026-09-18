@@ -52,8 +52,13 @@ CSS = """
 body { margin:0; padding:0 0 6rem; background:var(--bg); color:var(--ink);
        font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; }
 main { width: min(96vw, 122rem); margin: 0 auto; padding: 2.5rem clamp(.75rem, 2.5vw, 2.5rem) 4rem; }
-/* prose keeps a readable measure; tables, figures and callouts span the full (wide) container */
-main > p, main > ul, main > ol, main > blockquote { max-width: 58rem; }
+/* Prose, headings and tables keep a responsive measure (scales with the viewport, centred inside the
+   wide container); figures and callout cards span the full container width. */
+:root { --measure: min(100%, clamp(38rem, 54vw, 74rem)); }
+main > p, main > ul, main > ol, main > blockquote, main > h1, main > h2, main > h3, main > h4,
+main > table, main > details, main > hr { max-width: var(--measure); margin-left: auto; margin-right: auto; }
+figure.callout .fig-how, figure.callout figcaption.fig-takeaway, figure.callout .fig-controls {
+  max-width: var(--measure); }
 h1,h2,h3,h4 { line-height:1.25; font-weight:700; scroll-margin-top:1rem; }
 h1 { font-size:1.9rem; margin:2.5rem 0 1rem; border-bottom:3px solid var(--accent); padding-bottom:.4rem; }
 h2 { font-size:1.45rem; margin:2.4rem 0 .8rem; border-bottom:1px solid var(--rule); padding-bottom:.3rem; }
@@ -383,7 +388,7 @@ def main(argv: list[str]) -> None:
         render(Path(argv[1]), Path(argv[2]), Path(argv[1]).stem)
         return
     render(ROOT / "REPORT.md", ROOT / "REPORT.html",
-           "Open-weight review harnesses match Opus and Sol at a fraction of the cost")
+           "September 2026: Open-weight code-review harnesses match Opus and Sol in quality at a fraction of the cost")
     render(ROOT / "EXECUTIVE_SUMMARY.md", ROOT / "EXECUTIVE_SUMMARY.html",
            "Automated code review — executive summary")
 

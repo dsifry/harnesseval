@@ -1,10 +1,15 @@
-# Open-weight review harnesses match Opus and Sol at a fraction of the cost — and beat one-shot frontier models on real bugs
+# September 2026: Open-weight models running code review harnesses match Opus and Sol in quality at a fraction of the cost — and beat one-shot prompted frontier models on finding real bugs
 
-**In one line:** harnesses running open-weight GLM models match or beat the best commercial harness cells on our
-quality metric (F2′ **0.494** vs 0.460) at **2.3×–27.6× lower cost per review**, and they beat one-shot frontier
-models on real bugs in **39/42** matched model·effort pairs. On the matched frontier-model comparison the cheap
-GLM-flash harness runs at **1/57 per blended token and 1/38 per task**. The trade is latency, not capability;
-these cells are production-capable on state-of-the-art review work.
+**In one line:** Harnesses like metareview ([github](https://github.com/dsifry/metareview)) and
+compound engineering ([github](https://github.com/EveryInc/compound-engineering-plugin)) running on
+open-weight GLM 5.3 models match or beat the OpenAI Sol and Anthropic Opus 5 models on our quality metric
+(F2′ **0.494** vs 0.460) at **2.3×–27.6× lower cost per review**, and they beat one-shot frontier
+(Fable 5.1 and Astra) models on real bugs in **39/42** matched model·effort pairs. On the matched
+frontier-model comparison the cheap GLM-flash harness runs at **1/57 per blended token and 1/38 per task**.
+The trade is latency, not capability: GLM-5.3 even at medium effort level is production-capable on
+state-of-the-art review work, and for a small reduction of recall, even GLM-5.3-flash or shifting to a
+low reasoning effort level provides much faster results and even more cost savings at just a small
+reduction of overall capability.
 
 *(report revision 2026-09-18 · tag `report-2026-09-18`)*
 
