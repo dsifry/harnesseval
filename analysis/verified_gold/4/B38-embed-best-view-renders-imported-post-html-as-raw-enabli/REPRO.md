@@ -2,7 +2,7 @@
 
 **Claim.** Embed best view renders imported post HTML as raw, enabling XSS from untrusted imported content
 
-**Verdict in this bundle:** `inconclusive_env` ({'head': '?'})
+**Verdict in this bundle:** `defect_present_before_pr` ({'base': '?', 'head': 'FAIL', 'fixed': 'PASS'})
 **Fidelity:** `standalone_real_code`  ·  **Authoring model:** `deepseek-4.1-flash-background`
 
 Everything needed to check this yourself is in this directory:

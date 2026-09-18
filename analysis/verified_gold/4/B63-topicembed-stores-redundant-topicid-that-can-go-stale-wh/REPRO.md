@@ -2,7 +2,7 @@
 
 **Claim.** TopicEmbed stores redundant topic_id that can go stale when an embedded post is moved to another topic
 
-**Verdict in this bundle:** `inconclusive_env` ({'head': '?'})
+**Verdict in this bundle:** `inconclusive_env` ({'head': 'FAIL', 'fixed': 'ERROR:NameError'})
 **Fidelity:** `standalone_real_code`  ·  **Authoring model:** `deepseek-4.1-flash-background`
 
 Everything needed to check this yourself is in this directory:

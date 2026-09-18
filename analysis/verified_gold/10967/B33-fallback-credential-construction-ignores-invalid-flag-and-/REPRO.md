@@ -2,7 +2,7 @@
 
 **Claim.** Fallback credential construction ignores `invalid` flag and can use revoked/broken OAuth credentials
 
-**Verdict in this bundle:** `inconclusive_env` ({'head': 'FAIL', 'fixed': 'FAIL'})
+**Verdict in this bundle:** `inconclusive_env` ({'head': 'FAIL', 'fixed': '?'})
 **Fidelity:** `repo_suite`  ·  **Authoring model:** `deepseek-4.1-flash`
 
 Everything needed to check this yourself is in this directory:

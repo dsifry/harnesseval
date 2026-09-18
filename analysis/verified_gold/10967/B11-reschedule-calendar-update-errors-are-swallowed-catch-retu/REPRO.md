@@ -2,7 +2,7 @@
 
 **Claim.** Reschedule calendar update errors are swallowed: catch returns [] when calendarReference is unset and logs were removed
 
-**Verdict in this bundle:** `inconclusive_env` ({'head': 'FAIL', 'fixed': 'FAIL'})
+**Verdict in this bundle:** `confirmed_regression` ({'base': 'PASS', 'head': 'FAIL', 'fixed': 'PASS'})
 **Fidelity:** `repo_suite`  ·  **Authoring model:** `deepseek-4.1-flash`
 
 Everything needed to check this yourself is in this directory:

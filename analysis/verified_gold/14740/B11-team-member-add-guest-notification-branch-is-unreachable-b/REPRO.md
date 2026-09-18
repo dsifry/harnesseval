@@ -2,7 +2,7 @@
 
 **Claim.** Team-member add-guest notification branch is unreachable because CalendarEvent.team is never populated by callers
 
-**Verdict in this bundle:** `inconclusive_env` ({'head': 'FAIL', 'fixed': 'FAIL'})
+**Verdict in this bundle:** `not_a_bug` ({'head': 'PASS', 'head_refutation': 'PASS'})
 **Fidelity:** `repo_suite`  ·  **Authoring model:** `deepseek-4.1-flash`
 
 Everything needed to check this yourself is in this directory:

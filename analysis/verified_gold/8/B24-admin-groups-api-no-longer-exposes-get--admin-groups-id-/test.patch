@@ -1,134 +1,131 @@
-# frozen_string_literal: true
-# Standalone verification: does config/routes.rb still expose
-# GET /admin/groups/:id/users ?
-#
-# Run from repo root:  ruby -I. spec/verify/routes_verify.rb
+# spec/verify/routes_verify.rb
+# Standalone regression check for config/routes.rb (no Rails app, no DB).
+# Loads the REAL config/routes.rb with a minimal routing-DSL stub, then asserts
+# that GET /admin/groups/:id/users is still exposed.
 
-# ---- minimal stubs so the real routes file can be loaded without Rails ----
 module Kernel
-  alias_method :__orig_require, :require
+  alias_method :__orig_require_for_routes_verify, :require
   def require(name)
-    return false if name.to_s == "sidekiq/web"
-    __orig_require(name)
+    return true if name == "sidekiq/web"
+    __orig_require_for_routes_verify(name)
   end
-  def require_dependency(*); end
 end
 
-module Sidekiq; end
-module Logster; end
-Sidekiq.const_set(:Web, Object.new) unless Sidekiq.const_defined?(:Web)
-Logster.const_set(:Web, Object.new) unless Logster.const_defined?(:Web)
-
-module Rails
-  def self.env; self; end
-  def self.development?; false; end
-end
+def require_dependency(_name); end
 
 class AdminConstraint; end
 class StaffConstraint; end
 class HomepageConstraint; end
 class PermalinkConstraint; end
 
-# Tiny routing DSL that records (verb, path) pairs the way Rails would
-# expand them for `namespace` / `scope` / `resources`.
-class RouteDSL
+module Sidekiq; Web = Object.new; end
+module Logster; Web = Object.new; end
+
+module Rails
+  class Env
+    def development?; false; end
+  end
+  def self.env; @env ||= Env.new; end
+end
+
+module RoutePathExtract
+  def extract_path(args)
+    args.each do |a|
+      case a
+      when String
+        return a.sub(%r{\A/}, "")
+      when Hash
+        k = a.keys.find { |x| x.is_a?(String) }
+        return k.sub(%r{\A/}, "") if k
+      end
+    end
+    nil
+  end
+end
+
+class RouteRecorder
+  include RoutePathExtract
   attr_reader :routes
+  def initialize; @routes = []; end
+  def add(verb, path); @routes << [verb, path]; end
+  def draw; yield Mapper.new(self, []); end
+end
 
-  def initialize
-    @routes = []
-    @prefix = ""
-    @resource = nil
-    @mode = nil
+class Mapper
+  include RoutePathExtract
+  def initialize(rec, prefix); @rec = rec; @prefix = prefix; end
+
+  def get(*a);    emit("GET", a);    end
+  def post(*a);   emit("POST", a);   end
+  def put(*a);    emit("PUT", a);    end
+  def delete(*a); emit("DELETE", a); end
+  def match(*a); end
+  def mount(*a); end
+
+  def namespace(name, *rest, &blk)
+    Mapper.new(@rec, @prefix + [name.to_s]).instance_eval(&blk)
   end
 
-  def match(*a);  rec("MATCH", a);  end
-  def get(*a);    rec("GET", a);    end
-  def post(*a);   rec("POST", a);   end
-  def put(*a);    rec("PUT", a);    end
-  def delete(*a); rec("DELETE", a); end
-  def mount(*); end
-  def root(*); end
-  def constraints(*); yield if block_given?; end
-
-  def rec(verb, args)
-    path = args.first
-    path = path.keys.first if path.is_a?(Hash)
-    path = path.to_s.split("=>").first.to_s.strip
-    full = @prefix.dup
-    full += @resource if @resource
-    full += "/:id" if @resource && @mode == :member
-    full += "/#{path}"
-    @routes << [verb, full.gsub(%r{/+}, "/")]
+  def scope(path, *rest, &blk)
+    seg = path.to_s.sub(%r{\A/}, "")
+    Mapper.new(@rec, @prefix + [seg]).instance_eval(&blk)
   end
 
-  def namespace(name, &b)
-    saved = @prefix
-    @prefix = (@prefix + "/#{name}").gsub(%r{/+}, "/")
-    instance_eval(&b) if b
-  ensure
-    @prefix = saved
+  def resources(name, *rest, &blk)
+    base = @prefix + [name.to_s]
+    ResourceScope.new(@rec, base).instance_eval(&blk) if blk
   end
 
-  def scope(path, &b)
-    saved = @prefix
-    @prefix = (@prefix + path.to_s).gsub(%r{/+}, "/")
-    instance_eval(&b) if b
-  ensure
-    @prefix = saved
-  end
+  private
 
-  def resources(name, _opts = {}, &b)
-    saved = [@resource, @mode]
-    @resource = (@resource || "") + "/#{name}"
-    @mode = :member
-    instance_eval(&b) if b
-  ensure
-    @resource, @mode = saved
+  def emit(verb, args)
+    p = extract_path(args)
+    return if p.nil?
+    @rec.add(verb, (@prefix + [p]).join("/"))
   end
+end
 
-  def collection(&b)
-    saved = @mode; @mode = :collection
-    instance_eval(&b) if b
-  ensure
-    @mode = saved
-  end
+class ResourceScope
+  include RoutePathExtract
+  def initialize(rec, base); @rec = rec; @base = base; end
 
-  def member(&b)
-    saved = @mode; @mode = :member
-    instance_eval(&b) if b
-  ensure
-    @mode = saved
+  def collection(&blk); Mapper.new(@rec, @base).instance_eval(&blk);        end
+  def member(&blk);     Mapper.new(@rec, @base + [":id"]).instance_eval(&blk); end
+
+  def get(*a);    emit("GET", a);    end
+  def post(*a);   emit("POST", a);   end
+  def put(*a);    emit("PUT", a);    end
+  def delete(*a); emit("DELETE", a); end
+
+  private
+
+  def emit(verb, args)
+    p = extract_path(args)
+    return if p.nil?
+    @rec.add(verb, (@base + [":id", p]).join("/"))
   end
 end
 
 module Discourse
   class Application
-    def self.routes; @routes ||= Router.new; end
-  end
-  class Router
-    attr_reader :last
-    def draw(&block)
-      dsl = RouteDSL.new
-      dsl.instance_eval(&block)
-      @last = dsl.routes
-    end
+    def self.routes; @routes ||= RouteRecorder.new; end
   end
 end
 
-# ---- load the REAL routes file ----
-routes_path = File.expand_path("../../config/routes.rb", __FILE__)
 begin
-  require routes_path
+  require_relative "../../config/routes.rb"
 rescue Exception => e
-  puts "RESULT: FAIL: could not load #{routes_path}: #{e.class}: #{e.message}"
-  exit
+  puts "RESULT: FAIL: could not load config/routes.rb: #{e.class}: #{e.message}"
+  exit 0
 end
 
-routes = Discourse::Application.routes.last || []
-target = routes.any? { |v, p| v == "GET" && p == "/admin/groups/:id/users" }
+routes = Discourse::Application.routes.routes
+target = ["GET", "admin/groups/:id/users"]
 
-if target
+puts "recorded admin/groups GET/PUT/DELETE routes: #{routes.select { |v, p| p.start_with?('admin/groups') }.inspect}" if ENV["DEBUG_ROUTES"]
+
+if routes.include?(target)
   puts "RESULT: PASS"
 else
-  puts "RESULT: FAIL: GET /admin/groups/:id/users route is absent from config/routes.rb (no read replacement for the member list)"
+  puts "RESULT: FAIL: GET /admin/groups/:id/users is not defined (removed with no read replacement)"
 end

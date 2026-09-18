@@ -1,67 +1,119 @@
-require 'digest/sha1'
+# frozen_string_literal: true
+#
+# Standalone regression harness that loads the REAL app/models/post.rb and
+# probes the raw_html cooking branch introduced for imported RSS/HTML posts.
+#
+# Claimed defect: Post#cook returns `raw` unchanged when cook_method is
+# :raw_html, skipping the rendering/sanitization pipeline entirely, so an
+# attacker-controlled HTML payload is stored and later rendered verbatim.
 
 module Kernel
-  alias_method :rb_orig_require, :require
-  def require(path)
+  alias_method :__orig_require, :require
+  def require(path, *rest)
     return true if path == 'archetype'
-    rb_orig_require(path)
+    __orig_require(path, *rest)
   end
-  def require_dependency(name); end
+  private :require, :__orig_require
 end
 
-module Jobs; class Base; end; end
-module PrettyText; def self.excerpt(*a); end; end
-module RateLimiter
-  module OnCreateRecord; end
-  def self.new(*a); end
+def require_dependency(*); end
+
+module Enum
+  def initialize(*keys)
+    @map = {}
+    keys.each_with_index { |k, i| @map[k] = i + 1 }
+  end
+
+  def [](key); @map[key]; end
 end
-class PostRevisor; def initialize(*a); end; end
+
+module RateLimiter
+  module OnCreateRecord
+    def self.included(base); base.extend(ClassMethods); end
+
+    module ClassMethods
+      def rate_limit(*); end
+    end
+  end
+end
+
 module Trashable; end
-class PostAnalyzer; def initialize(*a); end; def cook(*a); end; end
-module Validators; class PostValidator; end; end
+
+module Validators
+  class PostValidator; end
+end
+
 module Plugin
   module Filter
-    def self.apply(*a); a.last; end
+    class << self
+      attr_accessor :calls
+
+      def apply(_key, _post, cooked)
+        self.calls = (calls || 0) + 1
+        "FILTERED(#{cooked})"
+      end
+    end
   end
 end
-module Archetype; end
 
-class Enum
-  def self.new(*args)
-    h = {}
-    args.each_with_index { |a, i| h[a] = i }
-    h
-  end
+class PostAnalyzer
+  def initialize(raw, _topic_id); @raw = raw; end
+  def cook(*); "COOKED(#{@raw})"; end
 end
 
 module ActiveRecord
   class Base
-    def self.belongs_to(*a); end
-    def self.has_many(*a); end
-    def self.has_one(*a); end
-    def self.scope(*a, &b); end
-    def self.validates_with(*a); end
-    def self.before_create(&b); end
-    def self.before_save(&b); end
-    def self.after_save(&b); end
-    def self.after_update(&b); end
-    def self.rate_limit(*a); end
-    attr_accessor :raw, :cook_method, :topic_id, :cooked, :version, :id
+    def initialize(attrs = {})
+      @attrs = {}
+      attrs.each { |k, v| @attrs[k] = v }
+    end
+
+    def method_missing(name, *args)
+      s = name.to_s
+      if s.end_with?('=')
+        @attrs[s.chomp('=').to_sym] = args.first
+      elsif @attrs.key?(name)
+        @attrs[name]
+      else
+        super
+      end
+    end
+
+    def respond_to_missing?(name, include_private = false)
+      @attrs.key?(name.to_s.chomp('=').to_sym) || super
+    end
+
+    %w[belongs_to has_many has_one validates_with attr_accessor scope
+       before_create before_save after_save after_update].each do |macro|
+      define_singleton_method(macro) { |*_args, &_blk| }
+    end
   end
 end
 
-require_relative '../../app/models/post.rb'
+require_relative '../../app/models/post'
 
-post = Post.new
-payload = '<script>alert("stored-xss")</script><img src=x onerror=alert(1)>'
-post.raw = payload
-post.cook_method = Post.cook_methods[:raw_html]
-post.topic_id = 1
+Plugin::Filter.calls = 0
 
-result = post.cook
+payload = '<img src=x onerror="alert(document.cookie)">'
+raw_post = Post.new(raw: payload, cook_method: Post.cook_methods[:raw_html])
+out = raw_post.cook
+filter_calls_for_raw = Plugin::Filter.calls
 
-if result == payload
-  puts "RESULT: FAIL: cook returns raw HTML unchanged when cook_method=raw_html, bypassing sanitization and the after_post_cook plugin filter"
+regular = Post.new(raw: '<b>hello</b>', cook_method: Post.cook_methods[:regular])
+regular_out = regular.cook
+
+puts "raw_html cook output  : #{out.inspect}"
+puts "raw_html filter calls : #{filter_calls_for_raw}"
+puts "regular  cook output  : #{regular_out.inspect}"
+puts "regular  filter calls : #{Plugin::Filter.calls}"
+
+defect = (out == payload) &&
+         out.include?('onerror') &&
+         filter_calls_for_raw.to_i.zero? &&
+         regular_out != regular.raw
+
+if defect
+  puts 'RESULT: FAIL: raw_html cooking returns the raw unsanitized HTML verbatim and bypasses Plugin::Filter / the sanitization pipeline'
 else
-  puts "RESULT: PASS"
+  puts 'RESULT: PASS'
 end

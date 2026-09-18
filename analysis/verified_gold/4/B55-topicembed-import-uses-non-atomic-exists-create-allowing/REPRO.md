@@ -2,7 +2,7 @@
 
 **Claim.** TopicEmbed import uses non-atomic exists?/create! allowing concurrent duplicates and unhandled RecordNotUnique
 
-**Verdict in this bundle:** `inconclusive_env` ({'head': '?'})
+**Verdict in this bundle:** `behavior_change_not_regression` ({'base': 'ERROR:LoadError', 'head': 'FAIL', 'fixed': 'PASS'})
 **Fidelity:** `standalone_real_code`  ·  **Authoring model:** `deepseek-4.1-flash-background`
 
 Everything needed to check this yourself is in this directory:

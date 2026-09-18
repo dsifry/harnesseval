@@ -1,86 +1,78 @@
-#!/usr/bin/env ruby
-# Standalone regression evidence for the claimed defect in
-# app/assets/javascripts/admin/routes/admin-embedding.js.es6
+require 'json'
+
+# Standalone regression test for
+#   app/assets/javascripts/admin/routes/admin-embedding.js.es6
+# Run from the repo root: ruby -I. spec/verify/admin-embedding.js_verify.rb
 #
-# The real file's model() body is loaded from disk and executed against a
-# minimal fake of the 2015-era Ember Data store so the only real logic under
-# test is the route source itself -- nothing is re-implemented.
+# No Rails, no DB. The REAL route source is loaded and its model() body is
+# executed against a minimal Ember Data store stub, so the only real logic
+# exercised is the code under test.
 
-source_path = File.join(__dir__, '..', '..', 'app', 'assets', 'javascripts', 'admin', 'routes', 'admin-embedding.js.es6')
-source = File.read(source_path)
+PATH = File.expand_path('app/assets/javascripts/admin/routes/admin-embedding.js.es6', Dir.pwd)
 
-# Pull the REAL model() body out of the file under test.
-m = source.match(/model\s*\(\s*\)\s*\{([^}]*)\}/m)
-abort 'could not locate model() in file under test' unless m
-model_body = m[1]
+unless File.file?(PATH)
+  puts "RESULT: FAIL: route source not found at #{PATH}"
+  exit 0
+end
 
-# Execute that exact body inside a lambda.  `this.store` is rebound to the
-# fake store passed at call time -- the route code itself is unchanged.
-model_fn = eval("->(store) { #{model_body.gsub('this.store', 'store')} }") # rubocop:disable Security/Eval
+src = File.read(PATH)
 
-# --- Minimal fake of the Ember Data store semantics being exercised ---
-# store.find('embedding') with no id dispatches to findAll, which extracts the
-# PLURAL root key ('embeddings') and returns a RecordArray -- never the
-# singular 'embedding' record that a singleton show route expects.
-class FakeStore
-  def initialize(payload)
-    @payload = payload
-  end
+model_body = src[/model\s*\(\s*\)\s*\{(.*?)\}/m, 1]
+if model_body.to_s.strip.empty?
+  puts "RESULT: FAIL: could not locate model() in #{PATH}"
+  exit 0
+end
+
+expr = model_body[/return\s+(.+?);?\s*\z/m, 1].to_s.strip.sub(/;\z/, '')
+expr = expr.sub(/\Athis\./, '') # `this.store` -> `store` inside the instance_eval ctx
+
+# The admin#show route renders a SINGLETON embedding; the server answers with the
+# singular root key, matching the shape the fixture in this PR exercises.
+SERVER_PAYLOAD = {
+  'embedding' => {
+    'id'               => 'singleton',
+    'embeddable_hosts' => [{ 'host' => 'example.com' }]
+  }
+}.freeze
+
+# Minimal Ember Data 1.x store semantics:
+#   store.find(type)     -> findAll: reads the PLURAL root key ('embeddings')
+#   store.find(type, id) -> reads the SINGULAR root key for a singleton record
+class EmberDataStore
+  def initialize(payload); @payload = payload; end
 
   def find(type, id = nil)
-    id.nil? ? findAll(type) : findById(type, id)
-  end
-
-  def findAll(type)
-    RecordArray.new(Array(@payload["#{type}s"]))
-  end
-
-  def findById(type, _id)
-    Record.new(@payload.fetch(type))
-  end
-
-  class RecordArray
-    def initialize(records);   @records = records; end
-    def embeddableHosts;       nil;                end # collection has no singular attr
-  end
-
-  class Record
-    def initialize(attrs);     @attrs = attrs;     end
-    def embeddableHosts;       @attrs['embeddableHosts']; end
+    id.nil? ? @payload["#{type}s"] : @payload[type]
   end
 end
 
-# The shape the server legitimately returns for this singleton resource.
-singular_payload = { 'embedding' => { 'embeddableHosts' => [{ 'id' => 1, 'host' => 'example.com' }] } }
-# The (wrong) plural shape the reported findall fixture used.
-plural_payload   = { 'embeddings' => [{ 'id' => 1 }] }
+ctx = Object.new
+ctx.define_singleton_method(:store) { EmberDataStore.new(SERVER_PAYLOAD) }
 
-def has_hosts?(model)
-  model.respond_to?(:embeddableHosts) && !model.embeddableHosts.nil? && model.embeddableHosts != false
-end
-
-had_hosts = {}
-[%w[singular singular_payload], %w[plural plural_payload]].each do |name, _|
-  payload = binding.local_variable_get("#{name}_payload")
-  had_hosts[name] = has_hosts?(model_fn.call(FakeStore.new(payload)))
-end
-
-# Reproduce the reported 'add host' crash: model.embeddableHosts.pushObject.
-model = model_fn.call(FakeStore.new(singular_payload))
-push_error = begin
-  model.embeddableHosts.pushObject({ 'host' => 'new.example.com' })
-  nil
+begin
+  model = ctx.instance_eval(expr)
 rescue StandardError => e
-  e.class
+  puts "RESULT: FAIL: model() raised #{e.class}: #{e.message}"
+  exit 0
 end
 
-if had_hosts['singular']
-  puts 'RESULT: PASS'
+expected = SERVER_PAYLOAD['embedding']
+
+# Claimed downstream symptom: {{if embedding.embeddableHosts}} stays falsy and
+# the add-host handler dies on undefined.pushObject.
+add_host_crashed =
+  begin
+    (model.is_a?(Hash) ? model['embeddable_hosts'] : nil).push({ 'host' => 'new' })
+    false
+  rescue NoMethodError
+    true
+  end
+
+if model.nil? || model != expected || add_host_crashed
+  puts "RESULT: FAIL: model() evaluated `#{expr}` -- store.find with no id is routed to " \
+       "findAll, which parses the plural root key 'embeddings'; the payload only carries " \
+       "the singular 'embedding' key, so the route model became #{model.inspect} instead " \
+       "of the embedding record (add-host crashed: #{add_host_crashed})."
 else
-  puts "RESULT: FAIL: store.find('embedding') without an id routes to findAll, " \
-       "which parses the plural 'embeddings' root key; the returned collection " \
-       "has no embeddableHosts (singular payload hosts?=#{had_hosts['singular'].inspect}, " \
-       "plural payload hosts?=#{had_hosts['plural'].inspect}) and " \
-       "embedding.embeddableHosts.pushObject raises #{push_error.inspect}, so the " \
-       "admin embedding page's host table never renders."
+  puts 'RESULT: PASS'
 end

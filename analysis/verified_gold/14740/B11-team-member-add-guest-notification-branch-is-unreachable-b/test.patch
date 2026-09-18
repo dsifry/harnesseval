@@ -1,67 +1,97 @@
-import { describe, expect, vi } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 
-// Capture constructor arguments for the templates used by sendAddGuestsEmails.
-const organizerAddGuestsArgs: any[] = [];
-const attendeeAddGuestsArgs: any[] = [];
+vi.mock("@prisma/extension-accelerate", () => ({
+  withAccelerate: () => (client: unknown) => client,
+}));
+
+vi.mock("@vercel/functions", () => ({
+  waitUntil: () => undefined,
+}));
+
+const { organizerAddGuestsCalls } = vi.hoisted(() => ({
+  organizerAddGuestsCalls: [] as Array<Record<string, unknown>>,
+}));
 
 vi.mock("./templates/organizer-add-guests-email", () => ({
-  default: class MockOrganizerAddGuestsEmail {
-    sendEmail = vi.fn().mockResolvedValue(undefined);
-    constructor(args: any) {
-      organizerAddGuestsArgs.push(args);
+  default: class OrganizerAddGuestsEmail {
+    constructor(opts: Record<string, unknown>) {
+      organizerAddGuestsCalls.push(opts);
     }
+    async sendEmail() {}
   },
 }));
 
 vi.mock("./templates/attendee-add-guests-email", () => ({
-  default: class MockAttendeeAddGuestsEmail {
-    sendEmail = vi.fn().mockResolvedValue(undefined);
-    constructor(...args: any[]) {
-      attendeeAddGuestsArgs.push(args);
-    }
+  default: class AttendeeAddGuestsEmail {
+    constructor(_calEvent: unknown, _attendee: unknown) {}
+    async sendEmail() {}
   },
 }));
 
 vi.mock("./templates/attendee-scheduled-email", () => ({
-  default: class MockAttendeeScheduledEmail {
-    sendEmail = vi.fn().mockResolvedValue(undefined);
-    constructor(_args: any) {}
+  default: class AttendeeScheduledEmail {
+    constructor(_calEvent: unknown, _attendee: unknown) {}
+    async sendEmail() {}
   },
 }));
 
-describe("sendAddGuestsEmails (team-member notification)", () => {
-  test("notifies each team member when the booking belongs to a team", async () => {
-    const { sendAddGuestsEmails } = await import("./email-manager");
+const fakeLanguage = { locale: "en", translate: (key: string) => key };
 
-    const teamMember = { name: "Team Member", email: "team-member@example.com" };
+describe("sendAddGuestsEmails (team bookings) adversarial", () => {
+  test("preserves team on the constructed CalendarEvent passed to OrganizerAddGuestsEmail", async () => {
+    const { sendAddGuestsEmails } = await import("./email-manager");
+    organizerAddGuestsCalls.length = 0;
+
+    const teamMembers = [
+      { name: "Alpha", email: "alpha@example.com", timeZone: "UTC", language: fakeLanguage },
+      { name: "Beta", email: "beta@example.com", timeZone: "UTC", language: fakeLanguage },
+    ];
 
     const calEvent = {
       type: "team",
-      title: "Team Booking",
-      startTime: new Date().toISOString(),
-      endTime: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+      title: "Team Sync",
+      description: "",
+      startTime: "2024-05-01T10:00:00.000Z",
+      endTime: "2024-05-01T10:30:00.000Z",
+      organizer: {
+        id: 1,
+        name: "Org",
+        email: "org@example.com",
+        timeZone: "UTC",
+        language: fakeLanguage,
+      },
       attendees: [
         {
           name: "Attendee",
           email: "attendee@example.com",
           timeZone: "UTC",
-          language: { locale: "en" },
+          language: fakeLanguage,
         },
       ],
-      organizer: { name: "Organizer", email: "organizer@example.com" },
-      team: { members: [{ ...teamMember }] },
-      iCalUID: "verified-test-uid",
-    } as any;
+      team: {
+        id: 42,
+        name: "Engineering",
+        members: teamMembers,
+      },
+    };
 
-    await sendAddGuestsEmails(calEvent, []);
+    await sendAddGuestsEmails(calEvent as never, ["new-guest@example.com"]);
 
-    const teamMemberCall = organizerAddGuestsArgs.find(
-      (args) => args && args.teamMember && args.teamMember.email === teamMember.email
-    );
+    const baseOrganizerCall = organizerAddGuestsCalls.find(
+      (call) => !("teamMember" in call)
+    ) as any;
 
+    expect(baseOrganizerCall).toBeDefined();
+    expect(baseOrganizerCall.calEvent.team).toBeDefined();
     expect(
-      teamMemberCall,
-      "expected sendAddGuestsEmails to send OrganizerAddGuestsEmail to each team member, but the constructed CalendarEvent omitted team so the team-member branch never ran"
-    ).toBeDefined();
+      baseOrganizerCall.calEvent.team.members.map((m: { email: string }) => m.email).sort()
+    ).toEqual(["alpha@example.com", "beta@example.com"]);
+
+    const teamMemberCalls = organizerAddGuestsCalls.filter((call) => "teamMember" in call);
+    expect(teamMemberCalls).toHaveLength(2);
+    for (const call of teamMemberCalls) {
+      const c = call as any;
+      expect(c.calEvent.team?.members).toHaveLength(2);
+    }
   });
 });

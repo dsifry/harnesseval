@@ -2,7 +2,7 @@
 
 **Claim.** Embed allowlist check does not scope requested topic/embed_url to the referer host's permitted category
 
-**Verdict in this bundle:** `inconclusive_env` ({'head': 'FAIL', 'fixed': 'ERROR:NoMethodError'})
+**Verdict in this bundle:** `behavior_change_not_regression` ({'base': 'ERROR:NoMethodError', 'head': 'FAIL', 'fixed': 'PASS'})
 **Fidelity:** `standalone_real_code`  ·  **Authoring model:** `deepseek-4.1-flash-background`
 
 Everything needed to check this yourself is in this directory:

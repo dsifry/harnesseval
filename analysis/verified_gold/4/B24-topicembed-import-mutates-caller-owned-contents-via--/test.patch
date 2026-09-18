@@ -1,90 +1,69 @@
+#!/usr/bin/env ruby
 require 'digest'
-require 'uri'
 
-# --- Minimal stubs so the real TopicEmbed file can load without Rails ---
-module Kernel
-  def require_dependency(_name); end
-end
+# --- Minimum stubs so the real file can load without Rails/DB ---
+def require_dependency(*); end
 
 module I18n
-  def self.t(_key, opts = {})
-    "imported from #{opts[:link]}"
+  def self.t(*args, **opts)
+    link = opts[:link] || (args.last.is_a?(Hash) ? args.last[:link] : nil)
+    "imported from #{link}"
   end
 end
 
-module Nokogiri
-  module HTML
-    def self.fragment(_contents)
-      obj = Object.new
-      def obj.css(_sel); []; end
-      def obj.to_html; ''; end
-      obj
-    end
-  end
-end
-
-class NilClass
-  def present?; false; end
-  def blank?; true; end
-end
-
-class ActiveRecord
+module ActiveRecord
   class Base
     def self.belongs_to(*); end
     def self.validates_presence_of(*); end
-    def self.where(*); StubRelation; end
+    def self.transaction; yield; end
+    def self.where(*); FakeRelation.new; end
+  end
+  class FakeRelation
+    def first; nil; end
+    def pluck(*); []; end
+    def update_column(*); end
   end
 end
 
-module StubRelation
-  def self.first; nil; end
-end
-
-class Topic
-  def self.transaction; yield; end
-end
-
-class PostCreator
-  def initialize(*); end
-  def create; nil; end
-end
-
-class PostRevisor; end
-class Post; end
-
-# Load the REAL file under test with a relative path.
+# Load the REAL file under test (no redefinition of the class).
 require_relative '../../app/models/topic_embed'
 
-user = Object.new
-url = 'http://example.com/article'
-title = 'The Article'
+URL = 'http://example.com/article'.freeze
 
-# --- Check 1: mutation of caller-owned string ---
-original = 'Hello world'
-caller_contents = original.dup
+# --- Observation 1: caller-owned mutable string is mutated in place ---
+mutable = +'original article body'
 begin
-  TopicEmbed.import(user, url, title, caller_contents)
-rescue => e
-  # ignore — we only care about mutation
+  TopicEmbed.import(:fake_user, URL, 'Title', mutable)
+rescue StandardError
+  # Downstream stubs (PostCreator, Topic, etc.) are intentionally absent;
+  # we only need to observe the side effect on the argument.
 end
-mutation = (caller_contents != original)
+mutated_in_place = mutable.include?('<hr>') || mutable.include?('imported from')
 
-# --- Check 2: FrozenError on frozen input ---
-frozen_input = 'Hello world'.freeze
+# --- Observation 2: frozen input raises FrozenError (or frozen RuntimeError) ---
+frozen = 'original article body'.freeze
 frozen_raised = false
-frozen_error = nil
 begin
-  TopicEmbed.import(user, url, title, frozen_input)
-rescue RuntimeError => e
-  frozen_raised = true
-  frozen_error = e
+  TopicEmbed.import(:fake_user, URL, 'Title', frozen)
+rescue Exception => e
+  frozen_raised = true if (defined?(FrozenError) && e.is_a?(FrozenError)) ||
+                          (e.is_a?(RuntimeError) && e.message =~ /frozen/i)
 end
 
-if mutation || frozen_raised
-  reasons = []
-  reasons << "import mutated caller-owned string in place (added #{caller_contents.length - original.length} chars: #{caller_contents.inspect})" if mutation
-  reasons << "raised #{frozen_error.class} on frozen input" if frozen_raised
-  puts "RESULT: FAIL: #{reasons.join('; ')}"
+# --- Observation 3: calling twice with same string accumulates duplicates ---
+reused = +'article body'
+2.times do
+  begin
+    TopicEmbed.import(:fake_user, URL, 'Title', reused)
+  rescue StandardError
+  end
+end
+duplicate_footers = reused.scan(/<hr>/).length > 1 || reused.scan(/imported from/).length > 1
+
+if mutated_in_place && frozen_raised
+  puts "RESULT: FAIL: TopicEmbed.import mutates caller-owned `contents` via `<<`; frozen input raises, and reuse accumulates the imported-from footer"
+el_sif mutated_in_place || frozen_raised
+  puts "RESULT: FAIL: partial defect detected (mutated=#{mutated_in_place}, frozen_raised=#{frozen_raised}, duplicated=#{duplicate_footers})"
 else
   puts 'RESULT: PASS'
 end

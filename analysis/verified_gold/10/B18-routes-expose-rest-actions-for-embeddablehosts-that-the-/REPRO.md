@@ -2,7 +2,7 @@
 
 **Claim.** Routes expose REST actions for embeddable_hosts that the controller doesn't implement (ActionNotFound on GET)
 
-**Verdict in this bundle:** `inconclusive_env` ({'head': 'ERROR:uninitialized constant'})
+**Verdict in this bundle:** `confirmed_regression` ({'base': 'PASS', 'head': 'FAIL', 'fixed': 'PASS'})
 **Fidelity:** `standalone_real_code`  ·  **Authoring model:** `deepseek-4.1-flash-background`
 
 Everything needed to check this yourself is in this directory:

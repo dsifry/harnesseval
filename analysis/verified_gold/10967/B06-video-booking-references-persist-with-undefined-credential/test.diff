@@ -2,15 +2,50 @@ diff --git a/packages/core/EventManager.verified.test.ts b/packages/core/EventMa
 new file mode 100644
 --- /dev/null
 +++ b/packages/core/EventManager.verified.test.ts
-@@ -0,0 +1,58 @@
-+import { describe, expect, it, vi, beforeEach } from "vitest";
+@@ -0,0 +1,127 @@
++import { describe, expect, it, vi } from "vitest";
 +
 +vi.mock("@calcom/prisma", () => ({
 +  default: {
 +    credential: {
-+      findUnique: vi.fn(),
++      findUnique: vi.fn().mockResolvedValue(null),
++      findMany: vi.fn().mockResolvedValue([]),
++      findFirst: vi.fn().mockResolvedValue(null),
 +    },
 +  },
++}));
++
++vi.mock("@calcom/app-store/utils", () => ({
++  default: vi.fn().mockResolvedValue([]),
++}));
++
++vi.mock("@calcom/app-store/_utils/getCalendar", () => ({
++  getCalendar: vi.fn(),
++}));
++
++vi.mock("@calcom/app-store/dailyvideo/lib/VideoApiAdapter", () => ({
++  FAKE_DAILY_CREDENTIAL: {
++    id: -1,
++    type: "daily_video",
++    appId: "daily-video",
++    userId: 0,
++    key: {},
++    invalid: false,
++  },
++}));
++
++vi.mock("@calcom/app-store/dailyvideo/zod", () => ({
++  appKeysSchema: { safeParse: () => ({ success: false, data: undefined }) },
++}));
++
++vi.mock("@calcom/app-store/locations", () => ({
++  getEventLocationTypeFromApp: vi.fn().mockReturnValue(null),
++  MeetLocationType: "integrations:google:meet",
++}));
++
++vi.mock("./CalendarManager", () => ({
++  createEvent: vi.fn().mockResolvedValue(null),
++  updateEvent: vi.fn().mockResolvedValue(null),
 +}));
 +
 +vi.mock("./videoClient", () => ({
@@ -18,46 +53,80 @@ new file mode 100644
 +  updateMeeting: vi.fn(),
 +}));
 +
-+vi.mock("./CalendarManager", () => ({
-+  createEvent: vi.fn().mockResolvedValue(null),
-+  updateEvent: vi.fn(),
-+}));
-+
-+import EventManager from "./EventManager";
 +import { createMeeting } from "./videoClient";
++import EventManager from "./EventManager";
 +
 +describe("EventManager video reference credentialId", () => {
-+  beforeEach(() => {
-+    vi.clearAllMocks();
-+  });
++  it("persists the video integration credentialId on non-calendar references returned by create()", async () => {
++    const videoCredentialId = 42;
 +
-+  it("should preserve credentialId for non-calendar (video) references", async () => {
-+    const mockVideoResult = {
-+      credentialId: "video-cred-1",
-+      type: "daily_video",
++    vi.mocked(createMeeting).mockImplementation(async (_credential: any, event: any) => ({
++      type: "office365_video",
++      success: true,
++      uid: event.uid,
 +      createdEvent: {
-+        id: "meeting-123",
-+        type: "daily_video",
++        id: "video-meeting-abc",
++        type: "office365_video",
++        url: "https://video.example.com/abc",
++        password: "",
 +      },
-+      originalEvent: {
-+        location: "integrations:daily",
-+      },
-+    };
-+    (createMeeting as any).mockResolvedValue(mockVideoResult);
++      originalEvent: event,
++      credentialId: videoCredentialId,
++    }));
 +
-+    const eventManager = new EventManager([]);
-+    const event = {
-+      type: "test",
++    const manager = new EventManager([
++      {
++        id: videoCredentialId,
++        type: "office365_video",
++        appId: "office365-video",
++        userId: 1,
++        key: {},
++        invalid: false,
++        appName: "office365-video",
++      } as any,
++    ] as any);
++
++    const event: any = {
++      uid: "booking-uid-123",
++      type: "test-event",
 +      title: "Test",
++      description: "",
 +      startTime: new Date().toISOString(),
 +      endTime: new Date().toISOString(),
-+      location: "integrations:daily",
-+      destinationCalendar: [],
-+    } as any;
++      location: "integrations:office365-video",
++      destinationCalendar: [
++        {
++          integration: "google_calendar",
++          externalId: "ext-1",
++          credentialId: 999,
++        },
++      ],
++      attendees: [],
++      organizer: {
++        email: "organizer@example.com",
++        name: "Organizer",
++        timeZone: "UTC",
++        language: { locale: "en" },
++      },
++      customInputs: [],
++      videoCallData: undefined,
++      conferenceData: undefined,
++    };
 +
-+    const result = await eventManager.createEvent(event);
++    const result = await (manager as any).create(event);
 +
-+    expect(result.referencesToCreate).toHaveLength(1);
-+    expect(result.referencesToCreate[0].credentialId).toBe("video-cred-1");
++    const videoReference = result.referencesToCreate.find(
++      (ref: any) => !ref.type.includes("_calendar")
++    );
++
++    // Claimed behavior: video (non-calendar) references must retain the
++    // credentialId of the video integration result so later cancel/update
++    // lookups can resolve the account. Current post-PR code always writes
++    // `undefined` here for non-calendar results.
++    expect(videoReference, "expected a non-calendar (video) reference to be returned").toBeDefined();
++    expect(
++      videoReference.credentialId,
++      "video reference must persist the video integration credentialId"
++    ).toBe(videoCredentialId);
 +  });
 +});

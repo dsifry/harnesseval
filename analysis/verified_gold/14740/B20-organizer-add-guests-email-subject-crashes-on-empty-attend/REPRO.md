@@ -2,7 +2,7 @@
 
 **Claim.** Organizer add-guests email subject crashes on empty attendees due to unguarded attendees[0].name access
 
-**Verdict in this bundle:** `inconclusive_env` ({'head': 'FAIL', 'fixed': 'FAIL'})
+**Verdict in this bundle:** `behavior_change_not_regression` ({'base': 'N/A_module_absent', 'head': 'FAIL', 'fixed': 'PASS'})
 **Fidelity:** `repo_suite`  ·  **Authoring model:** `deepseek-4.1-flash`
 
 Everything needed to check this yourself is in this directory:

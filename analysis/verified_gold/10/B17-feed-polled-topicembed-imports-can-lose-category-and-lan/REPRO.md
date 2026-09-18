@@ -2,7 +2,7 @@
 
 **Claim.** Feed-polled TopicEmbed imports can lose category and land in Uncategorized when no EmbeddableHost matches
 
-**Verdict in this bundle:** `inconclusive_env` ({'head': 'ERROR:NoMethodError'})
+**Verdict in this bundle:** `defect_present_before_pr` ({'base': 'FAIL', 'head': 'FAIL', 'fixed': 'PASS'})
 **Fidelity:** `standalone_real_code`  ·  **Authoring model:** `deepseek-4.1-flash-background`
 
 Everything needed to check this yourself is in this directory:

@@ -1,32 +1,43 @@
 require 'erb'
 
-path = File.expand_path('../../app/views/layouts/embed.html.erb', __FILE__)
-abort "File not found: #{path}" unless File.exist?(path)
-
-class FakeRequest
-  attr_reader :referer
-  def initialize(referer)
-    @referer = referer
+class HtmlEscapedReferer
+  def initialize(raw)
+    @raw = raw
+  end
+  def to_s
+    ERB::Util.html_escape(@raw)
   end
 end
 
-def render_template(path, referer)
-  template = ERB.new(File.read(path))
-  mod = Module.new
-  template.def_method(mod, :render)
-  context = Object.new
-  context.extend(mod)
-  context.instance_variable_set(:@request, FakeRequest.new(referer))
-  def context.stylesheet_link_tag(*); ""; end
-  def context.request; @request; end
-  context.render { "" }
+class StubView
+  def initialize(referer)
+    @referer = referer
+  end
+  def stylesheet_link_tag(name)
+    "<!-- #{name} -->"
+  end
+  def request
+    @request ||= Struct.new(:referer).new(HtmlEscapedReferer.new(@referer))
+  end
 end
 
-referer = "http://example.com/\\"
-rendered = render_template(path, referer)
+template_path = File.expand_path('../../app/views/layouts/embed.html.erb', __dir__)
+source = File.read(template_path)
+source = source.sub(/<%= yield %>/, '<%= "stubbed body" %>')
 
-if rendered.include?("'#{referer}'")
-  puts "RESULT: FAIL: referer interpolated raw into JS string literal; backslash escapes closing quote and breaks postMessage targetOrigin"
+referer = "https://example.com/foo\\"
+view = StubView.new(referer)
+erb = ERB.new(source)
+html = erb.result(view.instance_eval { binding })
+
+if html =~ /parent\.postMessage\(\{[^}]*\},\s*'([^']*)'\);/m
+  literal = $1
+  trailing_backslashes = literal[/\\+\z/]&.length || 0
+  if trailing_backslashes.odd?
+    puts "RESULT: FAIL: request.referer ends with an unescaped backslash that escapes the closing quote of the JS string literal, making the postMessage call syntactically invalid and silently breaking iframe auto-resize."
+  else
+    puts "RESULT: PASS"
+  end
 else
-  puts "RESULT: PASS"
+  puts "RESULT: FAIL: could not locate postMessage targetOrigin in rendered template"
 end

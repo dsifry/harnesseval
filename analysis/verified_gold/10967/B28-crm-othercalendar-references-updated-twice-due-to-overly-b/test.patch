@@ -1,99 +1,141 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { genericUpdateEvent, crmUpdateEvent } = vi.hoisted(() => ({
-  genericUpdateEvent: vi.fn(async (..._args: any[]) => ({ type: "update", success: true })),
-  crmUpdateEvent: vi.fn(async (..._args: any[]) => ({ type: "update", success: true })),
-}));
+const updateEventMock = vi.fn();
+const createEventMock = vi.fn();
 
-// The module under test is never mocked; only its external collaborators are.
 vi.mock("./CalendarManager", () => ({
-  createEvent: vi.fn(async () => ({})),
-  updateEvent: genericUpdateEvent,
-  deleteEvent: vi.fn(async () => ({})),
+  updateEvent: (...args: unknown[]) => updateEventMock(...args),
+  createEvent: (...args: unknown[]) => createEventMock(...args),
 }));
+
+vi.mock("./videoClient", () => ({
+  createMeeting: vi.fn(),
+  updateMeeting: vi.fn(),
+}));
+
+const bookingFindUnique = vi.fn();
+const credentialFindUnique = vi.fn();
 
 vi.mock("@calcom/prisma", () => ({
   default: {
-    booking: { findUnique: vi.fn(async () => null) },
-    credential: { findUnique: vi.fn(async () => null) },
+    booking: { findUnique: (...a: unknown[]) => bookingFindUnique(...a) },
+    credential: { findUnique: (...a: unknown[]) => credentialFindUnique(...a) },
   },
 }));
 
-// Any code that resolves a CRM / "other calendar" service through getCalendar is captured here.
-vi.mock("@calcom/app-store/_utils/getCalendar", () => ({
-  getCalendar: vi.fn(() => ({
-    createEvent: vi.fn(async () => ({})),
-    updateEvent: crmUpdateEvent,
-    deleteEvent: vi.fn(async () => ({})),
-  })),
+vi.mock("@calcom/app-store/_utils/getCalendar", () => ({ getCalendar: vi.fn() }));
+vi.mock("@calcom/app-store/dailyvideo/lib/VideoApiAdapter", () => ({
+  FAKE_DAILY_CREDENTIAL: { type: "daily_video", appName: "FAKE", key: {} },
 }));
+vi.mock("@calcom/app-store/locations", () => ({
+  getEventLocationTypeFromApp: vi.fn(),
+  MeetLocationType: "integrations:google:meet",
+}));
+vi.mock("@calcom/app-store/utils", () => ({ default: vi.fn().mockResolvedValue([]) }));
 
-const CRM_REFERENCE_UID = "crm-other-calendar-ref-uid";
+describe("EventManager CRM other_calendar duplicate update regression", () => {
+  beforeEach(() => {
+    updateEventMock.mockReset();
+    updateEventMock.mockResolvedValue({
+      type: "update",
+      success: true,
+      uid: "result-uid",
+      createdEvent: {},
+    });
+    createEventMock.mockReset();
+    bookingFindUnique.mockReset();
+    credentialFindUnique.mockReset();
+    credentialFindUnique.mockResolvedValue(null);
+  });
 
-describe("EventManager CRM other-calendar references", () => {
-  it("updates a CRM 'other_calendar' booking reference only once when all calendar events are updated", async () => {
-    process.env.CALENDSO_ENCRYPTION_KEY = "0123456789abcdef0123456789abcdef";
-    process.env.NEXT_PUBLIC_WEBAPP_URL = "http://localhost:3000";
-    process.env.NEXTAUTH_SECRET = "test-secret";
-
+  it("issues exactly one external update per booking reference, including crm other_calendar references", async () => {
     const { default: EventManager } = await import("./EventManager");
 
-    const crmCredential: any = {
-      id: 42,
-      type: "other_calendar",
-      appName: "hubspot",
+    const googleCredential = {
+      id: 1,
+      type: "google_calendar",
+      appName: "google-calendar",
       key: {},
       userId: 1,
       teamId: null,
       invalid: false,
+      appId: "google-calendar",
+    };
+    const crmCredential = {
+      id: 42,
+      type: "crm_other_calendar",
+      appName: "crm",
+      key: {},
+      userId: 1,
+      teamId: null,
+      invalid: false,
+      appId: "crm",
+    };
+    const otherCredential = {
+      id: 43,
+      type: "other_calendar",
+      appName: "crm",
+      key: {},
+      userId: 1,
+      teamId: null,
+      invalid: false,
+      appId: "crm",
     };
 
-    const manager: any = new (EventManager as any)([crmCredential]);
-    // Make sure the reference can resolve its credential regardless of constructor filtering.
-    manager.calendarCredentials = [crmCredential];
-
-    const event: any = {
+    const googleRef = {
+      type: "google_calendar",
+      uid: "gcal-ref-uid",
+      credentialId: 1,
+      externalCalendarId: "ext-gcal",
+    };
+    const crmRef = {
+      type: "crm_other_calendar",
+      uid: "crm-ref-uid",
+      credentialId: 42,
+      externalCalendarId: "ext-crm",
+    };
+    const otherRef = {
       type: "other_calendar",
-      title: "Test booking",
+      uid: "other-ref-uid",
+      credentialId: 43,
+      externalCalendarId: "ext-other",
+    };
+
+    bookingFindUnique.mockResolvedValue({
+      references: [googleRef, crmRef, otherRef],
+    });
+
+    const eventManager: any = Object.create(EventManager.prototype);
+    eventManager.calendarCredentials = [googleCredential, crmCredential, otherCredential];
+    eventManager.videoCredentials = [];
+
+    const event = {
+      title: "Regression booking",
       startTime: new Date().toISOString(),
       endTime: new Date().toISOString(),
-      uid: "event-uid",
-      location: "integrations:daily",
-      destinationCalendar: [],
+      type: "test",
+      uid: "evt-uid",
     };
-
-    const booking: any = {
+    const booking = {
       id: 1,
-      uid: "booking-uid",
-      references: [
-        {
-          type: "other_calendar",
-          uid: CRM_REFERENCE_UID,
-          credentialId: 42,
-          externalCalendarId: "crm-external-id",
-        },
-      ],
+      userId: 1,
+      references: [googleRef, crmRef, otherRef],
     };
 
-    genericUpdateEvent.mockClear();
-    crmUpdateEvent.mockClear();
+    await eventManager.updateAllCalendarEvents(event, booking);
 
-    await manager.updateAllCalendarEvents(event, booking);
+    const callsByUid: Record<string, number> = {};
+    for (const call of updateEventMock.mock.calls) {
+      const refUid = String(call[2]);
+      callsByUid[refUid] = (callsByUid[refUid] ?? 0) + 1;
+    }
 
-    // The generic loop calls updateEvent(credential, event, bookingRefUid, externalCalendarId)
-    const genericLoopCalls = genericUpdateEvent.mock.calls.filter((call) => call[2] === CRM_REFERENCE_UID);
-    // The dedicated other-calendar loop passes the reference uid somewhere in its arguments
-    const dedicatedLoopCalls = crmUpdateEvent.mock.calls.filter((call) => call.includes(CRM_REFERENCE_UID));
-    const totalUpdates = genericLoopCalls.length + dedicatedLoopCalls.length;
-
+    expect(callsByUid["gcal-ref-uid"]).toBe(1);
+    expect(callsByUid["other-ref-uid"]).toBe(1);
     expect(
-      totalUpdates,
-      "a CRM other-calendar booking reference must be pushed to the external calendar exactly once, but it is updated twice: once by the broad `.filter((reference) => reference.type.includes('_calendar'))` loop and again by the dedicated other-calendar loop"
+      callsByUid["crm-ref-uid"],
+      "crm other_calendar reference must be updated exactly once (claimed defect: also picked up by general _calendar filter, causing duplicate external update)"
     ).toBe(1);
-
-    expect(
-      genericLoopCalls.length,
-      "the generic calendar-reference filter `.includes('_calendar')` also matches 'other_calendar' CRM references, so the general update loop must not process them (they are handled by the dedicated other-calendar loop)"
-    ).toBe(0);
+    expect(updateEventMock.mock.calls.length).toBe(3);
   });
 });

@@ -2,7 +2,7 @@
 
 **Claim.** Reschedule/merge deletes only the first calendar reference, orphaning events on other hosts’ calendars
 
-**Verdict in this bundle:** `inconclusive_env` ({'head': 'FAIL', 'fixed': '?'})
+**Verdict in this bundle:** `inconclusive_env` ({'head': 'FAIL', 'fixed': 'FAIL'})
 **Fidelity:** `repo_suite`  ·  **Authoring model:** `deepseek-4.1-flash`
 
 Everything needed to check this yourself is in this directory:

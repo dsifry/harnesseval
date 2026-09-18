@@ -2,116 +2,91 @@ diff --git a/spec/verify/topic_embed_verify.rb b/spec/verify/topic_embed_verify.
 new file mode 100644
 --- /dev/null
 +++ b/spec/verify/topic_embed_verify.rb
-@@ -0,0 +1,112 @@
-+# standalone verification for app/models/topic_embed.rb
-+# claim: TopicEmbed stores a redundant topic_id that goes stale when an embedded
-+# post is moved to another topic (Discourse supports moving posts).
+@@ -0,0 +1,87 @@
 +require 'digest'
-+require 'uri'
++require 'nokogiri'
 +
-+# --- minimal Rails / runtime shims ---------------------------------------
-+module Kernel
-+  def require_dependency(name)
-+    require name
-+  rescue LoadError
-+    nil
-+  end
-+end
-+
-+begin
-+  require 'nokogiri'
-+rescue LoadError
-+  module Nokogiri
-+    module HTML
-+      class Fragment
-+        def initialize(html); @html = html; end
-+        def css(_sel); []; end
-+        def to_html; @html; end
-+      end
-+      def self.fragment(html); Fragment.new(html); end
-+    end
-+  end
-+end
++def require_dependency(name); end
 +
 +module I18n
-+  def self.t(key, opts = {}); opts[:default] || key.to_s; end
-+end
-+
-+module FakeDB
-+  def self.embeds; @embeds ||= []; end
-+  def self.posts;  @posts  ||= []; end
-+  def self.reset!; @embeds = []; @posts = []; end
-+end
-+
-+class Post
-+  attr_accessor :id, :topic_id, :raw
-+  def self.cook_methods; { raw_html: 0 }; end
-+  def present?; true; end
-+end
-+
-+class PostRevisor
-+  def initialize(post); @post = post; end
-+  def revise!(_user, raw, _opts = {}); @post.raw = raw; true; end
++  def self.t(key, opts = {}); key.to_s; end
 +end
 +
 +module ActiveRecord
-+  class Relation
-+    def initialize(rows, conds); @rows = rows; @conds = conds; end
-+    def all; @rows.select { |r| @conds.all? { |k, v| r.public_send(k) == v } }; end
-+    def first; all.first; end
-+    def pluck(col); all.map { |r| r.public_send(col) }; end
-+  end
-+
 +  class Base
-+    attr_accessor :id, :topic_id, :post_id, :embed_url, :content_sha1
-+    def self.belongs_to(_name, *_args); end
-+    def self.validates_presence_of(*_args); end
-+    def self.where(conds); Relation.new(FakeDB.embeds, conds); end
-+    def self.create!(attrs)
++    def self.inherited(subclass)
++      subclass.instance_variable_set(:@records, [])
++    end
++
++    def self.records
++      @records ||= []
++    end
++
++    def self.belongs_to(*args); end
++    def self.validates_presence_of(*args); end
++
++    def self.where(conds)
++      rows = records.select do |r|
++        conds.all? { |k, v| r.instance_variable_get("@#{k}") == v }
++      end
++      Relation.new(rows)
++    end
++
++    def self.create!(attrs = {})
 +      obj = new
-+      attrs.each { |k, v| obj.public_send(\"#{k}=\", v) }
-+      obj.id ||= (FakeDB.embeds.map(&:id).compact.max || 0) + 1
-+      FakeDB.embeds << obj
++      attrs.each { |k, v| obj.instance_variable_set("@#{k}", v) }
++      records << obj
 +      obj
 +    end
-+    def update_column(name, value); public_send(\"#{name}=\", value); true; end
-+    def post; FakeDB.posts.find { |p| p.id == post_id }; end
-+    def blank?; false; end
++
++    def method_missing(name, *args)
++      str = name.to_s
++      if str.end_with?('=')
++        instance_variable_set("@#{str.chomp('=')}", args.first)
++      elsif instance_variable_defined?("@#{name}")
++        instance_variable_get("@#{name}")
++      else
++        super
++      end
++    end
++
++    def update_column(col, val)
++      instance_variable_set("@#{col}", val)
++    end
++
++    class Relation
++      def initialize(rows); @rows = rows; end
++      def first; @rows.first; end
++      def blank?; @rows.empty?; end
++      def pluck(col); @rows.map { |r| r.instance_variable_get("@#{col}") }; end
++      def to_a; @rows; end
++    end
 +  end
 +end
 +
 +require_relative '../../app/models/topic_embed'
 +
-+# --- exercise the real file ----------------------------------------------
-+FakeDB.reset!
++# Claim: TopicEmbed redundantly stores topic_id, which can go stale when the
++# embedded post is moved to another topic.  The controller reads only the stored
++# topic_id (via TopicEmbed.topic_id_for_embed) instead of deriving it from
++# post.topic_id.  Simulate a post move and observe that the lookup still returns
++# the old topic.
 +
-+post = Post.new
-+post.id = 5
-+post.topic_id = 100
-+post.raw = 'old'
-+FakeDB.posts << post
++embed = TopicEmbed.create!(
++  topic_id: 1,
++  post_id: 10,
++  embed_url: 'http://example.com/article',
++  content_sha1: 'deadbeef'
++)
 +
-+url = 'http://example.com/article'
-+TopicEmbed.create!(topic_id: 100, embed_url: url,
-+                   content_sha1: Digest::SHA1.hexdigest('old'), post_id: 5)
++# Post 10 was moved to topic 2 (discourse supports moving posts).
++post = Struct.new(:id, :topic_id).new(10, 2)
 +
-+embed = TopicEmbed.where(embed_url: url).first
-+raise 'setup failed' unless embed.topic_id == 100 && embed.post.topic_id == 100
++returned = TopicEmbed.topic_id_for_embed('http://example.com/article')
 +
-+# Discourse-supported move: the embedded post is relocated to another topic.
-+post.topic_id = 200
-+
-+# Drive the real model logic along the existing-embed (update) path.
-+TopicEmbed.import(Object.new, url, 'Title', 'new contents')
-+
-+embed    = TopicEmbed.where(embed_url: url).first
-+observed = TopicEmbed.topic_id_for_embed(url)
-+expected = post.topic_id
-+
-+if observed == expected && embed.topic_id == expected
++if returned == post.topic_id
 +  puts 'RESULT: PASS'
 +else
-+  msg = 'redundant TopicEmbed#topic_id went stale after the post was moved ' +
-+        "(stored=#{embed.topic_id}, post.topic_id=#{post.topic_id}, topic_id_for_embed=#{observed})"
-+  puts "RESULT: FAIL: #{msg}"
++  puts "RESULT: FAIL: topic_id_for_embed returned #{returned.inspect} but post.topic_id is #{post.topic_id}; " \
++       'the stored topic_id is stale and is not derived from the post'
 +end

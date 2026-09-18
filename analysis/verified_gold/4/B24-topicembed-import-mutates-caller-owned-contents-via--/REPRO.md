@@ -2,7 +2,7 @@
 
 **Claim.** TopicEmbed import mutates caller-owned contents via `<<`, causing duplicate footers and FrozenError on frozen strings
 
-**Verdict in this bundle:** `inconclusive_env` ({'head': 'FAIL', 'fixed': 'ERROR:NoMethodError'})
+**Verdict in this bundle:** `behavior_change_not_regression` ({'base': 'ERROR:LoadError', 'head': 'FAIL', 'fixed': 'PASS'})
 **Fidelity:** `standalone_real_code`  ·  **Authoring model:** `deepseek-4.1-flash-background`
 
 Everything needed to check this yourself is in this directory:

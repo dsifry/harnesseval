@@ -1,56 +1,72 @@
-# frozen_string_literal: false
-require 'json'
+require 'open3'
 
-src_path = File.expand_path('app/assets/javascripts/discourse/models/group.js', Dir.pwd)
-unless File.file?(src_path)
-  puts "RESULT: FAIL: missing #{src_path}"
-  exit 1
+src_path = File.expand_path('../../app/assets/javascripts/discourse/models/group.js', __dir__)
+unless File.exist?(src_path)
+  puts "RESULT: FAIL: real source not found at #{src_path}"
+  exit
 end
 src = File.read(src_path)
 
-# Pull the findMembers body out of the real JS file
-fm_body = src[/findMembers\s*:\s*function\s*\([^)]*\)\s*\{(.*?)\n\s{2}\}/m, 1]
-if fm_body.nil?
-  puts "RESULT: FAIL: could not parse findMembers from #{src_path}"
-  exit 1
+js_stubs = <<~'JS'
+global.Em = {
+  isEmpty: function(v){ return v === undefined || v === null || v === ''; },
+  Object: { create: function(o){ return o; } }
+};
+function __makeClass(props){
+  function K(){}
+  for (var k in props){ K.prototype[k] = props[k]; }
+  K.prototype.get = function(k){ return this[k]; };
+  K.prototype.set = function(k,v){ this[k] = v; return v; };
+  K.prototype.setProperties = function(o){ for (var k in o) this[k] = o[k]; };
+  K.create = function(p){ var i = Object.create(this.prototype); if (p) for (var k in p) i[k] = p[k]; return i; };
+  K.reopenClass = function(c){ for (var k in c) K[k] = c[k]; };
+  return K;
+}
+global.__calls = [];
+global.Discourse = {
+  ajax: function(url, opts){
+    __calls.push({url: url, opts: opts});
+    return { then: function(cb){
+      var r = { meta: { total: 0, limit: 50, offset: 0 }, members: [] };
+      try { cb(r); } catch(e){}
+      return { then: function(){} };
+    }};
+  },
+  User: { create: function(m){ return m; } }
+};
+Discourse.Model = { extend: function(props){ return __makeClass(props); } };
+JS
+
+js_test = <<~'JS'
+var g = Discourse.Group.create({ name: 'original-name', id: 42, user_count: 10, offset: 0, limit: 50 });
+g.set('name', 'brand-new-name-unsaved');
+__calls.length = 0;
+g.findMembers();
+var url = __calls.length ? __calls[0].url : '(no url captured)';
+console.log('URL:' + url);
+JS
+
+script = js_stubs + "\n" + src + "\n" + js_test
+
+begin
+  stdout, stderr, status = Open3.capture3('node', '-e', script)
+rescue Errno::ENOENT
+  puts "RESULT: FAIL: node executable not available"
+  exit
 end
 
-# The URL expression passed to Discourse.ajax inside findMembers
-url_expr = fm_body[/Discourse\.ajax\(\s*(.+?)\s*,\s*\{/m, 1]
-if url_expr.nil?
-  puts "RESULT: FAIL: could not locate ajax url expression in findMembers"
-  exit 1
+unless status.success?
+  puts "RESULT: FAIL: node error: #{stderr.lines.first.to_s.strip}"
+  exit
 end
 
-# Model the live-edited, two-way-bound name field vs. the persisted identity
-live_name  = 'renamed-not-yet-saved'
-saved_name = 'original-name'
-group_id   = 42
+line = stdout.lines.find { |l| l.start_with?('URL:') }
+url = line ? line.strip.sub('URL:', '') : ''
 
-# Replicate the JS string concatenation in Ruby
-demo = url_expr.dup
-demo = demo.gsub("this.get('name')", "'#{live_name}'")
-demo = demo.gsub("this.get('id')", group_id.to_s)
-requested_url = eval(demo) # rubocop:disable Security/Eval
-
-expected_id_url   = "/groups/#{group_id}/members.json"
-expected_name_url = "/groups/#{saved_name}/members.json"
-
-# Contrast: the mutating calls themselves use the immutable id
-remove_url = src[/removeMember\s*:\s*function[^{]*\{(.*?)\n\s{2}\}/m, 1].to_s[/Discourse\.ajax\(\s*(.+?)\s*,\s*\{/m, 1].to_s
-add_url    = src[/addMembers\s*:\s*function[^{]*\{(.*?)\n\s{2}\}/m, 1].to_s[/Discourse\.ajax\(\s*(.+?)\s*,\s*\{/m, 1].to_s
-
-if requested_url.include?(live_name)
-  puts "RESULT: FAIL: findMembers builds the members URL from the two-way-bound live " \
-       "name property; after an unsaved rename it requests #{requested_url.inspect} " \
-       "(should key off #{expected_id_url.inspect} or #{expected_name_url.inspect}). " \
-       "removeMember uses #{remove_url.inspect}, addMembers uses #{add_url.inspect}."
-  exit 1
+if url.include?('brand-new-name-unsaved')
+  puts "RESULT: FAIL: findMembers built URL from live-edited name: #{url}"
+elsif url.include?('/groups/')
+  puts "RESULT: PASS"
+else
+  puts "RESULT: FAIL: unexpected url: #{url}"
 end
-
-if requested_url != expected_id_url && requested_url != expected_name_url
-  puts "RESULT: FAIL: findMembers produced unexpected URL #{requested_url.inspect}"
-  exit 1
-end
-
-puts "RESULT: PASS"

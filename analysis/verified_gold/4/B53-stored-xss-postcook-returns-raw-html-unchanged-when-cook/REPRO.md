@@ -2,7 +2,7 @@
 
 **Claim.** Stored XSS: Post.cook returns raw HTML unchanged when cook_method=raw_html, bypassing sanitization/filtering
 
-**Verdict in this bundle:** `inconclusive_env` ({'head': 'FAIL', 'fixed': 'ERROR:NoMethodError'})
+**Verdict in this bundle:** `inconclusive_env` ({'head': 'ERROR:NoMethodError'})
 **Fidelity:** `standalone_real_code`  ·  **Authoring model:** `deepseek-4.1-flash-background`
 
 Everything needed to check this yourself is in this directory:

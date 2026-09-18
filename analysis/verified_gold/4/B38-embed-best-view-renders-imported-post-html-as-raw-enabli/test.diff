@@ -2,96 +2,76 @@ diff --git a/spec/verify/best.html_verify.rb b/spec/verify/best.html_verify.rb
 new file mode 100644
 --- /dev/null
 +++ b/spec/verify/best.html_verify.rb
-@@ -0,0 +1,92 @@
+@@ -0,0 +1,72 @@
 +require 'erb'
++require 'cgi'
 +
-+TEMPLATE_PATH = 'app/views/embed/best.html.erb'
-+PAYLOAD = '<script>alert("xss")</script>'
++# --- Minimal shims to run the real Rails view standalone ---
++class EscapableString
++  attr_reader :html
++  def initialize(html); @html = html.to_s; end
++  def to_s; CGI.escapeHTML(@html); end
++end
 +
-+# --- Minimum stubs so the real template can be evaluated standalone ---
++class SafeString
++  attr_reader :html
++  def initialize(html); @html = html.to_s; end
++  def to_s; @html; end
++end
++
++def raw(x)
++  SafeString.new(x.is_a?(EscapableString) ? x.html : x.to_s)
++end
++
 +module I18n
-+  def self.t(key, **_opts); key.to_s; end
++  def self.t(key); key.to_s; end
 +end
 +
 +module SiteSetting
-+  def self.logo_url; 'https://cdn.example.test/logo.png'; end
++  def self.logo_url; 'http://example.com/logo.png'; end
 +end
 +
 +module Discourse
-+  def self.base_url; 'https://example.test'; end
++  def self.base_url; 'http://example.com'; end
 +end
 +
-+class FakeUser
-+  def initialize(name); @name = name; end
-+  def username; @name; end
-+  def small_avatar_url; 'https://cdn.example.test/a.png'; end
++def link_to(name, url, opts = {}); "<a href='#{url}'>#{name}</a>"; end
++def image_tag(src, opts = {}); "<img src='#{src}' />"; end
++
++class Array
++  def present?; !empty?; end
 +end
 +
-+class FakePost
-+  def initialize(cooked, username); @cooked = cooked; @username = username; end
-+  def cooked; @cooked; end
-+  def created_at; Time.at(0); end
-+  def url; 'https://example.test/p/1'; end
-+  def user; FakeUser.new(@username); end
-+end
++UserStub = Struct.new(:small_avatar_url, :username)
++PostStub = Struct.new(:created_at, :url, :user, :cooked)
++TopicStub = Struct.new(:url)
++TopicViewStub = Struct.new(:posts, :topic)
 +
-+class Posts
-+  include Enumerable
-+  def initialize(list); @list = list; end
-+  def each(&blk); @list.each(&blk); end
-+  def present?; !@list.empty?; end
-+end
++MALICIOUS_HTML = '<script>alert("xss")</script>'
 +
-+class FakeTopic
-+  def url; 'https://example.test/t/1'; end
-+end
++post = PostStub.new(
++  Time.now,
++  'http://example.com/t/1/1',
++  UserStub.new('http://example.com/avatar.png', 'attacker'),
++  EscapableString.new(MALICIOUS_HTML)
++)
 +
-+# Acts as the view context: records any call to raw() and provides the
-+# helper methods the template invokes.
-+class RenderContext
-+  attr_reader :raw_calls
-+  def initialize(topic_view); @topic_view = topic_view; @raw_calls = []; end
-+  def raw(value); @raw_calls << value; value.to_s; end
-+  def link_to(*args, **_opts); "<a>#{args[0]}</a>"; end
-+  def image_tag(src, **_opts); "<img src='#{src}'>"; end
-+  def get_binding; binding; end
-+end
++@topic_view = TopicViewStub.new([post], TopicStub.new('http://example.com/t/1'))
 +
-+source = File.read(TEMPLATE_PATH)
++# --- Load the real view file ---
++view_path = File.join(Dir.pwd, 'app/views/embed/best.html.erb')
++source = File.read(view_path)
 +
-+post = FakePost.new(PAYLOAD, 'alice')
-+topic_view = FakeTopicView = nil
-+class FakeTopicView
-+  attr_reader :posts, :topic
-+  def initialize(posts, topic); @posts = posts; @topic = topic; end
-+end
++# Erubis/Rails ERB trim markers -> plain ERB; normalize a transcription artifact
++source = source.gsub('<%-', '<%')
++source = source.gsub(/<%\s*end\s+if\s*%>/, '<% end %>')
 +
-+topic_view = FakeTopicView.new(Posts.new([post]), FakeTopic.new)
-+ctx = RenderContext.new(topic_view)
++erb = ERB.new(source)
++output = erb.result(binding)
 +
-+rendered =
-+  begin
-+    ERB.new(source, nil, '-').result(ctx.get_binding)
-+  rescue SyntaxError
-+    nil
-+  end
-+
-+reason = nil
-+
-+if rendered
-+  if ctx.raw_calls.include?(PAYLOAD)
-+    reason = 'view calls raw() on post.cooked: imported HTML is emitted unescaped'
-+  elsif rendered.include?(PAYLOAD)
-+    reason = 'rendered output contains unescaped imported HTML payload'
-+  end
++# --- Assertion ---
++if output.include?(MALICIOUS_HTML)
++  puts "RESULT: FAIL: raw post.cooked rendered imported HTML unescaped (XSS)"
 +else
-+  if source.match?(/raw\s+post\.cooked/)
-+    reason = 'view source emits raw post.cooked (template did not compile for rendering)'
-+  end
-+end
-+
-+if reason
-+  puts "RESULT: FAIL: #{reason}"
-+else
-+  puts 'RESULT: PASS'
++  puts "RESULT: PASS"
 +end

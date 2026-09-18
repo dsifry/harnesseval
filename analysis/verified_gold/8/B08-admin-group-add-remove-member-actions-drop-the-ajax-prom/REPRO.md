@@ -2,7 +2,7 @@
 
 **Claim.** Admin group add/remove member actions drop the AJAX promise, making failures silent and leaving stale UI state
 
-**Verdict in this bundle:** `inconclusive_env` ({'head': 'FAIL', 'fixed': 'FAIL'})
+**Verdict in this bundle:** `defect_present_before_pr` ({'base': 'FAIL', 'head': 'FAIL', 'fixed': 'PASS'})
 **Fidelity:** `standalone_real_code`  ·  **Authoring model:** `deepseek-4.1-flash-background`
 
 Everything needed to check this yourself is in this directory:

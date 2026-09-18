@@ -2,7 +2,7 @@
 
 **Claim.** Disqus import passes untrusted thread <link> to importremote/open without URI validation (SSRF/LFI/RCE)
 
-**Verdict in this bundle:** `inconclusive_env` ({'head': 'ERROR:LoadError'})
+**Verdict in this bundle:** `inconclusive_env` ({'head': 'FAIL', 'fixed': 'FAIL'})
 **Fidelity:** `standalone_real_code`  ·  **Authoring model:** `deepseek-4.1-flash-background`
 
 Everything needed to check this yourself is in this directory:

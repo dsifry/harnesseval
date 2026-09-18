@@ -2,60 +2,91 @@ diff --git a/packages/emails/templates/organizer-add-guests-email.verified.test.
 new file mode 100644
 --- /dev/null
 +++ b/packages/emails/templates/organizer-add-guests-email.verified.test.ts
-@@ -0,0 +1,56 @@
-+import { describe, expect, vi } from "vitest";
+@@ -0,0 +1,87 @@
++import { describe, expect, it, vi } from "vitest";
 +
-+import type { CalendarEvent } from "@calcom/types/Calendar";
-+
-+vi.mock("../lib/generateIcsString", () => ({
-+  default: vi.fn(() => "BEGIN:VCALENDAR\nEND:VCALENDAR"),
++vi.mock("@calcom/lib/constants", () => ({
++  APP_NAME: "Cal",
++  EMAIL_FROM: "noreply@cal.com",
++  WEBAPP_URL: "http://localhost:3000",
 +}));
 +
 +vi.mock("../", () => ({
-+  renderEmail: vi.fn(async () => "<html></html>"),
++  renderEmail: vi.fn().mockResolvedValue("<html></html>"),
 +}));
 +
-+describe("OrganizerAddGuestsEmail", () => {
-+  test("getNodeMailerPayload builds a subject when attendees is empty", async () => {
-+    process.env.NEXT_PUBLIC_WEBAPP_URL = "http://localhost:3000";
-+    process.env.EMAIL_FROM = "test@example.com";
++vi.mock("../lib/generateIcsString", () => ({
++  default: vi.fn().mockReturnValue("BEGIN:VCALENDAR\nEND:VCALENDAR"),
++}));
 +
-+    const { default: OrganizerAddGuestsEmail } = await import("./organizer-add-guests-email");
++// Mock the parent to avoid pulling the whole prisma/emails dependency graph
++// during module resolution; the behavior under test lives in the subclass.
++vi.mock("./organizer-scheduled-email", () => ({
++  default: class OrganizerScheduledEmail {
++    calEvent: unknown;
++    teamMember: unknown;
++    constructor(calEvent: unknown, teamMember?: unknown) {
++      this.calEvent = calEvent;
++      this.teamMember = teamMember;
++    }
++    t(key: string) {
++      return key;
++    }
++    getFormattedDate() {
++      return "1 Jan 2024";
++    }
++    getTextBody() {
++      return "text body";
++    }
++    getMailerOptions() {
++      return { from: "noreply@cal.com" };
++    }
++  },
++}));
 +
-+    const calEvent = {
-+      type: "Test Event",
-+      title: "Test Event",
-+      attendees: [],
-+      organizer: {
-+        name: "Organizer",
-+        email: "organizer@example.com",
-+        timeZone: "UTC",
-+      },
-+      startTime: "2030-01-01T10:00:00.000Z",
-+      endTime: "2030-01-01T11:00:00.000Z",
++import OrganizerAddGuestsEmail from "./organizer-add-guests-email";
++
++type Attendee = { email: string; name: string };
++
++function buildEvent(attendees: Attendee[]) {
++  return {
++    type: "30min",
++    title: "Test event",
++    startTime: "2024-01-01T10:00:00.000Z",
++    endTime: "2024-01-01T10:30:00.000Z",
++    organizer: {
++      email: "organizer@cal.com",
++      name: "Organizer",
++      language: { locale: "en" },
 +      timeZone: "UTC",
-+    } as unknown as CalendarEvent;
++    },
++    attendees,
++    iCalUID: "uid-1",
++    uid: "uid-1",
++  };
++}
 +
-+    const email = Object.create(
-+      OrganizerAddGuestsEmail.prototype
-+    ) as OrganizerAddGuestsEmail;
++async function invokeGetNodeMailerPayload(email: OrganizerAddGuestsEmail) {
++  const fn = (
++    email as unknown as {
++      getNodeMailerPayload: () => Promise<Record<string, unknown>>;
++    }
++  ).getNodeMailerPayload;
++  return fn.call(email);
++}
 +
-+    Object.assign(email, {
-+      calEvent,
-+      teamMember: undefined,
-+      t: (key: string) => key,
-+      getFormattedDate: () => "Jan 1, 2030",
-+      getMailerOptions: () => ({ from: "test@example.com" }),
-+      getTextBody: () => "text body",
-+    });
++describe("OrganizerAddGuestsEmail.getNodeMailerPayload subject", () => {
++  it("does not reject when the attendees array is empty (guarded attendees[0].name)", async () => {
++    const email = new OrganizerAddGuestsEmail(buildEvent([]) as never, undefined as never);
 +
-+    const payload = await (
-+      email as unknown as {
-+        getNodeMailerPayload: () => Promise<Record<string, unknown>>;
-+      }
-+    ).getNodeMailerPayload();
++    // On the buggy code, `this.calEvent.attendees[0].name` throws a TypeError
++    // for an empty attendee list, so building the mailer payload rejects.
++    await expect(invokeGetNodeMailerPayload(email)).resolves.toBeDefined();
++  });
 +
++  it("produces a subject string even when no guests are present", async () => {
++    const email = new OrganizerAddGuestsEmail(buildEvent([]) as never, undefined as never);
++    const payload = await invokeGetNodeMailerPayload(email);
 +    expect(typeof payload.subject).toBe("string");
-+    expect(payload.subject).not.toContain("undefined");
 +  });
 +});

@@ -2,7 +2,7 @@
 
 **Claim.** Disqus importer is no longer idempotent: reruns duplicate all replies when TopicEmbed.import_remote returns an existing post
 
-**Verdict in this bundle:** `inconclusive_env` ({'head': '?'})
+**Verdict in this bundle:** `inconclusive_env` ({'head': 'ERROR:NameError'})
 **Fidelity:** `standalone_real_code`  ·  **Authoring model:** `deepseek-4.1-flash-background`
 
 Everything needed to check this yourself is in this directory:

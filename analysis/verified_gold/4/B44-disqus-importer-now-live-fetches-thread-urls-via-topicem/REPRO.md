@@ -2,7 +2,7 @@
 
 **Claim.** Disqus importer now live-fetches thread URLs via TopicEmbed, skipping unreachable/non-http threads and losing original created_at/permalink body
 
-**Verdict in this bundle:** `inconclusive_env` ({'head': 'ERROR:LoadError'})
+**Verdict in this bundle:** `defect_present_before_pr` ({'base': 'FAIL', 'head': 'FAIL', 'fixed': 'PASS'})
 **Fidelity:** `standalone_real_code`  ·  **Authoring model:** `deepseek-4.1-flash-background`
 
 Everything needed to check this yourself is in this directory:

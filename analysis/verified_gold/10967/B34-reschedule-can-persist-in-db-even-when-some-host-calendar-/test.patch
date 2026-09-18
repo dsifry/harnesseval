@@ -1,58 +1,135 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@calcom/prisma", () => ({
-  default: {
-    booking: { findUnique: vi.fn() },
-    credential: { findUnique: vi.fn() },
-  },
+vi.mock("@calcom/prisma", () => {
+  const prisma = {
+    credential: { findUnique: vi.fn().mockResolvedValue(null) },
+    booking: { findUnique: vi.fn().mockResolvedValue(null), update: vi.fn() },
+  };
+  return { default: prisma, prisma };
+});
+
+vi.mock("@calcom/app-store/_utils/getCalendar", () => ({
+  getCalendar: vi.fn(async () => ({ deleteEvent: vi.fn(async () => undefined) })),
 }));
 
-vi.mock("./CalendarManager", () => ({
-  updateEvent: vi.fn(),
-  createEvent: vi.fn(),
+vi.mock("@calcom/app-store/utils", () => ({ default: vi.fn(async () => []) }));
+
+vi.mock("@calcom/app-store/locations", () => ({
+  MeetLocationType: "integrations:google:meet",
+  getEventLocationTypeFromApp: vi.fn(() => undefined),
+}));
+
+vi.mock("@calcom/app-store/dailyvideo/lib/VideoApiAdapter", () => ({
+  FAKE_DAILY_CREDENTIAL: { appId: "daily-video", type: "daily_video", key: {} },
+}));
+
+vi.mock("@calcom/app-store/dailyvideo/zod", () => ({ appKeysSchema: {} }));
+
+vi.mock("@calcom/prisma/zod-utils", () => ({
+  createdEventSchema: { parse: (value: unknown) => value },
 }));
 
 vi.mock("./videoClient", () => ({
-  createMeeting: vi.fn(),
-  updateMeeting: vi.fn(),
+  createMeeting: vi.fn(async () => null),
+  updateMeeting: vi.fn(async () => null),
 }));
 
-vi.mock("@calcom/app-store/_utils/getCalendar", () => ({
-  getCalendar: vi.fn(),
+vi.mock("./CalendarManager", () => ({
+  createEvent: vi.fn(async () => null),
+  updateEvent: vi.fn(),
 }));
 
-import { EventManager } from "./EventManager";
-import { updateEvent } from "./CalendarManager";
-
-describe("EventManager updateAllCalendarEvents", () => {
+describe("EventManager – reschedule with partial host calendar failure", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it("should throw or rollback when a host calendar update fails", async () => {
-    const credentials = [
-      { id: "cred1", type: "google_calendar", appName: "google-calendar", key: {}, userId: 1, teamId: null, invalid: false, appId: "1" },
-      { id: "cred2", type: "office365_calendar", appName: "office365-calendar", key: {}, userId: 2, teamId: null, invalid: false, appId: "2" },
-    ];
-    const manager = new EventManager(credentials as any);
+  it("throws so the DB reschedule can be rolled back when a host calendar update fails", async () => {
+    const { updateEvent } = await import("./CalendarManager");
+    const mockedUpdateEvent = vi.mocked(updateEvent);
 
-    const event = {} as any;
+    mockedUpdateEvent.mockImplementation(async (credential: any) => {
+      if (credential?.id === 2) {
+        return {
+          appName: "office365",
+          type: "office365_calendar",
+          success: false,
+          uid: "uid-2",
+          originalEvent: {} as any,
+          credentialId: 2,
+        } as any;
+      }
+      return {
+        appName: "google",
+        type: "google_calendar",
+        success: true,
+        uid: "uid-1",
+        originalEvent: {} as any,
+        credentialId: 1,
+        externalId: "ext-1",
+      } as any;
+    });
+
+    const { default: EventManager } = await import("./EventManager");
+
+    const calendarCredentials = [
+      {
+        id: 1,
+        appName: "google",
+        type: "google_calendar",
+        key: {},
+        userId: 1,
+        teamId: null,
+        invalid: false,
+        appId: "google-calendar",
+      },
+      {
+        id: 2,
+        appName: "office365",
+        type: "office365_calendar",
+        key: {},
+        userId: 1,
+        teamId: null,
+        invalid: false,
+        appId: "office365-calendar",
+      },
+    ];
+
+    const manager = new EventManager(calendarCredentials as any, [] as any);
+
+    const event = {
+      title: "Rescheduled event",
+      startTime: "2024-01-01T10:00:00Z",
+      endTime: "2024-01-01T11:00:00Z",
+      destinationCalendar: [],
+    } as any;
+
     const booking = {
-      id: 1,
+      id: 99,
       references: [
-        { type: "google_calendar", uid: "uid1", externalCalendarId: "ext1", credentialId: "cred1" },
-        { type: "office365_calendar", uid: "uid2", externalCalendarId: "ext2", credentialId: "cred2" },
+        { id: 1, type: "google_calendar", uid: "uid-1", credentialId: 1, externalCalendarId: "ext-1" },
+        { id: 2, type: "office365_calendar", uid: "uid-2", credentialId: 2, externalCalendarId: "ext-2" },
       ],
     } as any;
 
-    (updateEvent as any).mockImplementation(async (cred: any) => {
-      if (cred.id === "cred1") {
-        return { success: true, type: "google_calendar", appName: "google-calendar", uid: "uid1", originalEvent: event, credentialId: "cred1" };
-      } else {
-        return { success: false, type: "office365_calendar", appName: "office365-calendar", uid: "", originalEvent: event, credentialId: "cred2", error: "Failed to update" };
-      }
-    });
+    const updateAllCalendarEvents = (manager as any).updateAllCalendarEvents as (
+      event: any,
+      booking: any,
+      newBookingId?: number
+    ) => Promise<unknown>;
 
-    await expect((manager as any).updateAllCalendarEvents(event, booking)).rejects.toThrow();
+    expect(typeof updateAllCalendarEvents).toBe("function");
+
+    let thrown: unknown;
+    try {
+      await updateAllCalendarEvents.call(manager, event, booking);
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(
+      thrown,
+      "Expected a reschedule to abort with an error when one host calendar update fails, instead of silently persisting the new time in the DB while that host remains on the old time"
+    ).toBeInstanceOf(Error);
   });
 });

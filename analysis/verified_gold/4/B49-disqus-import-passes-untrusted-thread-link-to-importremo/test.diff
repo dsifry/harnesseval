@@ -2,13 +2,15 @@ diff --git a/spec/verify/disqus_verify.rb b/spec/verify/disqus_verify.rb
 new file mode 100644
 --- /dev/null
 +++ b/spec/verify/disqus_verify.rb
-@@ -0,0 +1,92 @@
-+require 'tmpdir'
+@@ -0,0 +1,125 @@
++require 'date'
 +
++# ---- stubs so lib/tasks/disqus.thor loads without Rails ----
 +module Kernel
 +  alias_method :__orig_require, :require
 +  def require(name)
-+    return true if name == 'nokogiri' || name == './config/environment'
++    n = name.to_s
++    return false if n == './config/environment' || n == 'nokogiri'
 +    __orig_require(name)
 +  end
 +end
@@ -19,45 +21,87 @@ new file mode 100644
 +      class Document; end
 +      class Parser
 +        def initialize(doc); @doc = doc; end
-+        def parse_file(path)
-+          xml = File.read(path)
-+          link = xml[/<link>(.*?)<\/link>/m, 1]
-+          d = @doc
-+          d.start_element('thread', ['dsq:id', 't1'])
-+          d.start_element('title', []); d.characters('Some Title'); d.end_element('title')
-+          d.start_element('link', []); d.characters(link); d.end_element('link')
-+          d.end_element('thread')
-+          d.start_element('post', ['dsq:id', 'p1'])
-+          d.start_element('thread', ['dsq:id', 't1'])
-+          d.end_element('thread')
-+          d.end_element('post')
++        def parse_file(_path)
++          # thread definition so @threads['t1'] exists
++          @doc.start_element('thread', [['dsq:id', 't1']])
++          @doc.start_element('link', [])
++          @doc.characters('file:///etc/passwd')
++          @doc.end_element('link')
++          @doc.start_element('title', [])
++          @doc.characters('Evil Thread')
++          @doc.end_element('title')
++          @doc.end_element('thread')
++
++          # post that references the thread; start_element('thread') appends it
++          @doc.start_element('post', [['dsq:id', 'p1']])
++          @doc.start_element('createdAt', [])
++          @doc.characters('2015-01-01T00:00:00')
++          @doc.end_element('createdAt')
++          @doc.start_element('message', [])
++          @doc.cdata_block('hello world')
++          @doc.end_element('message')
++          @doc.start_element('thread', [['dsq:id', 't1']])
++          @doc.end_element('thread')
++          @doc.end_element('post')
 +        end
 +      end
 +    end
 +  end
 +end
 +
-+class Object
-+  def blank?; false; end
-+  def present?; !blank?; end
-+end
-+class NilClass; def blank?; true; end; end
-+class String; def blank?; strip.empty?; end; end
-+
 +class Thor
 +  def self.desc(*); end
 +  def self.method_option(*); end
-+  attr_accessor :options
++  def initialize(opts = {}); @options = opts; end
++  attr_reader :options
++end
++
++class Object
++  def blank?
++    respond_to?(:empty?) ? !!empty? : !self
++  end
++  def present?
++    !blank?
++  end
++end
++
++class FakePost
++  attr_reader :topic_id, :topic, :post_number
++  def initialize(topic_id, topic, post_number)
++    @topic_id, @topic, @post_number = topic_id, topic, post_number
++  end
++  def present?; true; end
++end
++
++class TopicEmbed
++  def self.received_url; @received_url; end
++  def self.import_remote(_user, url, _opts = {})
++    @received_url = url
++    FakePost.new(1, Object.new, 1)
++  end
++end
++
++class PostCreator
++  def initialize(_user, _attrs); end
++  def create
++    FakePost.new(1, Object.new, 1)
++  end
++end
++
++class TopicFeaturedUsers
++  def initialize(_topic); end
++  def choose; end
++end
++
++class User
++  def self.where(_h); self; end
++  def self.first; @first ||= Object.new; end
 +end
 +
 +class SiteSetting
-+  class << self; attr_accessor :email_domains_blacklist; end
-+end
-+SiteSetting.email_domains_blacklist = 'spam.example'
-+
-+class User
-+  class Relation; def first; Object.new; end; end
-+  def self.where(*); Relation.new; end
++  class << self
++    attr_accessor :email_domains_blacklist
++  end
 +end
 +
 +class RateLimiter
@@ -65,33 +109,22 @@ new file mode 100644
 +  def self.enable; end
 +end
 +
-+CAPTURED = []
-+class TopicEmbed
-+  def self.import_remote(user, link, opts = {})
-+    CAPTURED << [link, opts]
-+    nil
-+  end
-+end
-+
-+require './lib/tasks/disqus.thor'
-+
-+MALICIOUS_URL = 'file:///etc/passwd'
 +begin
-+  Dir.mktmpdir do |dir|
-+    path = File.join(dir, 'export.xml')
-+    File.write(path, "<thread><link>#{MALICIOUS_URL}</link></thread>")
-+    d = Disqus.new
-+    d.options = { file: path, post_as: 'someone', dry_run: nil }
-+    d.import
-+  end
++  rel = ['../../lib/tasks/disqus.thor',
++         '../../lib/tasks/disqus.rake',
++         '../../script/disqus.thor'].find { |r| File.exist?(File.expand_path(r, __dir__)) }
++  raise LoadError, 'real disqus task file not found' unless rel
++  require_relative rel
 +
-+  captured_link = CAPTURED.first && CAPTURED.first[0]
++  MALICIOUS = 'file:///etc/passwd'
++  File.define_singleton_method(:exist?) { |_p| true }
++  Disqus.new(file: 'x.xml', post_as: 'admin', dry_run: nil, strip: nil).import
 +
-+  if captured_link == MALICIOUS_URL
-+    puts "RESULT: FAIL: untrusted <link> passed to TopicEmbed.import_remote as #{captured_link.inspect} (no scheme/host validation -> SSRF/LFI)"
++  if TopicEmbed.received_url == MALICIOUS
++    puts "RESULT: FAIL: import_remote received unvalidated link #{TopicEmbed.received_url.inspect}"
 +  else
-+    puts "RESULT: PASS: link validated/filtered (captured=#{captured_link.inspect})"
++    puts 'RESULT: PASS'
 +  end
-+rescue => e
-+  puts "RESULT: FAIL: unexpected #{e.class}: #{e.message}"
++rescue Exception => e
++  puts "RESULT: FAIL: #{e.class}: #{e.message}"
 +end

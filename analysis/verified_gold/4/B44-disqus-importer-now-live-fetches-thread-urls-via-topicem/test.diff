@@ -2,148 +2,142 @@ diff --git a/spec/verify/disqus_verify.rb b/spec/verify/disqus_verify.rb
 new file mode 100644
 --- /dev/null
 +++ b/spec/verify/disqus_verify.rb
-@@ -0,0 +1,144 @@
-+require 'tmpdir'
+@@ -0,0 +1,138 @@
 +require 'date'
++require 'stringio'
 +
-+# Shadow nokogiri with a stub via $LOAD_PATH so the real file's require finds ours.
-+$stub = Dir.mktmpdir
-+File.write(File.join($stub, 'nokogiri.rb'), <<~'RUBY')
-+  module Nokogiri
-+    module XML
-+      module SAX
-+        class Document; end
-+        class Parser
-+          def initialize(doc); @doc = doc; end
-+          def parse_file(_p)
-+            @doc.threads = {
-+              't1' => {id: 't1', link: 'http://example.com/one', title: 'Thread One',
-+                       created_at: '2014-01-01T00:00:00',
-+                       posts: [{id: 'p1', cooked: '<p>hello</p>',
-+                                created_at: '2014-01-02T00:00:00',
-+                                author_name: 'Alice', author_email: 'alice@example.com'}]},
-+              't2' => {id: 't2', link: 'not-a-url', title: 'Thread Two',
-+                       created_at: '2014-02-02T00:00:00',
-+                       posts: [{id: 'p2', cooked: '<p>yo</p>',
-+                                created_at: '2014-02-03T00:00:00',
-+                                author_name: 'Bob', author_email: 'bob@example.com'}]}
-+            }
-+            @doc.posts = {}
-+          end
-+        end
++# --- Stubs for external dependencies ---
++module Nokogiri
++  module XML
++    module SAX
++      class Document; end
++      class Parser
++        def initialize(p); end
++        def parse_file(f); end
 +      end
 +    end
 +  end
-+RUBY
-+$LOAD_PATH.unshift($stub)
-+
-+# Shim the ActiveSupport-isms the file leans on.
-+class Object
-+  def present?; true; end
-+  def blank?; false; end
-+end
-+class NilClass
-+  def present?; false; end
-+  def blank?; true; end
-+end
-+class String
-+  def present?; !empty?; end
-+  def blank?; empty?; end
 +end
 +
-+# Swallow the Rails-app require done inside Disqus#import.
-+module RequireShim
-+  def require(name)
-+    return false if name == './config/environment'
-+    super
-+  end
-+end
-+Object.prepend(RequireShim)
-+
-+# Minimal Thor so the class body loads without the gem.
-+Object.send(:remove_const, :Thor) if defined?(Thor)
 +class Thor
 +  def self.desc(*); end
 +  def self.method_option(*); end
-+  def initialize(*); end
-+  attr_accessor :options
++  def initialize(args=[], options={}, config={}); @options = options; end
++  def options; @options; end
 +end
 +
-+$calls = { import_remote: [], post_creator: [] }
++class SiteSetting
++  @email_domains_blacklist = ""
++  class << self; attr_accessor :email_domains_blacklist; end
++end
 +
 +class User
-+  attr_accessor :email, :username
-+  def self.where(cond)
-+    return [new.tap { |u| u.username = cond[:username_lower] }] if cond.is_a?(Hash) && cond.key?(:username_lower)
-+    []
-+  end
-+  def self.create!(attrs)
-+    new.tap { |u| u.email = attrs[:email] }
-+  end
++  def self.where(*); self; end
++  def self.first; new; end
++  def self.create!(**); new; end
 +end
 +
-+class Post
-+  attr_accessor :topic_id, :post_number, :topic
-+  def initialize
-+    @post_number = 1
-+    @topic = Object.new
-+  end
-+end
-+
-+class PostCreator
-+  def initialize(_user, attrs)
-+    @attrs = attrs
-+    $calls[:post_creator] << attrs
-+  end
-+  def create
-+    p = Post.new
-+    p.topic_id = 42
-+    p.post_number = $calls[:post_creator].size
-+    p
-+  end
-+end
-+
-+class TopicEmbed
-+  def self.import_remote(_user, link, title: nil)
-+    $calls[:import_remote] << link
-+    return nil unless link =~ /\Ahttps?:\/\//
-+    Post.new.tap { |p| p.topic_id = 99 }
-+  end
-+end
-+
-+class TopicFeaturedUsers
-+  def initialize(_t); end
-+  def choose; end
-+end
-+class SiteSetting
-+  class << self; attr_accessor :email_domains_blacklist; end
-+  self.email_domains_blacklist = ''
-+end
 +class RateLimiter
 +  def self.disable; end
 +  def self.enable; end
 +end
-+class UserNameSuggester
-+  def self.suggest(e); "u_#{e.hash.abs}"; end
-+end
-+module Email
-+  def self.downcase(e); e.to_s.downcase; end
-+end
 +
-+xml_path = File.join(Dir.mktmpdir, 'disqus.xml')
-+File.write(xml_path, '<disqus></disqus>')
-+
-+require './lib/tasks/disqus.thor'
-+
-+d = Disqus.new
-+d.options = { file: xml_path, post_as: 'admin', strip: nil, dry_run: nil }
-+d.import
-+
-+reasons = []
-+reasons << "TopicEmbed.import_remote called with #{$calls[:import_remote].inspect} (live HTTP fetch of thread link)" if $calls[:import_remote].any?
-+reasons << "only #{$calls[:post_creator].size} PostCreator call(s): thread with non-http link was silently skipped" if $calls[:post_creator].size < 2
-+if $calls[:post_creator].any? { |a| a[:raw] == '<p>hello</p>' || a[:raw] == '<p>yo</p>' }
-+  reasons << 'post raw is p[:cooked] HTML instead of the permalink markdown'
++class TopicEmbed
++  @calls = []
++  class << self; attr_accessor :calls; end
++  def self.import_remote(user, link, opts={})
++    @calls << {user: user, link: link, opts: opts}
++    post = Object.new
++    def post.present?; true; end
++    def post.topic_id; 1; end
++    def post.topic; @topic ||= Object.new; end
++    post
++  end
 +end
 +
-+puts reasons.empty? ? 'RESULT: PASS' : "RESULT: FAIL: #{reasons.join('; ')}"
++class TopicFeaturedUsers
++  def initialize(topic); end
++  def choose; end
++end
++
++class PostCreator
++  @calls = []
++  class << self; attr_accessor :calls; end
++  def initialize(user, attrs)
++    @user = user; @attrs = attrs
++    self.class.calls << {user: user, attrs: attrs}
++  end
++  def create
++    post = Object.new
++    def post.post_number; 1; end
++    def post.topic; @topic ||= Object.new; end
++    post
++  end
++end
++
++class Email; def self.downcase(s); s.downcase; end; end
++class UserNameSuggester; def self.suggest(s); "user"; end; end
++
++class Object
++  def blank?; respond_to?(:empty?) ? !!empty? : !self; end
++  def present?; !blank?; end
++end
++
++module Kernel
++  alias_method :orig_require, :require
++  def require(name)
++    return false if name == 'nokogiri' || name == './config/environment'
++    orig_require(name)
++  end
++end
++
++class File
++  class << self
++    alias_method :orig_exist?, :exist?
++    def exist?(path)
++      return true if path == 'fake.xml'
++      orig_exist?(path)
++    end
++  end
++end
++
++# --- Load the real file ---
++path = File.expand_path('../../lib/tasks/disqus.thor', __dir__)
++load path
++
++# --- Provide a fake parser with a thread ---
++class DisqusSAX
++  def self.new(options=nil)
++    parser = Object.new
++    threads = {
++      "1" => {
++        title: "Test Thread",
++        link: "http://example.com/thread",
++        created_at: "2015-01-01T00:00:00Z",
++        posts: [
++          { cooked: "<p>hello</p>", created_at: "2015-01-02T00:00:00Z", author_email: nil }
++        ]
++      }
++    }
++    parser.define_singleton_method(:threads) { threads }
++    parser.define_singleton_method(:normalize) { }
++    parser
++  end
++end
++
++# --- Run import, capture stdout ---
++original_stdout = $stdout
++$stdout = StringIO.new
++begin
++  disqus = Disqus.new([], { file: 'fake.xml', post_as: 'test' })
++  disqus.import
++  $stdout = original_stdout
++  if TopicEmbed.calls.any?
++    puts "RESULT: FAIL: TopicEmbed.import_remote was called (live HTTP fetch, drops created_at/permalink body)"
++  else
++    puts "RESULT: PASS"
++  end
++rescue => e
++  $stdout = original_stdout
++  puts "RESULT: FAIL: #{e.class}: #{e.message}"
++end

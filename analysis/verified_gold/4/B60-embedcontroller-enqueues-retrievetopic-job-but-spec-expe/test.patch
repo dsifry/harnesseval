@@ -1,94 +1,80 @@
 # frozen_string_literal: true
-require 'ostruct'
+require 'json'
 
-module Discourse
-  class InvalidAccess < StandardError; end
+# ---- Minimal stubs so the REAL controller file can load and run ----
+class Integer
+  def minute; self; end
 end
 
-# Rails monkey-patches Object#try; the controller calls nil.try(:id).
 class NilClass
   def try(*); nil; end
-end
-
-# 1.minute is used by discourse_expires_in
-class Integer
-  def minute; self * 60; end
-end
-
-module SiteSetting
-  def self.embeddable_host; 'example.com'; end
-end
-
-class FakeParams
-  def initialize(hash); @hash = hash; end
-  def require(key)
-    raise ArgumentError, "missing #{key}" unless @hash.key?(key)
-    @hash[key]
-  end
-  def [](key); @hash[key]; end
 end
 
 class ApplicationController
   def self.skip_before_filter(*); end
   def self.before_filter(*); end
   def self.layout(*); end
-
-  attr_reader :params, :response, :request
-
-  def initialize(raw_params = {})
-    @params = FakeParams.new(raw_params)
-    @response = OpenStruct.new(headers: {})
-    @request = OpenStruct.new(referer: 'http://example.com/')
-  end
-
   def current_user; nil; end
-  def render(*); @rendered = true; end
-  def rendered?; @rendered; end
-  def discourse_expires_in(*); end
 end
 
-class TopicEmbed
+module Jobs
   class << self
-    attr_accessor :topic_id_value
-    def topic_id_for_embed(_url); @topic_id_value; end
+    def calls; @calls ||= []; end
+    def reset!; @calls = []; end
+    def enqueue(name, *args, **kw)
+      calls << [name, args, kw]
+    end
   end
+end
+
+module TopicEmbed
+  def self.topic_id_for_embed(_url); nil; end
 end
 
 class TopicView
   def initialize(*); end
 end
 
-module Jobs
-  @enqueued = []
-  def self.enqueue(name, opts = {}); @enqueued << [name, opts]; end
-  def self.enqueued; @enqueued; end
-  def self.reset!; @enqueued = []; end
+module SiteSetting
+  def self.embeddable_host; nil; end
 end
 
+module Discourse
+  class InvalidAccess < StandardError; end
+end
+
+# Class the spec (allegedly) expects the controller to use synchronously.
 class TopicRetriever
-  @called = false
   class << self
-    attr_accessor :called
+    attr_accessor :instantiated
   end
-  def initialize(*); self.class.called = true; end
+  self.instantiated = false
+  def initialize(*); self.class.instantiated = true; end
 end
 
+# ---- Load the REAL file under test (do NOT redefine EmbedController) ----
 require_relative '../../app/controllers/embed_controller'
 
-Jobs.reset!
-TopicEmbed.topic_id_value = nil
-TopicRetriever.called = false
+class ParamsStub
+  def initialize(url); @url = url; end
+  def require(_key); @url; end
+end
 
-controller = EmbedController.new('embed_url' => 'http://example.com/t/1')
+controller = EmbedController.new
+controller.define_singleton_method(:params) { ParamsStub.new('http://example.test/embed') }
+controller.define_singleton_method(:render) { |*| nil }
+controller.define_singleton_method(:discourse_expires_in) { |*| nil }
+
+Jobs.reset!
+TopicRetriever.instantiated = false
+
 controller.best
 
-enqueued = Jobs.enqueued.any? { |name, _| name == :retrieve_topic }
-synchronous = TopicRetriever.called
+enqueued = Jobs.calls.any? { |name, _a, _k| name == :retrieve_topic }
+sync_called = TopicRetriever.instantiated
 
-if enqueued && !synchronous
-  puts 'RESULT: FAIL: EmbedController#best enqueues :retrieve_topic (async) instead of calling TopicRetriever synchronously as the spec asserts'
-elsif synchronous && !enqueued
-  puts 'RESULT: PASS'
+if enqueued && !sync_called
+  puts "RESULT: FAIL: EmbedController#best enqueues Jobs.enqueue(:retrieve_topic) instead of calling TopicRetriever synchronously; spec expects synchronous TopicRetriever.new"
 else
-  puts "RESULT: FAIL: unexpected path (enqueued=#{enqueued} synchronous=#{synchronous})"
+  puts "RESULT: PASS"
 end
