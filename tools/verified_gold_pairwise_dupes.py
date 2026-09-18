@@ -45,9 +45,17 @@ def toks(s):
     return {w for w in re.findall(r"[a-z0-9_]{4,}", (s or "").lower())}
 
 
+VOTES = VG / "PAIRWISE_VOTES.json"
+
+
+def load_votes():
+    return json.loads(VOTES.read_text()) if VOTES.exists() else {}
+
+
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("--threshold", type=float, default=0.3)
     ap.add_argument("--apply", action="store_true")
+    ap.add_argument("--min-votes", type=int, default=2, help="affirmative votes required to act on a pair")
     a = ap.parse_args()
     by_pr = defaultdict(list)
     for mf in sorted(VG.glob("*/B*/meta.json")):
@@ -84,6 +92,18 @@ def main():
         return await asyncio.gather(*[one(*p) for p in pairs])
     out = asyncio.run(run_all())
     hits = [r for r in out if r["same"]]
+    # ---- accumulate votes (the pairwise judge is not deterministic: the same pairs were judged
+    # duplicate in one pass and distinct in the next, so act on a majority of repeated passes)
+    votes = load_votes()
+    for r in out:
+        k = f"{r['pr']}|{r['a']}|{r['b']}"
+        v = votes.setdefault(k, {"yes": 0, "no": 0, "reasons": []})
+        v["yes" if r["same"] else "no"] += 1
+        if r["same"] and r.get("reason"):
+            v["reasons"].append(str(r["reason"])[:200])
+    VOTES.write_text(json.dumps(votes, indent=1))
+    confirmed = {k for k, v in votes.items() if v["yes"] >= a.min_votes}
+    print(f"vote tally: {len(votes)} pairs judged at least once; {len(confirmed)} with >= {a.min_votes} affirmative votes")
     print(f"duplicate pairs found: {len(hits)}")
     for r in sorted(hits, key=lambda r: -(r.get('confidence') or 0)):
         print(f"  PR {r['pr']}: {r['a']} == {r['b']} (conf {r['confidence']}, same_file={r['same_file']}, j={r['jaccard']})")
@@ -98,14 +118,15 @@ def main():
     if not hits:
         L.append("| — | — | — | — | every promoted bundle is a distinct defect |")
     (VG / "PAIRWISE_DUPES.md").write_text("\n".join(L) + "\n")
-    if a.apply and hits:
-        for r in hits:                       # keep the first, mark the second as a duplicate of it
+    to_apply = [r for r in hits if f"{r['pr']}|{r['a']}|{r['b']}" in confirmed] if a.apply else []
+    if a.apply:
+        for r in to_apply:                   # keep the first, mark the second as a duplicate of it
             mf = Path(r["b_meta"]); m = json.loads(mf.read_text())
             m["verdict"] = "duplicate_of"
             m["duplicate_of"] = {"bug_id": r["a"], "confidence": r["confidence"], "reason": r["reason"],
                                  "agency": "tools/verified_gold_pairwise_dupes.py"}
             mf.write_text(json.dumps(m, indent=1))
-        print(f"applied: {len(hits)} bundle(s) marked duplicate_of")
+        print(f"applied: {len(to_apply)} bundle(s) marked duplicate_of")
 
 
 if __name__ == "__main__":

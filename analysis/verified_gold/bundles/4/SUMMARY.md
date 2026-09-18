@@ -1,6 +1,6 @@
 # Verified hidden gold — PR 4
 
-Candidates: 70 · verdicts: {'behavior_change_not_regression': 36, 'confirmed_regression': 3, 'inconclusive_env': 8, 'defect_present_before_pr': 10, 'unresolved_file': 10, 'test_quality_verified': 1, 'duplicate_of': 2}
+Candidates: 70 · verdicts: {'behavior_change_not_regression': 35, 'confirmed_regression': 3, 'inconclusive_env': 8, 'defect_present_before_pr': 10, 'unresolved_file': 10, 'duplicate_of': 3, 'test_quality_verified': 1}
 
 | bug id | bug | verdict | head | base | fix | file | tarball sha256 |
 |---|---|---|---|---|---|---|---|
@@ -22,7 +22,6 @@ Candidates: 70 · verdicts: {'behavior_change_not_regression': 36, 'confirmed_re
 | 4-B28 | B28-embed-topic-retrieval-synchronously-runs-full-feed-poll- | `behavior_change_not_regression` | FAIL | ERROR:LoadError | PASS | `lib/topicretriever.rb` | `b20a06fca97b…` |
 | 4-B29 | B29-topicembed-uses-openurl-without-requiring-open-uri-caus | `behavior_change_not_regression` | FAIL | ERROR:LoadError | PASS | `app/models/topicembed.rb` | `b54a1ce1655c…` |
 | 4-B33 | B33-embed-topic-retrieval-can-crash-or-silently-no-op-when-e | `behavior_change_not_regression` | FAIL | ERROR:LoadError | PASS | `lib/topicretriever.rb` | `43327524c037…` |
-| 4-B35 | B35-redis-throttle-key-is-set-before-retrieval-succeeds-supp | `behavior_change_not_regression` | FAIL | ERROR:LoadError | PASS | `lib/topicretriever.rb` | `5f49a6865ffe…` |
 | 4-B37 | B37-rails-migration-adds-not-null-column-with-default-causin | `behavior_change_not_regression` | FAIL | ERROR:LoadError | PASS | `db/migrate/20131219203905addcookmethodtoposts.rb` | `df2110eff72f…` |
 | 4-B39 | B39-embeddable-host-validation-uses-strict-string-equality-r | `behavior_change_not_regression` | FAIL | ERROR:LoadError | PASS | `lib/topicretriever.rb` | `83c73b6aa875…` |
 | 4-B40 | B40-migration-backfills-postscookmethod-to-rawhtml-causing-a | `behavior_change_not_regression` | FAIL | ERROR:LoadError | PASS | `db/migrate/20131219203905_add_cookmethod_to_posts.rb` | `022f82662f8c…` |
@@ -53,6 +52,7 @@ Candidates: 70 · verdicts: {'behavior_change_not_regression': 36, 'confirmed_re
 | 4-B62 | B62-requiredependency-nokogiri-can-raise-loaderror-in-r | `defect_present_before_pr` | FAIL | FAIL | PASS | `app/models/topicembed.rb` | `22c938f7918d…` |
 | 4-B70 | B70-unescaped-requestreferer-interpolated-into-js-string-bre | `defect_present_before_pr` | FAIL | ? | PASS | `app/views/layouts/embed.html.erb` | `85810e7ab946…` |
 | 4-B80 | B80-embed-loading-page-auto-reloads-every-30s-amplifying-una | `defect_present_before_pr` | FAIL | ? | PASS | `app/views/embed/loading.html.erb` | `7f4b2e9c1eb1…` |
+| 4-B35 | B35-redis-throttle-key-is-set-before-retrieval-succeeds-supp | `duplicate_of` | FAIL | ERROR:LoadError | PASS | `lib/topicretriever.rb` | `730b4a5cddbd…` |
 | 4-B78 | B78-using--to-append-to-contents-mutates-the-callers-st | `duplicate_of` | FAIL | ERROR:LoadError | PASS | `lib/topicembed.rb` | `4a138b2a4999…` |
 | 4-B79 | B79-cache-miss-on-arbitrary-url-triggers-synchronous-full-rs | `duplicate_of` | FAIL | ERROR:LoadError | PASS | `topicretriever.rb` | `5ff26c43055d…` |
 | 4-B05 | B05-disqus-importer-silently-drops---category--c-support-and | `inconclusive_env` | FAIL | — | FAIL | `lib/tasks/disqus.thor` | `35bc405cbcbd…` |

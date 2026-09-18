@@ -2,7 +2,7 @@
 
 **Claim.** eventmanager.update swallows errors and returns [] when calendarReference is undefined
 
-**Verdict in this bundle:** `confirmed_regression` ({'base': 'PASS', 'head': 'FAIL', 'fixed': 'PASS'})
+**Verdict in this bundle:** `duplicate_of` ({'base': 'PASS', 'head': 'FAIL', 'fixed': 'PASS'})
 **Fidelity:** `repo_suite`  ·  **Authoring model:** `deepseek-4.1-flash`
 
 Everything needed to check this yourself is in this directory:

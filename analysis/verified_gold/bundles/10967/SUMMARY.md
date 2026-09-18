@@ -1,6 +1,6 @@
 # Verified hidden gold — PR 10967
 
-Candidates: 31 · verdicts: {'inconclusive_env': 14, 'static_text_test': 1, 'confirmed_regression': 5, 'defect_present_before_pr': 9, 'not_a_bug': 1, 'unresolved_file': 1}
+Candidates: 31 · verdicts: {'inconclusive_env': 14, 'static_text_test': 1, 'confirmed_regression': 4, 'defect_present_before_pr': 9, 'not_a_bug': 1, 'duplicate_of': 1, 'unresolved_file': 1}
 
 | bug id | bug | verdict | head | base | fix | file | tarball sha256 |
 |---|---|---|---|---|---|---|---|
@@ -8,7 +8,6 @@ Candidates: 31 · verdicts: {'inconclusive_env': 14, 'static_text_test': 1, 'con
 | 10967-B11 | B11-reschedule-calendar-update-errors-are-swallowed-catch-retu | `confirmed_regression` | FAIL | PASS | PASS | `packages/core/eventmanager.ts` | `33c6a129785a…` |
 | 10967-B13 | B13-booking-webhook-payload-breaks-backward-compatibility-by-c | `confirmed_regression` | FAIL | PASS | PASS | `packages/types/calendar.d.ts` | `5f4e9f9fcdfd…` |
 | 10967-B14 | B14-recurring-cancellation-delete-sweep-runs-once-per-calendar | `confirmed_regression` | FAIL | PASS | PASS | `apps/web/pages/api/bookings/[id]/cancel/handleCancelBooking.ts` | `d4e169957e8f…` |
-| 10967-B20 | B20-eventmanagerupdate-swallows-errors-and-returns--when-cale | `confirmed_regression` | FAIL | PASS | PASS | `packages/core/eventmanager.ts` | `f731fae44fc9…` |
 | 10967-B05 | B05-unscoped-credential-lookup-by-id-allows-cross-tenant-calen | `defect_present_before_pr` | FAIL | FAIL | PASS | `packages/core/eventmanager.ts` | `c02e09631a3c…` |
 | 10967-B09 | B09-missing-credentialid-branch-fans-out-over-all-credentials- | `defect_present_before_pr` | FAIL | FAIL | PASS | `eventmanager.ts` | `64b4de907165…` |
 | 10967-B12 | B12-collective-booking-can-report-success-while-silently-skipp | `defect_present_before_pr` | FAIL | FAIL | PASS | `packages/core/eventmanager.ts` | `c48ba54b9ead…` |
@@ -18,6 +17,7 @@ Candidates: 31 · verdicts: {'inconclusive_env': 14, 'static_text_test': 1, 'con
 | 10967-B26 | B26-booking-creation-performs-sequential-awaits-and-n1-credent | `defect_present_before_pr` | FAIL | FAIL | PASS | `packages/core/eventmanager.ts` | `c716a68f0914…` |
 | 10967-B27 | B27-uncaught-prisma-calendar-lookup-error-aborts-createallcale | `defect_present_before_pr` | FAIL | FAIL | PASS | `packages/core/eventmanager.ts` | `9f281bc427d0…` |
 | 10967-B31 | B31-multi-host-google-meet-bookings-create-different-meet-link | `defect_present_before_pr` | FAIL | FAIL | PASS | `packages/app-store/googlecalendar/lib/CalendarService.ts` | `f4516e285ead…` |
+| 10967-B20 | B20-eventmanagerupdate-swallows-errors-and-returns--when-cale | `duplicate_of` | FAIL | PASS | PASS | `packages/core/eventmanager.ts` | `36c45cb19da6…` |
 | 10967-B01 | B01-collective-bookings-persist-only-destinationcalendar0-dro | `inconclusive_env` | FAIL | — | FAIL | `packages/features/bookings/lib/handlenewbooking.ts` | `8c49abcf0b87…` |
 | 10967-B04 | B04-reschedule-merge-deletes-only-the-first-calendar-reference | `inconclusive_env` | FAIL | — | FAIL | `packages/trpc/server/routers/viewer/booking/eventmanager.ts` | `a23aacdab1b5…` |
 | 10967-B06 | B06-video-booking-references-persist-with-undefined-credential | `inconclusive_env` | FAIL | — | FAIL | `eventmanager.ts` | `d43d3cfdfac6…` |
