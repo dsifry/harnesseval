@@ -1372,16 +1372,30 @@ python3 -m venv .venv
 ### 11.2 The chain (run in this order)
 
 ```bash
+# 1. ingest the run registry (needs only the committed runs/ + the golden comments)
 .venv/bin/python tools/final_report_extract.py            # runs/*        → analysis/final_report_dataset.json
-.venv/bin/python tools/final_report_compute.py            # dataset       → analysis/final_report_metrics.json
-                                                          #   (frozen §1–§9 + §10b/§10c; appends true_gold_defects)
-.venv/bin/python tools/verified_gold_defect_metrics.py    # registry+data → analysis/verified_gold/DEFECT_METRICS.json
-.venv/bin/python tools/gold_defect_catalog.py             # registry      → analysis/verified_gold/GOLD_DEFECT_CATALOG.{json,md,csv}
+
+# 2. the §10d per-cell metrics, then the registry's derived tier counts/table
+.venv/bin/python tools/verified_gold_defect_metrics.py    # dataset+registry → analysis/verified_gold/DEFECT_METRICS.json
+.venv/bin/python tools/verified_gold_registry_sync.py     # defect meta.json → DEFECT_REGISTRY.{json,md} (_final counts)
+
+# 3. the headline metrics, including the §10d true-gold section it appends
+.venv/bin/python tools/final_report_compute.py            # dataset + DEFECT_METRICS → analysis/final_report_metrics.json
+                                                          #   (frozen §1–§9 + §10b/§10c + true_gold_defects)
+
+# 4. the catalogue, then the presentation layer
+.venv/bin/python tools/gold_defect_catalog.py             # registry → GOLD_DEFECT_CATALOG.{json,md,csv}
 .venv/bin/python tools/final_report_figures.py            # → analysis/figures/*.png + interactive_dashboard.html
 .venv/bin/python tools/final_report_figures_true_gold.py  # → the true-gold charts
 .venv/bin/python tools/final_report_tables.py             # → markdown tables (writes /tmp/final_report_tables.md)
 .venv/bin/python tools/final_report_html.py               # → analysis/figures/interactive_dashboard.html
 ```
+
+**Inputs vs outputs.** These files are committed **inputs** produced by the verification campaign, not by this
+chain, and must be present: `runs/`, `analysis/inputs/golden_comments/`, `analysis/exp_union_semantic_pilot_*.json`,
+`analysis/semantic_*.json`, `analysis/verified_gold/DEFECT_REGISTRY.json`, `analysis/verified_gold/DEFECT_ASSIGN.json`
+and the per-defect evidence directories. The chain writes the rest. Step 1 and step 3 each abort with a FATAL
+message if a required input is missing, rather than writing a degenerate artifact.
 
 ### 11.3 What reproduces exactly, and what does not (measured, not asserted)
 

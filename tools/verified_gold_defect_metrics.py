@@ -37,9 +37,14 @@ def main():
     reg = json.load(open(VG / "DEFECT_REGISTRY.json"))
     assign = json.load(open(VG / "DEFECT_ASSIGN.json"))
     D = json.load(open(ROOT / "analysis/final_report_dataset.json"))
-    M = json.load(open(ROOT / "analysis/final_report_metrics.json"))
-    top6 = list(M["expanded_gold"]["per_pr"].keys())
-    goldens = {u.rstrip("/").split("/")[-1]: M["expanded_gold"]["per_pr"][u]["golden"] for u in top6}
+    # The six-PR list and the per-PR golden counts come from the DATASET (produced by final_report_extract.py)
+    # rather than from the generated final_report_metrics.json. That file is written by final_report_compute.py,
+    # whose §10d step consumes THIS tool's DEFECT_METRICS.json - so reading the dataset here breaks the cycle and
+    # lets the whole chain be rebuilt from scratch in one pass. (Values are identical: n_comments per PR is the
+    # golden count, and the top-6 ordering key is the same sev_weight/n_comments sort used by the extractor.)
+    _pg = D["pr_golden"]
+    top6 = sorted(_pg, key=lambda u: (-_pg[u]["sev_weight"], -_pg[u]["n_comments"]))[:6]
+    goldens = {u.rstrip("/").split("/")[-1]: _pg[u]["n_comments"] for u in top6}
     slug = {u: u.rstrip("/").split("/")[-1] for u in top6}
     by_pr_defects = defaultdict(list)
     for d in reg["defects"]:
@@ -54,6 +59,10 @@ def main():
     reported_ids = {d for _pr, m in assign.items() for _h, d in m.items() if d in valid_ids}
 
     sel = {(r["model"], r["framework"], r["effort"], r["url"]): r for r in D["selected_runs"]}
+    try:
+        M = json.load(open(ROOT / "analysis/final_report_metrics.json"))
+    except FileNotFoundError:
+        M = {}
     MODELS = M["mods"] if "mods" in M else sorted({r["model"] for r in D["selected_runs"]})
     FWS = ["vanilla-engineered", "compound-realistic", "metareview-realistic"]
     EFFS = ["low", "medium", "high"]
