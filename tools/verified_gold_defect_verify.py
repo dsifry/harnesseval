@@ -66,10 +66,28 @@ def resolve_file(pr, anchor):
     basename against the PR's changed files first (authoritative), then fall back to the checkout."""
     mod = R if pr in RAILS else C
     repo = mod.REPO
-    want = norm(Path(anchor).name or anchor)
+    # 1) the anchor path exactly as given (the checkout is at the PR head at this point)
+    if anchor and (repo / anchor).exists():
+        return anchor
+    nf = norm(anchor)
+    # 2) exact normalized full-path match against the PR's changed files (authoritative)
     for f in pr_diff_files(pr):
-        if norm(Path(f).name) == want or want.endswith(norm(Path(f).name)) or norm(Path(f).name).endswith(want):
+        if norm(f) == nf:
             return f
+    want = norm(Path(anchor).name or anchor)
+    # 3) basename match, but disambiguate collisions by shared directory segments
+    #    (PR 11059 changes many CalendarService.ts files; picking the first one silently built the test
+    #     against the wrong module and every fix edit then failed to locate its target)
+    exact = [f for f in pr_diff_files(pr) if norm(Path(f).name) == want]
+    if exact:
+        if len(exact) == 1:
+            return exact[0]
+        anchor_dirs = set(anchor.split("/"))
+        return max(exact, key=lambda f: len(anchor_dirs & set(f.split("/"))))
+    loose = [f for f in pr_diff_files(pr)
+             if want.endswith(norm(Path(f).name)) or norm(Path(f).name).endswith(want)]
+    if loose:
+        return loose[0]
     if repo not in _FILE_IX:
         ix = {}
         for f in repo.rglob("*"):

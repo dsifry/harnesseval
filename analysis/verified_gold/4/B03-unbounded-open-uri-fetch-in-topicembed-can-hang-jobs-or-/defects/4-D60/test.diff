@@ -1,0 +1,91 @@
+require 'open-uri'
+require 'stringio'
+require 'cgi'
+
+# ActiveSupport-ish string helpers
+class String
+  def present?; !empty?; end
+  def blank?; empty?; end
+end
+
+# require_dependency is provided by ActiveSupport in Rails; no-op here.
+def require_dependency(*); end
+
+# Avoid loading the real simple-rss gem; the code under test only needs the constant.
+module Kernel
+  alias_method :__orig_require, :require unless method_defined?(:__orig_require)
+  def require(name)
+    return true if name.to_s == 'simple-rss'
+    __orig_require(name)
+  end
+end
+
+# Stub the scheduled-job base class so the file under test can be loaded.
+module Jobs
+  class Scheduled
+    def self.recurrence(*); end
+    def self.sidekiq_options(*); end
+  end
+end
+
+# Minimal stubs for the collaborators referenced by poll_feed.rb
+class SiteSetting
+  def self.feed_polling_enabled?; true; end
+  def self.feed_polling_url; 'http://example.com/feed.xml'; end
+  def self.embed_by_username; 'poll_user'; end
+end
+
+class FakeUser
+  def blank?; false; end
+end
+
+class FakeCollection
+  def first; FakeUser.new; end
+end
+
+class User
+  def self.where(_arg); FakeCollection.new; end
+end
+
+module TopicEmbed
+  def self.import(*); end
+end
+
+FakeRSS = Struct.new(:items)
+module SimpleRSS
+  def self.parse(_io); FakeRSS.new([]); end
+end
+
+# Intercept open() so we can observe the options actually passed by the code.
+$open_calls = []
+module Kernel
+  private
+  def open(*args, **kwargs, &_blk)
+    $open_calls << [args, kwargs]
+    StringIO.new('<rss/>')
+  end
+  public
+end
+
+# Load the REAL file under test with a relative path.
+require_relative '../../app/jobs/scheduled/poll_feed.rb'
+
+# Exercise the code path that performs the fetch.
+Jobs::PollFeed.new.execute({})
+
+if $open_calls.empty?
+  puts 'RESULT: FAIL: poll_feed never invoked open()'
+  exit 1
+end
+
+timeout_present = $open_calls.any? do |args, kwargs|
+  opts = kwargs.dup
+  args.each { |a| opts = opts.merge(a) if a.is_a?(Hash) }
+  opts.key?(:read_timeout) || opts.key?(:open_timeout) || opts.key?(:timeout)
+end
+
+if timeout_present
+  puts 'RESULT: PASS'
+else
+  puts "RESULT: FAIL: poll_feed calls open() without any timeout/size-cap option: #{$open_calls.inspect}"
+end

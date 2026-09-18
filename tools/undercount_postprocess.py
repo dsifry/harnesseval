@@ -47,8 +47,12 @@ def main():
                 json.dump(m, open(mv[0], "w"), indent=1)
                 reclassified.append((d["id"], labels[0][:70]))
                 continue
-            prim = max([x for x in reg["defects"] if x["bundle"] == d["bundle"] and x["pr"] == d["pr"]],
-                       key=lambda x: jac(x["label"], labels[0]) if labels else 0)
+            # the merge target is the defect that the container's FIX demonstrates = the container's own
+            # claim, looked up PR-wide (a container may itself have been folded into another container)
+            pool = [x for x in reg["defects"] if x["pr"] == d["pr"] and x["id"] != d["id"]]
+            prim = max(pool, key=lambda x: jac(x["label"], labels[0]) if labels else 0) if pool else None
+            if prim is None:
+                still.append((d["id"], "no merge target")); continue
             if prim["id"] != d["id"]:
                 to_merge.append((d["id"], prim["id"], prim["label"][:80]))
                 continue

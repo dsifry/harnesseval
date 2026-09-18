@@ -1,20 +1,12 @@
 # Defect registry — final state (after the orthogonality experiment)
 
-**Total gold = 42 goldens + 113 defects = 155 (3.69x goldens)**  ·  **test-validated hidden gold = 103 (2.45x goldens)**
+**Total gold = 42 goldens + 110 defects = 152 (3.62x goldens)**  ·  **test-validated hidden gold = 108 (2.57x goldens)**
 
 - 17 labels were MERGED away: the sibling fix also cured them, so they were the bundle's own defect restated.
-- 10 defects are undemonstrated in this harness, each with a specific reason.
+- 2 defects are undemonstrated in this harness, each with a specific reason.
 
 | defect | bundle | class | why not demonstrated |
 |---|---|---|---|
-| 4-D59 | 4-B24 | `?` |  |
-| 4-D60 | 4-B03 | `?` |  |
-| 4-D61 | 4-B26 | `?` |  |
-| 4-D62 | 4-B04 | `?` |  |
-| 8-D07 | 8-B05 | `?` |  |
-| 11059-D30 | 11059-B19 | `?` |  |
-| 11059-D31 | 11059-B19 | `?` |  |
-| 11059-D32 | 11059-B19 | `?` |  |
 | 11059-D33 | 11059-B23 | `?` |  |
 | 11059-D34 | 11059-B23 | `?` |  |
 
