@@ -1,0 +1,141 @@
+# frozen_string_literal: false
+require 'digest'
+require 'uri'
+
+def require_dependency(name); end
+
+class Object
+  def blank?; false; end
+  def present?; true; end
+end
+class NilClass
+  def blank?; true; end
+  def present?; false; end
+end
+class String
+  def blank?; strip.empty?; end
+  def present?; !blank?; end
+end
+
+module I18n
+  def self.t(key, opts = {})
+    "imported from #{opts[:link]}"
+  end
+end
+
+module Nokogiri
+  class FakeFragment
+    def initialize(html); @html = html; end
+    def css(selector); []; end
+    def to_html; @html; end
+  end
+  module HTML
+    def self.fragment(html)
+      FakeFragment.new(html)
+    end
+  end
+end
+
+module ActiveRecord
+  class Base
+    %w[id topic_id embed_url content_sha1 post_id post].each do |a|
+      attr_accessor a
+    end
+
+    def self.belongs_to(*args); end
+    def self.validates_presence_of(*args); end
+    def self.transaction; yield; end
+
+    def self.rows
+      @rows ||= []
+    end
+
+    def self.where(conditions)
+      Relation.new(self, conditions)
+    end
+
+    def self.create!(attrs)
+      obj = new
+      attrs.each { |k, v| obj.send("#{k}=", v) }
+      obj.id ||= (rows.map(&:id).compact.max || 0) + 1
+      rows << obj
+      obj
+    end
+
+    def update_column(column, value)
+      send("#{column}=", value)
+    end
+
+    class Relation
+      def initialize(klass, conditions)
+        @klass = klass
+        @conditions = conditions
+      end
+
+      def all
+        @klass.rows.select do |row|
+          @conditions.all? { |k, v| row.send(k) == v }
+        end
+      end
+
+      def first
+        all.first
+      end
+
+      def pluck(column)
+        all.map { |row| row.send(column) }
+      end
+    end
+  end
+end
+
+class Post
+  attr_accessor :id, :topic_id
+  def self.cook_methods; { raw_html: 1 }; end
+end
+
+class Topic
+  def self.transaction; yield; end
+end
+
+$next_topic_id = 0
+class PostCreator
+  def initialize(user, opts = {}); @opts = opts; end
+  def create
+    $next_topic_id += 1
+    p = Post.new
+    p.topic_id = $next_topic_id
+    p.id = $next_topic_id
+    p
+  end
+end
+
+class PostRevisor
+  def initialize(post); @post = post; end
+  def revise!(*args); end
+end
+
+require_relative '../../app/models/topic_embed.rb'
+
+user = Object.new
+base_url = 'http://example.com/article'
+post1 = TopicEmbed.import(user, base_url.dup, 'Title', 'body'.dup)
+
+variants = {
+  'query params'   => 'http://example.com/article?utm_source=news',
+  'trailing slash' => 'http://example.com/article/',
+  'fragment'       => 'http://example.com/article#section',
+  'hostname case'  => 'http://EXAMPLE.com/article',
+  'default port'   => 'http://example.com:80/article'
+}
+
+mismatches = variants.reject do |_, variant_url|
+  TopicEmbed.topic_id_for_embed(variant_url) == post1.topic_id
+end
+
+if mismatches.empty?
+  puts 'RESULT: PASS'
+else
+  details = mismatches.map { |label, url| "#{label} #{url.inspect}" }.join(', ')
+  puts "RESULT: FAIL: embed URL lookup is an exact, unnormalized string match; equivalent URLs (#{details}) resolve to a different or missing topic instead of topic_id=#{post1.topic_id}"
+end

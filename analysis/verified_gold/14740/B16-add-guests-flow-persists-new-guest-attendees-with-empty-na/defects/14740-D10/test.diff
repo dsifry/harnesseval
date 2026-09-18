@@ -1,0 +1,127 @@
+import { vi, describe, it, beforeEach, expect } from "vitest";
+
+const prismaMockObj = vi.hoisted(() => ({
+  booking: {
+    findFirst: vi.fn(),
+    update: vi.fn(),
+  },
+  user: {
+    findFirstOrThrow: vi.fn(),
+  },
+}));
+
+vi.mock("@calcom/prisma", () => ({ prisma: prismaMockObj }));
+
+vi.mock("@calcom/lib", () => ({
+  parseRecurringEvent: vi.fn(() => undefined),
+}));
+
+vi.mock("@calcom/lib/server", () => ({
+  getTranslation: vi.fn(async () => (key: string) => key),
+}));
+
+vi.mock("@calcom/lib/server/getUsersCredentials", () => ({
+  getUsersCredentials: vi.fn(async () => []),
+}));
+
+vi.mock("@calcom/lib/server/queries/teams", () => ({
+  isTeamAdmin: vi.fn(async () => false),
+  isTeamOwner: vi.fn(async () => false),
+}));
+
+vi.mock("@calcom/emails", () => ({
+  sendAddGuestsEmails: vi.fn(async () => undefined),
+}));
+
+vi.mock("@calcom/core/EventManager", () => ({
+  default: class MockEventManager {
+    updateCalendarAttendees = vi.fn(async () => undefined);
+  },
+}));
+
+import { addGuestsHandler } from "./addGuests.handler";
+
+const organizerUser = {
+  name: "Organizer",
+  email: "org@example.com",
+  timeZone: "UTC",
+  locale: "en",
+};
+
+const baseBooking = () => ({
+  id: 42,
+  uid: "uid-1",
+  title: "Test Booking",
+  description: "",
+  startTime: new Date("2099-01-01T10:00:00Z"),
+  endTime: new Date("2099-01-01T11:00:00Z"),
+  userId: 7,
+  userPrimaryEmail: "org@example.com",
+  attendees: [
+    { id: 1, name: "Existing", email: "existing@example.com", timeZone: "UTC", locale: "en" },
+  ],
+  eventType: {
+    id: 1,
+    title: "Test Event",
+    teamId: null,
+    recurringEvent: null,
+    seatsPerTimeSlot: null,
+    seatsShowAttendees: false,
+  },
+  destinationCalendar: null,
+  references: [],
+  user: { destinationCalendar: null, credentials: [] },
+  location: null,
+});
+
+describe("addGuestsHandler", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    const booking = baseBooking();
+    prismaMockObj.booking.findFirst.mockResolvedValue(booking);
+    prismaMockObj.user.findFirstOrThrow.mockResolvedValue(organizerUser);
+    prismaMockObj.booking.update.mockImplementation(async (args: any) => {
+      const created = args?.data?.attendees?.createMany?.data ?? [];
+      return {
+        ...booking,
+        attendees: [
+          ...booking.attendees,
+          ...created.map((g: any, i: number) => ({ id: 100 + i, ...g })),
+        ],
+      };
+    });
+  });
+
+  it("persists newly added guests with a non-empty name so greetings/ICS CN are not blank", async () => {
+    const ctx = {
+      user: {
+        id: 7,
+        email: "org@example.com",
+        name: "Organizer",
+        username: "org",
+        timeZone: "UTC",
+        locale: "en",
+      },
+    } as any;
+    const input = { bookingId: 42, guests: ["newguest@example.com"] } as any;
+
+    await addGuestsHandler({ ctx, input });
+
+    expect(prismaMockObj.booking.update).toHaveBeenCalledTimes(1);
+    const updateArgs = prismaMockObj.booking.update.mock.calls[0][0] as any;
+    const createdGuests = updateArgs.data.attendees.createMany.data as Array<{
+      name: string;
+      email: string;
+    }>;
+
+    expect(createdGuests).toHaveLength(1);
+    expect(
+      createdGuests[0].name,
+      "addGuests must persist a non-empty attendee name; empty name causes blank email greetings and ICS CN=\"\""
+    ).not.toBe("");
+    expect(
+      createdGuests[0].name,
+      "addGuests must persist a non-empty attendee name; empty name causes blank email greetings and ICS CN=\"\""
+    ).toBeTruthy();
+  });
+});

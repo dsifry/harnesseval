@@ -248,7 +248,8 @@ async def do_defect(d, findings, apply):
 async def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--pr", default=None); ap.add_argument("--limit", type=int, default=0)
-    ap.add_argument("--only", default=None); ap.add_argument("--apply", action="store_true", default=True)
+    ap.add_argument("--only", default=None); ap.add_argument("--ids", default=None)
+    ap.add_argument("--apply", action="store_true", default=True)
     a = ap.parse_args()
     reg = json.load(open(VG / "DEFECT_REGISTRY.json"))
     assign = json.load(open(VG / "DEFECT_ASSIGN.json"))
@@ -271,6 +272,9 @@ async def main():
     import hashlib
     def sha(t): return hashlib.sha1(t.encode()).hexdigest()[:16]
     todo = [d for d in reg["defects"] if d["tier"] == "D-labelled"]
+    if a.ids:
+        want = [x.strip() for x in a.ids.split(",") if x.strip()]
+        todo = [d for d in reg["defects"] if d["id"] in want]
     if a.pr: todo = [d for d in todo if d["pr"] == a.pr]
     if a.only: todo = [d for d in todo if d["id"] == a.only]
     if a.limit: todo = todo[:a.limit]

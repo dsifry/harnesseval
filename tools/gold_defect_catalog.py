@@ -80,6 +80,8 @@ def main():
                 anchors[f"{f}:{a}" + (f"-{b}" if b else "")] += 1
         anchor = anchors.most_common(1)[0][0] if anchors else (d.get("anchor_file") or "")
         own = dd is not None and (dd / "test.diff").exists()
+        dmeta0 = json.load(open(dd / "meta.json")) if own and (dd / "meta.json").exists() else {}
+        origin = dmeta0.get("test_origin") or "defect-authored (verifier wrote a test for this defect alone)"
         dmeta = json.load(open(dd / "meta.json")) if own and (dd / "meta.json").exists() else {}
         labels = (bmeta.get("multi_defect") or {}).get("labels") or []
 
@@ -101,9 +103,10 @@ def main():
             "id": did, "pr": pr, "label": d["label"], "tier": d.get("tier"),
             "evidence_level": "own_executed" if own else "bundle_executed",
             "defect_is_bundle_primary_claim": primary,
-            "exact_test": ("yes - defect-specific test, orthogonality proven" if own
-                           else ("yes - the bundle test demonstrates exactly this claim" if primary
-                                 else "bundle-level - this is a facet split out by the merge audit; the bundle test exercises the bundle's claim")),
+            "test_origin": origin,
+            "exact_test": ("yes - defect-specific test, orthogonality proven" if own and not dmeta0.get("test_origin")
+                           else ("yes - container test authored for exactly this claim" if own
+                                 else "no own test (should not occur: every defect owns a directory)")),
             "anchor": anchor,
             "bundle": d["bundle"], "bundle_dir": str(bd.relative_to(ROOT)) if bd else None,
             "bundle_verdict": d.get("bundle_verdict"),
@@ -128,21 +131,18 @@ def main():
     L = ["# Hidden-gold defect catalogue", "",
          f"**{len(recs)} distinct verified defects.** Every one has an executed test that failed on the PR head and a",
          "documented fix that made it pass. Two evidence levels:", "",
-         "- `own_executed` — the defect has its own `defects/<id>/` test, fix and logs, plus a sibling-fix",
-         "  orthogonality check (its own fix is required: the bundle's fix leaves it red).",
-         "- `bundle_executed` — demonstrated by its bundle's executed test/fix/logs. Explicitly marked when the",
-         "  defect **is** the bundle's primary claim (then the bundle's test is that defect's exact test).",
+         "**Every defect is an independent unit**: it owns `defects/<id>/{test.diff,fix.patch,logs/,meta.json}`.",
+         "No defect shares a test with another. `test_origin` records whether the test was written by the verifier",
+         "for this defect alone (with a sibling-fix orthogonality check) or copied from the original execution",
+         "container where it had been authored for exactly this claim.",
          "", "Merged duplicates and restored/renamed entries carry a provenance note.", "",
          "## Known open items (do not treat this catalogue as exhaustive)", "",
-         "- `exact_test` marked *bundle-level*: the defect was split out by the merge audit and has no test of",
-         "  its own yet; its behaviour is documented by the audit + assigned findings, and the bundle test",
-         "  exercises the bundle's claim.",
          "- `label_vs_test_mismatch`: where a defect's own test declares a claim that does not match the",
          "  registry label, the TEST is the truth (the label was inherited from an LLM merge audit).",
-         "- Under-count: the audits' claim lists imply further distinct defects that are not in the registry",
-         "  yet (e.g. 4/B33 nil-`downcase` crash, 4/B39 case-sensitive host compare, 4/B26 wrong-recue,",
-         "  4/B24 locale-dependent content_sha1, 4/B07 missing scheme validation, 8/B05 API-contract break,",
-         "  several 11059/B19 + 11059/B23 facets). 106 is a **floor**, not a ceiling.", ""]
+         "- Under-count: the audits' claim lists imply further distinct defects not in the registry yet",
+         "  (4/B33 nil-`downcase` crash, 4/B39 case-sensitive host compare, 4/B26 wrong-rescue, 4/B24",
+         "  locale-dependent content_sha1, 4/B07 missing scheme validation, 8/B05 API-contract break,",
+         "  several 11059/B19 + 11059/B23 facets). The count is a **floor**, not a ceiling.", ""]
     by_pr = defaultdict(list)
     for r in recs:
         by_pr[r["pr"]].append(r)

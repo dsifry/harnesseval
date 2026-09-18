@@ -1,12 +1,13 @@
 # Defect registry — final state (after the orthogonality experiment)
 
-**Total gold = 42 goldens + 103 defects = 145 (3.45x goldens)**  ·  **test-validated hidden gold = 103 (2.45x goldens)**
+**Total gold = 42 goldens + 101 defects = 143 (3.4x goldens)**  ·  **test-validated hidden gold = 100 (2.38x goldens)**
 
 - 16 labels were MERGED away: the sibling fix also cured them, so they were the bundle's own defect restated.
-- 0 defects are undemonstrated in this harness, each with a specific reason.
+- 1 defects are undemonstrated in this harness, each with a specific reason.
 
 | defect | bundle | class | why not demonstrated |
 |---|---|---|---|
+| 14740-D04 | 14740-B06 | `unresolved_in_pass` | the verification pass did not converge for this defect; the DEFECT itself is not in doubt (it was split out of its bundle by the merge audit and its f |
 
 ## Merged away (same defect as their bundle's label)
 

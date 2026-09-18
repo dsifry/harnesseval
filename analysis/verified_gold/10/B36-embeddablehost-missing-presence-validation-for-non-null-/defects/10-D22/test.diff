@@ -1,0 +1,99 @@
+require 'uri'
+
+module ActiveRecord
+  class NotNullViolation < StandardError; end
+
+  class Base
+    class << self
+      def validations
+        @validations ||= []
+      end
+
+      def callbacks
+        @callbacks ||= []
+      end
+
+      def validates_format_of(*args)
+        validations << [:format, args]
+      end
+
+      def validates_presence_of(*args)
+        validations << [:presence, args]
+      end
+
+      def validates(*args); end
+
+      def belongs_to(*args); end
+
+      def before_validation(&block)
+        callbacks << block
+      end
+
+      def column_names
+        %w[id host category_id]
+      end
+    end
+
+    def initialize(attrs = {})
+      @attributes = {}
+      attrs.each { |k, v| @attributes[k.to_sym] = v }
+    end
+
+    def [](k); @attributes[k.to_sym]; end
+    def []=(k, v); @attributes[k.to_sym] = v; end
+
+    def host; @attributes[:host]; end
+    def category_id; @attributes[:category_id]; end
+
+    def valid?
+      self.class.callbacks.each { |cb| instance_exec(&cb) }
+      self.class.validations.all? do |type, args|
+        case type
+        when :presence
+          attrs = args.first.is_a?(Array) ? args.first : [args.first]
+          attrs.all? do |a|
+            v = @attributes[a]
+            !v.nil? && !v.to_s.strip.empty?
+          end
+        when :format
+          opts = args.last.is_a?(Hash) ? args.last : {}
+          attr = args.first
+          attr = attr.first if attr.is_a?(Array)
+          regex = opts[:with]
+          val = @attributes[attr]
+          regex.nil? || (val && val =~ regex)
+        else
+          true
+        end
+      end
+    end
+
+    def save!
+      raise StandardError, 'invalid record' unless valid?
+      if @attributes[:category_id].nil?
+        raise NotNullViolation,
+              'null value in column "category_id" violates not-null constraint'
+      end
+      true
+    end
+  end
+end
+
+require_relative '../../app/models/embeddable_host'
+
+record = EmbeddableHost.new(host: 'example.com', category_id: nil)
+
+if record.valid?
+  begin
+    record.save!
+    puts 'RESULT: FAIL: save! succeeded unexpectedly'
+  rescue ActiveRecord::NotNullViolation => e
+    puts "RESULT: FAIL: missing presence validation on category_id; " \
+         "EmbeddableHost#valid? returned true with category_id=nil, " \
+         "then save! raised #{e.class}: #{e.message}"
+  rescue => e
+    puts "RESULT: FAIL: unexpected error #{e.class}: #{e.message}"
+  end
+else
+  puts 'RESULT: PASS'
+end
