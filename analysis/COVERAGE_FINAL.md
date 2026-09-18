@@ -90,7 +90,7 @@ is not reported except as a capability-floor aside.
   their vanilla cells reuse healthy August-era runs (era rule allows it for vanilla), and no
   full-50 vanilla fill was queued. Their compound cells are full 50/50; their metareview cells are
   the 36 top-6 re-runs required by the era rule (current-campaign binaries).
-- **GLM partial cells.** The two fill lanes were ~2/3 done at the freeze (fullmatrix [44/247],
+- **GLM partial cells.** The two fill lanes were ~40% done at the freeze (fullmatrix [44/247],
   vanilla [165/281] at last write) and were stopped for the freeze. `--skip-batch` health-gating
   means re-running resumes without redoing healthy cells.
 - **Astra compound/metareview partial.** Fill was never queued to 50; the cells are complete on

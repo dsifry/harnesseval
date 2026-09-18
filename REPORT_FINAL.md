@@ -1028,7 +1028,7 @@ drives every panel at once. All quality metrics presented are the expanded (real
 numbers; strict benchmark numbers appear as the comparison (panel 1f). Sections: five independent panels, each its own test with a
 question-as-title, how-to-read note, own CI toggle (off by default), own chart, takeaway
 callout and click-details card —
-1a price/performance ($/run vs F1); 1b latency/quality (wall vs F1); 1c cost per golden defect
+1a price/performance ($/run vs F2′); 1b latency/quality (wall vs F2′); 1c cost per true bug ($/true bug vs F2′)
 ($/TP vs recall); 1d cost per real finding ($/real vs F1); 1e token volume (tokens/run vs F1);
 then (1f) strict-vs-expanded recall dumbbell (the hidden-gold flip); then (2) effort
 ladder per framework; (3) token composition per effort; (4) sample-bias check — dumbbell

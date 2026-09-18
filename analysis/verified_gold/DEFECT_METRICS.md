@@ -79,7 +79,7 @@ Denominators are computed from the registry (see _final in analysis/verified_gol
 | claude-sonnet-5 · compound-realistic · high | 6 | 0.099 [0.031, 0.184] | 0.682 | 0.349 | 0.172 | 0.154 | 0.119 | 0.115 |
 | claude-sonnet-5 · compound-realistic · low | 6 | 0.086 [0.047, 0.158] | 0.722 | 0.325 | 0.153 | 0.135 | 0.104 | 0.100 |
 
-MRV-vs-CE: 8/21 pairs resolve positive on ΔF1'.
+MRV-vs-CE on ΔF1': 8/21 pairs resolve positive (CI lower bound > 0). On ΔF2' (our evaluator): 7/21. Point estimates: 19/21 positive on ΔF1', 18/21 on ΔF2'.
 
 ## variant: reachable
 
@@ -158,7 +158,7 @@ MRV-vs-CE: 8/21 pairs resolve positive on ΔF1'.
 | claude-sonnet-5 · compound-realistic · high | 6 | 0.108 [0.034, 0.202] | 0.682 | 0.349 | 0.186 | 0.165 | 0.130 | 0.125 |
 | claude-sonnet-5 · compound-realistic · low | 6 | 0.094 [0.052, 0.162] | 0.722 | 0.325 | 0.166 | 0.145 | 0.113 | 0.109 |
 
-MRV-vs-CE: 7/21 pairs resolve positive on ΔF1'.
+MRV-vs-CE on ΔF1': 7/21 pairs resolve positive (CI lower bound > 0). On ΔF2' (our evaluator): 7/21. Point estimates: 19/21 positive on ΔF1', 18/21 on ΔF2'.
 
 ## variant: full
 
@@ -237,5 +237,5 @@ MRV-vs-CE: 7/21 pairs resolve positive on ΔF1'.
 | claude-sonnet-5 · compound-realistic · high | 6 | 0.099 [0.031, 0.184] | 0.682 | 0.349 | 0.172 | 0.154 | 0.119 | 0.115 |
 | claude-sonnet-5 · compound-realistic · low | 6 | 0.086 [0.047, 0.155] | 0.722 | 0.325 | 0.153 | 0.135 | 0.104 | 0.100 |
 
-MRV-vs-CE: 8/21 pairs resolve positive on ΔF1'.
+MRV-vs-CE on ΔF1': 8/21 pairs resolve positive (CI lower bound > 0). On ΔF2' (our evaluator): 7/21. Point estimates: 19/21 positive on ΔF1', 18/21 on ΔF2'.
 

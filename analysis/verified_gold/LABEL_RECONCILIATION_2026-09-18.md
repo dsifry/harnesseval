@@ -1,3 +1,7 @@
+> **SUPERSEDED (2026-09-18) — kept as the audit record of that stage.** The totals below (103 defects /
+> 145 gold) predate the under-count recovery and the container-test normalisation. **Current: 42 goldens +
+> 110 individually test-validated defects = 152** (`GOLD_DEFECT_CATALOG.md`, `DEFECT_REGISTRY.json` `_final`).
+
 # Label ↔ test reconciliation — 2026-09-18
 
 The registry labels were inherited from an LLM merge audit (`MERGE_AUDIT.json`), so a label can describe

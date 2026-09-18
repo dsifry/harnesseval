@@ -104,3 +104,17 @@ Evidence levels per defect:
 container test it shares with another defect. `meta.json` records `evidence_provenance`. The canonical list,
 with each defect's test, fix, location and provenance, is `GOLD_DEFECT_CATALOG.md`; `DEFECT_REGISTRY.json`
 carries `_final` (goldens 42, defects 110, total gold 152).
+
+## Terminology (these mean the same thing)
+
+| term used elsewhere | term used here | meaning |
+|---|---|---|
+| framework, fw | **harness** | the wrapper around a model: `vanilla-engineered` (van), `compound-realistic` (CE), `metareview-realistic` (MRV) |
+| effort | **effort level** | low / medium / high reasoning effort |
+| bundle | **execution container** | one candidate finding with one executed test+fix; containers are provenance, defects are the unit |
+| claim, label | **defect claim** | a distinct root cause asserted by the merge audit |
+| true golden set, true gold, verified hidden gold | same | 42 Martian goldens + 110 verified defects = **152** |
+| expanded gold, verified union (§10b/§10c) | *superseded* | the earlier key-union sets (359 → 253); keep for provenance only |
+| coverage ceiling | — | a cell's reachable maximum (goldens + defects in the PRs it covered); **not** the same as `reachable` |
+| reachable denominator | — | 42 + the 97 defects some run actually reported (139), used only as a disclosed sensitivity variant |
+

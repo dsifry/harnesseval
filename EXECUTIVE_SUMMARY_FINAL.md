@@ -40,7 +40,7 @@ adjudication, judge gpt-5.2 for the Anthropic/GLM rows.
 
 - **Supported, measured:** the cost ratios above (list prices retrieved 2026-09-16, retrieval-dated
   table in the report); recall parity with frontier harness cells on the hardest PRs; the Pareto
-  frontier of $-per-real-finding vs F1 is entirely GLM cells; harnesses raise recall for weak/mid
+  frontier of $-per-real-finding vs F2′ is entirely GLM cells; harnesses raise recall for weak/mid
   models (median +0.12, 17/42 pairs resolved) but add 10× tokens median; **high vs medium effort
   buys nothing measurable in 18/22 model×framework comparisons** while costing 0.96×–4.2× — buy
   effort only where a resolved gain exists (our table lists them).
@@ -71,7 +71,8 @@ adjudication gate), then **executed** it: for every candidate, a test that fails
 minimal fix that makes it pass, and — where a sibling defect shares the site — an orthogonality
 check that the bundle's fix leaves it red. Independent duplicate passes (six reviewers, then a
 fix-location adjudication) removed 23 restatements and container folding removed 17 more, while a
-walk of the audits' own label lists restored 10 defects that had been dropped. The verified universe
+walk of the audits' own label lists surfaced 13 candidate claims that had been dropped, of which 10 turned
+out to be distinct defects (3 merged into the container's claim). The verified universe
 is **42 goldens + 110 individually test-validated defects = 152 distinct bugs**, every one owning its
 own test, fix and logs (`analysis/verified_gold/GOLD_DEFECT_CATALOG.md`; none undemonstrated).
 
@@ -110,8 +111,8 @@ and rejected: anchored findings are 227 in-diff vs 1 out-of-diff.
 ## Gaps we will not paper over
 
 Fable-5.1's harness cells don't exist (account rate-capped ~3 days) — 29 of 111 hitlist rows;
-opus/sonnet vanilla and metareview cells are top-6-only (operator decision + era rule); GLM
-full-50 fills were stopped at the data freeze (~2/3 done, resumable); sonnet-5's compound cells
+opus/sonnet vanilla cells are top-6-only by operator decision; some metareview cells needed era-rule re-runs; GLM
+full-50 fills were stopped at the data freeze (~40% of the planned fills done, resumable); sonnet-5's compound cells
 *lose* recall because Claude-Code-style routing sends reviewer subagents to haiku — a harness is
 only as good as the models it actually calls.
 

@@ -166,7 +166,12 @@ def main():
             L.append(f"| {m} · {fw} · {e} | {c['n_pr']} | {c['recall']:.3f} [{c['ci']['recall'][1]:.3f}, {c['ci']['recall'][2]:.3f}] "
                      f"| {c['adjP']:.3f} | {c['adjPp']:.3f} | {c['F1']:.3f} | {c['F1p']:.3f} | {c['F2']:.3f} | {c['F2p']:.3f} |")
         pos = sum(1 for v in out[variant]["pairs"].values() if v["dF1p"][1] > 0)
-        L += ["", f"MRV-vs-CE: {pos}/{len(out[variant]['pairs'])} pairs resolve positive on ΔF1'.", ""]
+        _p = out[variant]['pairs']
+        _p2 = sum(1 for v in _p.values() if v['dF2p'][1] > 0)
+        L += ["", f"MRV-vs-CE on ΔF1': {pos}/{len(_p)} pairs resolve positive (CI lower bound > 0). "
+                  f"On ΔF2' (our evaluator): {_p2}/{len(_p)}. Point estimates: "
+                  f"{sum(1 for v in _p.values() if v['dF1p'][0] > 0)}/{len(_p)} positive on ΔF1', "
+                  f"{sum(1 for v in _p.values() if v['dF2p'][0] > 0)}/{len(_p)} on ΔF2'.", ""]
     (VG / "DEFECT_METRICS.md").write_text("\n".join(L) + "\n")
     for variant in ("verified", "reachable", "full"):
         top = sorted(out[variant]["cells"].items(), key=lambda kv: -kv[1]["F1p"])[:5]

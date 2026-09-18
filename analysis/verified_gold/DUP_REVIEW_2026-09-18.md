@@ -5,7 +5,7 @@ defects. **Every group was re-adjudicated against hard evidence, not against its
 test assertions, its own minimal fix diff, and the PR-head source. Labels were frequently wrong (they were
 inherited from an LLM merge-audit of multi-concern bundles), so label similarity is not evidence.
 
-## A. Actual duplicates — same site, one fix (14 groups, 15 defects merged away)
+## A. Actual duplicates — same site, one fix (14 groups, 15 defects merged away in *this* pass (23 in total once the later label/under-count passes are included))
 
 | group | verdict | decisive evidence |
 |---|---|---|
@@ -57,8 +57,8 @@ defect now owns its own test directory. See `UNDERCOUNT_2026-09-18.md` and `GOLD
 
 | | before | after |
 |---|---|---|
-| hidden-gold defects | 120 | **106** |
+| hidden-gold defects | 120 | **106** → *110 after the later under-count recovery (see the final-state note above)* |
 | double-counted | 15 | 0 (merged) |
 | restored | — | +1 (4-D55) |
 | **total gold (42 + defects)** | 162 (3.86×) | **148 (3.52×)** |
-| test-validated hidden gold | 120 (2.86×) | **106 (2.52×)** |
+| test-validated hidden gold | 120 (2.86×) | **106 (2.52×)** → *110 (2.62×)* |
