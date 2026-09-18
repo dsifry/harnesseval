@@ -115,6 +115,13 @@ GLM harness cells reach equal-or-better F2′ at **$0.22–$0.63** (9.8×–27.6
 still misses, it misses *complementarily*: it finds 88 of the 147 true bugs and all 52 of its misses were
 found by another configuration (the union of all 66 complete cells covers 140/147).
 
+**How to read this report.** §2 is the method — what we ran, how findings are judged, why six PRs, and how
+we built ground truth we could execute; read it if you want to check or reproduce a number. §3 is the
+results, in five claims plus the cost/token/latency economics and a check that the six-PR sample is not
+misleading. §4 states plainly what we cannot claim, and §5 gives the exact reproduction chain (inputs,
+commands, checksums). If you only read one thing, read §3.5 (the five claims); if you only look at one
+figure, look at Figure 1 (value for money). Appendix A keeps the superseded unions for provenance only.
+
 ## 2. Methodology
 
 ### 2.1 The lab and the benchmark
@@ -201,10 +208,36 @@ comparability limits are disclosed in §2.3.3 and qualify the F1′/F2′ compar
 Secondary: the full 50, used only for the selection-effect check on the 33 cells with ≥40/50 healthy
 scored PRs (§3.6). All headline numbers are primary-sample numbers unless labelled otherwise.
 
-### 2.3 Instruments, comparability, and disclosure rules
+#### Caveats: what we did not run, and why
+
+One gap is deliberate and worth stating plainly rather than leaving implicit: **Claude Fable 5.1 was run
+one-shot across all six primary PRs, but its two harness cells (compound-realistic and metareview-realistic)
+were only partially run — one to two PRs each — so they are coverage gaps, not results.** Every other model
+has its full harness grid on the primary sample.
+
+The reason is **budget**. A harness review is not one model call: the orchestrator dispatches several
+subagent passes and then synthesises, so a harness run costs many times a one-shot run — and Fable is a
+frontier-priced model. Completing the Fable CE/MRV cells across the sample (and beyond) was beyond what this
+campaign could fund. We chose to spend the remaining budget on depth everywhere else — executed ground
+truth, honest adjudication, and the full-50 comparison runs — rather than on one more model's harness grid.
+
+If you have the budget, there are two ways to close it, and we welcome both:
+
+- **Fund it and we will run it.** The missing Fable harness cells can be run on the same apparatus and
+  published alongside these results; reach out via the repository
+  ([github.com/dsifry/harnesseval](https://github.com/dsifry/harnesseval)).
+- **Run it yourself.** The methodology is laid out to be reproduced: §2 specifies the frameworks, models,
+  effort levels, judges, instruments, run-health and era rules, and §5 publishes the reproduction chain
+  (`runs/` inputs, the exact commands, and the checksums). The resulting cells drop into the same tables and
+  the same scoring code, so the comparison is like-for-like.
+
+Nothing in the conclusions depends on guessing what those cells would have shown: every headline result is
+computed from the cells that are complete, and `analysis/COVERAGE.md` records exactly what is missing.
+
+### 2.3 How findings are judged: instruments, comparability, and disclosure
 
 
-#### 2.3.1 Frozen instruments (unchanged; do not modify)
+#### 2.3.1 The judging instruments, frozen across the campaign
 
 `harnesseval/judge.py` (golden matcher), `readjudicate3.py` prompt/version semantics, and the
 golden dataset were **not modified** for this report. n = 1 selected run per cell×PR (selection
@@ -258,8 +291,23 @@ fable $ are conservative.
 
 ### 2.4 The top-6 design choice, argued and tested
 
+**Why six PRs, and why these six.** The campaign's grid is 8 models × 3 frameworks × 3 effort levels = 72
+cells, and every cell × PR combination is a complete review — a harness cell being many model calls, not
+one. Run over all 50 benchmark PRs that is 3,600 reviews. The budget for this study allowed the full grid on
+a **six-PR primary sample** (432 cell×PR reviews, 66 complete cells), with the remaining budget spent on
+depth instead of breadth: executed ground truth for every claimed defect, honest adjudication of every
+finding, and full-50 comparison runs used to check the sample (§2.4.2, §3.6). In short, the trade was PR
+breadth against depth and redundancy of evidence, and we chose depth on a hard slice.
 
-#### 2.4.1 Definition and rationale (deliberate, not convenience)
+The six were selected by **summed original-golden severity weight** — an objective, pre-registered criterion,
+not a hand-picked set — and it turns out to be the **six most severe, most complex PRs in the evaluation
+set** (mean summed severity 18.2 versus 6.1 for the other 44, about 3×; §2.4.2). The rest of this section
+shows that this slice is defensible and states its limits: it is hard-weighted, but recall measured on it is
+*not* systematically biased against the tools (§2.4.2), and the earlier hope that it would be a conservative
+*lower bound* on full-set results does not survive testing — which is exactly why we report intervals and a
+selection check instead of treating six PRs as the whole story (§2.4.3, §3.6).
+
+#### 2.4.1 What "top-6" means, and why it is a defensible slice
 
 **top-6 = the six PRs with the highest summed golden-comment severity weight** (Critical=4,
 High=3, Medium=2, Low=1; ties by comment count) — i.e. the six PRs with the **highest original-golden
@@ -273,7 +321,7 @@ tool that only catches easy issues is not worth buying, and cost/benefit is deci
 end. (A lexicographic misreading of "top-6" already corrupted one subset earlier in this campaign —
 the severity ordering is binding.)
 
-#### 2.4.2 Representativeness claim, stated as testable
+#### 2.4.2 Is the sample representative of the full benchmark? (tested)
 **How hard is the sample?** Measured directly (panel 5 of the dashboard): summing each PR's golden severity
 weights (Critical 4 … Low 1), the six headlined PRs average **18.2** against **6.1** for the other 44 — about
 **3×** — and the **mildest of the six is as severe as the most severe PR we did not pick** (both 13). The
@@ -298,14 +346,20 @@ healthy scored PRs (T3):
    (sonnet-5 collapses from 3rd on full-50 to last on top-6); everywhere else ranks are preserved
    or near-preserved. This is direct, if not uniform, evidence for the claim.
 
-#### 2.4.3 Monotonicity check — the "lower bound" sub-claim is NOT supported
+#### 2.4.3 Is the top-6 result a conservative "lower bound"? (No — tested, and why that matters)
 
-If recall were systematically lower on higher-severity PRs, the top-6 ranking would be a lower
-bound on full-set recall. Measured: Spearman ρ(per-PR severity weight, per-PR recall) over the 33
-full rows averages **+0.10**, with 6/33 negative — recall is *not* monotonically lower on harder
-PRs. **Report the top-6 as a hard-weighted sample whose recall matches the full set on average
-(§2.4.2), not as a lower bound.** Where a specific cell shows a large gap (e.g. sol vanilla high:
-top-6 0.62 vs full 0.76), the T3 table is the correction.
+**What the sub-claim was.** If the six chosen PRs really are the hardest in the set, it is natural to hope
+that scores measured on them are a *floor* for the rest of the benchmark: a cell that scores X on the top-6
+would then score at least X on the full 50, and our headline numbers would be conservative by construction.
+This is the "lower bound" sub-claim. It matters because it decides how to read every number in §3: as a floor
+to be improved on, or as an unbiased (but noisy) sample from a harder-than-average slice.
+
+**Why it is false.** A floor would require recall to fall as PR severity rises. It does not: Spearman
+ρ between each PR's severity weight and its recall, over the 33 cells with full-50 runs, averages **+0.10**,
+with 6 of 33 negative — recall is *not* monotonically lower on harder PRs. So the honest framing is that the
+top-6 is a hard-weighted sample whose recall matches the full set on average (§2.4.2), not a lower bound.
+Where an individual cell does diverge sharply (e.g. sol vanilla high: top-6 0.62 vs full 0.76), the T3 table
+is the correction — and that divergence is also why a selection check is reported at all (§3.6).
 
 
 ### 2.5 Building ground truth we could execute
@@ -600,7 +654,7 @@ construction, the 2026-09-18 evidence audit (3 withheld from the verified univer
 duplicates) and the finding→defect assignment repair are described in §2.5, with per-defect evidence in
 `WITHDRAWALS_AND_DEDUP_2026-09-18.md`.
 
-### 3.2 The strict benchmark lens (42 goldens), kept for comparison
+### 3.2 The benchmark's own lens (its 42 golden comments), kept for comparison
 
 
 66 of 72 cells are complete (6/6 PRs each; 396 runs, n = 1 run/PR, k = 1); the six fable
@@ -717,7 +771,7 @@ expensive harnesses emit large volumes of non-golden content of which more is ju
 
 
 
-### 3.3 CE vs MRV on the same PRs
+### 3.3 Metareview vs compound engineering (MRV vs CE) on the same PRs
 
 #### T13 — CE vs MRV, paired on the same PRs (Δ = MRV − CE, semantic metrics)
 
@@ -1258,7 +1312,7 @@ full-50 F1 is 0.57 vs top-6 0.73 — the *ranking* survives, the level does not)
 judge family per row and k=1 adjudication* (§2.3.1, §4).
 
 
-### 3.6 Selection effect and sampling
+### 3.6 Does the six-PR choice distort the picture? (selection effect and sampling)
 
 
 #### T3 — selection effect: top-6 vs full-50 (cells with ≥40/50 healthy scored PRs)
@@ -1363,8 +1417,9 @@ decision, GLM partial fills were stopped at the data freeze.
 ## 4. What we cannot claim
 
 
-1. **Fable harness cells do not exist** (rate-capped ~3 days; 29 hitlist rows outstanding) — fable
-   harness numbers in T1/T2 are gaps, not results.
+1. **Fable harness cells are incomplete** (1–2 PRs each; a frontier-priced harness grid was beyond this
+   campaign's budget) — fable harness numbers in T1/T2 are gaps, not results. How to close the gap, or run
+   it yourself from the published methodology, is set out in §2.2's caveats.
 2. **n = 1 run per cell×PR**: cluster bootstrap quantifies *PR-sampling* variance only;
    run-to-run LLM variance is not in these CIs (`tools/eval_adjudicator.py`,
    `analysis/score_flips.py` outputs, and `analysis/ADJUDICATOR_INTERRATER.md` measure judge-side
@@ -1511,7 +1566,7 @@ found and fixed: `analysis/REPLICATION_TEST_2026-09-18.md`.
 | `analysis/figures/*.png` | same data, **different bytes** across matplotlib versions |
 | every LLM step (Appendix A clustering, Appendix A overlap checks, §3.1 defect verification) | **not** reproducible by re-running, by design — the stored artifacts are the record |
 
-### 5.4 Tool changes made for this report (disclosed, per the hard rules)
+### 5.4 Tool changes made for this report (disclosed for transparency)
 
 1. `tools/scoreboard.py` — added an `Fb` column with `--beta` (default 2.0, the benchmark's recall-weighted
    default). F1/recall/adjP semantics untouched: adds `ap.add_argument("--beta", ...)` and one line per row
@@ -1542,7 +1597,7 @@ line-anchored correctness analysis (not yet reported); resuming the GLM fill lan
 > **Superseded.** The material in this appendix is retained for provenance only. The primary results
 > are in §3.1; nothing in this appendix should be cited without that context.
 
-### A.1 The verified key-union set (superseded by §3.1)
+### A.1 The superseded key-union analysis (the earlier clustering approach)
 
 Appendix A introduced the semantic union and was then audited twice more. Both audits found real defects,
 and both are corrected here:
