@@ -1399,7 +1399,9 @@ message if a required input is missing, rather than writing a degenerate artifac
 
 ### 11.3 What reproduces exactly, and what does not (measured, not asserted)
 
-The chain was re-run in a **fresh clone** of the committed state and compared byte-for-byte:
+The chain was re-run in a **fresh clone** with every chain output deleted first (so a match cannot be a
+stale file matching itself) and compared byte-for-byte. Full record, including the eight problems the test
+found and fixed: `analysis/REPLICATION_TEST_2026-09-18.md`.
 
 | artifact | result |
 |---|---|
