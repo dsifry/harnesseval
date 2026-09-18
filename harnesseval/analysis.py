@@ -37,7 +37,9 @@ from collections import defaultdict
 RUNS_DIR = Path(__file__).resolve().parents[1] / "runs"
 REGISTRY = RUNS_DIR / "registry.jsonl"
 RESULTS = Path(__file__).resolve().parents[1] / "results"
-GOLDEN_DIR = Path(__file__).resolve().parents[1] / "third_party" / "code-review-benchmark" / "offline" / "golden_comments"
+_REPO = Path(__file__).resolve().parents[1]
+_VENDORED = _REPO / "analysis" / "inputs" / "golden_comments"
+GOLDEN_DIR = _VENDORED if _VENDORED.is_dir() else _REPO / "third_party" / "code-review-benchmark" / "offline" / "golden_comments"
 
 # Phase-A / non-framework runs we never analyze as FUTs
 NON_FUT = {"martian-judge", "inspect-runner-judge"}

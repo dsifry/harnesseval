@@ -88,8 +88,9 @@ realistic adapter invokes. Two ways to provide the binary:
   git checkout 0.8.2-eval && go build -o bin/metareview ./cmd/metareview`. Then point the
   harness at it via `MRV_BIN` (see [`adapters/metareview_realistic.py`](harnesseval/adapters/metareview_realistic.py)).
 
-- A prebuilt `bin/metareview` is vendored in this repo's `bin/` for convenience (from the
-  metareview 0.8.0 build); rebuild from the metareview `0.8.2-eval` branch to match the pin.
+- `bin/` is **gitignored**, so a fresh clone contains no binary — build it (recommended, matches the pin)
+  or copy a prebuilt one into `bin/metareview` and point `HARNESS_MRV_BIN` at it. `calibrate --check`
+  reports which one it resolves and whether it is executable.
 
 ## 6. CLIs (for the realistic / primary mode)
 
@@ -110,8 +111,23 @@ transient API overload (`cli_backends.is_transient_claude_error`).
 uv run python -m harnesseval.calibrate --check
 ```
 
-This reproduces the Martian bench's published anchor numbers before any framework comparison
-is trusted (Phase A calibration). If it passes, the lab is valid.
+Offline preflight — **no API calls, no spend**. It reports, item by item, whether the pieces a run needs are
+present: the keys file (names only, never values), the judge instrument, the golden comments, the Martian
+candidate results (INSTALL §4), writable `results/` + `runs/`, plus the framework-specific items (the
+metareview binary for metareview runs, the `claude`/`codex` CLIs for `--mode cli`). Exit 0 means the lab can
+run. Example in a clone that has not yet fetched the upstream checkouts:
+
+```
+[OK  ] API keys (~/.config/harnesseval/keys.env)      5 names: HARNESS_ANTHROPIC_API_KEY, ...
+[OK  ] judge instrument (harnesseval/judge.py)        score_from_matches present
+[OK  ] golden comments                                50 PRs from golden_comments
+[FAIL] candidate results (benchmark checkout)         FileNotFoundError: missing third_party/code-review-benchmark (INSTALL.md §4)
+[warn] metareview binary (metareview harness)         bin/metareview - build per INSTALL.md §5 or set HARNESS_MRV_BIN
+```
+
+To reproduce the bench's published anchor numbers (Phase A.1, the paid calibration run) use the same module
+without `--check` — that re-judges N shipped pairs (~$1/pair, `--pairs` default 5) and registers the result
+in `runs/registry.jsonl`.
 
 ## Notes
 

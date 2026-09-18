@@ -136,6 +136,86 @@ def run_pilot(judge_key: str, pilot_pairs: list[tuple[str, str]], concurrency: i
             "errors": n_err, "wall_s": dt, "disagreements": disagreements}
 
 
+
+def preflight() -> int:
+    """Offline verification of everything a run needs. No API calls, no spend.
+
+    Required: keys file, judge instrument, Martian golden comments, Martian candidate results, writable
+    results/ + runs/. Framework-specific: the metareview Go binary (metareview runs) and the claude/codex
+    CLIs (only for --mode cli / the "realistic" adapters).
+    """
+    import os as _os
+    import shutil as _shutil
+
+    from harnesseval.dataset import martian
+
+    rows: list[tuple[str, bool, bool, str]] = []   # (name, ok, required, detail)
+
+    # keys
+    try:
+        k = keys.load_keys()
+        rows.append(("API keys (~/.config/harnesseval/keys.env)", bool(k), True,
+                     f"{len(k)} names: {', '.join(sorted(k))}"))
+    except Exception as e:                                        # noqa: BLE001
+        rows.append(("API keys (~/.config/harnesseval/keys.env)", False, True, str(e)[:90]))
+
+    # judge instrument
+    try:
+        from harnesseval import judge as _j
+        ok = callable(getattr(_j, "score_from_matches", None))
+        rows.append(("judge instrument (harnesseval/judge.py)", ok, True,
+                     "score_from_matches present" if ok else "score_from_matches MISSING"))
+    except Exception as e:                                        # noqa: BLE001
+        rows.append(("judge instrument (harnesseval/judge.py)", False, True, str(e)[:90]))
+
+    # martian dataset (goldens)
+    try:
+        g = martian.golden_comments_by_url()
+        rows.append(("golden comments", bool(g), True, f"{len(g)} PRs from {martian.GOLDEN_DIR.name}"))
+    except Exception as e:                                        # noqa: BLE001
+        rows.append(("golden comments", False, True, str(e).splitlines()[0][:90]))
+
+    # martian dataset (candidate results) - needs the upstream checkout
+    try:
+        c = martian.candidates_by_url("opus")
+        rows.append(("candidate results (benchmark checkout)", bool(c), True,
+                     f"{len(c)} PRs (INSTALL.md §4)"))
+    except Exception as e:                                        # noqa: BLE001
+        rows.append(("candidate results (benchmark checkout)", False, True,
+                     f"{type(e).__name__}: missing third_party/code-review-benchmark (INSTALL.md §4)"))
+
+    # writable output dirs
+    try:
+        for d in ("results", "runs"):
+            Path(d).mkdir(parents=True, exist_ok=True)
+        rows.append(("output dirs results/ + runs/", True, True, "writable"))
+    except Exception as e:                                        # noqa: BLE001
+        rows.append(("output dirs results/ + runs/", False, True, str(e)[:90]))
+
+    # metareview binary (only needed for metareview frameworks)
+    mrv_env = _os.environ.get("HARNESS_MRV_BIN")
+    mrv = Path(mrv_env).expanduser() if mrv_env else Path("bin/metareview")
+    rows.append(("metareview binary (metareview harness)", mrv.exists() and _os.access(str(mrv), _os.X_OK),
+                 False, f"{mrv} - build per INSTALL.md §5 or set HARNESS_MRV_BIN"))
+
+    # CLIs (only needed for --mode cli)
+    for cli in ("claude", "codex"):
+        rows.append((f"{cli} CLI (--mode cli only)", _shutil.which(cli) is not None, False,
+                     _shutil.which(cli) or "not on PATH"))
+
+    print("\n  harnesseval preflight (offline; no API calls)\n")
+    for name, ok, required, detail in rows:
+        tag = "OK  " if ok else ("FAIL" if required else "warn")
+        print(f"    [{tag}] {name:<46} {detail}")
+    bad = [r for r in rows if r[2] and not r[1]]
+    print()
+    if bad:
+        print(f"  {len(bad)} required item(s) missing - the lab cannot run yet (see INSTALL.md).")
+        return 1
+    print("  All required items present. The lab can run (framework-specific items above are optional).")
+    return 0
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--pairs", type=int, default=5,
@@ -143,7 +223,13 @@ def main():
     ap.add_argument("--judge", choices=["opus", "sonnet"], default="opus")
     ap.add_argument("--concurrency", type=int, default=20)
     ap.add_argument("--out", default="results/phase_a1_pilot.json")
+    ap.add_argument("--check", action="store_true",
+                    help="offline preflight: verify keys, dataset, judge and binaries are present WITHOUT "
+                         "making any API call or spending budget. Exit 0 = the lab can run.")
     args = ap.parse_args()
+
+    if args.check:
+        raise SystemExit(preflight())
 
     cands = martian.candidates_by_url(args.judge)
     shipped = martian.shipped_evaluations(args.judge)
