@@ -1,0 +1,67 @@
+import { expect, it, vi } from "vitest";
+
+const { createdCredentials } = vi.hoisted(() => ({ createdCredentials: [] as any[] }));
+
+vi.mock("@calcom/prisma", () => ({
+  default: {
+    user: {
+      findUnique: async () => ({ id: 42 }),
+    },
+    app: {
+      findUnique: async () => ({ slug: "test-app" }),
+    },
+    credential: {
+      findFirst: async () => null,
+      update: async () => ({}),
+      create: async ({ data }: { data: unknown }) => {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        createdCredentials.push(data);
+        return { id: createdCredentials.length, ...(data as object) };
+      },
+    },
+  },
+}));
+
+vi.mock("@calcom/lib/constants", () => ({
+  APP_CREDENTIAL_SHARING_ENABLED: true,
+}));
+
+vi.mock("@calcom/lib/crypto", () => ({
+  symmetricDecrypt: () => JSON.stringify({ key: "value" }),
+}));
+
+vi.mock("@calcom/app-store/appStoreMetaData", () => ({
+  appStoreMetadata: {
+    "test-app": { slug: "test-app", type: "test_type" },
+  },
+}));
+
+function makeReq() {
+  return {
+    headers: { "calcom-webhook-secret": "test-secret" } as Record<string, string>,
+    body: { userId: 42, appSlug: "test-app", keys: "encrypted-keys" },
+  };
+}
+
+function makeRes() {
+  const res: any = {};
+  res.status = vi.fn().mockReturnValue(res);
+  res.json = vi.fn().mockReturnValue(res);
+  return res;
+}
+
+it("does not create duplicate credentials when two webhook deliveries race for the same user+app", async () => {
+  createdCredentials.length = 0;
+  process.env.CALCOM_WEBHOOK_SECRET = "test-secret";
+  process.env.CALCOM_WEBHOOK_HEADER_NAME = "calcom-webhook-secret";
+  process.env.CALCOM_APP_CREDENTIAL_ENCRYPTION_KEY = "test-encryption-key";
+
+  const { default: handler } = await import("./app-credential");
+
+  const res1 = makeRes();
+  const res2 = makeRes();
+
+  await Promise.all([handler(makeReq() as any, res1), handler(makeReq() as any, res2)]);
+
+  expect(createdCredentials).toHaveLength(1);
+});

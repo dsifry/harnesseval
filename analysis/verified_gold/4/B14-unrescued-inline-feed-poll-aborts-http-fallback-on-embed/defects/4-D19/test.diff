@@ -1,0 +1,79 @@
+# frozen_string_literal: true
+require 'uri'
+
+# ---- minimal stubs so the REAL lib/topic_retriever.rb can load & run ----
+
+class NilClass
+  def blank?; true; end
+end
+
+module SiteSetting
+  def self.embeddable_host; 'example.com'; end
+  def self.feed_polling_enabled?; true; end
+  def self.embed_by_username; 'system'; end
+end
+
+$redis = Object.new
+def $redis.setnx(_k, _v)
+  @seen ||= {}
+  return false if @seen[_k]
+  @seen[_k] = true
+  true
+end
+def $redis.expire(_k, _t); true; end
+
+class TopicEmbed
+  def self.where(_cond); WhereChain.new; end
+  def self.import_remote(_user, _url); :imported; end
+  class WhereChain
+    def exists?; false; end # cache is empty so we always hit the miss path
+  end
+end
+
+class User
+  def self.where(_cond); WhereChain.new; end
+  class WhereChain
+    def first; nil; end # no embed_by_username user -> fetch_http bails
+  end
+end
+
+# Synchronous counter: if PollFeed.new.execute runs inline, count increments
+# during TopicRetriever#retrieve. If it were deferred/enqueued, it would not.
+$poll_feed_calls = 0
+
+module Jobs
+  class PollFeed
+    def initialize; end
+    def execute(_opts)
+      $poll_feed_calls += 1
+    end
+  end
+end
+
+# ---- load the REAL file under test (no redefinition) ----
+require File.expand_path('../../lib/topic_retriever.rb', File.dirname(__FILE__))
+
+# ---- exercise observable behaviour ----
+# Three distinct cache-miss embed URLs, each with the throttle disabled
+# (i.e. every request proceeds to perform_retrieve).
+urls = (1..3).map { |i| "http://example.com/post/#{i}" }
+
+urls.each do |u|
+  before = $poll_feed_calls
+  TopicRetriever.new(u, no_throttle: true).retrieve
+  inline = $poll_feed_calls - before
+  raise "expected >=1 inline feed poll for #{u}, got #{inline}" if inline < 1
+end
+
+# ---- verdict ----
+# Correct behaviour: no synchronous poll runs per cache-miss request
+#                    (the hourly scheduler owns feed polling).
+# Defect present : each cache-miss request ran a full feed poll inline.
+if $poll_feed_calls == 0
+  puts "RESULT: PASS"
+elsif $poll_feed_calls == urls.size
+  puts "RESULT: FAIL: every cache-miss embed synchronously ran a full feed poll " \
+       "(#{ $poll_feed_calls } inline Jobs::PollFeed#execute calls for #{ urls.size } distinct URLs)"
+else
+  puts "RESULT: FAIL: unexpected inline poll count #{$poll_feed_calls}"
+end

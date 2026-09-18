@@ -1,0 +1,66 @@
+import { expect, vi } from "vitest";
+
+import { test } from "@calcom/web/test/fixtures/fixtures";
+
+import { buildCalendarEvent, buildPerson } from "../../lib/test/builder";
+
+// i18n is a true external (loads locale namespaces). Stub it so that this test
+// only exercises the template payload logic under test.
+vi.mock("@calcom/lib/i18n", () => {
+  const t = (key: string) => key;
+  return {
+    getTranslation: () => t,
+    i18n: { getFixedT: () => t, t },
+  };
+});
+
+// serverConfig reads env vars at import time; stub it so module import is stable.
+vi.mock("@calcom/lib/serverConfig", () => ({
+  serverConfig: { transport: {}, from: "test@example.com" },
+}));
+
+// Rendering React e-mail templates is a true external concern (react-email);
+// stubbing it isolates the payload construction under test.
+vi.mock("../", () => ({
+  renderEmail: async () => "<html>rendered</html>",
+}));
+
+test("team-member variant of OrganizerAddGuestsEmail must not leak attendee emails via replyTo", async () => {
+  const organizer = buildPerson({
+    name: "Organizer Alice",
+    email: "alice-organizer@example.com",
+  });
+  const secretAttendee = buildPerson({
+    name: "Secret Attendee",
+    email: "secret-attendee@example.com",
+  });
+  const teamMember = buildPerson({
+    name: "Team Member Bob",
+    email: "bob-team@example.com",
+  });
+
+  const calEvent = buildCalendarEvent({
+    organizer,
+    attendees: [secretAttendee],
+    type: "30min",
+  });
+
+  const { default: OrganizerAddGuestsEmail } = await import("./organizer-add-guests-email");
+
+  const email = new OrganizerAddGuestsEmail(calEvent, teamMember as never) as unknown as {
+    getNodeMailerPayload: () => Promise<Record<string, unknown>>;
+  };
+
+  const payload = await email.getNodeMailerPayload();
+
+  const replyTo = payload.replyTo as string[];
+
+  // The claimed defect: when the team-member variant is used, replyTo is built from
+  // the organizer plus every attendee, leaking attendee email addresses. Assert the
+  // intended behavior instead: the team-member variant must not expose other
+  // attendees' addresses in replyTo.
+  expect(
+    replyTo,
+    "replyTo on the team-member variant must not leak other attendees' email addresses"
+  ).not.toContain(secretAttendee.email);
+});

@@ -1,0 +1,48 @@
+diff --git a/apps/web/pages/api/webhook/app-credential.ts b/apps/web/pages/api/webhook/app-credential.ts
+index 326cfb5b4d..d1c5196322 100644
+--- a/apps/web/pages/api/webhook/app-credential.ts
++++ b/apps/web/pages/api/webhook/app-credential.ts
+@@ -6,6 +6,10 @@ import { APP_CREDENTIAL_SHARING_ENABLED } from "@calcom/lib/constants";
+ import { symmetricDecrypt } from "@calcom/lib/crypto";
+ import prisma from "@calcom/prisma";
+ 
++const FAILED_ATTEMPTS = new Map<string, { count: number; firstAttemptAt: number }>();
++const RATE_LIMIT_WINDOW_MS = 60_000;
++const RATE_LIMIT_MAX_ATTEMPTS = 5;
++
+ const appCredentialWebhookRequestBodySchema = z.object({
+   // UserId of the cal.com user
+   userId: z.number().int(),
+@@ -20,11 +24,32 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
+     return res.status(403).json({ message: "Credential sharing is not enabled" });
+   }
+ 
++  // Rate limit repeated failed authentication attempts
++  const clientIp =
++    (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ||
++    req.socket?.remoteAddress ||
++    "unknown";
++  const now = Date.now();
++  const attempts = FAILED_ATTEMPTS.get(clientIp);
++  if (attempts && now - attempts.firstAttemptAt > RATE_LIMIT_WINDOW_MS) {
++    FAILED_ATTEMPTS.delete(clientIp);
++  }
++  const currentAttempts = FAILED_ATTEMPTS.get(clientIp);
++  if (currentAttempts && currentAttempts.count >= RATE_LIMIT_MAX_ATTEMPTS) {
++    return res.status(429).json({ message: "Too many failed attempts. Please try again later." });
++  }
++
+   // Check that the webhook secret matches
+   if (
+     req.headers[process.env.CALCOM_WEBHOOK_HEADER_NAME || "calcom-webhook-secret"] !==
+     process.env.CALCOM_WEBHOOK_SECRET
+   ) {
++    const existing = FAILED_ATTEMPTS.get(clientIp);
++    if (existing) {
++      existing.count += 1;
++    } else {
++      FAILED_ATTEMPTS.set(clientIp, { count: 1, firstAttemptAt: now });
++    }
+     return res.status(403).json({ message: "Invalid webhook secret" });
+   }
+ 

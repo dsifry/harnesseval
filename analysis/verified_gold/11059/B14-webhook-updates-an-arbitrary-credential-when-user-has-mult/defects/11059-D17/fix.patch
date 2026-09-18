@@ -1,0 +1,92 @@
+diff --git a/apps/web/pages/api/webhook/app-credential.ts b/apps/web/pages/api/webhook/app-credential.ts
+index 326cfb5b4d..2de32342fd 100644
+--- a/apps/web/pages/api/webhook/app-credential.ts
++++ b/apps/web/pages/api/webhook/app-credential.ts
+@@ -6,6 +6,8 @@ import { APP_CREDENTIAL_SHARING_ENABLED } from "@calcom/lib/constants";
+ import { symmetricDecrypt } from "@calcom/lib/crypto";
+ import prisma from "@calcom/prisma";
+ 
++const pendingCredentialOps = new Map<string, Promise<{ message: string }>>();
++
+ const appCredentialWebhookRequestBodySchema = z.object({
+   // UserId of the cal.com user
+   userId: z.number().int(),
+@@ -58,36 +60,53 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
+     symmetricDecrypt(reqBody.keys, process.env.CALCOM_APP_CREDENTIAL_ENCRYPTION_KEY || "")
+   );
+ 
+-  // Can't use prisma upsert as we don't know the id of the credential
+-  const appCredential = await prisma.credential.findFirst({
+-    where: {
+-      userId: reqBody.userId,
+-      appId: appMetadata.slug,
+-    },
+-    select: {
+-      id: true,
+-    },
+-  });
++  // Prevent a non-atomic find-then-create race by deduplicating concurrent
++  // operations for the same userId+appId within this process.
++  const credentialKey = `${reqBody.userId}:${appMetadata.slug}`;
++  const pendingOperation = pendingCredentialOps.get(credentialKey);
++  if (pendingOperation) {
++    return res.status(200).json(await pendingOperation);
++  }
+ 
+-  if (appCredential) {
+-    await prisma.credential.update({
++  const operation = (async () => {
++    const appCredential = await prisma.credential.findFirst({
+       where: {
+-        id: appCredential.id,
+-      },
+-      data: {
+-        key: keys,
+-      },
+-    });
+-    return res.status(200).json({ message: `Credentials updated for userId: ${reqBody.userId}` });
+-  } else {
+-    await prisma.credential.create({
+-      data: {
+-        key: keys,
+         userId: reqBody.userId,
+         appId: appMetadata.slug,
+-        type: appMetadata.type,
++      },
++      select: {
++        id: true,
+       },
+     });
+-    return res.status(200).json({ message: `Credentials created for userId: ${reqBody.userId}` });
++
++    if (appCredential) {
++      await prisma.credential.update({
++        where: {
++          id: appCredential.id,
++        },
++        data: {
++          key: keys,
++        },
++      });
++      return { message: `Credentials updated for userId: ${reqBody.userId}` };
++    } else {
++      await prisma.credential.create({
++        data: {
++          key: keys,
++          userId: reqBody.userId,
++          appId: appMetadata.slug,
++          type: appMetadata.type,
++        },
++      });
++      return { message: `Credentials created for userId: ${reqBody.userId}` };
++    }
++  })();
++
++  pendingCredentialOps.set(credentialKey, operation);
++  try {
++    const result = await operation;
++    return res.status(200).json(result);
++  } finally {
++    pendingCredentialOps.delete(credentialKey);
+   }
+ }

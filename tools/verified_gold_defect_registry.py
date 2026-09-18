@@ -102,10 +102,12 @@ def main():
         for dup_bid, dup in by_bundle.items():        # pull unique labels from its duplicates
             if dup["duplicate_of"] != r["bundle"]:
                 continue
+            # the duplicate verdict asserts "same defect as the keeper": drop the duplicate's OWN claim
+            # (it IS the keeper's defect, whatever its wording) and keep only its genuinely unique facets
+            dup_own = max(dup["labels"], key=lambda x: jac(x, dup["title"])) if dup["labels"] else dup["title"]
             for l in dup["labels"]:
-                # the duplicate verdict already asserts "same defect as the keeper", so its own claim
-                # folds into the keeper's (never a second D-verified); only genuinely unique facets are
-                # kept, and those carry no dedicated test => D-labelled
+                if jac(l, dup_own) >= 0.6:            # this label is the duplicate's own claim -> keeper's
+                    continue
                 if not any(jac(l, t["label"]) >= 0.45 for t in take):
                     take.append({"label": l, "from": dup_bid, "own": False,
                                  "note": "unique facet of a duplicate bundle (no dedicated test)"})

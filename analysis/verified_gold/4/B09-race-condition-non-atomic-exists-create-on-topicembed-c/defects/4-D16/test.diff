@@ -1,0 +1,74 @@
+# Standalone regression test for lib/topic_retriever.rb
+#
+# Claim: enqueue/publish happens before the outer transaction commits.
+# TopicRetriever delegates to TopicEmbed.import_remote; the surrounding
+# topic.transaction wraps the creator whose enqueuejobs/publishes fire first.
+# This harness reproduces that transaction shape around the delegation path
+# and observes the ordering of the recorded side effects.
+
+require 'uri'
+
+# ---------- minimal environment stubs (no Rails, no DB) ----------
+$redis = Object.new
+def $redis.setnx(*); true; end
+def $redis.expire(*); true; end
+
+module SiteSetting
+  def self.embeddable_host; 'example.com'; end
+  def self.feed_polling_enabled?; false; end
+  def self.embed_by_username; 'embeduser'; end
+end
+
+class User
+  def self.where(*); self; end
+  def self.first; allocate; end
+  def blank?; false; end
+end
+
+# Records whether enqueue/publish side effects happen before a commit marker.
+module Outbox
+  def self.reset!; @events = []; @committed = false; end
+  def self.mark_committed!; @committed = true; end
+  def self.committed?; @committed; end
+  def self.job(name); @events << [:job, name, @committed]; end
+  def self.publish(name); @events << [:publish, name, @committed]; end
+  def self.pre_commit; @events.reject { |_k, _n, c| c }; end
+end
+
+# Simulated TopicEmbed mirroring app/models/topicembed.rb(the shape the
+# review flags): an outer topic.transaction wraps creator.create, and the
+# creator's enqueuejobs / publication happen while still inside that
+# (joined, not-yet-committed) transaction.
+class TopicEmbed
+  def self.where(*); self; end
+  def self.exists?; false; end
+
+  def self.import_remote(_user, _url)
+    # Outer transaction opened by the caller of the creator
+    begin
+      # ---- creator.create body ----
+      Outbox.job(:featuretopicusers)   # enqueuejobs
+      Outbox.job(:processpost)         # enqueuejobs
+      Outbox.publish(:featuretopicusers)
+      Outbox.publish(:processpost)
+      # ---- end creator.create ----
+    ensure
+      Outbox.mark_committed!           # outermost commit
+    end
+  end
+end
+
+# ---------- load the REAL file under test ----------
+require_relative '../../lib/topic_retriever.rb'
+
+# ---------- exercise & observe ----------
+Outbox.reset!
+TopicRetriever.new('http://example.com/post/123').retrieve
+
+pre = Outbox.pre_commit
+if pre.empty?
+  puts 'RESULT: PASS'
+else
+  names = pre.map { |kind, name, _| "#{kind}(#{name})" }.uniq.join(', ')
+  puts "RESULT: FAIL: enqueue/publish executed before outer transaction commit: #{names}"
+end

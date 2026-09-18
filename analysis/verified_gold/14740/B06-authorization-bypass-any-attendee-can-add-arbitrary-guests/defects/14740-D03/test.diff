@@ -1,0 +1,102 @@
+import prismaMock from "../../../../../../tests/libs/__mocks__/prismaMock";
+
+import { vi, describe, it, expect, beforeEach } from "vitest";
+
+vi.mock("@calcom/prisma", () => ({
+  prisma: prismaMock,
+}));
+
+vi.mock("@calcom/emails", () => ({
+  sendAddGuestsEmails: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("@calcom/core/EventManager", () => ({
+  default: class MockEventManager {
+    updateCalendarAttendees = vi.fn().mockResolvedValue(undefined);
+  },
+}));
+
+vi.mock("@calcom/lib/server/getUsersCredentials", () => ({
+  getUsersCredentials: vi.fn().mockResolvedValue([]),
+}));
+
+vi.mock("@calcom/lib/server/queries/teams", () => ({
+  isTeamAdmin: vi.fn().mockResolvedValue(false),
+  isTeamOwner: vi.fn().mockResolvedValue(false),
+}));
+
+vi.mock("@calcom/lib/server", () => ({
+  getTranslation: vi.fn().mockImplementation(() => Promise.resolve((key: string) => key)),
+}));
+
+const baseBooking = {
+  id: 42,
+  userId: 1,
+  uid: "uid-42",
+  title: "Team sync",
+  description: "",
+  startTime: new Date("2030-01-01T10:00:00Z"),
+  endTime: new Date("2030-01-01T11:00:00Z"),
+  location: null,
+  userPrimaryEmail: "org@example.com",
+  status: "ACCEPTED",
+  attendees: [],
+  eventType: null,
+  destinationCalendar: null,
+  references: [],
+  user: {
+    destinationCalendar: null,
+    credentials: [],
+  },
+};
+
+async function runHandler(overrides: Record<string, unknown>) {
+  const booking = { ...baseBooking, ...overrides };
+  prismaMock.booking.findFirst.mockResolvedValue(booking as never);
+  prismaMock.user.findFirstOrThrow.mockResolvedValue({
+    name: "Organizer",
+    email: "org@example.com",
+    timeZone: "UTC",
+    locale: "en",
+  } as never);
+  prismaMock.booking.update.mockResolvedValue({ ...booking, attendees: [] } as never);
+
+  const { addGuestsHandler } = await import("./addGuests.handler");
+
+  let caught: unknown = null;
+  try {
+    await addGuestsHandler({
+      ctx: { user: { id: 1, email: "org@example.com" } },
+      input: { bookingId: 42, guests: ["newguest@example.com"] },
+    } as unknown as Parameters<typeof addGuestsHandler>[0]);
+  } catch (err) {
+    caught = err;
+  }
+  return caught;
+}
+
+describe("addGuestsHandler booking state validation", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it.each([
+    ["CANCELLED", { status: "CANCELLED" }],
+    ["REJECTED", { status: "REJECTED" }],
+    ["PENDING", { status: "PENDING" }],
+    [
+      "PAST",
+      {
+        status: "ACCEPTED",
+        startTime: new Date("2000-01-01T10:00:00Z"),
+        endTime: new Date("2000-01-01T11:00:00Z"),
+      },
+    ],
+  ])("rejects adding guests to a %s booking", async (label, overrides) => {
+    const err = await runHandler(overrides as Record<string, unknown>);
+    expect(
+      err,
+      `addGuestsHandler must reject adding guests to a ${label} booking, but it accepted the guests and sent invites`
+    ).not.toBeNull();
+  });
+});

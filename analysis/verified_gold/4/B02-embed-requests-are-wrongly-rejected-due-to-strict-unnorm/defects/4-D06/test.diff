@@ -1,0 +1,117 @@
+require 'ostruct'
+require 'uri'
+require 'logger'
+require 'stringio'
+
+# ---------------------------------------------------------------------------
+# Minimal Rails/Discourse stubs so the real controller can be loaded and run
+# in isolation (no Rails app, no database).
+# ---------------------------------------------------------------------------
+module Discourse
+  class InvalidAccess < StandardError; end
+end
+
+# ActiveSupport-style Integer#minute used by discourse_expires_in 1.minute
+class Integer
+  def minute; self * 60; end
+end
+
+module Jobs
+  @queue = []
+  class << self
+    def enqueue(name, args = {})
+      @queue << [name, args]
+    end
+    def queue; @queue; end
+    def clear!; @queue = []; end
+  end
+end
+
+class SiteSetting
+  def self.embeddable_host; 'example.com'; end
+end
+
+class TopicEmbed
+  def self.topic_id_for_embed(_url); nil; end
+end
+
+class TopicView
+  def initialize(*); end
+end
+
+class User
+  attr_reader :id
+  def initialize(id, staff: false)
+    @id = id
+    @staff = staff
+  end
+  def staff?; @staff; end
+  def try(m)
+    respond_to?(m) ? send(m) : nil
+  end
+end
+
+class ApplicationController
+  class << self
+    def skip_before_filter(*); end
+    def before_filter(*); end
+    def layout(*); end
+  end
+
+  attr_accessor :_params, :_current_user
+
+  def params; @_params; end
+  def current_user; @_current_user; end
+  def response; @_response ||= OpenStruct.new(headers: {}); end
+  def request;  @_request  ||= OpenStruct.new(referer: 'http://example.com/'); end
+  def render(*); @_rendered = true; end
+  def rendered?; @_rendered; end
+  def discourse_expires_in(*); end
+end
+
+class Params
+  def initialize(h); @h = h; end
+  def require(k)
+    v = @h[k]
+    raise "missing param #{k}" if v.nil?
+    v
+  end
+  def [](k); @h[k]; end
+end
+
+# ---------------------------------------------------------------------------
+# Load the REAL file under test
+# ---------------------------------------------------------------------------
+require_relative '../../app/controllers/embed_controller.rb'
+
+# ---------------------------------------------------------------------------
+# Exercise the action with a staff user and observe what gets enqueued.
+# ---------------------------------------------------------------------------
+controller = EmbedController.new
+controller._params = Params.new(embed_url: 'http://example.com/topic/1')
+controller._current_user = User.new(42, staff: true)
+
+Jobs.clear!
+controller.best
+
+entry = Jobs.queue.last
+unless entry && entry[0] == :retrieve_topic
+  puts "RESULT: FAIL: retrieve_topic was not enqueued (got #{entry.inspect})"
+  exit
+end
+
+args = entry[1]
+user_id = args[:user_id]
+
+# Claimed defect: for a staff user, EmbedController#best forwards the
+# staff user's id into the RetrieveTopic job.  RetrieveTopic treats a
+# non-nil user_id as 'real user', and for staff it skips throttling; so a
+# staff member can spam remote topic retrieval without being throttled
+# like an anonymous visitor.  Correct behavior is to NOT hand the staff
+# id to the job (user_id must be nil).
+if user_id.nil?
+  puts "RESULT: PASS"
+else
+  puts "RESULT: FAIL: staff user_id=#{user_id.inspect} passed to RetrieveTopic; " \
+       "job can short-circuit throttling for staff (staff-only throttle bypass)"
+end
