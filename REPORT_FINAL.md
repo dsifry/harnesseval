@@ -813,6 +813,29 @@ nitpick-class findings.** Chart: `analysis/figures/fig_true_gold_defects_found.p
 **Charts.** `analysis/figures/fig_true_gold_pareto.png` (recall vs F1′ with cluster-bootstrap CIs) and
 `analysis/figures/fig_true_gold_efficiency.png` ($ per true bug found vs recall).
 
+**Why the recall levels — and therefore F2′ — look low, and why no cell finds everything.**
+The denominator is not a list of things an agent could reasonably be expected to find; it is what the whole
+campaign (2,416 healthy runs, unioned and then audited) turned up. Three facts follow:
+
+1. **13 of the 110 verified defects were never reported by any run.** They were surfaced by our own audit
+   (the merge-audit label lists and the under-count triage), each is real and test-validated, but no run is
+   credited with them by the scoring map. They sit in every cell's denominator and cap recall for everyone.
+   Measured against only the defects some run actually reported (**97**), the denominators become 139 instead
+   of 152 and recall rises ~4 points for every cell: best harness recall 0.454 → **0.496** (glm-vis · MRV ·
+   high) and best F2′ 0.436 → **0.467**; the harness-vs-vanilla ordering is unchanged (1.19× vs 1.21×).
+   The `reachable` variant in `DEFECT_METRICS.json` reports this denominator.
+2. **A cell is one run per PR; the gold set is the union of the fleet.** Averaged over the 66 complete cells,
+   a cell finds **25.2 of 42 goldens (60%; best 35/42 = 83%) but only 15.9 of 110 hidden-gold defects (14%;
+   best 39/110 = 35%)**. Official goldens are largely reachable; the hidden-gold tail is not.
+3. **The tail is heavy and the ceiling is ~88%.** 33 defects have ≤3 assigned findings anywhere, 14 are found
+   by exactly one of the 66 cells, and **unioning all 66 cells still reaches only 134/152 (88%)** — 17 defects
+   and 1 golden are found by no complete cell at all. The misses concentrate in the largest PR (PR 4: 44
+   defects, 37 ever reported).
+
+So F2′ ≈ 0.44 is the product of an ensemble-union recall (~0.45–0.50) and a nitpick-charged precision
+(~0.38–0.44) — neither term is a statement that the tool is weak in absolute terms. Read the levels with the
+denominator in hand; read the *ordering* (which is unaffected) for the comparison.
+
 **Honest limitations.** The adjudication/duplicate judges are non-deterministic (documented); duplicate
 calls used majority rules and fix-location evidence rather than a single judge's word. The 110 defects are
 those the pipeline could *execute*; the earlier audits' label lists suggest a small number of further claims

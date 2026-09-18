@@ -48,6 +48,10 @@ def main():
     for d in reg["defects"]:
         tier[d["id"]] = d["tier"]
     valid_ids = set(tier)
+    # defects that at least one finding anywhere was assigned to. 13 of the verified defects were surfaced by
+    # the AUDIT (merge-audit label lists / under-count triage) and were never reported by any run, so no cell
+    # can score them; recall against them is structurally capped. Reported as a separate 'reachable' variant.
+    reported_ids = {d for _pr, m in assign.items() for _h, d in m.items() if d in valid_ids}
 
     sel = {(r["model"], r["framework"], r["effort"], r["url"]): r for r in D["selected_runs"]}
     MODELS = M["mods"] if "mods" in M else sorted({r["model"] for r in D["selected_runs"]})
@@ -65,10 +69,14 @@ def main():
                 continue
             if variant == "verified" and tier.get(did) != "D-verified":
                 continue
+            if variant == "reachable" and did not in reported_ids:
+                continue
             own.add(did)
         tot = len(by_pr_defects.get(pr, []))
         if variant == "verified":
             tot = sum(1 for d in by_pr_defects.get(pr, []) if d["tier"] == "D-verified")
+        elif variant == "reachable":
+            tot = sum(1 for d in by_pr_defects.get(pr, []) if d["id"] in reported_ids)
         v = r["rj3"] or r["inrun"]
         return {"tp": r["tp"] + len(own), "den": goldens[pr] + tot, "hal": v["hal"], "imp": v["imp"]}
 
@@ -97,7 +105,7 @@ def main():
         return rec, adj, adjp, f1, f1p, f2, f2p
 
     out = {}
-    for variant in ("verified", "full"):
+    for variant in ("verified", "reachable", "full"):
         cells = {}
         for m in MODELS:
             for fw in FWS:
@@ -147,9 +155,11 @@ def main():
 
     L = ["# §10d — defect-level metrics (per-run matching at the individual-bug unit)", "",
          "Denominators are computed from the registry (see _final in analysis/verified_gold/DEFECT_REGISTRY.json): "
-         "verified = 42 goldens + every D-verified defect; full = 42 + all registry defects. "
+         "verified = 42 goldens + every D-verified defect; reachable = 42 + only those defects that some run "
+         "actually reported (13 were audit-surfaced and no run ever reported them, so they cap recall for "
+         "everyone); full = 42 + all registry defects. "
          "recall = (golden TP + distinct defects hit) / denominator; adjP charges hallucinations, adjP' also nitpicks.", ""]
-    for variant in ("verified", "full"):
+    for variant in ("verified", "reachable", "full"):
         L += [f"## variant: {variant}", "", "| cell | n PRs | recall [CI] | adjP | adjP' | F1 | F1' | F2 | F2' |", "|---|---|---|---|---|---|---|"]
         for k, c in sorted(out[variant]["cells"].items(), key=lambda kv: -kv[1]["F1p"]):
             m, fw, e = k.split("|")
@@ -158,7 +168,7 @@ def main():
         pos = sum(1 for v in out[variant]["pairs"].values() if v["dF1p"][1] > 0)
         L += ["", f"MRV-vs-CE: {pos}/{len(out[variant]['pairs'])} pairs resolve positive on ΔF1'.", ""]
     (VG / "DEFECT_METRICS.md").write_text("\n".join(L) + "\n")
-    for variant in ("verified", "full"):
+    for variant in ("verified", "reachable", "full"):
         top = sorted(out[variant]["cells"].items(), key=lambda kv: -kv[1]["F1p"])[:5]
         print(f"[{variant}] top cells by F1':")
         for k, c in top:

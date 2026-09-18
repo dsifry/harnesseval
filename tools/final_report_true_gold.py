@@ -51,7 +51,7 @@ def main():
     met = json.load(open(MET))
     before = {k: json.dumps(v, sort_keys=True) for k, v in met.items() if k != "true_gold_defects"}
     dm = json.load(open(DM))
-    for variant in ("verified", "full"):
+    for variant in ("verified", "reachable", "full"):
         if variant not in dm:
             continue
         dm[variant]["headline"] = headline(dm[variant])
