@@ -107,6 +107,18 @@ cp .env.example .env          # API keys live OUTSIDE the repo (see INSTALL.md)
 uv run python -m harnesseval.calibrate --check    # validate the lab against published anchors
 ```
 
+## Viewing the charts
+
+```bash
+tools/serve_report.sh              # serves on 0.0.0.0:8765 (LAN-visible) and prints the share URL
+```
+
+Then open (or share) `http://<your-ip>:8765/analysis/figures/interactive_dashboard.html`. The 11 PNGs are in
+the same directory. The dashboard pulls Plotly from a CDN, so viewers need internet for that one page; the PNGs
+need nothing. For viewers outside the LAN, tunnel it (`brew install cloudflared && cloudflared tunnel --url
+http://localhost:8765`) — pass a narrower root first (`tools/serve_report.sh 8766 analysis/figures`) so a public
+tunnel does not expose the whole repository.
+
 ## License
 
 MIT.
