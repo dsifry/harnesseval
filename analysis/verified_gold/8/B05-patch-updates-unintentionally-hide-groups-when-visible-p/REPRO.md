@@ -2,7 +2,7 @@
 
 **Claim.** PATCH updates unintentionally hide groups when `visible` param is omitted (and legacy membership changes are ignored)
 
-**Verdict in this bundle:** `behavior_change_not_regression` ({'base': 'ERROR:NameError', 'head': 'FAIL', 'fixed': 'PASS'})
+**Verdict in this bundle:** `duplicate_of` ({'base': 'ERROR:NameError', 'head': 'FAIL', 'fixed': 'PASS'})
 **Fidelity:** `standalone_real_code`  ·  **Authoring model:** `deepseek-4.1-flash-background`
 
 Everything needed to check this yourself is in this directory:

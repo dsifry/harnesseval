@@ -1,12 +1,11 @@
 # Verified hidden gold — PR 8
 
-Candidates: 21 · verdicts: {'confirmed_regression': 1, 'defect_present_before_pr': 12, 'behavior_change_not_regression': 5, 'unresolved_file': 2, 'inconclusive_env': 1}
+Candidates: 21 · verdicts: {'confirmed_regression': 1, 'defect_present_before_pr': 12, 'behavior_change_not_regression': 4, 'duplicate_of': 1, 'unresolved_file': 2, 'inconclusive_env': 1}
 
 | bug id | bug | verdict | head | base | fix | file | tarball sha256 |
 |---|---|---|---|---|---|---|---|
 | 8-B03 | B03-admingroupscontrolleraddmembers-splits-usernames-witho | `behavior_change_not_regression` | FAIL | ERROR:NoMethodError | PASS | `app/controllers/admin/groups_controller.rb` | `b2f1130f5b4d…` |
 | 8-B04 | B04-admin-group-creation-drops-submitted-aliaslevel-and-save | `behavior_change_not_regression` | FAIL | ERROR:NoMethodError | PASS | `app/controllers/admin/groups_controller.rb` | `358d5a4a4303…` |
-| 8-B05 | B05-patch-updates-unintentionally-hide-groups-when-visible-p | `behavior_change_not_regression` | FAIL | ERROR:NameError | PASS | `app/controllers/admin/groupscontroller.rb` | `6b4f004b8911…` |
 | 8-B15 | B15-admingroupscontroller-specs-hardcode-group-id1-implici | `behavior_change_not_regression` | FAIL | ERROR:NoMethodError | PASS | `spec/controllers/admin/groups_controller_spec.rb` | `bcc13e8cd4c0…` |
 | 8-B18 | B18-group-name-is-stripped-on-create-but-not-on-update-allow | `behavior_change_not_regression` | FAIL | ERROR:NoMethodError | PASS | `app/controllers/admin/groups_controller.rb` | `34624629e748…` |
 | 8-B00 | B00-updating-a-group-without-visible-param-unintentionally-f | `confirmed_regression` | FAIL | PASS | PASS | `app/controllers/admin/groups_controller.rb` | `2d2df93c72c9…` |
@@ -22,6 +21,7 @@ Candidates: 21 · verdicts: {'confirmed_regression': 1, 'defect_present_before_p
 | 8-B19 | B19-admin-group-edit-form-implicitly-submits-on-enter-causin | `defect_present_before_pr` | FAIL | FAIL | PASS | `app/assets/javascripts/discourse/templates/admin/group.hbs` | `74091b098c67…` |
 | 8-B21 | B21-admin-addmembers-can-re-add-existing-user-and-raise-reco | `defect_present_before_pr` | FAIL | FAIL | PASS | `app/controllers/admin/groups_controller.rb` | `47087817b034…` |
 | 8-B26 | B26-admin-group-template-bypasses-usercountdisplay-and-rende | `defect_present_before_pr` | FAIL | FAIL | PASS | `admin/templates/group.hbs` | `27f3c7a24ad8…` |
+| 8-B05 | B05-patch-updates-unintentionally-hide-groups-when-visible-p | `duplicate_of` | FAIL | ERROR:NameError | PASS | `app/controllers/admin/groupscontroller.rb` | `a5070109de3d…` |
 | 8-B24 | B24-admin-groups-api-no-longer-exposes-get--admin-groups-id- | `inconclusive_env` | FAIL | — | FAIL | `config/routes.rb` | `26c87446e7ac…` |
 | 8-B23 | B23-label-forname-does-not-match-the-ember-text-field-i | `unresolved_file` | — | — | — | `N/A (template containing the new form markup is not present in the provided PR diff; issue is identified from the report only)` | `3b6626fc5ae2…` |
 | 8-B27 | B27-userid-sent-in-a-delete-request-body-may-never-reach-par | `unresolved_file` | — | — | — | `None` | `5be13e50b2ec…` |

@@ -1,6 +1,6 @@
 # Verified hidden gold — PR 4
 
-Candidates: 70 · verdicts: {'behavior_change_not_regression': 35, 'confirmed_regression': 3, 'inconclusive_env': 8, 'defect_present_before_pr': 10, 'unresolved_file': 10, 'duplicate_of': 3, 'test_quality_verified': 1}
+Candidates: 70 · verdicts: {'behavior_change_not_regression': 34, 'confirmed_regression': 3, 'inconclusive_env': 8, 'defect_present_before_pr': 10, 'unresolved_file': 10, 'duplicate_of': 4, 'test_quality_verified': 1}
 
 | bug id | bug | verdict | head | base | fix | file | tarball sha256 |
 |---|---|---|---|---|---|---|---|
@@ -29,7 +29,6 @@ Candidates: 70 · verdicts: {'behavior_change_not_regression': 35, 'confirmed_re
 | 4-B42 | B42-topicembedrb59-port-logic-should-compare-against-uridef | `behavior_change_not_regression` | FAIL | ERROR:LoadError | PASS | `None` | `a41ef09ff00e…` |
 | 4-B46 | B46-poll-feed-processing-calls-stringscrub-via-stringscrub | `behavior_change_not_regression` | FAIL | ERROR:LoadError | PASS | `lib/pollfeed.rb` | `43dcf99ce48f…` |
 | 4-B48 | B48-embed-source-hash-includes-localized-footer-causing-fals | `behavior_change_not_regression` | FAIL | ERROR:LoadError | PASS | `app/models/topicembed.rb` | `b659db07b180…` |
-| 4-B55 | B55-topicembed-import-uses-non-atomic-exists-create-allowing | `behavior_change_not_regression` | FAIL | ERROR:LoadError | PASS | `app/models/topic_embed.rb` | `af81677fdd8b…` |
 | 4-B56 | B56-pollfeed-job-processes-unbounded-rss-items-creating-enqu | `behavior_change_not_regression` | FAIL | ERROR:LoadError | PASS | `app/jobs/regular/poll_feed.rb` | `150eb8721ecc…` |
 | 4-B60 | B60-embedcontroller-enqueues-retrievetopic-job-but-spec-expe | `behavior_change_not_regression` | FAIL | ERROR:LoadError | PASS | `app/controllers/embedcontroller.rb` | `5e19ff99819a…` |
 | 4-B61 | B61-retrievetopic-job-unnecessarily-eager-loads-mail-stack-v | `behavior_change_not_regression` | FAIL | ERROR:LoadError | PASS | `app/jobs/regular/retrievetopic.rb` | `d9c5dca57da1…` |
@@ -53,6 +52,7 @@ Candidates: 70 · verdicts: {'behavior_change_not_regression': 35, 'confirmed_re
 | 4-B70 | B70-unescaped-requestreferer-interpolated-into-js-string-bre | `defect_present_before_pr` | FAIL | ? | PASS | `app/views/layouts/embed.html.erb` | `85810e7ab946…` |
 | 4-B80 | B80-embed-loading-page-auto-reloads-every-30s-amplifying-una | `defect_present_before_pr` | FAIL | ? | PASS | `app/views/embed/loading.html.erb` | `7f4b2e9c1eb1…` |
 | 4-B35 | B35-redis-throttle-key-is-set-before-retrieval-succeeds-supp | `duplicate_of` | FAIL | ERROR:LoadError | PASS | `lib/topicretriever.rb` | `730b4a5cddbd…` |
+| 4-B55 | B55-topicembed-import-uses-non-atomic-exists-create-allowing | `duplicate_of` | FAIL | ERROR:LoadError | PASS | `app/models/topic_embed.rb` | `399ff9e21dd0…` |
 | 4-B78 | B78-using--to-append-to-contents-mutates-the-callers-st | `duplicate_of` | FAIL | ERROR:LoadError | PASS | `lib/topicembed.rb` | `4a138b2a4999…` |
 | 4-B79 | B79-cache-miss-on-arbitrary-url-triggers-synchronous-full-rs | `duplicate_of` | FAIL | ERROR:LoadError | PASS | `topicretriever.rb` | `5ff26c43055d…` |
 | 4-B05 | B05-disqus-importer-silently-drops---category--c-support-and | `inconclusive_env` | FAIL | — | FAIL | `lib/tasks/disqus.thor` | `35bc405cbcbd…` |
