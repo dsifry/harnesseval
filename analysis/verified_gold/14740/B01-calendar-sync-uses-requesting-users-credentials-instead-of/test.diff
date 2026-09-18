@@ -1,0 +1,126 @@
+diff --git a/packages/trpc/server/routers/viewer/bookings/_router.verified.test.tsx b/packages/trpc/server/routers/viewer/bookings/_router.verified.test.tsx
+new file mode 100644
+--- /dev/null
++++ b/packages/trpc/server/routers/viewer/bookings/_router.verified.test.tsx
+@@ -0,0 +1,121 @@
++import "../../../../../../tests/libs/__mocks__/libServerI18n";
++import prismaMock from "../../../../../../tests/libs/__mocks__/prismaMock";
++
++import { vi, describe, it, expect, beforeEach } from "vitest";
++
++const { calendarCalls, CalendarManagerMock } = vi.hoisted(() => {
++  const calls: unknown[][] = [];
++  const make = (name: string) =>
++    async (...args: unknown[]) => {
++      calls.push([name, ...args]);
++      return {};
++    };
++  return {
++    calendarCalls: calls,
++    CalendarManagerMock: {
++      createEvent: make("createEvent"),
++      updateEvent: make("updateEvent"),
++      deleteEvent: make("deleteEvent"),
++    },
++  };
++});
++
++vi.mock("@calcom/lib/CalendarManager", () => ({ CalendarManager: CalendarManagerMock }));
++vi.mock("@calcom/features/calendars/CalendarManager", () => ({
++  CalendarManager: CalendarManagerMock,
++}));
++
++// Some handlers construct an EventManager-ish object via this entrypoint.
++vi.mock("@calcom/lib/getCalendar", () => ({
++  getCalendar: vi.fn(async (...args: unknown[]) => {
++    calendarCalls.push(["getCalendar", ...args]);
++    return { credentials: {} };
++  }),
++}));
++
++describe("bookings _router.addGuests - calendar sync credentials", () => {
++  beforeEach(() => {
++    calendarCalls.length = 0;
++    vi.clearAllMocks();
++  });
++
++  it("uses the booking organizer's credentials, not the requesting user's", async () => {
++    const callerUser = {
++      id: 9001,
++      email: "attendee@example.com",
++      username: "attendee",
++      name: "Attendee",
++      locale: "en",
++      timeZone: "UTC",
++    };
++    const organizerUser = {
++      id: 42,
++      email: "organizer@example.com",
++      username: "organizer",
++      name: "Organizer",
++      locale: "en",
++      timeZone: "UTC",
++    };
++
++    const booking = {
++      id: 777,
++      uid: "booking-uid",
++      userId: organizerUser.id,
++      user: organizerUser,
++      userPrimaryEmail: organizerUser.email,
++      title: "Demo",
++      description: null,
++      status: "ACCEPTED",
++      startTime: new Date(),
++      endTime: new Date(),
++      attendees: [],
++      references: [],
++      eventType: { id: 1, team: null, title: "Demo" },
++      eventTypeId: 1,
++      location: null,
++      metadata: {},
++      responses: {},
++      paid: false,
++      recurringEventId: null,
++    };
++
++    // The addGuests handler typically loads the booking here.
++    prismaMock.booking.findFirst.mockResolvedValue(booking);
++    prismaMock.booking.findUnique.mockResolvedValue(booking);
++    prismaMock.booking.update.mockResolvedValue(booking);
++    prismaMock.attendee.createMany.mockResolvedValue({ count: 1 });
++    prismaMock.attendee.create.mockResolvedValue({
++      id: 1,
++      email: "guest@example.com",
++      bookingId: booking.id,
++    });
++
++    const { bookingsRouter } = await import("./_router");
++    const trpcCaller = bookingsRouter.createCaller({
++      user: callerUser,
++      prisma: prismaMock,
++      session: { user: callerUser },
++    } as never);
++
++    try {
++      await trpcCaller.addGuests({
++        bookingId: booking.id,
++        guests: [{ email: "guest@example.com", name: "Guest" }],
++      });
++    } catch {
++      // The handler may fail mid-way through; we only care about which
++      // user's credentials were handed to the calendar layer.
++    }
++
++    const serialized = JSON.stringify(calendarCalls);
++
++    // The calendar operation must be performed on behalf of the organizer.
++    expect(serialized, "calendar sync must use the booking organizer's credentials").toContain(
++      organizerUser.email
++    );
++    // It must NOT be performed with the requesting (attendee) user's credentials.
++    expect(serialized, "calendar sync must not use the requesting user's credentials").not.toContain(
++      callerUser.email
++    );
++  });
++});

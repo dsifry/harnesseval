@@ -1,0 +1,62 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const { findUniqueMock } = vi.hoisted(() => ({ findUniqueMock: vi.fn() }));
+
+vi.mock("@calcom/prisma", () => ({
+  default: {
+    booking: { findUnique: findUniqueMock },
+    credential: { findUnique: vi.fn() },
+  },
+}));
+
+vi.mock("@calcom/prisma/zod-utils", () => ({ createdEventSchema: {} }));
+vi.mock("@calcom/app-store/_utils/getCalendar", () => ({ getCalendar: vi.fn() }));
+vi.mock("@calcom/app-store/utils", () => ({ default: vi.fn(() => []) }));
+vi.mock("@calcom/app-store/locations", () => ({
+  getEventLocationTypeFromApp: vi.fn(),
+  MeetLocationType: "integrations:google:meet",
+}));
+vi.mock("@calcom/app-store/dailyvideo/lib/VideoApiAdapter", () => ({
+  FAKE_DAILY_CREDENTIAL: { appId: "dailyvideo" },
+}));
+vi.mock("@calcom/app-store/dailyvideo/zod", () => ({ appKeysSchema: {} }));
+vi.mock("./CalendarManager", () => ({
+  createEvent: vi.fn(),
+  updateEvent: vi.fn(),
+}));
+vi.mock("./videoClient", () => ({
+  createMeeting: vi.fn(),
+  updateMeeting: vi.fn(),
+}));
+
+describe("EventManager.updateAllCalendarEvents (verified regression)", () => {
+  beforeEach(() => {
+    findUniqueMock.mockReset();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("surfaces a failure instead of silently returning [] when a DB lookup throws before calendarReference is assigned", async () => {
+    findUniqueMock.mockRejectedValue(new Error("simulated DB failure"));
+
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const { default: EventManager } = await import("./EventManager");
+    const manager = new EventManager([], []);
+
+    const result = await manager.updateAllCalendarEvents(
+      { type: "test-event", title: "Test" } as any,
+      { id: 1, references: [] } as any,
+      999
+    );
+
+    expect(Array.isArray(result)).toBe(true);
+    // On current (post-PR) code the catch returns `calendarReference?.map(...) ?? []` -> [].
+    // A reschedule DB failure is therefore indistinguishable from "no calendar references".
+    expect(result).not.toEqual([]);
+    expect(result.some((r: any) => r && r.success === false)).toBe(true);
+    expect(errorSpy).toHaveBeenCalled();
+  });
+});

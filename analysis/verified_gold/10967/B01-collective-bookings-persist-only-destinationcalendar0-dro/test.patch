@@ -1,0 +1,230 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import type { NextApiRequest } from "next";
+
+process.env.CALENDSO_ENCRYPTION_KEY = "0123456789abcdef0123456789abcdef";
+process.env.NEXT_PUBLIC_WEBAPP_URL = "http://localhost:3000";
+process.env.NEXT_PUBLIC_APP_URL = "http://localhost:3000";
+
+const bookingCreateMock = vi.fn();
+const credentialFindFirstOrThrowMock = vi.fn();
+const userFindManyMock = vi.fn();
+const eventTypeFindUniqueMock = vi.fn();
+
+vi.mock("@calcom/prisma", () => ({
+  default: {
+    booking: {
+      create: (...args: unknown[]) => bookingCreateMock(...args),
+      findFirst: vi.fn().mockResolvedValue(null),
+      findUnique: vi.fn().mockResolvedValue(null),
+      update: vi.fn().mockResolvedValue({}),
+    },
+    credential: {
+      findFirstOrThrow: (...args: unknown[]) => credentialFindFirstOrThrowMock(...args),
+      findFirst: vi.fn().mockResolvedValue({ id: 1, key: {} }),
+    },
+    user: {
+      findMany: (...args: unknown[]) => userFindManyMock(...args),
+      findUnique: vi.fn().mockResolvedValue(null),
+      findFirst: vi.fn().mockResolvedValue(null),
+    },
+    eventType: {
+      findUnique: (...args: unknown[]) => eventTypeFindUniqueMock(...args),
+      findFirst: vi.fn().mockResolvedValue(null),
+    },
+    destinationCalendar: {
+      findUnique: vi.fn().mockResolvedValue(null),
+      findFirst: vi.fn().mockResolvedValue(null),
+    },
+    payment: { findFirst: vi.fn().mockResolvedValue(null) },
+    team: { findUnique: vi.fn() },
+    membership: { findFirst: vi.fn() },
+    $transaction: vi.fn(),
+  },
+  Prisma: { JsonNull: null },
+}));
+
+vi.mock("@calcom/core/EventManager", () => ({
+  default: vi.fn().mockImplementation(() => ({
+    create: vi.fn().mockResolvedValue({ referencesToCreate: [], results: [] }),
+    update: vi.fn().mockResolvedValue({ referencesToCreate: [], results: [] }),
+  })),
+}));
+
+vi.mock("@calcom/core/getUserAvailability", () => ({
+  getUserAvailability: vi.fn().mockResolvedValue({ busy: [], timeZone: "UTC", dateOverrides: [], currentSeats: [] }),
+}));
+
+vi.mock("@calcom/core/event", async () => ({
+  getEventName: vi.fn().mockReturnValue("Collective Test Event"),
+}));
+
+vi.mock("@calcom/core/videoClient", () => ({
+  deleteMeeting: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("@calcom/emails", () => ({
+  sendScheduledEmails: vi.fn().mockResolvedValue(undefined),
+  sendOrganizerRequestEmail: vi.fn().mockResolvedValue(undefined),
+  sendAttendeeRequestEmail: vi.fn().mockResolvedValue(undefined),
+  sendRescheduledEmails: vi.fn().mockResolvedValue(undefined),
+  sendRescheduledSeatEmail: vi.fn().mockResolvedValue(undefined),
+  sendScheduledSeatsEmails: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("@calcom/features/bookings/lib/handleWebhookTrigger", () => ({
+  handleWebhookTrigger: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("@calcom/app-store/_utils/getCalendar", () => ({
+  getCalendar: vi.fn().mockResolvedValue(null),
+}));
+
+vi.mock("@calcom/app-store/zapier/lib/nodeScheduler", () => ({
+  cancelScheduledJobs: vi.fn().mockResolvedValue(undefined),
+  scheduleTrigger: vi.fn().mockResolvedValue(undefined),
+}));
+
+const primaryDestinationCalendar = {
+  id: 101,
+  integration: "office365_calendar",
+  externalId: "primary-external",
+  userId: 1,
+  eventTypeId: null,
+  credentialId: 1,
+};
+const coHostDestinationCalendar = {
+  id: 202,
+  integration: "office365_calendar",
+  externalId: "cohost-external",
+  userId: 2,
+  eventTypeId: null,
+  credentialId: 2,
+};
+
+const baseEventType = {
+  id: 77,
+  slug: "collective-demo",
+  title: "Collective Demo",
+  description: null,
+  length: 30,
+  schedulingType: "COLLECTIVE",
+  requiresConfirmation: false,
+  seatsPerTimeSlot: null,
+  seatsShowAttendees: true,
+  disableGuests: false,
+  price: 0,
+  currency: "usd",
+  destinationCalendar: null,
+  locations: [],
+  customInputs: [],
+  bookingFields: [],
+  periodType: "UNLIMITED",
+  periodStartDate: null,
+  periodEndDate: null,
+  periodDays: null,
+  periodCountCalendarDays: null,
+  metadata: {},
+  hideCalendarNotes: false,
+  minimumBookingNotice: 0,
+  beforeEventBuffer: 0,
+  afterEventBuffer: 0,
+  recurringEvent: null,
+  owner: null,
+  team: null,
+  hosts: [
+    {
+      user: {
+        id: 1,
+        username: "host-one",
+        name: "Host One",
+        email: "host1@example.com",
+        timeZone: "UTC",
+        locale: "en",
+        credentials: [],
+        destinationCalendar: primaryDestinationCalendar,
+      },
+      isFixed: true,
+    },
+    {
+      user: {
+        id: 2,
+        username: "host-two",
+        name: "Host Two",
+        email: "host2@example.com",
+        timeZone: "UTC",
+        locale: "en",
+        credentials: [],
+        destinationCalendar: coHostDestinationCalendar,
+      },
+      isFixed: true,
+    },
+  ],
+  users: [],
+  availability: [],
+  userId: 1,
+};
+
+describe("handleNewBooking > collective destination calendars", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    bookingCreateMock.mockImplementation(async (args: { data: Record<string, unknown> }) => ({
+      id: 500,
+      uid: args?.data?.uid,
+    }));
+    credentialFindFirstOrThrowMock.mockResolvedValue({ id: 1, key: {}, appId: "office365_calendar" });
+    userFindManyMock.mockResolvedValue([baseEventType.hosts[0].user, baseEventType.hosts[1].user]);
+    eventTypeFindUniqueMock.mockResolvedValue(baseEventType);
+  });
+
+  it("persists every collective host's destination calendar, not only destinationCalendar[0]", async () => {
+    const module = await import("./handleNewBooking");
+    const handler = (module as { default?: unknown; handler?: unknown }).default ?? (module as { handler?: unknown }).handler;
+    expect(typeof handler).toBe("function");
+
+    const reqBody = {
+      eventTypeId: baseEventType.id,
+      start: "2030-01-01T10:00:00.000Z",
+      end: "2030-01-01T10:30:00.000Z",
+      timeZone: "UTC",
+      language: "en",
+      user: "host-one",
+      email: "booker@example.com",
+      name: "Booker",
+      phone: "+10000000000",
+      location: "integrations:daily",
+      smsReminderNumber: null,
+      customInputs: [],
+      metadata: {},
+      hashedLink: null,
+      bookingUid: null,
+      noEmail: true,
+      guests: [],
+    } as unknown as NextApiRequest["body"];
+
+    const req = {
+      cookies: {},
+      headers: {},
+      body: reqBody,
+      method: "POST",
+      query: {},
+      socket: { remoteAddress: "127.0.0.1" },
+    } as unknown as NextApiRequest;
+
+    await (handler as (a: unknown, b: unknown, c: unknown) => Promise<unknown>)(reqBody, req, 1);
+
+    expect(bookingCreateMock).toHaveBeenCalled();
+    const createArgs = bookingCreateMock.mock.calls[0][0] as {
+      data: { destinationCalendar?: { connect?: unknown } | unknown };
+    };
+    const connect = createArgs.data.destinationCalendar;
+    const connectedIds: number[] = Array.isArray((connect as { connect?: unknown })?.connect)
+      ? ((connect as { connect: { id: number }[] }).connect).map((c) => c.id)
+      : [(connect as { connect?: { id: number } })?.connect?.id as number].filter((id) => typeof id === "number");
+
+    // Claim under test: all collective hosts' destination calendars (including the co-host's)
+    // must be persisted, not merely destinationCalendar[0].
+    expect(connectedIds).toEqual(
+      expect.arrayContaining([primaryDestinationCalendar.id, coHostDestinationCalendar.id])
+    );
+  });
+});

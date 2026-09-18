@@ -1,0 +1,75 @@
+diff --git a/apps/web/pages/api/webhook/app-credential.ts b/apps/web/pages/api/webhook/app-credential.ts
+index 326cfb5b4d..aaa3cfb432 100644
+--- a/apps/web/pages/api/webhook/app-credential.ts
++++ b/apps/web/pages/api/webhook/app-credential.ts
+@@ -13,6 +13,40 @@ const appCredentialWebhookRequestBodySchema = z.object({
+   // Keys should be AES256 encrypted with the CALCOM_APP_CREDENTIAL_ENCRYPTION_KEY
+   keys: z.string(),
+ });
++
++// Minimal in-memory rate limit for invalid secret guessing attempts.
++// Note: In serverless environments this may be per-instance, but it still prevents unlimited guessing.
++const MAX_INVALID_SECRET_ATTEMPTS = 5;
++const INVALID_SECRET_WINDOW_MS = 60_000;
++const invalidSecretAttempts = new Map<string, { count: number; windowStart: number }>();
++
++function getClientIp(req: NextApiRequest) {
++  const xff = req.headers["x-forwarded-for"];
++  const forwarded = Array.isArray(xff) ? xff[0] : xff;
++  const ipFromHeader = forwarded?.split(",")[0]?.trim();
++  return ipFromHeader || req.socket?.remoteAddress || "unknown";
++}
++
++function isRateLimited(ip: string, now: number) {
++  const entry = invalidSecretAttempts.get(ip);
++  if (!entry) return false;
++  if (now - entry.windowStart > INVALID_SECRET_WINDOW_MS) {
++    invalidSecretAttempts.delete(ip);
++    return false;
++  }
++  return entry.count >= MAX_INVALID_SECRET_ATTEMPTS;
++}
++
++function recordInvalidSecret(ip: string, now: number) {
++  const entry = invalidSecretAttempts.get(ip);
++  if (!entry || now - entry.windowStart > INVALID_SECRET_WINDOW_MS) {
++    invalidSecretAttempts.set(ip, { count: 1, windowStart: now });
++    return;
++  }
++  entry.count += 1;
++  invalidSecretAttempts.set(ip, entry);
++}
++
+ /** */
+ export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+   // Check that credential sharing is enabled
+@@ -20,12 +54,24 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
+     return res.status(403).json({ message: "Credential sharing is not enabled" });
+   }
+ 
+-  // Check that the webhook secret matches
+-  if (
+-    req.headers[process.env.CALCOM_WEBHOOK_HEADER_NAME || "calcom-webhook-secret"] !==
+-    process.env.CALCOM_WEBHOOK_SECRET
+-  ) {
++  const headerName = process.env.CALCOM_WEBHOOK_HEADER_NAME || "calcom-webhook-secret";
++  const providedSecret = req.headers[headerName];
++  const expectedSecret = process.env.CALCOM_WEBHOOK_SECRET;
++
++  // Check that the webhook secret matches (with brute-force protection)
++  if (providedSecret !== expectedSecret) {
++    const ip = getClientIp(req);
++    const now = Date.now();
++
++    if (isRateLimited(ip, now)) {
++      return res.status(429).json({ message: "Too many invalid webhook secret attempts" });
++    }
++
++    recordInvalidSecret(ip, now);
+     return res.status(403).json({ message: "Invalid webhook secret" });
++  } else {
++    // Successful auth clears any previous invalid attempts for this IP.
++    invalidSecretAttempts.delete(getClientIp(req));
+   }
+ 
+   const reqBody = appCredentialWebhookRequestBodySchema.parse(req.body);

@@ -1,0 +1,143 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+process.env.NEXT_PUBLIC_WEBAPP_URL = "http://localhost:3000";
+process.env.NEXTAUTH_SECRET = "test-secret";
+process.env.CALENDSO_ENCRYPTION_KEY = "test-key-32-bytes-long-1234567890";
+process.env.DATABASE_URL = "postgresql://localhost/test";
+
+const { findManyMock } = vi.hoisted(() => ({ findManyMock: vi.fn() }));
+
+vi.mock("@calcom/prisma", () => {
+  const client: any = {
+    user: {
+      findMany: findManyMock,
+      findUnique: vi.fn(),
+      update: vi.fn(),
+      updateMany: vi.fn(),
+      create: vi.fn(),
+    },
+    eventType: { findUnique: vi.fn(), findFirst: vi.fn(), findMany: vi.fn(), update: vi.fn() },
+    booking: { create: vi.fn(), findFirst: vi.fn(), findUnique: vi.fn(), update: vi.fn(), findMany: vi.fn() },
+    bookingReference: { create: vi.fn(), createMany: vi.fn(), deleteMany: vi.fn(), findMany: vi.fn(), findFirst: vi.fn() },
+    attendee: { create: vi.fn(), createMany: vi.fn(), findMany: vi.fn() },
+    payment: { create: vi.fn(), update: vi.fn(), findFirst: vi.fn() },
+    credential: { findFirst: vi.fn(), findMany: vi.fn() },
+    destinationCalendar: { findMany: vi.fn(), create: vi.fn(), update: vi.fn(), deleteMany: vi.fn(), findUnique: vi.fn() },
+    membership: { findFirst: vi.fn(), findMany: vi.fn() },
+    team: { findUnique: vi.fn(), findFirst: vi.fn() },
+    $transaction: vi.fn(async (fn: any) => (typeof fn === "function" ? fn(client) : Promise.all(fn))),
+    $queryRaw: vi.fn(),
+    $executeRaw: vi.fn(),
+  };
+  return { default: client, prisma: client };
+});
+
+vi.mock("@calcom/core/EventManager", () => ({
+  default: class {
+    async createBooking() {
+      return { referencesToCreate: [], results: [] };
+    }
+  },
+}));
+vi.mock("@calcom/core/event", () => ({ getEventName: vi.fn(() => "Test") }));
+vi.mock("@calcom/core/getUserAvailability", () => ({
+  getUserAvailability: vi.fn(async () => ({ busy: [], dateRanges: {}, currentSeats: 0, away: false })),
+}));
+vi.mock("@calcom/core/videoClient", () => ({ deleteMeeting: vi.fn() }));
+vi.mock("@calcom/emails", () => ({
+  sendAttendeeRequestEmail: vi.fn(),
+  sendOrganizerRequestEmail: vi.fn(),
+  sendRescheduledEmails: vi.fn(),
+  sendRescheduledSeatEmail: vi.fn(),
+  sendScheduledEmails: vi.fn(),
+  sendScheduledSeatsEmails: vi.fn(),
+}));
+vi.mock("@calcom/features/bookings/lib/getBookingFields", () => ({
+  getBookingFieldsWithSystemFields: vi.fn((x: unknown) => x),
+}));
+vi.mock("@calcom/features/bookings/lib/getCalEventResponses", () => ({
+  getCalEventResponses: vi.fn(() => ({})),
+}));
+vi.mock("@calcom/features/bookings/lib/handleWebhookTrigger", () => ({
+  handleWebhookTrigger: vi.fn(),
+}));
+vi.mock("@calcom/app-store/_utils/getCalendar", () => ({ getCalendar: vi.fn(async () => null) }));
+vi.mock("@calcom/app-store/zapier/lib/nodeScheduler", () => ({
+  cancelScheduledJobs: vi.fn(),
+  scheduleTrigger: vi.fn(),
+}));
+
+describe("handleNewBooking dynamic group booking", () => {
+  beforeEach(() => {
+    findManyMock.mockReset();
+  });
+
+  it("selects organization.slug for the dynamic user list query", async () => {
+    findManyMock.mockResolvedValue([
+      { id: 1, username: "alice", email: "alice@example.com", allowDynamicBooking: true, timeZone: "UTC", locale: "en", organization: { slug: "acme" } },
+      { id: 2, username: "bob", email: "bob@example.com", allowDynamicBooking: true, timeZone: "UTC", locale: "en", organization: { slug: "acme" } },
+    ]);
+
+    const mod: any = await import("./handleNewBooking");
+    const handleNewBooking = mod.default ?? mod.handler ?? mod.handleNewBooking;
+
+    const req: any = {
+      method: "POST",
+      headers: {},
+      cookies: {},
+      body: {
+        user: ["alice", "bob"],
+        name: "Alice",
+        email: "alice@example.com",
+        start: new Date(Date.now() + 86400000).toISOString(),
+        timeZone: "UTC",
+        language: "en",
+        metadata: {},
+        responses: {},
+        customInputs: {},
+        guests: [],
+        notes: "",
+      },
+    };
+
+    const eventType: any = {
+      id: 999,
+      slug: "dynamic",
+      schedulingType: null,
+      hosts: [],
+      users: [],
+      periodType: "UNLIMITED",
+      periodDays: null,
+      periodEndDate: null,
+      periodStartDate: null,
+      periodCountCalendarDays: false,
+      locations: [],
+      metadata: {},
+      customInputs: [],
+      bookingFields: [],
+      seatsPerTimeSlot: null,
+      destinationCalendar: null,
+      userId: null,
+      teamId: null,
+      price: 0,
+      currency: "usd",
+      length: 30,
+    };
+
+    try {
+      await handleNewBooking(req, {
+        userId: undefined,
+        eventTypeId: undefined,
+        eventType,
+        bookerName: "Alice",
+      } as any);
+    } catch {
+      // Downstream throws are irrelevant; the dynamic loadUsers query runs before them.
+    }
+
+    expect(findManyMock).toHaveBeenCalled();
+    const args = findManyMock.mock.calls[0][0] as { select: Record<string, unknown> };
+    expect(args.select).toHaveProperty("organization");
+    expect(args.select.organization).toEqual({ select: { slug: true } });
+  });
+});

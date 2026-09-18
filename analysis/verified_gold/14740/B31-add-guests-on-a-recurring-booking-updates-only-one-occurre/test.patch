@@ -1,0 +1,108 @@
+import i18nMock from "../../../../../../tests/libs/__mocks__/libServerI18n";
+import prismaMock from "../../../../../../tests/libs/__mocks__/prismaMock";
+
+import { vi, describe, it, beforeEach, expect } from "vitest";
+
+const { mockUpdateCalendarAttendees } = vi.hoisted(() => ({
+  mockUpdateCalendarAttendees: vi.fn(),
+}));
+
+vi.mock("@calcom/core/EventManager", () => ({
+  default: vi.fn().mockImplementation(() => ({
+    updateCalendarAttendees: mockUpdateCalendarAttendees,
+  })),
+}));
+
+vi.mock("@calcom/emails", () => ({
+  sendAddGuestsEmails: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("@calcom/lib/server/getUsersCredentials", () => ({
+  getUsersCredentials: vi.fn().mockResolvedValue([]),
+}));
+
+vi.mock("@calcom/lib/server/queries/teams", () => ({
+  isTeamAdmin: vi.fn().mockResolvedValue(true),
+  isTeamOwner: vi.fn().mockResolvedValue(true),
+}));
+
+// Only mock the top-level re-export used by the handler; do NOT import the real
+// @calcom/lib, because loading it pulls in other packages that fail to resolve.
+vi.mock("@calcom/lib", () => ({
+  parseRecurringEvent: (r: unknown) => r,
+}));
+
+describe("addGuestsHandler — recurring booking must not send a series-wide invite", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // @ts-expect-error - test mock
+    i18nMock.getTranslation.mockImplementation(() =>
+      Promise.resolve((key: string) => key)
+    );
+  });
+
+  it("does not forward eventType.recurringEvent on the event used to update calendar attendees", async () => {
+    const recurringEvent = { freq: 2, count: 5, interval: 1 };
+
+    const existingAttendee = {
+      name: "Existing",
+      email: "existing@example.com",
+      timeZone: "UTC",
+      locale: "en",
+    };
+
+    const booking = {
+      id: 1,
+      uid: "booking-uid",
+      userId: 7,
+      userPrimaryEmail: "organizer@example.com",
+      title: "Recurring Booking",
+      description: "",
+      startTime: new Date("2024-01-01T10:00:00.000Z"),
+      endTime: new Date("2024-01-01T10:30:00.000Z"),
+      location: null,
+      attendees: [existingAttendee],
+      eventType: {
+        title: "Recurring Booking",
+        recurringEvent,
+        teamId: null,
+        seatsPerTimeSlot: null,
+        seatsShowAttendees: true,
+      },
+      destinationCalendar: null,
+      references: [],
+      user: {
+        destinationCalendar: null,
+        credentials: [],
+      },
+    };
+
+    prismaMock.booking.findFirst.mockResolvedValue(booking as never);
+    prismaMock.booking.update.mockResolvedValue({
+      ...booking,
+      attendees: [
+        existingAttendee,
+        { name: "", email: "newguest@example.com", timeZone: "UTC", locale: "en" },
+      ],
+    } as never);
+    prismaMock.user.findFirstOrThrow.mockResolvedValue({
+      name: "Organizer",
+      email: "organizer@example.com",
+      timeZone: "UTC",
+      locale: "en",
+    } as never);
+
+    const { addGuestsHandler } = await import("./addGuests.handler");
+
+    await addGuestsHandler({
+      // @ts-expect-error - minimal session user for the test
+      ctx: { user: { id: 7, email: "organizer@example.com" } },
+      input: { bookingId: 1, guests: ["newguest@example.com"] },
+    });
+
+    expect(mockUpdateCalendarAttendees).toHaveBeenCalledTimes(1);
+    const [evt] = mockUpdateCalendarAttendees.mock.calls[0];
+
+    expect(evt.recurringEvent).toBeFalsy();
+  });
+});

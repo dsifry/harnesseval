@@ -1,0 +1,76 @@
+require 'digest'
+require 'uri'
+
+# --- Minimal stubs so the real file loads without a Rails app/database ---
+def require_dependency(_name); end
+
+module I18n
+  def self.t(*); 'imported'; end
+end
+
+module Nokogiri
+  module HTML
+    class Fragment
+      def initialize(html); @html = html; end
+      def css(_sel); []; end
+      def to_html; @html; end
+    end
+    def self.fragment(html); Fragment.new(html); end
+  end
+end
+
+module ActiveRecord
+  class Base
+    def self.belongs_to(*); end
+    def self.validates_presence_of(*); end
+    def self.where(_conds); $fake_relation; end
+  end
+end
+
+class FakeRelation
+  def initialize(embed); @embed = embed; end
+  def first; @embed; end
+end
+
+$revise_result = false
+$revise_count = 0
+class PostRevisor
+  def initialize(_post); end
+  def revise!(*_args)
+    $revise_count += 1
+    $revise_result
+  end
+end
+
+# --- Load the REAL file under test (relative path, never redefined) ---
+require_relative '../../app/models/topic_embed.rb'
+
+# --- Build fakes around the real class ---
+$update_column_calls = []
+
+embed = TopicEmbed.new
+embed.define_singleton_method(:blank?) { false }
+embed.define_singleton_method(:present?) { true }
+embed.define_singleton_method(:post) { Object.new }
+embed.define_singleton_method(:content_sha1) { 'stale-sha-does-not-match' }
+embed.define_singleton_method(:embed_url) { 'http://example.com/post' }
+embed.define_singleton_method(:update_column) do |name, value|
+  $update_column_calls << [name, value]
+end
+
+$fake_relation = FakeRelation.new(embed)
+
+# --- Exercise: existing embed, changed content, revise! returns false ---
+$revise_result = false
+contents = 'hello world'.dup
+TopicEmbed.import(Object.new, 'http://example.com/post', 'Title', contents)
+
+advanced = $update_column_calls.any? { |name, _| name == :content_sha1 }
+
+if $revise_count.zero?
+  puts "RESULT: FAIL: revise! was never invoked; test setup broken"
+elsif advanced
+  puts "RESULT: FAIL: content_sha1 advanced #{$update_column_calls.inspect} even though revise! returned false; failed revision permanently marked as imported"
+else
+  puts "RESULT: PASS"
+end

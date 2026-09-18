@@ -1,0 +1,81 @@
+diff --git a/apps/web/pages/api/webhook/app-credential.ts b/apps/web/pages/api/webhook/app-credential.ts
+index 326cfb5b4d..465a52fc0d 100644
+--- a/apps/web/pages/api/webhook/app-credential.ts
++++ b/apps/web/pages/api/webhook/app-credential.ts
+@@ -13,6 +13,43 @@ const appCredentialWebhookRequestBodySchema = z.object({
+   // Keys should be AES256 encrypted with the CALCOM_APP_CREDENTIAL_ENCRYPTION_KEY
+   keys: z.string(),
+ });
++
++function getHeaderValue(req: NextApiRequest, headerName: string) {
++  const val = req.headers[headerName];
++  if (typeof val === "string") return val;
++  return undefined;
++}
++
++function getPerUserExpectedSecret(userId: number, appSlug: string) {
++  const raw = process.env.CALCOM_WEBHOOK_SECRETS;
++  if (!raw) {
++    // Refuse insecure instance-wide shared secret configuration.
++    return { ok: false as const, error: "Per-user webhook secrets not configured" };
++  }
++
++  let parsed: unknown;
++  try {
++    parsed = JSON.parse(raw);
++  } catch {
++    return { ok: false as const, error: "Per-user webhook secrets not configured" };
++  }
++
++  if (!parsed || typeof parsed !== "object") {
++    return { ok: false as const, error: "Per-user webhook secrets not configured" };
++  }
++
++  const map = parsed as Record<string, unknown>;
++  const scoped = map[`${userId}:${appSlug}`];
++  const perUser = map[String(userId)];
++
++  const secret = (typeof scoped === "string" && scoped) || (typeof perUser === "string" && perUser) || undefined;
++  if (!secret) {
++    return { ok: false as const, error: "Missing per-user webhook secret" };
++  }
++
++  return { ok: true as const, secret };
++}
++
+ /** */
+ export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+   // Check that credential sharing is enabled
+@@ -20,15 +57,25 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
+     return res.status(403).json({ message: "Credential sharing is not enabled" });
+   }
+ 
+-  // Check that the webhook secret matches
+-  if (
+-    req.headers[process.env.CALCOM_WEBHOOK_HEADER_NAME || "calcom-webhook-secret"] !==
+-    process.env.CALCOM_WEBHOOK_SECRET
+-  ) {
+-    return res.status(403).json({ message: "Invalid webhook secret" });
++  // Parse request body (needed for per-user secret binding)
++  const parsedBody = appCredentialWebhookRequestBodySchema.safeParse(req.body);
++  if (!parsedBody.success) {
++    return res.status(400).json({ message: "Invalid request body" });
+   }
++  const reqBody = parsedBody.data;
+ 
+-  const reqBody = appCredentialWebhookRequestBodySchema.parse(req.body);
++  // Enforce per-user/per-app webhook secrets (no instance-wide shared secret)
++  const headerName = process.env.CALCOM_WEBHOOK_HEADER_NAME || "calcom-webhook-secret";
++  const providedSecret = getHeaderValue(req, headerName);
++  const expectedSecretResult = getPerUserExpectedSecret(reqBody.userId, reqBody.appSlug);
++
++  if (!expectedSecretResult.ok) {
++    return res.status(500).json({ message: expectedSecretResult.error });
++  }
++
++  if (!providedSecret || providedSecret !== expectedSecretResult.secret) {
++    return res.status(403).json({ message: "Invalid webhook secret" });
++  }
+ 
+   // Check that the user exists
+   const user = await prisma.user.findUnique({ where: { id: reqBody.userId } });

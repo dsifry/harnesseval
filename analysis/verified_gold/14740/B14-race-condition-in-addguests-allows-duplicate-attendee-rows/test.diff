@@ -1,0 +1,151 @@
+diff --git a/packages/trpc/server/routers/viewer/bookings/addGuests.handler.verified.test.ts b/packages/trpc/server/routers/viewer/bookings/addGuests.handler.verified.test.ts
+new file mode 100644
+--- /dev/null
++++ b/packages/trpc/server/routers/viewer/bookings/addGuests.handler.verified.test.ts
+@@ -0,0 +1,146 @@
++import prismaMock from "../../../../../../tests/libs/__mocks__/prismaMock";
++
++import { vi, describe, it, expect, beforeEach } from "vitest";
++
++vi.mock("@calcom/prisma", async () => {
++  const mod = await import("../../../../../../tests/libs/__mocks__/prismaMock");
++  return { prisma: (mod as any).default };
++});
++
++vi.mock("@calcom/core/EventManager", () => ({
++  default: class {
++    async updateCalendarAttendees() {
++      return undefined;
++    }
++  },
++}));
++
++vi.mock("@calcom/emails", () => ({
++  sendAddGuestsEmails: vi.fn().mockResolvedValue(undefined),
++}));
++
++vi.mock("@calcom/lib/server/getUsersCredentials", () => ({
++  getUsersCredentials: vi.fn().mockResolvedValue([]),
++}));
++
++vi.mock("@calcom/lib/server/queries/teams", () => ({
++  isTeamAdmin: vi.fn().mockResolvedValue(false),
++  isTeamOwner: vi.fn().mockResolvedValue(false),
++}));
++
++vi.mock("@calcom/lib/server", () => ({
++  getTranslation: vi.fn().mockResolvedValue((key: string) => key),
++}));
++
++vi.mock("@calcom/lib", () => ({
++  parseRecurringEvent: vi.fn().mockReturnValue(null),
++}));
++
++type Attendee = {
++  id: number;
++  email: string;
++  name: string;
++  timeZone: string;
++  locale: string;
++};
++
++describe("addGuestsHandler concurrent duplicate guest race", () => {
++  const attendees: Attendee[] = [];
++  let nextAttendeeId = 0;
++  let findFirstCount = 0;
++  let releaseFindFirst!: () => void;
++  let findFirstGate: Promise<void>;
++
++  const baseBooking: any = {
++    id: 1,
++    title: "Test booking",
++    description: "",
++    startTime: new Date("2024-01-01T10:00:00Z"),
++    endTime: new Date("2024-01-01T11:00:00Z"),
++    uid: "booking-uid-1",
++    location: null,
++    userId: 1,
++    userPrimaryEmail: "organizer@example.com",
++    eventTypeId: 1,
++    eventType: {
++      id: 1,
++      title: "Test event",
++      teamId: null,
++      recurringEvent: null,
++      seatsPerTimeSlot: null,
++      seatsShowAttendees: null,
++    },
++    destinationCalendar: null,
++    references: [],
++    user: {
++      destinationCalendar: null,
++      credentials: [],
++    },
++  };
++
++  beforeEach(() => {
++    attendees.length = 0;
++    nextAttendeeId = 0;
++    findFirstCount = 0;
++    findFirstGate = new Promise<void>((resolve) => {
++      releaseFindFirst = resolve;
++    });
++
++    // Both concurrent handlers must observe the booking BEFORE either writes,
++    // reproducing the non-transactional read-then-insert flow.
++    prismaMock.booking.findFirst.mockImplementation(async () => {
++      findFirstCount += 1;
++      if (findFirstCount >= 2) releaseFindFirst();
++      await findFirstGate;
++      return {
++        ...baseBooking,
++        attendees: attendees.map((a) => ({ ...a })),
++      };
++    });
++
++    prismaMock.user.findFirstOrThrow.mockResolvedValue({
++      name: "Organizer",
++      email: "organizer@example.com",
++      timeZone: "UTC",
++      locale: "en",
++    });
++
++    prismaMock.booking.update.mockImplementation(async (args: any) => {
++      const data = args.data.attendees.createMany.data as Array<{
++        email: string;
++        name: string;
++        timeZone: string;
++        locale: string;
++      }>;
++      for (const guest of data) {
++        attendees.push({ id: ++nextAttendeeId, ...guest });
++      }
++      return {
++        ...baseBooking,
++        attendees: attendees.map((a) => ({ ...a })),
++      };
++    });
++  });
++
++  it("does not insert duplicate attendee rows when two concurrent requests add the same guest email", async () => {
++    const { addGuestsHandler } = await import("./addGuests.handler");
++
++    const ctx = {
++      user: { id: 1, email: "organizer@example.com" },
++    } as any;
++
++    const input = { bookingId: 1, guests: ["dup@example.com"] };
++
++    await Promise.all([
++      addGuestsHandler({ ctx, input }),
++      addGuestsHandler({ ctx, input }),
++    ]);
++
++    const duplicates = attendees.filter((a) => a.email === "dup@example.com");
++
++    expect(
++      duplicates,
++      "addGuests must not create duplicate attendee rows when two concurrent requests add the same email (read-then-insert without transaction/unique constraint)"
++    ).toHaveLength(1);
++  });
++});

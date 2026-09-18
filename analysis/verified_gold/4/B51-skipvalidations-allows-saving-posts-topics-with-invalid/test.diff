@@ -1,0 +1,105 @@
+diff --git a/spec/verify/post_revisor_verify.rb b/spec/verify/post_revisor_verify.rb
+new file mode 100644
+--- /dev/null
++++ b/spec/verify/post_revisor_verify.rb
+@@ -0,0 +1,100 @@
++require 'tmpdir'
++
++# Provide a stub for the one external require the real file performs.
++stub_dir = Dir.mktmpdir
++File.write(File.join(stub_dir, "edit_rate_limiter.rb"), <<~RUBY)
++  class EditRateLimiter
++    def initialize(_user); end
++    def performed!; end
++  end
++RUBY
++$LOAD_PATH.unshift(stub_dir)
++
++# Load the REAL class under test from its real relative path.
++require_relative '../../lib/post_revisor'
++
++# ---- Minimal environment stubs (no Rails, no DB) ----
++class SiteSetting
++  def self.ninja_edit_window; 1000; end
++end
++
++class Post
++  def self.hidden_reasons; { flag_threshold_reached: 1 }; end
++  def self.transaction; yield; end
++  def self.where(*_a); self; end
++  def self.exists?; false; end
++end
++
++class Topic
++  def self.exec_sql(*_a); nil; end
++end
++
++class Category
++  def self.where(*_a); self; end
++  def self.first; nil; end
++end
++
++module I18n
++  def self.t(key); key.to_s; end
++end
++
++module PostAction
++  def self.clear_flags!(*_a); nil; end
++end
++
++# A fake post that records the validate: flag passed to #save and, when
++# validate: true, rejects nil/blank raw content (simulating AR validations).
++class FakePost
++  attr_accessor :raw, :word_count, :last_editor_id, :acting_user, :edit_reason,
++                :hidden, :hidden_reason_id, :topic, :topic_id, :post_number,
++                :last_version_at, :version, :invalidate_oneboxes
++  attr_reader :cooked, :saved, :last_validate_flag
++
++  def initialize
++    @raw = "initial raw"
++    @cooked = "<p>hi</p>"
++    @post_number = 2
++    @topic_id = 99
++    @last_editor_id = 1
++    @last_version_at = Time.now
++    @version = 1
++    @hidden = false
++    @hidden_reason_id = nil
++    @saved = nil
++    @last_validate_flag = :never
++  end
++
++  def advance_draft_sequence; end
++  def extract_quoted_post_numbers; end
++  def save_reply_relationships; end
++  def trigger_post_process; end
++
++  def save(validate: true)
++    @last_validate_flag = validate
++    @saved = if validate
++               !(@raw.nil? || @raw.strip.empty?)
++             else
++               true
++             end
++  end
++end
++
++user = Struct.new(:id).new(1)
++
++# Case 1: attacker-triggered import passes skip_validations: true and a blank raw.
++post_with_skip = FakePost.new
++PostRevisor.new(post_with_skip).revise!(user, "", skip_validations: true)
++
++# Case 2: control - no skip_validations option, validations must run.
++post_no_skip = FakePost.new
++PostRevisor.new(post_no_skip).revise!(user, "")
++
++bypass_observed  = post_with_skip.saved == true && post_with_skip.last_validate_flag == false
++validation_works = post_no_skip.saved == false && post_no_skip.last_validate_flag == true
++
++if bypass_observed && validation_works
++  puts "RESULT: FAIL: skip_validations: true persisted blank raw content " \
++       "(save called with validate: false), bypassing all AR validations"
++else
++  puts "RESULT: PASS"
++end

@@ -1,0 +1,182 @@
+import { describe, expect, it, vi, beforeEach } from "vitest";
+import { Prisma } from "@prisma/client";
+
+const RAW_PRISMA_MESSAGE =
+  "Unique constraint failed on the fields: (`username`) [raw-prisma-output-must-not-reach-client]";
+
+const mocks = vi.hoisted(() => {
+  const findMany = vi.fn();
+  const findFirst = vi.fn();
+  const findUnique = vi.fn();
+  const getBookingData = vi.fn();
+
+  const makeProxy = (): any => {
+    const p: any = new Proxy(function () {}, {
+      get(_, prop) {
+        if (prop === "then") return undefined;
+        if (prop === "__esModule") return true;
+        if (prop === "default") return makeProxy();
+        return makeProxy();
+      },
+      apply: () => makeProxy(),
+      construct: () => makeProxy(),
+    });
+    return p;
+  };
+
+  const prisma = new Proxy(
+    {
+      user: { findMany, findUnique },
+      eventType: { findFirst, findUnique },
+    } as any,
+    {
+      get(target: any, prop) {
+        if (prop in target) return target[prop];
+        return vi.fn();
+      },
+    }
+  );
+
+  return { findMany, findFirst, findUnique, getBookingData, makeProxy, prisma };
+});
+
+vi.mock("@calcom/prisma", () => ({ default: mocks.prisma, prisma: mocks.prisma }));
+vi.mock("./getBookingData", () => ({ getBookingData: mocks.getBookingData }));
+vi.mock("@calcom/features/bookings/lib/getBookingData", () => ({
+  getBookingData: mocks.getBookingData,
+}));
+vi.mock("@calcom/lib/isOutOfBounds", () => ({ isOutOfBounds: () => false }));
+vi.mock("@calcom/lib/logger", () => ({
+  default: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
+vi.mock("@calcom/core/event", () => mocks.makeProxy());
+vi.mock("@calcom/core/EventManager", () => ({ default: mocks.makeProxy() }));
+vi.mock("@calcom/core/getUserAvailability", () => ({
+  getUserAvailability: mocks.makeProxy(),
+}));
+vi.mock("@calcom/core/videoClient", () => mocks.makeProxy());
+vi.mock("@calcom/dayjs", () => ({ default: mocks.makeProxy() }));
+vi.mock("@calcom/emails", () => mocks.makeProxy());
+vi.mock("@calcom/app-store/utils", () => mocks.makeProxy());
+vi.mock("@calcom/app-store/locations", () => mocks.makeProxy());
+vi.mock("@calcom/app-store/_utils/getCalendar", () => ({
+  getCalendar: mocks.makeProxy(),
+}));
+vi.mock("@calcom/app-store/zapier/lib/nodeScheduler", () => mocks.makeProxy());
+vi.mock("@calcom/features/bookings/lib/handleWebhookTrigger", () => ({
+  handleWebhookTrigger: mocks.makeProxy(),
+}));
+vi.mock("@calcom/features/bookings/lib/getBookingFields", () => ({
+  getBookingFieldsWithSystemFields: mocks.makeProxy(),
+}));
+vi.mock("@calcom/features/bookings/lib/getCalEventResponses", () => ({
+  getCalEventResponses: mocks.makeProxy(),
+}));
+vi.mock("@calcom/lib/getFullName", () => ({ getFullName: mocks.makeProxy() }));
+vi.mock("@calcom/lib/getUsernameList", () => ({
+  getUsernameList: mocks.makeProxy(),
+}));
+vi.mock("@calcom/lib/server/i18n", () => ({ getTranslation: mocks.makeProxy() }));
+
+const fakeEventType = {
+  id: 42,
+  eventName: "Test Event",
+  slug: "test-event",
+  schedulingType: null,
+  periodType: null,
+  periodDays: null,
+  periodEndDate: null,
+  periodStartDate: null,
+  periodCountCalendarDays: null,
+  userId: 1,
+  hosts: [],
+  users: [],
+  customInputs: [],
+  locations: [],
+  destinationCalendar: null,
+  seatsPerTimeSlot: null,
+  hideCalendarNotes: false,
+  seatsShowAttendees: true,
+  metadata: {},
+  price: 0,
+  currency: "usd",
+  paymentOption: null,
+  disableGuests: false,
+  length: 30,
+  minimumBookingNotice: 0,
+  beforeEventBuffer: 0,
+  afterEventBuffer: 0,
+  recurringEvent: null,
+  slotInterval: null,
+};
+
+describe("handleNewBooking loadUsers error handling", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.findFirst.mockResolvedValue(fakeEventType);
+    mocks.findUnique.mockResolvedValue(undefined);
+    mocks.getBookingData.mockResolvedValue({
+      user: ["test-user"],
+      start: new Date(Date.now() + 86_400_000).toISOString(),
+      eventTypeId: undefined,
+      language: "en",
+      appsStatus: [],
+      name: "Booker",
+      email: "booker@example.com",
+      guests: [],
+      location: undefined,
+      notes: "",
+      smsReminderNumber: undefined,
+      rescheduleReason: "",
+    });
+  });
+
+  it("does not leak raw Prisma error messages to the public booker", async () => {
+    mocks.findMany.mockRejectedValueOnce(
+      new Prisma.PrismaClientKnownRequestError(RAW_PRISMA_MESSAGE, {
+        code: "P2002",
+        clientVersion: "test",
+        meta: { target: ["username"] },
+      })
+    );
+
+    const res = {
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn().mockReturnThis(),
+      send: vi.fn().mockReturnThis(),
+      setHeader: vi.fn().mockReturnThis(),
+      end: vi.fn().mockReturnThis(),
+    };
+    const req = {
+      body: {},
+      query: {},
+      headers: { "user-agent": "vitest" },
+      method: "POST",
+      cookies: {},
+    } as any;
+
+    const mod: any = await import("./handleNewBooking");
+    const handler: any = mod.default ?? mod.handler;
+
+    let thrown: any;
+    try {
+      await handler(req, res);
+    } catch (e) {
+      thrown = e;
+    }
+
+    // Sanity: the handler reached loadUsers() and invoked Prisma.
+    expect(mocks.findMany).toHaveBeenCalled();
+
+    const responsePayload = res.json.mock.calls.map((c: any[]) => c[0]);
+    const leaked = JSON.stringify({
+      message: thrown?.message,
+      payload: responsePayload,
+    });
+
+    expect(
+      leaked,
+      "Raw Prisma error message leaked to public booker — loadUsers catches Prisma errors and rethrows them as HTTP 400"
+    ).not.toContain(RAW_PRISMA_MESSAGE);
+  });
+});

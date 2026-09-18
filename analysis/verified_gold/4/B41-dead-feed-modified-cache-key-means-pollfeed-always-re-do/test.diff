@@ -1,0 +1,92 @@
+diff --git a/spec/verify/poll_feed_verify.rb b/spec/verify/poll_feed_verify.rb
+new file mode 100644
+--- /dev/null
++++ b/spec/verify/poll_feed_verify.rb
+@@ -0,0 +1,87 @@
++# frozen_string_literal: true
++require 'ostruct'
++require 'cgi'
++require 'digest/sha1'
++
++# --- minimal stubs so the real file loads and runs without Rails -------
++def require_dependency(_path); end
++
++class String
++  def present?; !empty?; end
++  def blank?; empty?; end
++end
++
++module Jobs
++  class Scheduled
++    def self.recurrence(&_blk); end
++    def self.sidekiq_options(**_opts); end
++  end
++end
++
++module SiteSetting
++  def self.feed_polling_enabled?; true; end
++  def self.feed_polling_url; 'http://example.com/feed.xml'; end
++  def self.embed_by_username; 'system'; end
++end
++
++class User
++  def self.where(_cond); self; end
++  def self.first; @u ||= new; end
++  def blank?; false; end
++end
++
++module SimpleRSS
++  def self.parse(_io)
++    OpenStruct.new(items: [OpenStruct.new(
++      link: 'http://example.com/1',
++      id: 'http://example.com/1',
++      content: '<p>hello</p>',
++      title: 't'
++    )])
++  end
++end
++
++module TopicEmbed
++  def self.import(*_args); $imports += 1; end
++end
++
++$imports = 0
++$opened  = []
++# pretend the simple-rss gem is already loaded
++$LOADED_FEATURES << 'simple-rss.rb'
++
++# --- load the REAL file under test -------------------------------------
++require_relative '../../app/jobs/scheduled/poll_feed.rb'
++
++# intercept Kernel#open so we can observe every download attempt
++module Kernel
++  alias_method :orig_open_for_poll, :open
++  def open(*args)
++    $opened << args
++    OpenStruct.new(read: '')
++  end
++  private :open
++end
++
++# observe whether the (supposedly dead) feed_key method is ever invoked
++$feed_key_calls = 0
++module FeedKeyTracker
++  def feed_key(*a, &b)
++    $feed_key_calls += 1
++    super
++  end
++end
++Jobs::PollFeed.prepend(FeedKeyTracker)
++
++# --- exercise the job twice (simulate two hourly runs) -----------------
++job = Jobs::PollFeed.new
++2.times { job.poll_feed }
++
++defect = $feed_key_calls.zero? && $opened.length == 2 && $imports == 2
++
++if defect
++  puts "RESULT: FAIL: feed_key is dead code; poll_feed re-downloaded the feed #{$opened.length} times " \
++       "(#{$imports} re-imports, 0 feed_key calls, no conditional GET)"
++else
++  puts 'RESULT: PASS'
++end

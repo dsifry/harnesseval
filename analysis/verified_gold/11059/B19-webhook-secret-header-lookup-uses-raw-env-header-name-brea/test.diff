@@ -1,0 +1,107 @@
+diff --git a/apps/web/pages/api/webhook/app-credential.verified.test.ts b/apps/web/pages/api/webhook/app-credential.verified.test.ts
+new file mode 100644
+--- /dev/null
++++ b/apps/web/pages/api/webhook/app-credential.verified.test.ts
+@@ -0,0 +1,102 @@
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++
++const symmetricDecryptMock = vi.fn(() => JSON.stringify({ apiKey: "decrypted" }));
++
++const prismaMock = {
++  user: {
++    findUnique: vi.fn(async () => ({ id: 1 })),
++  },
++  app: {
++    findUnique: vi.fn(async () => ({ slug: "zoom" })),
++  },
++  credential: {
++    findFirst: vi.fn(async () => null),
++    update: vi.fn(async () => ({})),
++    create: vi.fn(async () => ({})),
++  },
++};
++
++vi.mock("@calcom/lib/constants", () => ({
++  APP_CREDENTIAL_SHARING_ENABLED: true,
++}));
++
++vi.mock("@calcom/lib/crypto", () => ({
++  symmetricDecrypt: (...args: unknown[]) => symmetricDecryptMock(...args),
++}));
++
++vi.mock("@calcom/app-store/appStoreMetaData", () => ({
++  appStoreMetadata: {
++    zoom: { slug: "zoom", type: "zoom" },
++  },
++}));
++
++vi.mock("@calcom/prisma", () => ({
++  default: prismaMock,
++}));
++
++function createRes() {
++  const res: any = {};
++  res.statusCode = undefined;
++  res.body = undefined;
++  res.status = vi.fn((code: number) => {
++    res.statusCode = code;
++    return res;
++  });
++  res.json = vi.fn((body: any) => {
++    res.body = body;
++    return res;
++  });
++  return res;
++}
++
++describe("/api/webhook/app-credential webhook auth", () => {
++  const OLD_ENV = process.env;
++
++  beforeEach(() => {
++    vi.resetModules();
++    process.env = { ...OLD_ENV };
++
++    process.env.CALCOM_WEBHOOK_SECRET = "shh";
++    // Mixed-case env value is common, but Node/Next lowercases incoming header keys
++    process.env.CALCOM_WEBHOOK_HEADER_NAME = "X-CalCom-Webhook-Secret";
++    process.env.CALCOM_APP_CREDENTIAL_ENCRYPTION_KEY = "irrelevant-for-test";
++
++    symmetricDecryptMock.mockClear();
++    prismaMock.user.findUnique.mockClear();
++    prismaMock.app.findUnique.mockClear();
++    prismaMock.credential.findFirst.mockClear();
++    prismaMock.credential.update.mockClear();
++    prismaMock.credential.create.mockClear();
++  });
++
++  afterEach(() => {
++    process.env = OLD_ENV;
++  });
++
++  it("accepts a valid secret even when CALCOM_WEBHOOK_HEADER_NAME casing differs and header value is string[]", async () => {
++    const { default: handler } = await import("./app-credential");
++
++    const req: any = {
++      headers: {
++        // Simulate Node/Next normalized (lowercased) header key
++        "x-calcom-webhook-secret": ["shh"],
++      },
++      body: {
++        userId: 1,
++        appSlug: "zoom",
++        keys: "encrypted-payload",
++      },
++    };
++
++    const res = createRes();
++
++    await handler(req, res);
++
++    expect(
++      res.statusCode,
++      "Webhook auth should lowercase the env-configured header name (Node lowercases req.headers keys) and normalize string[] header values"
++    ).toBe(200);
++    expect(res.body).toEqual({ message: "Credentials created for userId: 1" });
++    expect(prismaMock.credential.create).toHaveBeenCalledTimes(1);
++  });
++});

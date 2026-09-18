@@ -1,0 +1,229 @@
+import { describe, expect, it, vi } from "vitest";
+
+const { deleteEventSpy, prismaMock } = vi.hoisted(() => {
+  const deleteEventSpy = vi.fn().mockResolvedValue({});
+
+  const makeProxy = (): any =>
+    new Proxy(
+      {},
+      {
+        get(target: any, prop: string) {
+          if (!target[prop]) {
+            target[prop] = new Proxy(
+              {},
+              {
+                get(t: any, method: string) {
+                  if (!t[method]) {
+                    t[method] = vi.fn().mockResolvedValue(undefined);
+                  }
+                  return t[method];
+                },
+              }
+            );
+          }
+          return target[prop];
+        },
+      }
+    );
+
+  const prismaMock = makeProxy();
+  return { deleteEventSpy, prismaMock };
+});
+
+vi.mock("@calcom/app-store", () => ({ default: {} }));
+vi.mock("@calcom/app-store/_utils/getCalendar", () => ({
+  getCalendar: vi.fn().mockResolvedValue({ deleteEvent: deleteEventSpy }),
+}));
+vi.mock("@calcom/app-store/dailyvideo/lib/VideoApiAdapter", () => ({ FAKE_DAILY_CREDENTIAL: {} }));
+vi.mock("@calcom/app-store/locations", () => ({ DailyLocationType: "daily" }));
+vi.mock("@calcom/app-store/zapier/lib/nodeScheduler", () => ({ cancelScheduledJobs: vi.fn() }));
+vi.mock("@calcom/core/videoClient", () => ({ deleteMeeting: vi.fn(), updateMeeting: vi.fn() }));
+vi.mock("@calcom/emails", () => ({ sendCancelledEmails: vi.fn(), sendCancelledSeatEmails: vi.fn() }));
+vi.mock("@calcom/features/bookings/lib/getCalEventResponses", () => ({
+  getCalEventResponses: vi.fn(() => ({})),
+}));
+vi.mock("@calcom/features/ee/workflows/lib/isEventTypeOwnerKYCVerified", () => ({
+  isEventTypeOwnerKYCVerified: vi.fn(() => false),
+}));
+vi.mock("@calcom/features/ee/workflows/lib/reminders/emailReminderManager", () => ({
+  deleteScheduledEmailReminder: vi.fn(),
+}));
+vi.mock("@calcom/features/ee/workflows/lib/reminders/reminderScheduler", () => ({
+  sendCancelledReminders: vi.fn(),
+}));
+vi.mock("@calcom/features/ee/workflows/lib/reminders/smsReminderManager", () => ({
+  deleteScheduledSMSReminder: vi.fn(),
+}));
+vi.mock("@calcom/features/ee/workflows/lib/reminders/whatsappReminderManager", () => ({
+  deleteScheduledWhatsappReminder: vi.fn(),
+}));
+vi.mock("@calcom/features/webhooks/lib/getWebhooks", () => ({
+  default: vi.fn().mockResolvedValue([]),
+}));
+vi.mock("@calcom/features/webhooks/lib/sendPayload", () => ({
+  default: vi.fn(),
+}));
+vi.mock("@calcom/lib", () => ({
+  isPrismaObjOrUndefined: (x: any) => x,
+  parseRecurringEvent: (x: any) => x,
+}));
+vi.mock("@calcom/lib/getTeamIdFromEventType", () => ({
+  getTeamIdFromEventType: vi.fn(() => null),
+}));
+vi.mock("@calcom/lib/http-error", () => ({
+  HttpError: class HttpError extends Error {
+    constructor(public opts: any) {
+      super(opts?.message ?? "HttpError");
+    }
+  },
+}));
+vi.mock("@calcom/lib/logger", () => ({
+  default: { debug: vi.fn(), error: vi.fn(), warn: vi.fn(), info: vi.fn() },
+}));
+vi.mock("@calcom/lib/payment/handleRefundError", () => ({ handleRefundError: vi.fn() }));
+vi.mock("@calcom/lib/server/i18n", () => ({
+  getTranslation: vi.fn(async () => (key: string) => key),
+}));
+vi.mock("@calcom/lib/timeFormat", () => ({
+  getTimeFormatStringFromUserTimeFormat: vi.fn(() => "h:mm A"),
+}));
+vi.mock("@calcom/prisma/enums", () => ({
+  BookingStatus: { ACCEPTED: "ACCEPTED", REJECTED: "REJECTED", CANCELLED: "CANCELLED" },
+  MembershipRole: { OWNER: "OWNER" },
+  WorkflowMethods: { EMAIL: "EMAIL", SMS: "SMS", WHATSAPP: "WHATSAPP" },
+  WebhookTriggerEvents: { BOOKING_CANCELLED: "BOOKING_CANCELLED" },
+}));
+vi.mock("@calcom/prisma/zod-utils", () => ({
+  schemaBookingCancelParams: { parse: (x: any) => x },
+}));
+vi.mock("@calcom/prisma", () => ({
+  default: prismaMock,
+  bookingMinimalSelect: {},
+}));
+
+describe("handleCancelBooking recurring collective deletion", () => {
+  it("deletes calendar events for ALL calendar references of remaining bookings, not just the first", async () => {
+    const bookingToDelete = {
+      id: 1,
+      uid: "booking-uid",
+      title: "Test Booking",
+      description: "desc",
+      startTime: new Date("2024-01-01T10:00:00Z"),
+      endTime: new Date("2024-01-01T11:00:00Z"),
+      status: "ACCEPTED",
+      paid: false,
+      recurringEventId: "rec-123",
+      location: "integrations:daily",
+      customInputs: null,
+      cancellationReason: null,
+      smsReminderNumber: null,
+      seatsPerTimeSlot: null,
+      eventType: {
+        id: 10,
+        title: "Event Type",
+        slug: "event-type",
+        recurringEvent: { freq: 2, count: 5, interval: 1 },
+        owner: { id: 1 },
+        teamId: null,
+        bookingFields: null,
+        seatsPerTimeSlot: null,
+        requiresConfirmation: false,
+        price: 0,
+        currency: "usd",
+        metadata: null,
+        isDynamic: false,
+        disableGuests: false,
+      },
+      user: {
+        id: 1,
+        email: "user@example.com",
+        name: "User",
+        timeZone: "UTC",
+        timeFormat: 12,
+        locale: "en",
+        destinationCalendar: null,
+        credentials: [
+          { id: 1, type: "google_calendar", key: {}, appId: "google-calendar", userId: 1, teamId: null },
+        ],
+      },
+      references: [
+        {
+          id: 1,
+          type: "google_calendar",
+          uid: "main-google-uid",
+          externalCalendarId: "main-ext",
+          credentialId: 1,
+          bookingId: 1,
+          deleted: false,
+        },
+      ],
+      attendees: [],
+      payment: [],
+      destinationCalendar: null,
+      team: null,
+      seatsReferences: [],
+      workflowReminders: [],
+      metadata: null,
+      iCalUID: null,
+      iCalSequence: 0,
+      smsReminders: [],
+      emailReminders: [],
+      whatsappReminders: [],
+      userPrimaryEmail: "user@example.com",
+      rescheduled: null,
+    };
+
+    const updatedBooking = {
+      id: 2,
+      references: [
+        {
+          id: 2,
+          type: "google_calendar",
+          uid: "uid-google",
+          externalCalendarId: "ext-google",
+          credentialId: 1,
+          bookingId: 2,
+          deleted: false,
+        },
+        {
+          id: 3,
+          type: "office365_calendar",
+          uid: "uid-o365",
+          externalCalendarId: "ext-o365",
+          credentialId: 2,
+          bookingId: 2,
+          deleted: false,
+        },
+      ],
+    };
+
+    prismaMock.booking.findUnique.mockResolvedValue(bookingToDelete);
+    prismaMock.booking.findMany.mockResolvedValue([updatedBooking]);
+
+    const req = {
+      body: {
+        id: 1,
+        uid: "booking-uid",
+        allRemainingBookings: true,
+        cancellationReason: "test",
+      },
+    } as any;
+
+    const mod = await import("./handleCancelBooking");
+    const handler = mod.default ?? (mod as any).handler;
+
+    try {
+      await handler(req);
+    } catch {
+      // Later stages of cancellation may throw because not all deps are mocked.
+      // The calendar deletion happens before that, so we still inspect the spy.
+    }
+
+    const deletedUids = deleteEventSpy.mock.calls.map((call) => call[0]);
+
+    // The remaining (updated) booking has events on two different calendar providers.
+    // Cancelling all remaining bookings must delete both of them; finding only the
+    // first calendar reference orphans the event on the other host's calendar.
+    expect(deletedUids).toContain("uid-o365");
+  });
+});

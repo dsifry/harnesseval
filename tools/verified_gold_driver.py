@@ -94,6 +94,10 @@ FAILING TEST OUTPUT (tail):
 {head_log}
 ```
 
+CANDIDATE FILES THAT DEFINE THE IDENTIFIERS IN THE CLAIM (the defect may be in ANY of these —
+name the right one in fix_file_path):
+{symbol_files}
+
 RULES
 - Return ONLY exact-match edits: each `find` must be a verbatim excerpt of the CURRENT SOURCE and must
   occur EXACTLY ONCE. Include enough surrounding context to be unique.
@@ -107,6 +111,46 @@ Respond with ONLY this JSON object (no prose, no code fences):
 {{"fix_file_path": "<repo-relative path of the file to edit>",
   "fix_edits": [{{"find": "<verbatim excerpt of THAT file>", "replace": "<corrected excerpt>"}}],
   "explanation": "<one sentence>"}}"""
+
+
+MODEL_TIMEOUT = 240   # seconds; LunarRoute calls occasionally hang (observed 10+ min stalls)
+
+
+async def call_model_json_bounded(*args, **kwargs):
+    """call_model_json with a hard timeout: a hung call must not wedge a stream. On timeout the
+    caller sees the same empty-result shape it already handles as a retryable authoring failure."""
+    try:
+        return await asyncio.wait_for(call_model_json(*args, **kwargs), timeout=MODEL_TIMEOUT)
+    except asyncio.TimeoutError:
+        return {}, 0, 0, {}
+
+
+SYMBOL_STOP = {"should","would","could","because","when","with","from","this","that","have","been",
+               "does","doesn","isn","aren","rather","instead","always","never","error","missing",
+               "without","before","after","return","value","values","which","there","their","about"}
+
+def defining_files(cand, limit=3):
+    """Files under the checkout that DEFINE the identifiers named in the claim. The defect often lives
+    in a callee (schema/helper) while the candidate resolved to the caller, which is the single largest
+    cause of 'edits rejected' / 'fix did not converge'."""
+    text = (str(cand.get("title")) + " " + " ".join((cand.get("reports") or [])[:6]))
+    toks = [t for t in re.findall(r"[A-Za-z_][A-Za-z0-9_]{5,}", text)
+            if t.lower() not in SYMBOL_STOP]
+    seen, terms = set(), []
+    for t in toks:
+        if t.lower() not in seen:
+            seen.add(t.lower()); terms.append(t)
+    hits = {}
+    for term in terms[:6]:
+        try:
+            out = sh(f"grep -rl --include='*{ext}' --exclude-dir=node_modules --exclude-dir=.git {term} . | head -12")
+            for f in out.splitlines():
+                f = f.strip().lstrip("./")
+                if f: hits[f] = hits.get(f, 0) + 1
+        except Exception:
+            pass
+    ranked = sorted(hits.items(), key=lambda kv: -kv[1])[:limit]
+    return [f for f, _ in ranked]
 
 
 def sh(cmd, cwd=None, timeout=300):
@@ -235,7 +279,7 @@ async def author_test(model, cand, file, content, diff, supplier_dir, stem, extr
                                 ext=(".tsx" if file.endswith(".tsx") else ".ts"))
     # reasoning models burn the output budget on large inputs: keep effort low and the budget large,
     # otherwise the call returns EMPTY content with 0 output tokens (observed on 87k-char files).
-    parsed, tin, tout, _ = await call_model_json(model, SYSTEM, prompt, effort="low", max_tokens=16000)
+    parsed, tin, tout, _ = await call_model_json_bounded(model, SYSTEM, prompt, effort="low", max_tokens=16000)
     return (parsed if isinstance(parsed, dict) else {}), tin, tout
 
 
@@ -278,14 +322,14 @@ async def author_refute(model, cand, file, content, test_code, head_log, supplie
     prompt = REFUTE_PROMPT.format(file=file, title=cand.get("title") or "",
                                   reports="\n".join(f"- {r}" for r in cand.get("reports", [])[:4]),
                                   test_code=test_code[:5000], content=content)
-    parsed, tin, tout, _ = await call_model_json(model, SYSTEM, prompt, effort="low", max_tokens=16000)
+    parsed, tin, tout, _ = await call_model_json_bounded(model, SYSTEM, prompt, effort="low", max_tokens=16000)
     return (parsed if isinstance(parsed, dict) else {}), tin, tout
 
 
 async def author_fix(model, cand, file, content, test_code, head_log, original_content):
     prompt = FIX_PROMPT.format(title=cand.get("title") or "", file=file, test_code=test_code[:6000],
                                content=content, head_log=head_log[-2500:])
-    parsed, tin, tout, _ = await call_model_json(model, SYSTEM, prompt, effort="low", max_tokens=8000)
+    parsed, tin, tout, _ = await call_model_json_bounded(model, SYSTEM, prompt, effort="low", max_tokens=8000)
     return (parsed if isinstance(parsed, dict) else {}), tin, tout
 
 

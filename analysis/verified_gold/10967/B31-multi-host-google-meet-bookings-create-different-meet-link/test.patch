@@ -1,0 +1,140 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import { expect, it, vi, afterEach } from "vitest";
+
+const insertMock = vi.fn();
+const patchMock = vi.fn();
+const updateMock = vi.fn();
+const deleteMock = vi.fn();
+
+vi.mock("googleapis", () => ({
+  google: {
+    auth: {
+      OAuth2: class {
+        setCredentials() {
+          /* mock */
+        }
+      },
+    },
+    calendar: () => ({
+      events: {
+        insert: (...args: any[]) => insertMock(...args),
+        patch: (...args: any[]) => patchMock(...args),
+        update: (...args: any[]) => updateMock(...args),
+        delete: (...args: any[]) => deleteMock(...args),
+      },
+    }),
+  },
+}));
+
+vi.mock("@calcom/lib/logger", () => {
+  const child: any = () => ({
+    info: () => {},
+    error: () => {},
+    warn: () => {},
+    debug: () => {},
+    getChildLogger: child,
+  });
+  return { default: { getChildLogger: child, ...child() } };
+});
+
+vi.mock("@calcom/prisma", () => ({ default: {} }));
+
+vi.mock("@calcom/lib/CalEventParser", () => ({
+  getLocation: () => "integrations:google:meet",
+  getRichDescription: () => "description",
+}));
+
+vi.mock("./getGoogleAppKeys", () => ({
+  getGoogleAppKeys: () => ({ client_id: "cid", client_secret: "csecret" }),
+}));
+
+vi.mock("./googleCredentialSchema", () => ({
+  googleCredentialSchema: { parse: (x: any) => x },
+}));
+
+afterEach(() => {
+  vi.resetAllMocks();
+});
+
+function buildEvent(overrides: any = {}) {
+  return {
+    type: "google_calendar",
+    title: "Multi-host Google Meet booking",
+    description: "Team meeting",
+    startTime: new Date("2025-01-01T10:00:00Z") as any,
+    endTime: new Date("2025-01-01T10:30:00Z") as any,
+    organizer: {
+      id: 1,
+      name: "Host One",
+      email: "host1@example.com",
+      timeZone: "UTC",
+      username: "host1",
+    },
+    attendees: [{ email: "guest@example.com", name: "Guest", timeZone: "UTC" }],
+    location: "integrations:google:meet",
+    conferenceData: {
+      createRequest: {
+        requestId: "shared-request-id",
+        conferenceSolutionKey: { type: "hangoutsMeet" },
+      },
+    },
+    destinationCalendar: [
+      { credentialId: 1, externalId: "host1@example.com", integration: "google_calendar" },
+      { credentialId: 2, externalId: "host2@example.com", integration: "google_calendar" },
+    ],
+    ...overrides,
+  } as any;
+}
+
+it("createEvent must return the same Google Meet link for every host calendar in a multi-host booking", async () => {
+  const { default: GoogleCalendarService } = await import("./CalendarService");
+
+  const credential = {
+    id: 1,
+    type: "google_calendar",
+    key: { client_id: "cid", client_secret: "csecret", access_token: "at" },
+  } as any;
+
+  // Simulate Google Calendar: each insert that carries a conferenceData createRequest
+  // generates its own brand-new Meet conference/link for that host's calendar.
+  let insertCounter = 0;
+  insertMock.mockImplementation((_params: any, cb: any) => {
+    insertCounter += 1;
+    const link = `https://meet.google.com/conference-${insertCounter}`;
+    const data = {
+      id: `gcal-event-${insertCounter}`,
+      hangoutLink: link,
+      iCalUID: `uid-${insertCounter}`,
+    };
+    if (typeof cb === "function") {
+      cb(null, { data });
+    }
+    return Promise.resolve({ data });
+  });
+  patchMock.mockResolvedValue({ data: {} });
+
+  const svc = new GoogleCalendarService(credential) as any;
+  svc.auth = { getToken: async () => ({}) };
+
+  const host1Event = buildEvent({
+    destinationCalendar: [
+      { credentialId: 1, externalId: "host1@example.com", integration: "google_calendar" },
+    ],
+  });
+  const host2Event = buildEvent({
+    destinationCalendar: [
+      { credentialId: 2, externalId: "host2@example.com", integration: "google_calendar" },
+    ],
+  });
+
+  const host1Result = await svc.createEvent(host1Event, 1);
+  const host2Result = await svc.createEvent(host2Event, 2);
+
+  const host1Link = host1Result?.additionalInfo?.hangoutLink;
+  const host2Link = host2Result?.additionalInfo?.hangoutLink;
+
+  expect(host1Link).toBeTruthy();
+  // Claimed defect: every host in a collective Google Meet booking must share ONE Meet link,
+  // but the current implementation performs its own conference-creating insert per host calendar.
+  expect(host2Link).toBe(host1Link);
+});

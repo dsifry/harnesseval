@@ -1,0 +1,149 @@
+#!/usr/bin/env ruby
+# Standalone regression evidence for spec/jobs/poll_feed_spec.rb.
+# Claim: the "requires feed_polling_url" and "requires embed_by_username" examples are
+# vacuous because feed_polling_enabled? is never stubbed true, so the guard chain
+# short-circuits and the url/username guards are never actually exercised.
+
+# ---------- minimal stand-ins for the Rails/Discourse environment ----------
+class Object; def blank?; false; end; def present?; true; end; end
+class NilClass; def blank?; true; end; def present?; false; end; end
+class String; def blank?; strip.empty?; end; def present?; !blank?; end; end
+class Integer; def minutes; self; end; end
+
+def require_dependency(_path); true; end
+
+module Jobs
+  class Base; def self.every(_); end; end
+  class Scheduled < Base; end
+end
+
+class SiteSetting
+  def self.feed_polling_enabled?; false; end
+  def self.feed_polling_url; nil; end
+  def self.embed_by_username; nil; end
+end
+
+SITE_DEFAULTS = {
+  :feed_polling_enabled? => false,
+  :feed_polling_url => nil,
+  :embed_by_username => nil
+}.freeze
+
+def reset_site_setting!
+  SITE_DEFAULTS.each { |n, v| SiteSetting.singleton_class.send(:define_method, n) { |*_a| v } }
+end
+
+$expecters = []
+
+class Stubber
+  def initialize(obj, name); @obj = obj; @name = name; end
+  def returns(v)
+    obj, n = @obj, @name
+    obj.singleton_class.send(:define_method, n) { |*_a| v }
+    self
+  end
+end
+
+class Expecter
+  def initialize(obj, name)
+    @name = name; @expected = nil
+    st = { n: 0 }; @st = st
+    obj.singleton_class.send(:define_method, name) { |*_a| st[:n] += 1; nil }
+    $expecters << self
+  end
+  def never; @expected = 0; self; end
+  def once; @expected = 1; self; end
+  def verify!
+    return if @expected.nil?
+    raise "#{@name} expected #{@expected} call(s), got #{@st[:n]}" unless @st[:n] == @expected
+  end
+end
+
+class Object
+  def stubs(name); Stubber.new(self, name); end
+  def expects(name); Expecter.new(self, name); end
+end
+
+# ---------- tiny RSpec DSL shim ----------
+$contexts = [{}]
+$examples = []
+
+def describe(_t = nil, &b); $contexts.push({}); b.call; $contexts.pop; end
+def context(_t = nil, &b); describe(_t, &b); end
+def let(name, &b); $contexts.last[name.to_sym] = b; end
+def it(desc, &b)
+  merged = {}
+  $contexts.each { |c| merged.merge!(c) }
+  $examples << [desc, merged, b]
+end
+
+def finish(msg); puts msg; exit 0; end
+
+# ---------- load the REAL job under test ----------
+root = File.expand_path('../..', __dir__)
+job_path = %w[app/jobs/regular/poll_feed.rb lib/jobs/regular/poll_feed.rb jobs/regular/poll_feed.rb]
+           .map { |p| File.join(root, p) }.find { |p| File.file?(p) }
+finish("RESULT: FAIL: poll_feed job source not found under #{root}") unless job_path
+require job_path
+
+# Model deleting the url/username guards from execute (the post-PR spec should have
+# caught this but must be shown to stay green).
+class PollFeedNoGuards < Jobs::PollFeed
+  def execute(_args)
+    return unless SiteSetting.feed_polling_enabled?
+    poll_feed
+  end
+end
+
+# ---------- load the REAL spec file (intercept spec_helper) ----------
+class Object
+  def require(path)
+    return true if path == 'spec_helper'
+    super
+  end
+end
+
+spec_path = File.join(root, 'spec/jobs/poll_feed_spec.rb')
+finish("RESULT: FAIL: spec file not found at #{spec_path}") unless File.file?(spec_path)
+load spec_path
+
+# ---------- run the two examples against the real and guard-removed classes ----------
+def build_ctx(lets)
+  ctx = Object.new
+  lets.each do |name, b|
+    ctx.define_singleton_method(name) { @c ||= {}; @c[name] ||= instance_exec(&b) }
+  end
+  ctx
+end
+
+def run_example(lets, body, klass)
+  reset_site_setting!
+  $expecters = []
+  ctx = build_ctx(lets.merge(poller: -> { klass.new }))
+  ctx.instance_exec(&body)
+  $expecters.each(&:verify!)
+  [true, nil]
+rescue => e
+  [false, "#{e.class}: #{e.message}"]
+end
+
+url_ex  = $examples.find { |d, _, _| d.include?('feed_polling_url') }
+user_ex = $examples.find { |d, _, _| d.include?('embed_by_username') }
+finish('RESULT: FAIL: required examples not present in spec') unless url_ex && user_ex
+
+real_url  = run_example(url_ex[1], url_ex[2], Jobs::PollFeed)
+mut_url   = run_example(url_ex[1], url_ex[2], PollFeedNoGuards)
+real_user = run_example(user_ex[1], user_ex[2], Jobs::PollFeed)
+mut_user  = run_example(user_ex[1], user_ex[2], PollFeedNoGuards)
+
+if !real_url[0] || !real_user[0]
+  finish("RESULT: FAIL: could not evaluate spec examples (#{real_url[1]} / #{real_user[1]})")
+elsif real_url[0] && mut_url[0] && real_user[0] && mut_user[0]
+  finish('RESULT: FAIL: feed_polling_url and embed_by_username examples stay green after removing both guards (feed_polling_enabled? short-circuits)')
+elsif real_url[0] && mut_url[0]
+  finish('RESULT: FAIL: feed_polling_url example stays green after removing the url guard')
+elsif real_user[0] && mut_user[0]
+  finish('RESULT: FAIL: embed_by_username example stays green after removing the username guard')
+else
+  finish('RESULT: PASS')
+end

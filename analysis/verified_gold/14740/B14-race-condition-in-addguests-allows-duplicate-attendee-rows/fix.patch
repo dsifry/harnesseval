@@ -1,0 +1,90 @@
+diff --git a/packages/trpc/server/routers/viewer/bookings/addGuests.handler.ts b/packages/trpc/server/routers/viewer/bookings/addGuests.handler.ts
+index 99fec2cadf..069b1bac04 100644
+--- a/packages/trpc/server/routers/viewer/bookings/addGuests.handler.ts
++++ b/packages/trpc/server/routers/viewer/bookings/addGuests.handler.ts
+@@ -19,6 +19,22 @@ type AddGuestsOptions = {
+   };
+   input: TAddGuestsInputSchema;
+ };
++let addGuestsLock = Promise.resolve();
++
++const withAddGuestsLock = async <T>(fn: () => Promise<T>): Promise<T> => {
++  let releaseLock: (() => void) | undefined;
++  const prevLock = addGuestsLock;
++  addGuestsLock = new Promise<void>((resolve) => {
++    releaseLock = resolve;
++  });
++  await prevLock;
++  try {
++    return await fn();
++  } finally {
++    releaseLock?.();
++  }
++};
++
+ export const addGuestsHandler = async ({ ctx, input }: AddGuestsOptions) => {
+   const { user } = ctx;
+   const { bookingId, guests } = input;
+@@ -89,20 +105,50 @@ export const addGuestsHandler = async ({ ctx, input }: AddGuestsOptions) => {
+     };
+   });
+ 
+-  const bookingAttendees = await prisma.booking.update({
+-    where: {
+-      id: bookingId,
+-    },
+-    include: {
+-      attendees: true,
+-    },
+-    data: {
+-      attendees: {
+-        createMany: {
+-          data: guestsFullDetails,
++  const bookingAttendees = await withAddGuestsLock(async () => {
++    const freshBooking = await prisma.booking.findFirst({
++      where: {
++        id: bookingId,
++      },
++      include: {
++        attendees: true,
++        eventType: true,
++        destinationCalendar: true,
++        references: true,
++        user: {
++          include: {
++            destinationCalendar: true,
++            credentials: true,
++          },
+         },
+       },
+-    },
++    });
++
++    if (!freshBooking) throw new TRPCError({ code: "NOT_FOUND", message: "booking_not_found" });
++
++    const stillUniqueGuests = guestsFullDetails.filter(
++      (guest) => !freshBooking.attendees.some((attendee) => attendee.email === guest.email)
++    );
++
++    if (stillUniqueGuests.length === 0) {
++      return freshBooking;
++    }
++
++    return await prisma.booking.update({
++      where: {
++        id: bookingId,
++      },
++      include: {
++        attendees: true,
++      },
++      data: {
++        attendees: {
++          createMany: {
++            data: stillUniqueGuests,
++          },
++        },
++      },
++    });
+   });
+ 
+   const attendeesListPromises = bookingAttendees.attendees.map(async (attendee) => {

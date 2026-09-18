@@ -1,0 +1,71 @@
+import { describe, expect, it, vi, beforeEach } from "vitest";
+
+const { errorSpy } = vi.hoisted(() => {
+  return { errorSpy: vi.fn() };
+});
+
+vi.mock("@calcom/lib/logger", () => ({
+  default: {
+    getChildLogger: () => ({
+      error: errorSpy,
+      warn: vi.fn(),
+      info: vi.fn(),
+      debug: vi.fn(),
+    }),
+  },
+}));
+
+vi.mock("@calcom/app-store/_utils/getCalendar", () => ({
+  getCalendar: vi.fn().mockResolvedValue({
+    createEvent: vi.fn().mockRejectedValue({ code: 500, message: "boom" }),
+  }),
+}));
+
+vi.mock("@calcom/app-store/utils", () => ({
+  default: vi.fn(() => []),
+}));
+
+vi.mock("./getCalendarsEvents", () => ({
+  default: vi.fn(),
+}));
+
+vi.mock("@calcom/lib/server/perfObserver", () => ({
+  performance: { mark: vi.fn(), measure: vi.fn(), now: vi.fn() },
+}));
+
+describe("CalendarManager createEvent PII leak", () => {
+  beforeEach(() => {
+    errorSpy.mockClear();
+  });
+
+  it("does not log attendee PII on createEvent failure", async () => {
+    const { createEvent } = await import("./CalendarManager");
+
+    const calEvent = {
+      title: "Meeting",
+      attendees: [
+        { email: "victim@example.com", name: "Victim", phoneNumber: "+1234567890" },
+      ],
+      additionalNotes: "confidential notes",
+      hideCalendarNotes: false,
+    } as any;
+
+    const credential = {
+      id: 42,
+      appName: "google-calendar",
+      type: "google_calendar",
+    } as any;
+
+    await createEvent(credential, calEvent);
+
+    expect(errorSpy).toHaveBeenCalled();
+
+    const loggedText = errorSpy.mock.calls
+      .flat()
+      .map((arg) => (typeof arg === "string" ? arg : JSON.stringify(arg)))
+      .join(" ");
+
+    expect(loggedText).not.toContain("victim@example.com");
+    expect(loggedText).not.toContain("confidential notes");
+  });
+});

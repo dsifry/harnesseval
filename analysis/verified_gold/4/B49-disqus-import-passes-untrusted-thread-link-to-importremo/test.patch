@@ -1,0 +1,92 @@
+require 'tmpdir'
+
+module Kernel
+  alias_method :__orig_require, :require
+  def require(name)
+    return true if name == 'nokogiri' || name == './config/environment'
+    __orig_require(name)
+  end
+end
+
+module Nokogiri
+  module XML
+    module SAX
+      class Document; end
+      class Parser
+        def initialize(doc); @doc = doc; end
+        def parse_file(path)
+          xml = File.read(path)
+          link = xml[/<link>(.*?)<\/link>/m, 1]
+          d = @doc
+          d.start_element('thread', ['dsq:id', 't1'])
+          d.start_element('title', []); d.characters('Some Title'); d.end_element('title')
+          d.start_element('link', []); d.characters(link); d.end_element('link')
+          d.end_element('thread')
+          d.start_element('post', ['dsq:id', 'p1'])
+          d.start_element('thread', ['dsq:id', 't1'])
+          d.end_element('thread')
+          d.end_element('post')
+        end
+      end
+    end
+  end
+end
+
+class Object
+  def blank?; false; end
+  def present?; !blank?; end
+end
+class NilClass; def blank?; true; end; end
+class String; def blank?; strip.empty?; end; end
+
+class Thor
+  def self.desc(*); end
+  def self.method_option(*); end
+  attr_accessor :options
+end
+
+class SiteSetting
+  class << self; attr_accessor :email_domains_blacklist; end
+end
+SiteSetting.email_domains_blacklist = 'spam.example'
+
+class User
+  class Relation; def first; Object.new; end; end
+  def self.where(*); Relation.new; end
+end
+
+class RateLimiter
+  def self.disable; end
+  def self.enable; end
+end
+
+CAPTURED = []
+class TopicEmbed
+  def self.import_remote(user, link, opts = {})
+    CAPTURED << [link, opts]
+    nil
+  end
+end
+
+require './lib/tasks/disqus.thor'
+
+MALICIOUS_URL = 'file:///etc/passwd'
+begin
+  Dir.mktmpdir do |dir|
+    path = File.join(dir, 'export.xml')
+    File.write(path, "<thread><link>#{MALICIOUS_URL}</link></thread>")
+    d = Disqus.new
+    d.options = { file: path, post_as: 'someone', dry_run: nil }
+    d.import
+  end
+
+  captured_link = CAPTURED.first && CAPTURED.first[0]
+
+  if captured_link == MALICIOUS_URL
+    puts "RESULT: FAIL: untrusted <link> passed to TopicEmbed.import_remote as #{captured_link.inspect} (no scheme/host validation -> SSRF/LFI)"
+  else
+    puts "RESULT: PASS: link validated/filtered (captured=#{captured_link.inspect})"
+  end
+rescue => e
+  puts "RESULT: FAIL: unexpected #{e.class}: #{e.message}"
+end

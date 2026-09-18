@@ -1,0 +1,97 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const h = vi.hoisted(() => {
+  const captured: { template: string; calendarEvent: any }[] = [];
+  const noop = () => {};
+  const sub = { debug: noop, error: noop, info: noop, warn: noop, log: noop };
+  return {
+    captured,
+    logger: {
+      default: { ...sub, getSubLogger: () => sub },
+      getSubLogger: () => sub,
+    },
+  };
+});
+
+vi.mock("./templates/attendee-scheduled-email", () => ({
+  default: class {
+    constructor(calEvent: any) {
+      h.captured.push({ template: "AttendeeScheduledEmail", calendarEvent: calEvent });
+    }
+    async sendEmail() {}
+  },
+}));
+vi.mock("./templates/attendee-add-guests-email", () => ({
+  default: class {
+    constructor(calEvent: any) {
+      h.captured.push({ template: "AttendeeAddGuestsEmail", calendarEvent: calEvent });
+    }
+    async sendEmail() {}
+  },
+}));
+vi.mock("./templates/organizer-add-guests-email", () => ({
+  default: class {
+    constructor(opts: any) {
+      h.captured.push({ template: "OrganizerAddGuestsEmail", calendarEvent: opts.calEvent });
+    }
+    async sendEmail() {}
+  },
+}));
+
+vi.mock("@calcom/core/event", () => ({
+  getEventName: () => "Test Event",
+  getEventNameForEventType: () => "Test Event",
+}));
+vi.mock("@calcom/lib/formatCalendarEvent", () => ({
+  formatCalEvent: (e: any) => e,
+  default: (e: any) => e,
+}));
+vi.mock("@calcom/lib/logger", () => h.logger);
+vi.mock("@calcom/lib/safeStringify", () => ({
+  safeStringify: (x: any) => JSON.stringify(x),
+  default: (x: any) => JSON.stringify(x),
+}));
+vi.mock("@calcom/prisma", () => ({
+  prisma: {},
+  default: {},
+  getBooking: async () => null,
+}));
+
+const SECRET = "PRIVATE_INTERNAL_NOTES_SHOULD_NOT_LEAK";
+const NEW_GUEST = "newguest@example.com";
+
+const buildEvent = () => ({
+  type: "Test Event",
+  title: "Test Event",
+  description: "desc",
+  additionalNotes: SECRET,
+  hideCalendarNotes: true,
+  startTime: new Date(Date.now() + 3_600_000).toISOString(),
+  endTime: new Date(Date.now() + 7_200_000).toISOString(),
+  attendees: [
+    { id: 2, name: "Existing", email: "existing@example.com", timeZone: "UTC", language: { locale: "en" } },
+    { id: 3, name: "New", email: NEW_GUEST, timeZone: "UTC", language: { locale: "en" } },
+  ],
+  organizer: {
+    id: 1,
+    name: "Organizer",
+    email: "organizer@example.com",
+    timeZone: "UTC",
+    language: { locale: "en" },
+  },
+  team: { members: [] as any[] },
+});
+
+describe("sendAddGuestsEmails respects hideCalendarNotes", () => {
+  beforeEach(() => {
+    h.captured.length = 0;
+  });
+
+  it("redacts additionalNotes before emailing newly added guests (matches scheduled-email contract)", async () => {
+    const { sendAddGuestsEmails } = await import("./email-manager");
+    await sendAddGuestsEmails(buildEvent() as any, [NEW_GUEST]);
+
+    const leaked = h.captured.filter((c) => c.calendarEvent?.additionalNotes === SECRET);
+    expect(leaked.map((c) => c.template)).toEqual([]);
+  });
+});

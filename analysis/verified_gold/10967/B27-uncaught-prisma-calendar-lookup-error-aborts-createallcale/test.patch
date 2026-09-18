@@ -1,0 +1,102 @@
+import { describe, expect, it, vi, beforeEach } from "vitest";
+
+vi.mock("@calcom/prisma", () => ({
+  default: {
+    credential: {
+      findUnique: vi.fn(),
+    },
+  },
+}));
+
+vi.mock("./CalendarManager", () => ({
+  createEvent: vi.fn(),
+  updateEvent: vi.fn(),
+}));
+
+vi.mock("./videoClient", () => ({
+  createMeeting: vi.fn(),
+  updateMeeting: vi.fn(),
+}));
+
+vi.mock("@calcom/app-store/_utils/getCalendar", () => ({
+  getCalendar: vi.fn(),
+}));
+
+vi.mock("@calcom/app-store/dailyvideo/lib/VideoApiAdapter", () => ({
+  FAKE_DAILY_CREDENTIAL: {},
+}));
+
+vi.mock("@calcom/app-store/dailyvideo/zod", () => ({
+  appKeysSchema: {},
+}));
+
+vi.mock("@calcom/app-store/utils", () => ({
+  default: vi.fn(),
+}));
+
+vi.mock("@calcom/prisma/zod-utils", () => ({
+  createdEventSchema: {},
+}));
+
+describe("EventManager createAllCalendarEvents", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("should not abort the whole booking creation when one destination's prisma credential lookup fails, preserving already-created events", async () => {
+    const { default: EventManager } = await import("./EventManager");
+    const prisma = (await import("@calcom/prisma")).default;
+    const { createEvent } = await import("./CalendarManager");
+
+    // First destination's credential lookup succeeds
+    (prisma.credential.findUnique as any).mockResolvedValueOnce({
+      id: 1,
+      app: { slug: "google-calendar" },
+      type: "google_calendar",
+      key: {},
+      userId: 1,
+      teamId: null,
+      invalid: false,
+      appId: "google-calendar",
+    });
+
+    // Second destination's credential lookup throws (simulating a transient DB blip)
+    (prisma.credential.findUnique as any).mockRejectedValueOnce(
+      new Error("Connection pool timeout")
+    );
+
+    (createEvent as any).mockResolvedValue({
+      type: "created",
+      uid: "event-1",
+      id: 1,
+      password: "pass",
+      url: "https://example.com",
+      externalId: "ext-1",
+    });
+
+    const manager = new EventManager([]);
+
+    const event = {
+      title: "Test event",
+      startTime: "2024-01-01T10:00:00Z",
+      endTime: "2024-01-01T11:00:00Z",
+      destinationCalendar: [
+        { credentialId: 1, integration: "google_calendar", externalId: "ext-1" },
+        { credentialId: 2, integration: "google_calendar", externalId: "ext-2" },
+      ],
+    } as any;
+
+    const resultsOrError = await (manager as any)
+      .createAllCalendarEvents(event)
+      .catch((e: unknown) => e);
+
+    expect(
+      resultsOrError,
+      "createAllCalendarEvents should continue after a single destination's prisma lookup fails, instead of aborting and orphaning already-created events"
+    ).not.toBeInstanceOf(Error);
+
+    expect(resultsOrError).toHaveLength(1);
+    expect(resultsOrError[0]).toMatchObject({ type: "created" });
+    expect(createEvent).toHaveBeenCalledTimes(1);
+  });
+});

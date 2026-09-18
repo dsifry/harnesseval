@@ -1,0 +1,113 @@
+diff --git a/spec/verify/topic_embed_verify.rb b/spec/verify/topic_embed_verify.rb
+new file mode 100644
+--- /dev/null
++++ b/spec/verify/topic_embed_verify.rb
+@@ -0,0 +1,108 @@
++#!/usr/bin/env ruby
++# Standalone regression check for app/models/topic_embed.rb
++# Claim: TopicEmbed.import performs a non-atomic exists?-then-create!, so a losing
++# concurrent import raises ActiveRecord::RecordNotUnique which is not handled.
++
++require 'digest'
++
++def require_dependency(name)
++  return if name == 'nokogiri' && defined?(Nokogiri)
++  require name
++end
++
++module Nokogiri
++  module HTML
++    class Doc
++      def initialize(html); @html = html; end
++      def css(_sel); []; end
++      def to_html; @html; end
++    end
++    def self.fragment(html); Doc.new(html); end
++  end
++end
++
++module I18n
++  def self.t(_key, opts = {}); "imported from #{opts[:link]}"; end
++end
++
++class Object
++  def blank?; false; end
++  def present?; !blank?; end
++end
++
++class NilClass
++  def blank?; true; end
++  def present?; false; end
++end
++
++class ActiveRecord
++  class RecordNotUnique < StandardError; end
++
++  class Base
++    def self.belongs_to(*_a); end
++    def self.validates_presence_of(*_a); end
++    def self.transaction; yield; end
++  end
++end
++
++$events = []
++
++class Topic < ActiveRecord::Base; end
++
++class Post < ActiveRecord::Base
++  def self.cook_methods; { raw_html: 1 }; end
++end
++
++FakePost = Struct.new(:topic_id, :id) do
++  def initialize; super(42, 99); end
++end
++
++class PostCreator
++  def initialize(_user, _opts); end
++  def create
++    $events << :post_created
++    FakePost.new
++  end
++end
++
++class PostRevisor
++  def initialize(_post); end
++  def revise!(*_a); end
++end
++
++class EmbedRelation
++  def first
++    $events << :exists_check
++    nil
++  end
++end
++
++class ActiveRecord::Base
++  def self.where(_cond); EmbedRelation.new; end
++  def self.create!(_attrs)
++    $events << :create
++    raise ActiveRecord::RecordNotUnique,
++          'duplicate key value violates unique constraint "index_topic_embeds_on_embed_url"'
++  end
++end
++
++REAL_FILE = File.expand_path('../../app/models/topic_embed.rb', __FILE__)
++abort "real file not found: #{REAL_FILE}" unless File.exist?(REAL_FILE)
++require REAL_FILE
++
++begin
++  ret = TopicEmbed.import(Object.new, 'http://example.com/a', 'Title', '<p>body</p>')
++  puts("import returned #{ret.inspect}")
++  puts('RESULT: PASS')
++rescue ActiveRecord::RecordNotUnique => e
++  order = $events.index(:exists_check) && $events.index(:create) &&
++          $events.index(:exists_check) < $events.index(:create)
++  side = $events.index(:post_created) && $events.index(:create) &&
++         $events.index(:post_created) < $events.index(:create)
++  warn("events=#{$events.inspect}")
++  if order && side
++    puts "RESULT: FAIL: import's exists?-then-create! is non-atomic; the loser's #{e.class} (#{e.message}) escapes unhandled after PostCreator side effects"
++  else
++    puts "RESULT: FAIL: #{e.class} escaped TopicEmbed.import (events=#{$events.inspect})"
++  end
++end

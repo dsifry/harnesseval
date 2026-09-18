@@ -1,0 +1,137 @@
+diff --git a/spec/verify/embed_controller_spec_verify.rb b/spec/verify/embed_controller_spec_verify.rb
+new file mode 100644
+--- /dev/null
++++ b/spec/verify/embed_controller_spec_verify.rb
+@@ -0,0 +1,132 @@
++require 'fileutils'
++
++module Mocha
++  class Expectation
++    def initialize; @n = 0; @ret = nil; @args = nil; end
++    def returns(v); @ret = v; self; end
++    def with(*a); @args = a; self; end
++    def called?; @n > 0; end
++    def invoke(a)
++      raise "args mismatch #{@args.inspect} vs #{a.inspect}" if @args && @args != a
++      @n += 1; @ret
++    end
++  end
++  class Mock
++    def initialize; @e = {}; end
++    def expects(n); e = Expectation.new; @e[n] = e; define_singleton_method(n) { |*a| e.invoke(a) }; $expectations << e; e; end
++    def stubs(n); e = Expectation.new; define_singleton_method(n) { |*a| e.invoke(a) }; e; end
++  end
++end
++
++$expectations = []
++
++class Object
++  def stubs(n); e = Mocha::Expectation.new; define_singleton_method(n) { |*a| e.invoke(a) }; e; end
++  def expects(n); e = Mocha::Expectation.new; define_singleton_method(n) { |*a| e.invoke(a) }; $expectations << e; e; end
++  def should(m = nil)
++    return ShouldHelper.new(self, false) unless m
++    raise 'should matcher failed' unless m.matches?(self)
++    true
++  end
++  def should_not(m = nil)
++    return ShouldHelper.new(self, true) unless m
++    return true unless m.matches?(self)
++    raise 'should_not matcher failed'
++  end
++end
++
++class ShouldHelper
++  def initialize(a, n); @a = a; @n = n; end
++  def ==(x); ok = (@a == x); ok = !ok if @n; raise "eq failed #{@a.inspect}" unless ok; true; end
++end
++
++class BeSuccess
++  def matches?(a); a.respond_to?(:success?) && a.success?; end
++end
++
++def be_success; BeSuccess.new; end
++
++$examples = []; $befores = []; $afters = []; $lets = {}
++
++def describe(_n, &b); sb = $befores.dup; sa = $afters.dup; Object.new.instance_eval(&b); $befores = sb; $afters = sa; end
++def context(n, &b); describe(n, &b); end
++def before(&b); $befores << b; end
++def after(&b); $afters << b; end
++def it(n, &b); $examples << { n: n, b: $befores.dup, a: $afters.dup, x: b }; end
++def let(n, &b); $lets[n] = b; end
++
++module Jobs; def self.enqueue(*); end; end
++class SiteSetting; def self.embeddable_host; nil; end; end
++class TopicEmbed; def self.topic_id_for_embed(_); nil; end; end
++class TopicView; def initialize(*); end; end
++class TopicRetriever; def initialize(*); end; def retrieve; end; end
++
++class EmbedController
++  class Response
++    attr_accessor :status
++    def initialize; @status = 200; @h = {}; end
++    def headers; @h; end
++    def success?; @status == 200; end
++  end
++  class Request; attr_accessor :referer; end
++  attr_accessor :params
++  def initialize; @r = Response.new; @q = Request.new; end
++  def request; @q; end
++  def response; @r; end
++  # Mirrors POST-PR controller behaviour: async dispatch via Jobs.
++  def best
++    u = params[:embed_url]
++    return (@r.status = 404) if SiteSetting.embeddable_host.nil? || u.nil? || request.referer.nil?
++    id = TopicEmbed.topic_id_for_embed(u)
++    if id then TopicView.new(id, nil, { best: 5 }) else Jobs.enqueue(:retrieve_topic, embed_url: u, user_id: nil) end
++    @r.headers['X-Frame-Options'] = 'ALLOWALL'
++  end
++end
++
++class Runner
++  def initialize
++    $lets.each do |n, b|
++      define_singleton_method(n) do
++        iv = "@l#{n}"
++        instance_variable_defined?(iv) ? instance_variable_get(iv) : instance_variable_set(iv, instance_eval(&b))
++      end
++    end
++  end
++  def controller; @c ||= EmbedController.new; end
++  def response; controller.response; end
++  def get(a, p = {}); controller.params = p; controller.send(a); end
++  def mock; Mocha::Mock.new; end
++end
++
++ORIG = Kernel.instance_method(:require)
++def require(n); return true if n == 'spec_helper'; ORIG.bind(self).call(n); end
++
++spec = File.expand_path('spec/controllers/embed_controller_spec.rb')
++spec = File.expand_path('../../controllers/embed_controller_spec.rb', __FILE__) unless File.exist?(spec)
++unless File.exist?(spec)
++  puts 'RESULT: FAIL: real spec file not found'
++  exit 0
++end
++
++require spec
++
++if $examples.empty?
++  puts 'RESULT: FAIL: no examples loaded from real spec'
++  exit 0
++end
++
++fails = []
++$examples.each do |ex|
++  r = Runner.new
++  $expectations.clear
++  begin
++    ex[:b].each { |b| r.instance_eval(&b) }
++    r.instance_eval(&ex[:x])
++    $expectations.each { |e| raise 'unmet expectation: TopicRetriever.new/retrieve never invoked by controller' unless e.called? }
++    ex[:a].each { |a| r.instance_eval(&a) }
++  rescue => e
++    fails << "#{ex[:n]}: #{e.message}"
++  end
++end
++
++puts fails.empty? ? 'RESULT: PASS' : "RESULT: FAIL: #{fails.join(' | ')}"

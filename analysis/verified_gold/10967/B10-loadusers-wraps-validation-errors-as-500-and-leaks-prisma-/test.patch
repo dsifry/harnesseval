@@ -1,0 +1,93 @@
+import { Prisma } from "@prisma/client";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+// Ensure env vars exist before importing modules that read them at import time.
+process.env.NEXT_PUBLIC_WEBAPP_URL = "http://localhost:3000";
+process.env.CALENDSO_ENCRYPTION_KEY = "test-encryption-key";
+process.env.CRON_API_KEY = "test-cron-key";
+process.env.NEXT_PUBLIC_WEBSITE_URL = "http://localhost:3000";
+
+const userFindMany = vi.fn();
+
+vi.mock("@calcom/prisma", () => ({
+  default: {
+    user: { findMany: userFindMany, findUnique: vi.fn(), findFirst: vi.fn() },
+    eventType: { findFirst: vi.fn(), findUnique: vi.fn() },
+    booking: { create: vi.fn(), findFirst: vi.fn() },
+  },
+  prisma: {
+    user: { findMany: userFindMany, findUnique: vi.fn(), findFirst: vi.fn() },
+    eventType: { findFirst: vi.fn(), findUnique: vi.fn() },
+    booking: { create: vi.fn(), findFirst: vi.fn() },
+  },
+}));
+
+const getBookingDataMock = vi.fn();
+vi.mock("./getBookingData", () => ({
+  getBookingData: getBookingDataMock,
+}));
+
+describe("handleNewBooking.loadUsers error classification", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    userFindMany.mockReset();
+    getBookingDataMock.mockReset();
+  });
+
+  it("classifies an empty dynamicUserList as a 400 client error, not a generic 500", async () => {
+    const mod = await import("./handleNewBooking");
+    const handler = (mod.default ?? mod) as (req: unknown) => Promise<unknown>;
+
+    // Dynamic booking (no eventTypeId) with an empty user list.
+    getBookingDataMock.mockResolvedValue({
+      user: [],
+      start: new Date().toISOString(),
+      timeZone: "UTC",
+      language: "en",
+      metadata: {},
+    });
+
+    const req = {
+      method: "POST",
+      query: {},
+      body: { user: [], start: new Date().toISOString(), timeZone: "UTC" },
+      headers: {},
+      cookies: {},
+    };
+
+    await expect(handler(req)).rejects.toMatchObject({
+      statusCode: 400,
+    });
+  });
+
+  it("does not expose Prisma known-request failures as a 400 client error", async () => {
+    const mod = await import("./handleNewBooking");
+    const handler = (mod.default ?? mod) as (req: unknown) => Promise<unknown>;
+
+    getBookingDataMock.mockResolvedValue({
+      user: ["alice", "bob"],
+      start: new Date().toISOString(),
+      timeZone: "UTC",
+      language: "en",
+      metadata: {},
+    });
+
+    userFindMany.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError("Internal database connection failure", {
+        code: "P1001",
+        clientVersion: "5.0.0",
+      })
+    );
+
+    const req = {
+      method: "POST",
+      query: {},
+      body: { user: "alice,bob", start: new Date().toISOString(), timeZone: "UTC" },
+      headers: {},
+      cookies: {},
+    };
+
+    // A server-side Prisma failure must not be surfaced as a 400 client error.
+    await expect(handler(req)).rejects.not.toMatchObject({ statusCode: 400 });
+  });
+});

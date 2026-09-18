@@ -1,0 +1,126 @@
+diff --git a/packages/core/EventManager.verified.test.ts b/packages/core/EventManager.verified.test.ts
+new file mode 100644
+--- /dev/null
++++ b/packages/core/EventManager.verified.test.ts
+@@ -0,0 +1,121 @@
++import { beforeEach, describe, expect, it, vi } from "vitest";
++
++const updateEventMock = vi.fn();
++const createEventMock = vi.fn();
++const credentialFindUniqueMock = vi.fn();
++const bookingFindUniqueMock = vi.fn();
++
++vi.mock("./CalendarManager", () => ({
++  updateEvent: (...args: unknown[]) => updateEventMock(...args),
++  createEvent: (...args: unknown[]) => createEventMock(...args),
++}));
++
++vi.mock("./videoClient", () => ({
++  createMeeting: vi.fn(),
++  updateMeeting: vi.fn(),
++}));
++
++vi.mock("@calcom/app-store/_utils/getCalendar", () => ({
++  getCalendar: vi.fn().mockResolvedValue(null),
++}));
++
++vi.mock("@calcom/app-store/dailyvideo/lib/VideoApiAdapter", () => ({
++  FAKE_DAILY_CREDENTIAL: {},
++}));
++
++vi.mock("@calcom/app-store/dailyvideo/zod", () => ({
++  calVideoKeysSchema: {},
++}));
++
++vi.mock("@calcom/app-store/locations", () => ({
++  MeetLocationType: "integrations:google:meet",
++  getEventLocationTypeFromApp: () => null,
++}));
++
++vi.mock("@calcom/app-store/utils", () => ({
++  default: vi.fn().mockResolvedValue([]),
++}));
++
++vi.mock("@calcom/prisma/zod-utils", () => ({
++  createdEventSchema: { safeParse: () => ({ success: false }) },
++}));
++
++vi.mock("@calcom/prisma", () => ({
++  default: {
++    credential: {
++      findUnique: (...args: unknown[]) => credentialFindUniqueMock(...args),
++    },
++    booking: {
++      findUnique: (...args: unknown[]) => bookingFindUniqueMock(...args),
++    },
++  },
++}));
++
++describe("EventManager cross-tenant credential defense", () => {
++  beforeEach(() => {
++    vi.clearAllMocks();
++  });
++
++  it("must not update external calendar events using a credential that belongs to a different user (cross-tenant credential id)", async () => {
++    // The booking reference carries credentialId 4242 which belongs to user 999
++    // (a completely unrelated tenant). The booking host is user 1.
++    const foreignCredential = {
++      id: 4242,
++      appId: "google-calendar",
++      type: "google_calendar",
++      userId: 999,
++      teamId: null,
++      key: { access_token: "attacker-token" },
++      invalid: false,
++      app: { slug: "google-calendar" },
++    };
++    credentialFindUniqueMock.mockResolvedValue(foreignCredential);
++
++    const { default: EventManager } = await import("./EventManager");
++
++    const event = {
++      title: "booking title",
++      startTime: new Date().toISOString(),
++      endTime: new Date().toISOString(),
++      organizer: { email: "host@example.com" },
++      attendees: [],
++      location: "integrations:google:meet",
++    } as never;
++
++    // No calendar credentials are pre-bound to this EventManager, so the code
++    // must fall back to the DB lookup keyed on the booking reference id.
++    const manager = new EventManager([], event);
++
++    const booking = {
++      id: 1,
++      userId: 1,
++      references: [
++        {
++          type: "google_calendar",
++          uid: "ref-uid-1",
++          credentialId: 4242,
++          externalCalendarId: "attacker-calendar",
++        },
++      ],
++    } as never;
++
++    await (
++      manager as unknown as {
++        updateAllCalendarEvents: (
++          e: unknown,
++          b: unknown
++        ) => Promise<Array<unknown>>;
++      }
++    ).updateAllCalendarEvents(event, booking);
++
++    const usedForeignCredential = updateEventMock.mock.calls.some(
++      ([cred]: Array<{ userId?: number } | undefined>) =>
++        cred !== undefined && cred !== null && cred.userId === 999
++    );
++
++    expect(
++      usedForeignCredential,
++      "updateAllCalendarEvents must not update external calendar events with a credential owned by user 999 when the booking host is user 1"
++    ).toBe(false);
++  });
++});

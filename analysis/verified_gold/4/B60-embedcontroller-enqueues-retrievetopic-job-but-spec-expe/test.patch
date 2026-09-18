@@ -1,0 +1,94 @@
+# frozen_string_literal: true
+require 'ostruct'
+
+module Discourse
+  class InvalidAccess < StandardError; end
+end
+
+# Rails monkey-patches Object#try; the controller calls nil.try(:id).
+class NilClass
+  def try(*); nil; end
+end
+
+# 1.minute is used by discourse_expires_in
+class Integer
+  def minute; self * 60; end
+end
+
+module SiteSetting
+  def self.embeddable_host; 'example.com'; end
+end
+
+class FakeParams
+  def initialize(hash); @hash = hash; end
+  def require(key)
+    raise ArgumentError, "missing #{key}" unless @hash.key?(key)
+    @hash[key]
+  end
+  def [](key); @hash[key]; end
+end
+
+class ApplicationController
+  def self.skip_before_filter(*); end
+  def self.before_filter(*); end
+  def self.layout(*); end
+
+  attr_reader :params, :response, :request
+
+  def initialize(raw_params = {})
+    @params = FakeParams.new(raw_params)
+    @response = OpenStruct.new(headers: {})
+    @request = OpenStruct.new(referer: 'http://example.com/')
+  end
+
+  def current_user; nil; end
+  def render(*); @rendered = true; end
+  def rendered?; @rendered; end
+  def discourse_expires_in(*); end
+end
+
+class TopicEmbed
+  class << self
+    attr_accessor :topic_id_value
+    def topic_id_for_embed(_url); @topic_id_value; end
+  end
+end
+
+class TopicView
+  def initialize(*); end
+end
+
+module Jobs
+  @enqueued = []
+  def self.enqueue(name, opts = {}); @enqueued << [name, opts]; end
+  def self.enqueued; @enqueued; end
+  def self.reset!; @enqueued = []; end
+end
+
+class TopicRetriever
+  @called = false
+  class << self
+    attr_accessor :called
+  end
+  def initialize(*); self.class.called = true; end
+end
+
+require_relative '../../app/controllers/embed_controller'
+
+Jobs.reset!
+TopicEmbed.topic_id_value = nil
+TopicRetriever.called = false
+
+controller = EmbedController.new('embed_url' => 'http://example.com/t/1')
+controller.best
+
+enqueued = Jobs.enqueued.any? { |name, _| name == :retrieve_topic }
+synchronous = TopicRetriever.called
+
+if enqueued && !synchronous
+  puts 'RESULT: FAIL: EmbedController#best enqueues :retrieve_topic (async) instead of calling TopicRetriever synchronously as the spec asserts'
+elsif synchronous && !enqueued
+  puts 'RESULT: PASS'
+else
+  puts "RESULT: FAIL: unexpected path (enqueued=#{enqueued} synchronous=#{synchronous})"
+end

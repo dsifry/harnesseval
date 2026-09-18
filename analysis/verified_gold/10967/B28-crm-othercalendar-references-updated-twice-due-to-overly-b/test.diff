@@ -1,0 +1,104 @@
+diff --git a/packages/core/EventManager.verified.test.ts b/packages/core/EventManager.verified.test.ts
+new file mode 100644
+--- /dev/null
++++ b/packages/core/EventManager.verified.test.ts
+@@ -0,0 +1,99 @@
++import { describe, expect, it, vi } from "vitest";
++
++const { genericUpdateEvent, crmUpdateEvent } = vi.hoisted(() => ({
++  genericUpdateEvent: vi.fn(async (..._args: any[]) => ({ type: "update", success: true })),
++  crmUpdateEvent: vi.fn(async (..._args: any[]) => ({ type: "update", success: true })),
++}));
++
++// The module under test is never mocked; only its external collaborators are.
++vi.mock("./CalendarManager", () => ({
++  createEvent: vi.fn(async () => ({})),
++  updateEvent: genericUpdateEvent,
++  deleteEvent: vi.fn(async () => ({})),
++}));
++
++vi.mock("@calcom/prisma", () => ({
++  default: {
++    booking: { findUnique: vi.fn(async () => null) },
++    credential: { findUnique: vi.fn(async () => null) },
++  },
++}));
++
++// Any code that resolves a CRM / "other calendar" service through getCalendar is captured here.
++vi.mock("@calcom/app-store/_utils/getCalendar", () => ({
++  getCalendar: vi.fn(() => ({
++    createEvent: vi.fn(async () => ({})),
++    updateEvent: crmUpdateEvent,
++    deleteEvent: vi.fn(async () => ({})),
++  })),
++}));
++
++const CRM_REFERENCE_UID = "crm-other-calendar-ref-uid";
++
++describe("EventManager CRM other-calendar references", () => {
++  it("updates a CRM 'other_calendar' booking reference only once when all calendar events are updated", async () => {
++    process.env.CALENDSO_ENCRYPTION_KEY = "0123456789abcdef0123456789abcdef";
++    process.env.NEXT_PUBLIC_WEBAPP_URL = "http://localhost:3000";
++    process.env.NEXTAUTH_SECRET = "test-secret";
++
++    const { default: EventManager } = await import("./EventManager");
++
++    const crmCredential: any = {
++      id: 42,
++      type: "other_calendar",
++      appName: "hubspot",
++      key: {},
++      userId: 1,
++      teamId: null,
++      invalid: false,
++    };
++
++    const manager: any = new (EventManager as any)([crmCredential]);
++    // Make sure the reference can resolve its credential regardless of constructor filtering.
++    manager.calendarCredentials = [crmCredential];
++
++    const event: any = {
++      type: "other_calendar",
++      title: "Test booking",
++      startTime: new Date().toISOString(),
++      endTime: new Date().toISOString(),
++      uid: "event-uid",
++      location: "integrations:daily",
++      destinationCalendar: [],
++    };
++
++    const booking: any = {
++      id: 1,
++      uid: "booking-uid",
++      references: [
++        {
++          type: "other_calendar",
++          uid: CRM_REFERENCE_UID,
++          credentialId: 42,
++          externalCalendarId: "crm-external-id",
++        },
++      ],
++    };
++
++    genericUpdateEvent.mockClear();
++    crmUpdateEvent.mockClear();
++
++    await manager.updateAllCalendarEvents(event, booking);
++
++    // The generic loop calls updateEvent(credential, event, bookingRefUid, externalCalendarId)
++    const genericLoopCalls = genericUpdateEvent.mock.calls.filter((call) => call[2] === CRM_REFERENCE_UID);
++    // The dedicated other-calendar loop passes the reference uid somewhere in its arguments
++    const dedicatedLoopCalls = crmUpdateEvent.mock.calls.filter((call) => call.includes(CRM_REFERENCE_UID));
++    const totalUpdates = genericLoopCalls.length + dedicatedLoopCalls.length;
++
++    expect(
++      totalUpdates,
++      "a CRM other-calendar booking reference must be pushed to the external calendar exactly once, but it is updated twice: once by the broad `.filter((reference) => reference.type.includes('_calendar'))` loop and again by the dedicated other-calendar loop"
++    ).toBe(1);
++
++    expect(
++      genericLoopCalls.length,
++      "the generic calendar-reference filter `.includes('_calendar')` also matches 'other_calendar' CRM references, so the general update loop must not process them (they are handled by the dedicated other-calendar loop)"
++    ).toBe(0);
++  });
++});

@@ -1,0 +1,145 @@
+# frozen_string_literal: true
+# Standalone regression test for lib/tasks/disqus.thor (Disqus import idempotency).
+require 'date'
+
+# ---------- minimum stubs required to load the REAL file ----------
+module Nokogiri; module XML; module SAX; class Document; end; end; end; end
+
+module Kernel
+  alias_method :__orig_require, :require
+  def require(name)
+    return true if name == 'nokogiri' || name == './config/environment'
+    __orig_require(name)
+  end
+end
+
+class Object; def blank?; false; end; def present?; !blank?; end; end
+class NilClass; def blank?; true; end; def present?; false; end; end
+class String; def blank?; strip.empty?; end; def present?; !blank?; end; end
+
+class Thor
+  attr_accessor :options
+  def self.desc(*a, **k); end
+  def self.method_option(*a, **k); end
+  def initialize(options = {}); @options = options; end
+end
+
+class File
+  class << self
+    alias_method :__orig_exist?, :exist?
+    def exist?(_p); true; end
+  end
+end
+
+# ---------- fake domain objects ----------
+class FakePost
+  attr_reader :topic, :post_number
+  def initialize(topic, number); @topic = topic; @post_number = number; end
+  def topic_id; @topic.id; end
+end
+
+class FakeTopic
+  ALL = []
+  attr_reader :id, :posts
+  def initialize(id); @id = id; @posts = []; @next_number = 1; ALL << self; end
+  def self.find(id); ALL.find { |t| t.id == id }; end
+  def add_post
+    p = FakePost.new(self, @next_number)
+    @next_number += 1
+    @posts << p
+    p
+  end
+end
+
+class User
+  attr_reader :email, :username
+  def initialize(email, username); @email = email; @username = username; end
+  def self.registry; @registry ||= {}; end
+  def self.where(cond)
+    if cond.key?(:username_lower)
+      [registry.values.find { |u| u.username.downcase == cond[:username_lower] }].compact
+    elsif cond.key?(:email)
+      [registry[cond[:email]]].compact
+    else
+      []
+    end
+  end
+  def self.create!(email:, username:)
+    u = new(email, username); registry[email] = u; u
+  end
+end
+
+module UserNameSuggester; def self.suggest(email); email.split('@').first; end; end
+module Email; def self.downcase(s); s.downcase; end; end
+class SiteSetting
+  class << self; attr_accessor :email_domains_blacklist; end
+  self.email_domains_blacklist = ''
+end
+class RateLimiter; def self.enable; end; def self.disable; end; end
+
+# import_remote: first call builds the topic (embed post is number 1), later calls
+# return the SAME pre-existing post -- the post-PR contract described in the claim.
+class TopicEmbed
+  @embeds = {}
+  class << self; attr_reader :embeds; end
+  def self.import_remote(_user, link, title: nil)
+    @embeds[link] ||= FakeTopic.new(@embeds.size + 1).tap(&:add_post)
+    @embeds[link].posts.first
+  end
+end
+
+class PostCreator
+  CREATED = []
+  def initialize(_user, attrs); @attrs = attrs; end
+  def create
+    post = FakeTopic.find(@attrs[:topic_id]).add_post
+    CREATED << @attrs.merge(post: post)
+    post
+  end
+end
+
+class TopicFeaturedUsers
+  def initialize(_topic); end
+  def choose; end
+end
+
+module Nokogiri; module XML; module SAX
+  class Parser
+    def initialize(doc); @doc = doc; end
+    def parse_file(_path)
+      posts = [
+        { id: 'c1', cooked: 'first comment', created_at: '2015-01-01T00:00:00',
+          author_email: 'alice@example.com', author_name: 'Alice' },
+        { id: 'c2', cooked: 'second comment', created_at: '2015-01-02T00:00:00',
+          author_email: 'alice@example.com', author_name: 'Alice', parent_id: 'c1' }
+      ]
+      @doc.threads = { 't1' => { id: 't1', link: 'http://example.com/topic-1',
+                                 title: 'Topic 1', created_at: '2015-01-01T00:00:00',
+                                 posts: posts } }
+      @doc.posts = { 'c1' => posts[0], 'c2' => posts[1] }
+    end
+  end
+end; end; end
+
+# ---------- load the REAL file under test ----------
+load File.expand_path('../../lib/tasks/disqus.thor', __dir__)
+
+alice = User.new('alice@example.com', 'alice')
+User.registry['alice@example.com'] = alice
+runner = -> { Disqus.new({ file: 'disqus.xml', post_as: 'alice' }).import }
+
+runner.call
+after_first = PostCreator::CREATED.size
+runner.call
+after_second = PostCreator::CREATED.size
+
+raws = PostCreator::CREATED.map { |a| a[:raw] }
+dupes = raws.group_by { |r| r }.select { |_, v| v.size > 1 }
+
+if dupes.empty?
+  puts 'RESULT: PASS'
+else
+  puts "RESULT: FAIL: re-running the importer appended duplicate replies " \
+       "#{dupes.keys.inspect} (PostCreator calls: #{after_first} after run 1, " \
+       "#{after_second} after run 2)"
+end

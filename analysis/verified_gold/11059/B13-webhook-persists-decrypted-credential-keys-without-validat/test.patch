@@ -1,0 +1,103 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import z from "zod";
+
+vi.mock("@calcom/lib/constants", () => ({
+  APP_CREDENTIAL_SHARING_ENABLED: true,
+}));
+
+const symmetricDecryptMock = vi.fn();
+vi.mock("@calcom/lib/crypto", () => ({
+  symmetricDecrypt: symmetricDecryptMock,
+}));
+
+const prismaMock = {
+  user: {
+    findUnique: vi.fn(),
+  },
+  app: {
+    findUnique: vi.fn(),
+  },
+  credential: {
+    findFirst: vi.fn(),
+    create: vi.fn(),
+    update: vi.fn(),
+  },
+};
+vi.mock("@calcom/prisma", () => ({
+  default: prismaMock,
+}));
+
+const appStoreMetadataMock = {
+  "test-app": {
+    slug: "test-app",
+    type: "oauth",
+    // This is the per-app credential schema that MUST be enforced.
+    credentialSchema: z
+      .object({
+        clientId: z.string().min(1),
+        clientSecret: z.string().min(1),
+      })
+      .strict(),
+  },
+};
+vi.mock("@calcom/app-store/appStoreMetaData", () => ({
+  appStoreMetadata: appStoreMetadataMock,
+}));
+
+function makeRes() {
+  const res: any = {};
+  res.statusCode = undefined;
+  res.body = undefined;
+  res.status = vi.fn().mockImplementation((code: number) => {
+    res.statusCode = code;
+    return res;
+  });
+  res.json = vi.fn().mockImplementation((body: any) => {
+    res.body = body;
+    return res;
+  });
+  return res;
+}
+
+describe("apps/web/pages/api/webhook/app-credential.ts", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.CALCOM_WEBHOOK_HEADER_NAME = "calcom-webhook-secret";
+    process.env.CALCOM_WEBHOOK_SECRET = "secret";
+    process.env.CALCOM_APP_CREDENTIAL_ENCRYPTION_KEY = "enc-key";
+  });
+
+  it("rejects and does not persist decrypted credential keys that do not validate against the app credential schema", async () => {
+    // Malformed (but valid JSON) credential payload: missing required clientId/clientSecret.
+    symmetricDecryptMock.mockReturnValue(JSON.stringify({ wrong: "shape" }));
+
+    prismaMock.user.findUnique.mockResolvedValue({ id: 1 });
+    prismaMock.app.findUnique.mockResolvedValue({ slug: "test-app" });
+    prismaMock.credential.findFirst.mockResolvedValue(null);
+    prismaMock.credential.create.mockResolvedValue({ id: "cred_1" });
+
+    const req: any = {
+      headers: {
+        "calcom-webhook-secret": "secret",
+      },
+      body: {
+        userId: 1,
+        appSlug: "test-app",
+        keys: "encrypted-blob",
+      },
+    };
+    const res = makeRes();
+
+    const { default: handler } = await import("./app-credential");
+    await handler(req, res);
+
+    // CLAIMED BEHAVIOR: should validate against per-app schema and reject malformed keys.
+    expect(
+      res.statusCode,
+      "Webhook persists decrypted credential keys without validating per-app credential schema"
+    ).toBe(400);
+
+    expect(prismaMock.credential.create).not.toHaveBeenCalled();
+    expect(prismaMock.credential.update).not.toHaveBeenCalled();
+  });
+});

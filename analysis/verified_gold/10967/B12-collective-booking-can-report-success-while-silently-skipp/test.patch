@@ -1,0 +1,143 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+process.env.CALENDSO_ENCRYPTION_KEY = "test-encryption-key-for-verified-test";
+process.env.NEXT_PUBLIC_WEBAPP_URL = "http://localhost:3000";
+
+const { mockCreateEvent, mockFindUnique } = vi.hoisted(() => ({
+  mockCreateEvent: vi.fn(),
+  mockFindUnique: vi.fn(),
+}));
+
+vi.mock("@calcom/prisma", () => ({
+  default: {
+    credential: { findUnique: mockFindUnique },
+  },
+}));
+
+vi.mock("./CalendarManager", () => ({
+  createEvent: mockCreateEvent,
+  updateEvent: vi.fn(),
+}));
+
+vi.mock("./videoClient", () => ({
+  createMeeting: vi.fn(),
+  updateMeeting: vi.fn(),
+}));
+
+vi.mock("@calcom/app-store/utils", () => ({
+  default: vi.fn().mockReturnValue([]),
+}));
+
+vi.mock("@calcom/app-store/_utils/getCalendar", () => ({
+  getCalendar: vi.fn().mockReturnValue(null),
+}));
+
+vi.mock("@calcom/app-store/dailyvideo/lib/VideoApiAdapter", () => ({
+  FAKE_DAILY_CREDENTIAL: {
+    appId: "daily-video",
+    type: "daily_video",
+    key: {},
+    appName: "Cal Video",
+    userId: 1,
+    teamId: null,
+    invalid: false,
+  },
+}));
+
+vi.mock("@calcom/app-store/dailyvideo/zod", () => ({
+  appKeysSchema: { parse: () => ({}) },
+}));
+
+vi.mock("@calcom/app-store/locations", () => ({
+  getEventLocationTypeFromApp: vi.fn().mockReturnValue(null),
+  MeetLocationType: "integrations:google:meet",
+}));
+
+vi.mock("@calcom/prisma/zod-utils", () => ({
+  createdEventSchema: { parse: (x: unknown) => x },
+}));
+
+describe("EventManager collective bookings (verified defect)", () => {
+  beforeEach(() => {
+    mockCreateEvent.mockReset();
+    mockFindUnique.mockReset();
+    mockCreateEvent.mockImplementation(
+      async (credential: any, _event: any, externalId?: string) => ({
+        type: credential?.type ?? "google_calendar",
+        uid: `uid-${credential?.id ?? "unknown"}-${externalId ?? "no-ext"}`,
+        id: `${credential?.id ?? "unknown"}-${externalId ?? "no-ext"}`,
+        externalId,
+      })
+    );
+  });
+
+  it("does not silently skip co-host calendar creation when destination credential cannot be resolved", async () => {
+    const { default: EventManager } = await import("./EventManager");
+
+    // The co-host's credential row exists in DB but app.slug is null, so the
+    // post-PR code leaves `credential` undefined and silently skips that destination.
+    mockFindUnique.mockResolvedValue({
+      id: 999,
+      type: "google_calendar",
+      key: { access_token: "co-host-token" },
+      userId: 2,
+      teamId: null,
+      invalid: false,
+      appId: "google-calendar",
+      app: { slug: null },
+    });
+
+    const calendarCredentials = [
+      {
+        id: 1,
+        appId: "google-calendar",
+        type: "google_calendar",
+        userId: 1,
+        teamId: null,
+        key: { access_token: "main-host-token" },
+        invalid: false,
+        appName: "google_calendar",
+      },
+    ];
+
+    const destinationCalendar = [
+      { integration: "google_calendar", externalId: "main-host-ext", credentialId: 1 },
+      { integration: "google_calendar", externalId: "co-host-ext", credentialId: 999 },
+    ];
+
+    const eventManager: any = Object.create(EventManager.prototype);
+    eventManager.calendarCredentials = calendarCredentials;
+    eventManager.videoCredentials = [];
+
+    const event: any = {
+      destinationCalendar,
+      type: "collective",
+      title: "Test collective booking",
+      startTime: new Date().toISOString(),
+      endTime: new Date().toISOString(),
+      attendees: [],
+      organizer: { email: "organizer@example.com", name: "Organizer", timeZone: "UTC" },
+    };
+
+    let thrown: unknown = null;
+    let results: any[] = [];
+    try {
+      results = await eventManager.createAllCalendarEvents(event);
+    } catch (e) {
+      thrown = e;
+    }
+
+    // If the fix surfaces an error, the silent-skip defect is no longer present.
+    if (thrown === null) {
+      const externalIdsCreated = mockCreateEvent.mock.calls.map((call: any[]) => call[2]);
+
+      expect(
+        externalIdsCreated,
+        `co-host destination was silently skipped; createEvent only called for ${JSON.stringify(
+          externalIdsCreated
+        )}`
+      ).toContain("co-host-ext");
+      expect(results).toHaveLength(2);
+    }
+  });
+});

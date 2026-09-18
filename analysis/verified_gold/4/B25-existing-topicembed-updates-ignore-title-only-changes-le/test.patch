@@ -1,0 +1,98 @@
+require 'digest'
+
+def require_dependency(name)
+  require name
+rescue LoadError
+  nil
+end
+
+begin
+  require 'nokogiri'
+rescue LoadError
+  module Nokogiri
+    module HTML
+      def self.fragment(html); FragmentStub.new(html); end
+    end
+  end
+  class FragmentStub
+    def initialize(html); @html = html; end
+    def css(_); []; end
+    def to_html; @html; end
+  end
+end
+
+module I18n
+  def self.t(_key, *_args, **_opts); 'imported'; end
+end
+
+$topic_embeds = {}
+
+class FakeRelation
+  def initialize(rec); @rec = rec; end
+  def first; @rec; end
+end
+
+module ActiveRecord
+  class Base
+    def self.belongs_to(*); end
+    def self.validates_presence_of(*); end
+    def self.where(**cond)
+      FakeRelation.new($topic_embeds[cond[:embed_url]])
+    end
+    def self.create!(_); raise 'create! not expected in this test'; end
+  end
+end
+
+require_relative '../../app/models/topic_embed'
+
+class FakeTopic
+  attr_accessor :title
+  def update(attrs = {}, **kw)
+    attrs = attrs.merge(kw) unless kw.empty?
+    attrs.each { |k, v| send(k.to_s + '=', v) }
+    true
+  end
+  alias_method :update_attributes, :update
+end
+
+class FakePost
+  attr_accessor :topic
+  def initialize; @topic = FakeTopic.new; end
+end
+
+class FakeEmbed
+  attr_accessor :embed_url, :content_sha1, :post, :topic_id
+  def initialize(url, sha, post)
+    @embed_url, @content_sha1, @post = url, sha, post
+  end
+  def blank?; false; end
+  def update_column(k, v); instance_variable_set('@' + k.to_s, v); end
+end
+
+$revisor_calls = []
+
+class PostRevisor
+  def initialize(post); @post = post; end
+  def revise!(_user, _raw, *_args, **opts)
+    $revisor_calls << opts
+    @post.topic.title = opts[:title] if opts[:title] && @post.respond_to?(:topic) && @post.topic
+  end
+end
+
+url  = 'http://example.com/article'
+body = '<p>Hello</p>'
+footer = %Q{\n<hr>\n<small>imported</small>\n}
+existing_sha1 = Digest::SHA1.hexdigest(body + footer)
+
+post = FakePost.new
+post.topic.title = 'Old Title'
+$topic_embeds[url] = FakeEmbed.new(url, existing_sha1, post)
+
+NEW_TITLE = 'New Title'
+TopicEmbed.import(Object.new, url, NEW_TITLE, body.dup)
+
+if post.topic.title == NEW_TITLE
+  puts 'RESULT: PASS'
+else
+  puts %Q{RESULT: FAIL: title-only change ignored; topic.title=#{post.topic.title.inspect}, revisor_calls=#{$revisor_calls.inspect}}
+end
