@@ -274,7 +274,8 @@ w()
 TG = M.get("true_gold_defects", {})
 if TG:
     w("### T16 — TRUE-gold defect-level matrix (§10d PRIMARY): per-cell metrics with 95% cluster-bootstrap CIs")
-    w("| cell | n PRs | TP | den | recall [CI] | adjP | adjP' | F1 [CI] | F1' [CI] |")
+    w("Evaluator: **F2\u2032** (recall weighted 4:1, nitpick-charged precision), on the full 152-bug true golden set.")
+    w("| cell | n PRs | TP | den | recall [CI] | adjP | **F2\u2032 [CI]** | F1 [CI] | F1\u2032 [CI] |")
     w("|---|---|---|---|---|---|---|---|---|")
     for k, c in sorted(TG["verified"]["cells"].items(), key=lambda kv: -kv[1]["F1p"]):
         m, fw, e = k.split("|")
@@ -284,7 +285,10 @@ if TG:
           f"{c['F1']:.3f} [{ci['F1'][1]:.3f}, {ci['F1'][2]:.3f}] | {c['F1p']:.3f} [{ci['F1p'][1]:.3f}, {ci['F1p'][2]:.3f}] |")
     h = TG["verified"]["headline"]
     w("")
-    w(f"Best harness recall: `{h['harness']['best_recall']['cell']}` "
+    w(f"Best harness F2\u2032: `{h['harness']['best_f2p']['cell']}` {h['harness']['best_f2p']['F2p']:.3f}; "
+      f"best vanilla F2\u2032: `{h['vanilla']['best_f2p']['cell']}` {h['vanilla']['best_f2p']['F2p']:.3f} "
+      f"(harness/vanilla {h['best_f2p_ratio_harness_over_vanilla']:.2f}x). "
+      f"Best harness recall: `{h['harness']['best_recall']['cell']}` "
       f"{h['harness']['best_recall']['recall']:.3f}; best harness F1': `{h['harness']['best_f1p']['cell']}` "
       f"{h['harness']['best_f1p']['F1p']:.3f}; best vanilla: `{h['vanilla']['best_f1p']['cell']}` "
       f"{h['vanilla']['best_f1p']['recall']:.3f} recall / {h['vanilla']['best_f1p']['F1p']:.3f} F1'. "

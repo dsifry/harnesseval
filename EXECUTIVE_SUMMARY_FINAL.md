@@ -73,13 +73,18 @@ matched model·effort pairs (mean **+0.107**; peak-recall ratio **1.51×** versu
 **MRV is ahead of CE on average, not uniformly** (ΔF1′ point estimate +19/−2 over 21 matched pairs,
 mean +0.047; 8/21 resolve positive at 95%; +18/−3 on ΔF2′).
 
-**On the composite metric, read F2′, not F1′.** Our stated cost asymmetry is that a missed bug costs more
-than a false alarm (4:1) — that is β=2, i.e. F2. Reporting F1′ (β=1) contradicted that and, because adjP′
-charges nitpicks, it made the ranking volume-sensitive: a terse cell that reports 17–25 findings per PR
-registers zero nitpicks and outranks a verbose cell that finds far more real bugs. On **F2′** the best
-harness cell (glm-vis · MRV · high, 0.436 [0.396, 0.491]) leads the best vanilla cell (fable · van · high,
-0.361) by **1.21×**, and the top six cells are all harness cells. F1′ is retained only as a labelled
-equal-weight, nitpick-averse diagnostic.
+**Our evaluator is F2′, on the full 152-bug true golden set.** The choice is deliberate. Recall alone is
+half a metric (a tool that comments on everything would score 1.0 and be useless), so it must be paired with
+a noise term — and the only free parameter is β, the ratio at which a missed bug is charged against a false
+alarm. This campaign's stated position is that *a missed bug costs more than a false alarm*; that asymmetry
+**is** β=2, i.e. F2. Reporting F1′ (β=1) contradicted our own preference and, because adjP′ charges
+nitpicks, made the ranking volume-sensitive: a terse cell reporting 17–25 findings per PR registers zero
+nitpicks and outranked a verbose cell that found 69 real bugs to its 49. F2′ fixes that. On the full true
+golden set (42 goldens + all 110 verified defects = 152 — we keep the full set, so the metric leaves room
+for better agents) the best harness cell (glm-vis · MRV · high) scores **F2′ 0.436 [0.396, 0.491]** against
+**0.361** for the best vanilla cell (fable · van · high) — a **1.21×** edge with the top six cells all
+harness cells. `adjP` is reported alongside F2′ so the noise story stays visible, and F1′ appears only as a
+labelled diagnostic.
 
 **Why even the best harness misses what it misses.** Three mechanisms, separated: (1) *denominator
 inflation* — paraphrase splits and golden duplicates (now fixed) made the universe look ~1.6× bigger

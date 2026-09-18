@@ -328,17 +328,18 @@ function tracesFor(xmet, ymet, showci) {
 const layoutFor = (xmet, ymet, annotate) => ({
   margin:{l:56,r:16,t:8,b:44}, paper_bgcolor:'rgba(0,0,0,0)', plot_bgcolor:'rgba(0,0,0,0)',
   xaxis:{title:{text:metName[xmet]}, type:'log', gridcolor:'#eee', zeroline:false},
-  yaxis:{title:{text:metName[ymet]}, gridcolor:'#eee', zeroline:false, range: ['F1','F2','recall','adjP','F1_sem','F1p_sem','F2_sem','F2p_sem','recall_sem','adjP_sem','adjPp_sem'].includes(ymet) ? [0,1] : undefined},
+  yaxis:{title:{text:metName[ymet]}, gridcolor:'#eee', zeroline:false,
+         range: ['F2_sem','F2p_sem'].includes(ymet) ? [0,0.5] : (['F1','F2','recall','adjP','F1_sem','F1p_sem','F2_sem','F2p_sem','recall_sem','adjP_sem','adjPp_sem'].includes(ymet) ? [0,1] : undefined)},
   legend:{font:{size:10}, orientation:'h', y:-0.2},
   hoverlabel:{font:{size:12}},
 });
 // five independent views: [chartDiv, ciCheckbox, detailsDiv, xmet, ymet, annotate]
 const VIEWS = [
-  ['chart1a','showci1a','details1a','cost_run','F1p_sem',false],
-  ['chart1b','showci1b','details1b','wall_run','F1p_sem',false],
-  ['chart1c','showci1c','details1c','usd_per_tp_sem','recall_sem',false],
-  ['chart1d','showci1d','details1d','usd_per_real','F1p_sem',false],
-  ['chart1e','showci1e','details1e','tok_run','F1p_sem',false],
+  ['chart1a','showci1a','details1a','cost_run','F2p_sem',false],
+  ['chart1b','showci1b','details1b','wall_run','F2p_sem',false],
+  ['chart1c','showci1c','details1c','usd_per_tp_sem','F2p_sem',false],
+  ['chart1d','showci1d','details1d','usd_per_real','F2p_sem',false],
+  ['chart1e','showci1e','details1e','tok_run','F2p_sem',false],
 ];
 function drawView(v){
   const [div, ci, card, xm, ym, ann] = v;
@@ -350,8 +351,9 @@ VIEWS.forEach(v => {
   const c = ev.points[0].customdata; const d = document.getElementById(v[2]);
   const rows = [['model', c.model],['framework', c.fw],['effort', c.eff],['n PRs', c.n||6],
     ['recall (true golden set)', c.recall_sem!=null ? fmt(c.recall_sem)+' ['+fmt(c.recall_sem_lo)+','+fmt(c.recall_sem_hi)+']' : '—'],
-    ['F1 (true golden set)', c.F1_sem!=null ? fmt(c.F1_sem)+' ['+fmt(c.F1_sem_lo)+','+fmt(c.F1_sem_hi)+']' : '—'],
-    ['F1\u2032 (user lens)', c.F1p_sem!=null ? fmt(c.F1p_sem) : '—'],
+    ['F2\u2032 (OUR EVALUATOR, true set)', c.F2p_sem!=null ? fmt(c.F2p_sem)+(c.F2p_sem_lo!=null?' ['+fmt(c.F2p_sem_lo)+','+fmt(c.F2p_sem_hi)+']':'') : '—'],
+    ['F2 (true set, claim-soundness precision)', c.F2_sem!=null ? fmt(c.F2_sem) : '—'],
+    ['F1 (true set) / F1\u2032 (equal-weight lens)', (c.F1_sem!=null ? fmt(c.F1_sem) : '—')+' / '+(c.F1p_sem!=null ? fmt(c.F1p_sem) : '—')],
     ['adjP / adjP\u2032', c.adjP_sem!=null ? fmt(c.adjP_sem)+' / '+fmt(c.adjPp_sem) : '—'],
     ['$/true bug found', c.usd_per_tp_sem!=null ? fmtA(c.usd_per_tp_sem) : '—'],
     ['recall (benchmark)', fmt(c.recall)+' ['+fmt(c.recall_lo)+','+fmt(c.recall_hi)+']'],

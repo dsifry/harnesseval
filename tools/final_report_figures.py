@@ -19,8 +19,10 @@ M = json.load(open(f"{ROOT}/analysis/final_report_metrics.json"))
 # cells onto those names. (Previously this pointed at expanded_gold_verified.matrix_sem, the superseded
 # LLM-merged §10c keyset.)
 SEM = {k: {"TP_sem": c["TP"], "recall_sem": c["recall"], "F1": c["F1"], "F1p": c["F1p"],
+           "F2": c["F2"], "F2p": c["F2p"],
            "adjP": c["adjP"], "adjPp": c["adjPp"],
-           "ci": {"recall_sem": c["ci"]["recall"], "F1": c["ci"]["F1"], "F1p": c["ci"]["F1p"]}}
+           "ci": {"recall_sem": c["ci"]["recall"], "F1": c["ci"]["F1"], "F1p": c["ci"]["F1p"],
+                  "F2": c["ci"]["F2"], "F2p": c["ci"]["F2p"]}}
        for k, c in M["true_gold_defects"]["verified"]["cells"].items()}
 
 def sem_cell(m, fw, e):
@@ -51,8 +53,8 @@ def err(ci):
 
 # ---------------------------------------------------------------- 1. Pareto
 fig, axes = plt.subplots(1, 2, figsize=(12, 5), sharey=True)
-for ax, met, xlab in ((axes[0], "F1_sem", "F1, true golden set (CI)"),
-                      (axes[1], "F1p_sem", "F1\u2032 true golden set, nitpicks charged (CI)")):
+for ax, met, xlab in ((axes[0], "recall_sem", "recall, true golden set (CI)"),
+                      (axes[1], "F2p_sem", "F2\u2032 (our evaluator) - true golden set, CIs")):
     pts = []
     for k, v in M["matrix"].items():
         if v["n_pr"] < 6:
@@ -61,7 +63,7 @@ for ax, met, xlab in ((axes[0], "F1_sem", "F1, true golden set (CI)"),
         sc = sem_cell(m, fw, e)
         if not sc:
             continue
-        yci = sc["ci"]["F1" if met == "F1_sem" else "F1p"]
+        yci = sc["ci"]["recall_sem" if met == "recall_sem" else "F2p"]
         pts.append((v["ci"]["usd_per_real"][0], yci[0], m, fw, e,
                     v["ci"]["usd_per_real"], yci))
     pts.sort(key=lambda p: p[0])
@@ -85,8 +87,8 @@ for ax, met, xlab in ((axes[0], "F1_sem", "F1, true golden set (CI)"),
     ax.set_xscale("log")
     ax.set_xlabel("metered $ per real finding (TP + beyond-gold real), log scale — CI")
     ax.set_ylabel(xlab)
-    ax.set_ylim(0.0, 0.5 if met == "F1p_sem" else 0.6)
-    if met == "F1_sem":
+    ax.set_ylim(0.0, 0.5)
+    if met == "recall_sem":
         ax.legend(fontsize=6)
 fig.suptitle("Cost/quality frontier, verified true golden set (42 goldens + 211 additional bugs) — top-6 cells", fontsize=9)
 fig.tight_layout()
@@ -163,7 +165,7 @@ for ax, fw in zip(axes, FRAMEWORKS):
             sc = sem_cell(m, fw, e)
             if v is None or not sc:
                 continue
-            yci = sc["ci"]["F1p"]
+            yci = sc["ci"]["F2p"]
             xs.append(v["ci"]["cost_run"][0]); ys.append(yci[0])
             xlo.append(v["ci"]["cost_run"][1]); xhi.append(v["ci"]["cost_run"][2])
             ylo.append(yci[1]); yhi.append(yci[2])
@@ -175,7 +177,7 @@ for ax, fw in zip(axes, FRAMEWORKS):
                         color=MCOL[m], lw=0.7, capsize=1, alpha=0.6)
     ax.set_xscale("log")
     ax.set_xlabel("metered $ / run (log)")
-    ax.set_ylabel("F1\u2032 (true golden set, nitpicks charged)")
+    ax.set_ylabel("F2\u2032 (our evaluator, true golden set)"); ax.set_ylim(0, 0.5)
     ax.set_title(fw, fontsize=8)
     ax.legend(fontsize=5.5, ncol=2)
 fig.suptitle("Effort ladder: real-world quality vs cost as effort rises (low → medium → high), CIs shown", fontsize=9)
@@ -288,18 +290,18 @@ for m, fw, e, v in pts:
     sc = sem_cell(m, fw, e)
     if not sc:
         continue
-    c, f = v["ci"]["cost_run"], sc["ci"]["F1p"]
+    c, f = v["ci"]["cost_run"], sc["ci"]["F2p"]
     scatter_ci(ax, c[0], c[1], c[2], f[0], f[1], f[2], m, fw, e)
 clusters = {}
 for m, fw, e, v in pts:
     sc = sem_cell(m, fw, e)
     if not sc:
         continue
-    clusters.setdefault(m, []).append((v["ci"]["cost_run"][0], sc["F1p"]))
+    clusters.setdefault(m, []).append((v["ci"]["cost_run"][0], sc["F2p"]))
 for m, cpts in clusters.items():
     cluster_hull(ax, cpts, MCOL[m], M_SHORT[m])
-ax.set_xlabel("metered $ / run (log)"); ax.set_ylabel("F1\u2032 (true golden set) [CI]")
-ax.set_title("(a) price/performance: $ per PR review vs F1\u2032 — model clusters shaded", fontsize=9)
+ax.set_xlabel("metered $ / run (log)"); ax.set_ylabel("F2\u2032 (our evaluator) [CI]"); ax.set_ylim(0, 0.5)
+ax.set_title("(a) price/performance: $ per PR review vs F2\u2032 — model clusters shaded", fontsize=9)
 
 # (b) F1' per dollar (true golden set; approx CI = F1' CI / cost point)
 ax = axes[0][1]
@@ -308,7 +310,7 @@ for m, fw, e, v in pts:
     sc = sem_cell(m, fw, e)
     if not sc:
         continue
-    rows.append((m, fw, e, sc["F1p"] / v["ci"]["cost_run"][0], sc["ci"]["F1p"], v["ci"]["cost_run"][0]))
+    rows.append((m, fw, e, sc["F2p"] / v["ci"]["cost_run"][0], sc["ci"]["F2p"], v["ci"]["cost_run"][0]))
 rows.sort(key=lambda r: -r[3])
 rows = rows[:20]
 labels = [f"{M_SHORT[m]}·{FW_SHORT[fw]}·{e[:3]}" for m, fw, e, _, _, _ in rows]
@@ -320,8 +322,8 @@ ypos = np.arange(len(rows))[::-1]
 ax.barh(ypos, vals, color=cols, alpha=0.8)
 ax.errorbar(vals, ypos, xerr=[los, his], fmt="none", ecolor="k", lw=0.8, capsize=1)
 ax.set_yticks(ypos); ax.set_yticklabels(labels, fontsize=5.5)
-ax.set_xlabel("F1\u2032 per $ per run (approx CI)")
-ax.set_title("(b) F1\u2032 per dollar, true golden set (top 20 cells)", fontsize=9)
+ax.set_xlabel("F2\u2032 per $ per run (approx CI)")
+ax.set_title("(b) F2\u2032 per dollar (top 20 cells)", fontsize=9)
 
 # (c) F1' vs wall time, model clusters shaded
 ax = axes[1][0]
@@ -329,18 +331,18 @@ for m, fw, e, v in pts:
     sc = sem_cell(m, fw, e)
     if not sc:
         continue
-    w, f = v["ci"]["wall_run"], sc["ci"]["F1p"]
+    w, f = v["ci"]["wall_run"], sc["ci"]["F2p"]
     scatter_ci(ax, w[0], w[1], w[2], f[0], f[1], f[2], m, fw, e)
 clusters = {}
 for m, fw, e, v in pts:
     sc = sem_cell(m, fw, e)
     if not sc:
         continue
-    clusters.setdefault(m, []).append((v["ci"]["wall_run"][0], sc["F1p"]))
+    clusters.setdefault(m, []).append((v["ci"]["wall_run"][0], sc["F2p"]))
 for m, cpts in clusters.items():
     cluster_hull(ax, cpts, MCOL[m], M_SHORT[m])
-ax.set_xlabel("wall seconds / run (log)"); ax.set_ylabel("F1\u2032 (true golden set) [CI]")
-ax.set_title("(c) F1\u2032 vs wall-clock per run — model clusters shaded", fontsize=9)
+ax.set_xlabel("wall seconds / run (log)"); ax.set_ylabel("F2\u2032 (our evaluator) [CI]"); ax.set_ylim(0, 0.5)
+ax.set_title("(c) F2\u2032 vs wall-clock per run — model clusters shaded", fontsize=9)
 for m, c in MCOL.items():
     ax.scatter([], [], color=c, s=6, label=M_SHORT[m])
 ax.legend(fontsize=5, ncol=2, loc="lower right")
@@ -352,10 +354,11 @@ for m, fw, e, v in pts:
     if not sc or not sc["TP_sem"]:
         continue
     x = v["ci"]["cost_run"][0] * v["n_pr"] / sc["TP_sem"]
-    r = sc["ci"]["recall_sem"]
+    r = sc["ci"]["F2p"]
     scatter_ci(ax, x, x * 0.98, x * 1.02, r[0], r[1], r[2], m, fw, e)
-ax.set_xlabel("metered $ per true bug found (log)"); ax.set_ylabel("recall, true golden set [CI]")
-ax.set_title("(d) cost per true bug vs recall (true golden set)", fontsize=9)
+ax.set_xlabel("metered $ per true bug found (log)"); ax.set_ylabel("F2\u2032 (our evaluator) [CI]")
+ax.set_ylim(0, 0.5)
+ax.set_title("(d) cost per true bug vs F2\u2032 (152 true bugs)", fontsize=9)
 
 fig.suptitle("Efficiency 2×2, verified true golden set — top-6 cells, 95% cluster-bootstrap CIs", fontsize=10)
 fig.tight_layout()

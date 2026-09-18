@@ -40,14 +40,14 @@ def rows():
         m, fw, e = key.split("|")
         ci = (c.get("ci") or {})
         r = ci.get("recall") or [c["recall"], c["recall"], c["recall"]]
-        f = ci.get("F1p") or [c["F1p"], c["F1p"], c["F1p"]]
+        f = ci.get("F2p") or [c["F2p"], c["F2p"], c["F2p"]]
         mx = MATRIX.get(key) or {}
         cost = mx.get("cost_run")
         n = c.get("n_pr") or mx.get("n_pr") or 1
         per_true = (cost * n / c["TP"]) if (cost and c.get("TP")) else None
         out.append({"key": key, "m": m, "fw": fw, "e": e, "recall": c["recall"], "rlo": r[1], "rhi": r[2],
-                    "F1p": c["F1p"], "flo": f[1], "fhi": f[2], "adjP": c.get("adjP"),
-                    "per_true": per_true, "TP": c.get("TP")})
+                    "F2p": c["F2p"], "flo": f[1], "fhi": f[2], "adjP": c.get("adjP"),
+                    "F1p": c["F1p"], "per_true": per_true, "TP": c.get("TP")})
     return out
 
 
@@ -77,19 +77,17 @@ def scatter(ax, xk, xlo, xhi, yk, ylo, yhi, xlog=False):
 
 # ---- fig 1: recall vs F1' -------------------------------------------------------
 fig, ax = plt.subplots(figsize=(7.2, 5.0))
-scatter(ax, "F1p", "flo", "fhi", "recall", "rlo", "rhi")
-ax.set_xlabel("F1′  (equal-weight, nitpick-averse F-score)  →  better\n"
-              "NOTE: F2′ (recall-weighted 4:1) is the recommended composite — it reverses this ordering for "
-              "high-recall cells; see REPORT_FINAL §10d")
+scatter(ax, "F2p", "flo", "fhi", "recall", "rlo", "rhi")
+ax.set_xlabel("F2′  (recall-weighted 4:1, nitpick-charged precision)  →  better\n"
+              "our chosen evaluator: a missed bug costs 4× a false alarm, which is what we claim to believe")
 ax.set_ylabel("recall of the true golden set  (152 = 42 goldens + 110 verified defects)  →  better")
-ax.set_title("True-gold frontier: does a harness actually find more real bugs per unit of noise?\n"
+ax.set_title("True-gold frontier (152 true bugs): recall vs F2′, our evaluator\n"
              "each point is one (model, framework, effort) cell; bars are cluster-bootstrap 95% CIs",
              fontsize=8.5, loc="left")
-bx = max(r["F1p"] for r in R)
-h = HEAD.get("harness", {}).get("best_f1p", {})
-v = HEAD.get("vanilla", {}).get("best_f1p", {})
-ax.axvline(v.get("F1p", 0), color=FWCOL["vanilla-engineered"], lw=0.7, ls=":", alpha=0.7)
-ax.text(v.get("F1p", 0), ax.get_ylim()[0], " best vanilla F1′", fontsize=6, color="#555", va="bottom")
+ax.set_xlim(0, 0.5)
+v = HEAD.get("vanilla", {}).get("best_f2p", {})
+ax.axvline(v.get("F2p", 0), color=FWCOL["vanilla-engineered"], lw=0.7, ls=":", alpha=0.7)
+ax.text(v.get("F2p", 0), ax.get_ylim()[0], " best vanilla F2′", fontsize=6, color="#555", va="bottom")
 ax.legend(loc="lower right", frameon=False, fontsize=7)
 fig.tight_layout()
 fig.savefig(f"{FIG}/fig_true_gold_pareto.png")
@@ -97,12 +95,13 @@ plt.close(fig)
 
 # ---- fig 2: $ per true bug vs recall -------------------------------------------
 fig, ax = plt.subplots(figsize=(7.2, 5.0))
-scatter(ax, "per_true", "per_true", "per_true", "recall", "rlo", "rhi", xlog=True)
+scatter(ax, "per_true", "per_true", "per_true", "F2p", "flo", "fhi", xlog=True)
 ax.set_xlabel("$ per TRUE bug found  (list price; log scale — each gridline right is ~10× more)")
-ax.set_ylabel("recall of the true golden set  →  better")
-ax.set_title("What a caught real bug costs (true golden set)\n"
-             "the buyer's panel: up and to the left is better; bars are cluster-bootstrap 95% CIs",
-             fontsize=8.5, loc="left")
+ax.set_ylabel("F2′ of the true golden set  →  better")
+ax.set_ylim(0, 0.5)
+ax.set_title("What a caught real bug costs (152 true bugs)\n"
+             "the buyer's panel: up and to the left is better (F2′ axis capped at 0.5); bars are "
+             "cluster-bootstrap 95% CIs", fontsize=8.5, loc="left")
 ax.legend(loc="lower left", frameon=False, fontsize=7)
 fig.tight_layout()
 fig.savefig(f"{FIG}/fig_true_gold_efficiency.png")
@@ -113,19 +112,16 @@ L = ["## True-gold headline (deduplicated verified hidden-gold set)", "",
      f"Denominator (the true golden set): **{GOLD}** = 42 Martian goldens + {GOLD - 42} verified hidden-gold "
      f"defects. TP counts are per cell over the campaign's 6 PRs; `totals.TP/den` ({BLOCK['totals']['TP']}/"
      f"{BLOCK['totals']['den']}) sums findings across cells and is not the gold-set ratio.", "",
-     "| | cell | recall | F1′ | adjusted precision |", "|---|---|---|---|---|"]
-for name, hh in (("best harness recall", h), ("best harness F1′", h),
-                 ("best vanilla (recall & F1′)", v)):
-    pass
+     "| | cell | recall | **F2′** | adjusted precision (adjP) |", "|---|---|---|---|---|"]
 rows_md = [("best harness recall", HEAD["harness"]["best_recall"]),
-           ("best harness F1′", HEAD["harness"]["best_f1p"]),
+           ("**best harness F2′ (our evaluator)**", HEAD["harness"]["best_f2p"]),
            ("best vanilla recall", HEAD["vanilla"]["best_recall"]),
-           ("best vanilla F1′", HEAD["vanilla"]["best_f1p"])]
+           ("best vanilla F2′", HEAD["vanilla"]["best_f2p"])]
 for lab, hh in rows_md:
-    L.append(f"| {lab} | `{hh['cell']}` | {hh['recall']:.3f} | {hh['F1p']:.3f} | {hh['adjP']:.3f} |")
-L += ["", f"- peak-recall ratio, harness ÷ vanilla: **{HEAD['peak_recall_ratio_harness_over_vanilla']:.2f}×**",
-      f"- best-F1′ ratio, harness ÷ vanilla: **{HEAD['best_f1p_ratio_harness_over_vanilla']:.2f}×** "
-      f"({'vanilla ahead' if HEAD['best_f1p_ratio_harness_over_vanilla'] < 1 else 'harness ahead'})", ""]
+    L.append(f"| {lab} | `{hh['cell']}` | {hh['recall']:.3f} | {hh.get('F2p', float('nan')):.3f} | {hh['adjP']:.3f} |")
+L += ["", f"- **harness ÷ vanilla on F2′: {HEAD['best_f2p_ratio_harness_over_vanilla']:.2f}×**",
+      f"- peak-recall ratio, harness ÷ vanilla: {HEAD['peak_recall_ratio_harness_over_vanilla']:.2f}×",
+      f"- (F1′, the equal-weight lens, for reference: {HEAD['best_f1p_ratio_harness_over_vanilla']:.2f}×)", ""]
 open(f"{ROOT}/analysis/verified_gold/TRUE_GOLD_HEADLINES.md", "w").write("\n".join(L))
 print("\n".join(L))
 
@@ -173,14 +169,14 @@ ys = list(range(len(bars)))[::-1]
 for i, b in zip(ys, bars):
     ax.barh(i, b["gold"], color="#c9c9c9", height=0.7)
     ax.barh(i, b["def"], left=b["gold"], color=FWCOL[b["fw"]], height=0.7)
-    ax.text(b["gold"] + b["def"] + 1.0, i, f"F1′ rank {sorted(bars, key=lambda x: -x['F1p']).index(b)+1:<2d} "
-            f"· nitpick {b['nit']:.0%}", fontsize=5.6, va="center", color="#444")
+    ax.text(b["gold"] + b["def"] + 1.0, i, f"F2′ rank {sorted(bars, key=lambda x: -x['F2p']).index(b)+1:<2d} "
+            f"· F2′ {b['F2p']:.3f} · nitpick {b['nit']:.0%}", fontsize=5.6, va="center", color="#444")
 ax.set_yticks(ys); ax.set_yticklabels([b["label"] for b in bars], fontsize=5.6)
 ax.set_xlabel("real bugs found on the true golden set  ·  gray = Martian goldens, "
               "color = hidden-gold defects the benchmark never scores")
-ax.set_title("Finding real bugs ≠ winning F1′\n"
-             "cells sorted by real bugs found; the F1′ leaderboard penalty is dominated by how many of a "
-             "cell's findings the adjudicator classifies as nitpicks",
+ax.set_title("Real bugs found, with each cell's F2′ (our evaluator) for comparison\n"
+             "cells sorted by real bugs found; F2′ (recall-weighted 4:1) tracks bugs found far better than "
+             "the equal-weight F1′ did, though the nitpick share still moves it",
              fontsize=9, loc="left")
 ax.set_xlim(0, max(b["gold"] + b["def"] for b in bars) * 1.30)
 for fw in ("vanilla-engineered", "compound-realistic", "metareview-realistic"):

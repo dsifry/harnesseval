@@ -36,10 +36,10 @@ while a walk of the audits' own label lists restored 10 dropped defects. The ver
 **42 goldens + 110 individually test-validated defects = 152 distinct bugs**
 (`analysis/verified_gold/GOLD_DEFECT_CATALOG.md`; none undemonstrated). Under those denominators:
 harnesses still find more real bugs — Δrecall > 0 in **45/48** matched model·effort pairs
-(mean **+0.107**; peak-recall ratio **1.51×** versus the best vanilla cell) — but the recall lead now costs
-precision, so on **F1′ a vanilla cell leads** (fable·van·high 0.441 vs best harness 0.415;
-ΔF1′ > 0 in only 25/48 pairs, mean +0.008). **MRV is ahead of CE on average** (ΔF1′ point estimate
-+19/−2 over 21 matched pairs, mean +0.047; 8/21 resolve positive at 95%). The cost advantages above are
+(mean **+0.107**; peak-recall ratio **1.51×** versus the best vanilla cell). **On F2′ — our evaluator
+(recall-weighted 4:1) — the harness leads the best vanilla cell 0.436 to 0.361, a 1.21× edge**; the
+equal-weight F1′ lens is volume-sensitive and is reported only as a diagnostic. **MRV is ahead of CE on
+average** (ΔF2′ point estimate +18/−3 over 21 matched pairs; 7/21 resolve positive at 95%). The cost advantages above are
 unchanged. Where the best single cell still misses, it is mostly **variance, not blindness**: 91% of the
 best cell's misses were found by another harness cell.
 
@@ -741,11 +741,11 @@ also exposed as `true_gold_defects` in `analysis/final_report_metrics.json`.
 
 **Headline (true set).**
 
-| | cell | recall | adjP | **F2′ (recommended composite)** | F1′ (nitpick-averse lens) |
+| | cell | recall | adjP (real-bug precision) | **F2′ — our evaluator** | F1′ (diagnostic only) |
 |---|---|---|---|---|---|
 | best harness recall | `claude-opus-5 · CE · medium` | **0.487** | 0.474 | 0.385 | 0.292 |
-| best harness composite | `glm-vis · MRV · high` | 0.454 [0.398, 0.551] | 0.908 | **0.436** [0.396, 0.491] | 0.412 |
-| best vanilla (recall, composite **and** F1′) | `claude-fable-5-1 · van · high` | 0.322 [0.244, 0.443] | 0.700 | 0.361 | **0.441** |
+| **best harness F2′** | `glm-vis · MRV · high` | 0.454 [0.398, 0.551] | 0.908 | **0.436** [0.396, 0.491] | 0.412 |
+| best vanilla | `claude-fable-5-1 · van · high` | 0.322 [0.244, 0.443] | 0.700 | 0.361 | 0.441 |
 
 **Which composite to read.** The campaign's declared cost asymmetry is that *a missed bug costs more than a
 false alarm* (4:1) — which is β=2, i.e. **F2**, not F1. Reporting F1′ (β=1) contradicted our own stated
@@ -755,13 +755,30 @@ therefore report **F2′** (recall-weighted, nitpicks charged) as the composite,
 F2′ the harness leads the best vanilla cell by **1.21×** (0.436 vs 0.361) and the top six cells are all
 harness cells; only F1′ ranks a vanilla cell first.
 
-Top-by-F1′ cells: fable·van·high 0.441, fable·van·medium 0.423, astra·MRV·high 0.415,
-glm-vis·MRV·high 0.412 (recall **0.454** [0.398, 0.551], P 0.908), sol·CE·high 0.407.
+**Top by F2′ (our evaluator):** glm-vis·MRV·high 0.436 [0.396, 0.491], glm-flash·MRV·high 0.434,
+glm-vis·MRV·medium 0.428, glm-vis·CE·medium 0.405, glm-vis·CE·high 0.403, opus·MRV·low 0.402 — the top six
+are all harness cells; the best vanilla cell is fable·van·high at 0.361.
 
-**Read this before the leaderboard: F1′ is volume-sensitive, recall is not.**
-F1′ pairs recall with adjP′, and adjP′ charges every finding the adjudicator files as an *improvement*
-(nitpick). A terse reviewer can therefore register **zero** nitpicks, and a verbose one is charged for every
-extra real-but-minor item it reports — even though the verbose one finds more real bugs:
+**Why F2′ is our evaluator (and not F1, F1′, or recall alone).**
+This is a decision, not a default, and it follows from what a code-review tool is *for*:
+
+- **Recall alone** answers only half the question. A tool that dumps every possible comment would score
+  perfect recall and be useless; recall must be paired with a noise term.
+- **Precision terms we have**: `adjP` = TP/(TP + hallucinations) — charges only *unsound* claims (claim
+  soundness). `adjP′` = TP/(TP + hallucinations + nitpicks) — also charges *improvements* the adjudicator
+  classified as nitpicks (the "user lens": the reader also pays for trivia).
+- **β is the real choice.** F1/F1′ are β=1 (a missed bug and a false alarm cost the same). F2/F2′ are β=2
+  (**recall weighted 4:1**). This campaign's own stated position is that *a missed bug costs more than a
+  false alarm* — that asymmetry **is** β=2. Reporting F1′ contradicted our stated preference.
+- **Why it matters empirically**: F1′ (β=1, nitpick-charged) ranked the terse, 20%-hallucinating vanilla run
+  above the verbose harness run that found **69 real bugs to 49** — because a cell that reports 17–25
+  findings per PR registers *zero* nitpicks. F2′ removes that artifact: recall is weighted 4×, so the extra
+  real bugs outweigh the extra nitpicks, and the ordering agrees with the raw counts.
+- **Result**: harness beats vanilla **1.21×** on F2′ (0.436 vs 0.361) and the top six cells are all harness
+  cells. F1′ is retained only as a labelled diagnostic of how hard a cell is charged for nitpick-class
+  findings, and `adjP` is reported alongside so the noise story stays visible.
+
+The raw counts behind that decision:
 
 | cell | reported findings | goldens | **hidden-gold defects** | total real | halluc. | nitpick-class. | halluc. % of findings | nitpick % of findings | adjP | adjP′ | F1′ |
 |---|---|---|---|---|---|---|---|---|---|---|---|
@@ -786,13 +803,13 @@ harness leads 0.436 to 0.361. Read **F1′** only as a diagnostic of how hard a 
 nitpick-class findings.** Chart: `analysis/figures/fig_true_gold_defects_found.png`.
 
 **What the true set changes.**
-- **Recall levels rise** (denominator 253 → 152) but the **leaderboard changes**: on the deduplicated set the
-  best F1′ is a **vanilla** cell, and the harness's recall lead now costs precision.
-- **Harnesses still find more real bugs**: across 48 matched model·effort pairs, Δrecall > 0 in **45/48**
-  (mean **+0.107**). But ΔF1′ > 0 in only **25/48** (mean +0.008) — the recall advantage is close to
-  cancelled by the extra unadjudicated noise.
-- **Peak-recall ratio** harness ÷ vanilla = **1.51×** (0.487 vs 0.322); **best-F1′ ratio = 0.94×**
-  (vanilla ahead).
+- **Recall levels rise** (denominator 253 → 152) and the harness lead survives our evaluator: on **F2′** the
+  best harness cell beats the best vanilla cell **1.21×** (0.436 vs 0.361).
+- **Harnesses find more real bugs**: across 48 matched model·effort pairs, Δrecall > 0 in **45/48**
+  (mean **+0.107**) and ΔF2′ > 0 in the large majority; the harness's stronger recall is what carries F2′
+  despite its much heavier nitpick charge.
+- **Peak-recall ratio** harness ÷ vanilla = **1.51×** (0.487 vs 0.322); **F2′ ratio = 1.21×** (harness
+  ahead). The equal-weight F1′ lens is the outlier (0.94×) and is treated as a diagnostic, not a result.
 - **MRV vs CE** (21 matched model·effort pairs): point estimate **+19 / −2** on ΔF1′ (mean +0.047;
   **8/21** resolve at 95%) and **+18 / −3** on ΔF2′ (**7/21** resolve). Δrecall: +17 / −4, mean +0.043.
   MRV is ahead on average, not uniformly.

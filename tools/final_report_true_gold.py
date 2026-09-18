@@ -32,8 +32,8 @@ def headline(block):
         bfk, bfv = max(grp.items(), key=lambda kv: kv[1]["F1p"])
         b2k, b2v = max(grp.items(), key=lambda kv: kv[1].get("F2p", 0))
         out[name] = {
-            "best_recall": {"cell": brk, **{k: brv[k] for k in ("recall", "F1p", "adjP", "TP", "den")}},
-            "best_f1p": {"cell": bfk, **{k: bfv[k] for k in ("recall", "F1p", "adjP", "TP", "den")}},
+            "best_recall": {"cell": brk, "F2p": brv.get("F2p"), **{k: brv[k] for k in ("recall", "F1p", "adjP", "TP", "den")}},
+            "best_f1p": {"cell": bfk, "F2p": bfv.get("F2p"), **{k: bfv[k] for k in ("recall", "F1p", "adjP", "TP", "den")}},
             "best_f2p": {"cell": b2k, **{k: b2v[k] for k in ("recall", "F2p", "F1p", "adjP", "TP", "den")}},
         }
     if "harness" in out and "vanilla" in out:
