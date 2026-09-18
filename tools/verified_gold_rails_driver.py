@@ -95,13 +95,14 @@ name the right one in fix_file_path):
 {symbol_files}
 
 RULES
-- Return ONLY exact-match edits: each `find` must be a verbatim excerpt of the CURRENT SOURCE and must
-  occur EXACTLY ONCE. Include enough context to be unique.
-- Minimal change. Never return the whole file.
+{shape}
+- Minimal change: fix only what this defect requires.
+- Return `fixed_file_content` with the COMPLETE corrected file instead of `fix_edits`, if asked to.
 
 Respond with ONLY this JSON object (no prose, no fences):
 {{"fix_file_path": "{file}",
   "fix_edits": [{{"find": "<verbatim excerpt>", "replace": "<corrected excerpt>"}}],
+  "fixed_file_content": "<complete corrected file — only when asked>",
   "explanation": "<one sentence>"}}"""
 
 
@@ -183,7 +184,7 @@ async def author_test(model, cand, file, content, supplier_dir, stem):
     return (parsed if isinstance(parsed, dict) else {}), tin, tout
 
 
-async def author_fix(model, cand, file, content, test_code, head_log):
+async def author_fix(model, cand, file, content, test_code, head_log, full_file=False):
     defs = defining_files(cand)
     blocks = []
     for f in defs:
@@ -192,23 +193,35 @@ async def author_fix(model, cand, file, content, test_code, head_log):
         except Exception:
             pass
     symbol_files = "\n\n".join(blocks) or "(grep found no defining file)"
+    shape = ('- Return `fixed_file_content` with the COMPLETE corrected file (exact-match edits have failed twice).'
+             if full_file else
+             '- Return ONLY exact-match edits: each `find` must be a verbatim excerpt of the CURRENT SOURCE and\n'
+             '  must occur EXACTLY ONCE. Include enough context to be unique.')
     prompt = FIX_PROMPT.format(title=cand.get("title") or "", file=file, test_code=test_code[:5000],
                                content=content[:9000], head_log=head_log[-2000:],
-                               symbol_files=symbol_files)
+                               symbol_files=symbol_files, shape=shape)
     parsed, tin, tout, _ = await call_model_json_bounded(model, SYSTEM, prompt, effort="low", max_tokens=8000)
     return (parsed if isinstance(parsed, dict) else {}), tin, tout
 
 
+def _norm_ws(t: str) -> str:
+    return "\n".join(ln.rstrip() for ln in t.strip("\n").splitlines())
+
+
 def apply_edits(path, edits):
+    """Exact match, then whitespace-normalized match; reject loudly if not uniquely locatable."""
     p = REPO / path
     s = p.read_text()
     for i, e in enumerate(edits):
         f, r = e.get("find"), e.get("replace")
         if not f or r is None:
             raise ValueError(f"edit {i}: missing find/replace")
-        if s.count(f) != 1:
-            raise ValueError(f"edit {i}: find occurs {s.count(f)} times (need exactly 1)")
-        s = s.replace(f, r)
+        if s.count(f) == 1:
+            s = s.replace(f, r); continue
+        parts = _norm_ws(s).split(_norm_ws(f))
+        if len(parts) == 2:
+            s = parts[0] + _norm_ws(r) + parts[1]; continue
+        raise ValueError(f"edit {i}: find not uniquely locatable (exact {s.count(f)}, normalized {len(parts)-1})")
     p.write_text(s)
 
 
@@ -237,7 +250,7 @@ def write_bundle(d, cand, pr, verdict, logs, test_code, fix_diff, test_path, ext
     return meta
 
 
-async def do_candidate(cand, model, k_retry=3, k_fix=4):
+async def do_candidate(cand, model, k_retry=3, k_fix=6, escalate=None):
     pr = cand["pr_slug"]; base, head = PR_HEADS[pr]
     clean_repo(head)
     file = cand.get("file_resolved") or ""
@@ -278,9 +291,12 @@ async def do_candidate(cand, model, k_retry=3, k_fix=4):
             return write_bundle(d, cand, pr, "not_a_bug", {"head": head_log}, test_code, "", tp,
                                 {"notes": notes, "demotion_review": "standalone test reports PASS on the unmodified post-PR code",
                                  "model_tokens": {"in": tin, "out": tout}})
-        if c.startswith("ERROR") and attempt < k_retry:
-            notes.append(f"test attempt {attempt}: {c}; the stubs are insufficient — retried")
-            content = original[:12000] + f"\n\nLAST RUN ERROR (fix the stubs, not the file under test):\n{head_log[-1200:]}"
+        if (c.startswith("ERROR") or c == "?") and attempt < k_retry:
+            notes.append(f"test attempt {attempt}: {c}; the script must print a RESULT: marker — retried")
+            content = (original[:12000] +
+                       "\n\nLAST RUN OUTPUT (the script must end with exactly one line 'RESULT: PASS' or "
+                       "'RESULT: FAIL: <why>', and must not raise; fix the script/stubs, never the file under test):\n"
+                       + head_log[-1500:])
             continue
         break
     else:
@@ -295,19 +311,26 @@ async def do_candidate(cand, model, k_retry=3, k_fix=4):
                              "model_tokens": {"in": tin, "out": tout}})
 
     fixed = False
+    fix_model = model
     for attempt in range(1, k_fix + 1):
-        fx, i2, o2 = await author_fix(model, cand, file, content, test_code, head_log)
+        if escalate and attempt == 3:
+            fix_model = escalate
+            notes.append(f"fix attempt {attempt}: escalating fix authoring to {fix_model}")
+        fx, i2, o2 = await author_fix(fix_model, cand, file, content, test_code, head_log, full_file=attempt >= 3)
         tin += i2; tout += o2
         edits = fx.get("fix_edits")
         target = fx.get("fix_file_path") or file
-        if not edits:
-            notes.append(f"fix attempt {attempt}: no fix_edits")
+        if not edits and not fx.get("fixed_file_content"):
+            notes.append(f"fix attempt {attempt}: no fix returned")
             continue
         if not (REPO / target).exists():
             target = file
         sh("git checkout -q -- .")
         try:
-            apply_edits(target, edits)
+            if fx.get("fixed_file_content"):
+                (REPO / target).write_text(fx["fixed_file_content"])
+            else:
+                apply_edits(target, edits)
         except Exception as e:
             notes.append(f"fix attempt {attempt}: edits rejected for {target}: {e}")
             continue
@@ -343,20 +366,36 @@ async def main():
     ap.add_argument("--pr", default="4"); ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--only", type=int, default=None); ap.add_argument("--model", default=AUTHOR_MODEL)
     ap.add_argument("--force", action="store_true")
+    ap.add_argument("--escalate", default=None, help="stronger model to use for the fix after 2 failed attempts")
+    ap.add_argument("--only-verdict", default=None, help="re-run only candidates whose existing bundle has this verdict")
     a = ap.parse_args()
     cands = [c for c in json.load(open(MANIFEST)) if c["pr_slug"] == a.pr]
     if a.only is not None:
         cands = [c for c in cands if c["class_index"] == a.only]
     if a.limit:
         cands = cands[:a.limit]
-    if not a.force:
+    if a.only_verdict:
+        import glob as _g
+        keep_idx = set()
+        for mf in _g.glob(f'{BUNDLE_ROOT}/{a.pr}/*/meta.json'):
+            try:
+                mm = json.load(open(mf))
+            except Exception:
+                continue
+            if mm.get("verdict") == a.only_verdict:
+                bid = mm.get("bug_id") or ""
+                if "B" in bid:
+                    keep_idx.add(int(bid.split("B")[1]))
+        cands = [c for c in cands if c["class_index"] in keep_idx]
+        print(f"selected {len(cands)} candidate(s) with verdict {a.only_verdict}", flush=True)
+    elif not a.force:
         cands = [c for c in cands if not (BUNDLE_ROOT / c["pr_slug"] / f"B{c['class_index']:02d}-{c['class_slug']}" / "meta.json").exists()]
     print(f"repo={REPO} pr={a.pr} candidates={len(cands)}", flush=True)
     index = []
     for i, c in enumerate(cands, 1):
         t0 = time.time()
         try:
-            m = await do_candidate(c, a.model)
+            m = await do_candidate(c, a.model, escalate=a.escalate)
             status = (m or {}).get("verdict", "skipped")
         except Exception as e:
             status = f"error: {type(e).__name__}: {e}"

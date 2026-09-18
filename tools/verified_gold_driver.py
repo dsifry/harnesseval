@@ -240,17 +240,29 @@ def _window(content, line, span=140):
             + "\n".join(lines[lo:hi]))
 
 
+def _norm_ws(t: str) -> str:
+    return "\n".join(ln.rstrip() for ln in t.strip("\n").splitlines())
+
+
 def apply_edits(path, edits):
-    """Apply exact-match edits; every `find` must occur exactly once."""
+    """Apply edits with a tolerance ladder: exact match -> whitespace-normalized match.
+    Every `find` must end up uniquely resolvable; otherwise the edit is rejected loudly."""
     p = REPO / path
     s = p.read_text()
     for i, e in enumerate(edits):
         f, r = e.get("find"), e.get("replace")
         if not f or r is None:
             raise ValueError(f"edit {i}: missing find/replace")
-        if s.count(f) != 1:
-            raise ValueError(f"edit {i}: `find` occurs {s.count(f)} times (need exactly 1)")
-        s = s.replace(f, r)
+        if s.count(f) == 1:
+            s = s.replace(f, r); continue
+        # whitespace-tolerant: match line-wise on rstripped lines
+        nf, ns = _norm_ws(f), _norm_ws(s)
+        parts = ns.split(nf)
+        if len(parts) == 2:
+            head, tail = parts
+            s = head + _norm_ws(r) + tail
+            continue
+        raise ValueError(f"edit {i}: `find` not uniquely locatable (exact {s.count(f)}, normalized {len(parts) - 1})")
     p.write_text(s)
 
 
@@ -326,7 +338,7 @@ async def author_refute(model, cand, file, content, test_code, head_log, supplie
     return (parsed if isinstance(parsed, dict) else {}), tin, tout
 
 
-async def author_fix(model, cand, file, content, test_code, head_log, original_content):
+async def author_fix(model, cand, file, content, test_code, head_log, original_content, full_file=False):
     defs = defining_files(cand)
     blocks = []
     for f in defs:
@@ -335,9 +347,13 @@ async def author_fix(model, cand, file, content, test_code, head_log, original_c
         except Exception:
             pass
     symbol_files = "\n\n".join(blocks) or "(grep found no defining file)"
+    shape = ('- Return the COMPLETE corrected file in `fixed_file_content` (exact-match edits have failed).'
+             if full_file else
+             '- Return ONLY exact-match edits: each `find` must be a verbatim excerpt of the CURRENT SOURCE and must\n'
+             '  occur EXACTLY ONCE. Include enough context to be unique.')
     prompt = FIX_PROMPT.format(title=cand.get("title") or "", file=file, test_code=test_code[:6000],
                                content=content, head_log=head_log[-2500:],
-                               symbol_files=symbol_files)
+                               symbol_files=symbol_files, shape=shape)
     parsed, tin, tout, _ = await call_model_json_bounded(model, SYSTEM, prompt, effort="low", max_tokens=8000)
     return (parsed if isinstance(parsed, dict) else {}), tin, tout
 
@@ -441,7 +457,7 @@ def write_bundle(d, cand, pr, verdict, logs, test_code, fix_diff, test_path, ext
     return meta
 
 
-async def do_candidate(cand, model, k_retry=3, k_fix=4):
+async def do_candidate(cand, model, k_retry=3, k_fix=6, escalate=None):
     pr = cand["pr_slug"]; base, head = PR_HEADS[pr]
     clean_repo(head)                                  # worktree at head before any check
     file = cand.get("file_resolved") or ""
@@ -541,12 +557,17 @@ async def do_candidate(cand, model, k_retry=3, k_fix=4):
 
     # ---- 2. author the minimal fix as exact-match edits
     fixed = False
+    fix_model = model
     for attempt in range(1, k_fix + 1):
-        fx, i2, o2 = await author_fix(model, cand, file, content, test_code, head_log, original)
+        if escalate and attempt == 3 and escalate:
+            fix_model = escalate
+            notes.append(f"fix attempt {attempt}: escalating fix authoring to {fix_model}")
+        full_file = attempt >= 3          # exact-match edits failed twice -> allow a whole-file answer
+        fx, i2, o2 = await author_fix(fix_model, cand, file, content, test_code, head_log, original, full_file=full_file)
         tin += i2; tout += o2
         edits = fx.get("fix_edits")
-        if not edits:
-            notes.append(f"fix attempt {attempt}: no fix_edits returned")
+        if not edits and not fx.get("fixed_file_content"):
+            notes.append(f"fix attempt {attempt}: no fix returned")
             continue
         target = fx.get("fix_file_path") or file     # the defect may live in another module
         if not (REPO / target).exists():
@@ -554,7 +575,10 @@ async def do_candidate(cand, model, k_retry=3, k_fix=4):
             target = file
         sh("git checkout -q -- .")                      # reset source; keep the (untracked) test
         try:
-            apply_edits(target, edits)
+            if fx.get("fixed_file_content"):
+                (REPO / target).write_text(fx["fixed_file_content"])
+            else:
+                apply_edits(target, edits)
         except Exception as e:
             notes.append(f"fix attempt {attempt}: edits rejected for {target}: {e}")
             continue
@@ -615,6 +639,8 @@ async def main():
     ap.add_argument("--model", default=AUTHOR_MODEL)
     ap.add_argument("--repo", default=None)
     ap.add_argument("--force", action="store_true")
+    ap.add_argument("--escalate", default=None, help="stronger model to use for the fix after 2 failed attempts")
+    ap.add_argument("--only-verdict", default=None, help="re-run only candidates whose existing bundle has this verdict")
     a = ap.parse_args()
     AUTHOR_MODEL = a.model
     if a.repo:
@@ -637,7 +663,7 @@ async def main():
     for i, c in enumerate(cands, 1):
         t0 = time.time()
         try:
-            m = await do_candidate(c, a.model)
+            m = await do_candidate(c, a.model, escalate=a.escalate)
             status = (m or {}).get("verdict", "skipped_no_file")
         except Exception as e:
             status = f"error: {type(e).__name__}: {e}"
