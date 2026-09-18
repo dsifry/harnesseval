@@ -145,6 +145,14 @@ FOOTER = (
     '<a href="REPORT.html">full report (HTML)</a>'
 )
 
+
+# Per-figure height overrides (CSS height values). Dense charts need more vertical room than the default.
+FIG_HEIGHTS = {
+    "fig_true_gold_pareto": "clamp(560px, 70vh, 1040px)",
+    "fig_true_gold_defects_found": "clamp(520px, 64vh, 960px)",
+    "fig_pareto_frontier": "clamp(560px, 68vh, 1000px)",
+}
+
 _BOOT_SCRIPT = """<script>
 (function () {
   var figs = Array.prototype.slice.call(document.querySelectorAll('div.plotly-fig'));
@@ -328,7 +336,9 @@ def render_callout(blk: list[str], inline_md: markdown.Markdown, interactive_cou
         if ci_payload is not None:
             parts.append('<p class="fig-controls"><label><input type="checkbox" class="ci-toggle" '
                          f'data-fig="{base}"> show 95% CIs</label></p>')
-        parts.append(f'<div class="plotly-fig" id="fig-{base}"></div>')
+        _h = FIG_HEIGHTS.get(base)
+        parts.append(f'<div class="plotly-fig" id="fig-{base}"'
+                     + (f' style="height:{_h}"' if _h else '') + '></div>')
         parts.append('<details class="fig-fallback" open><summary>Static fallback '
                      '(used automatically when JavaScript is unavailable)</summary>'
                      f'<img alt="{alt}" src="{uri}"></details>')

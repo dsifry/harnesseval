@@ -312,9 +312,9 @@ selection check instead of treating six PRs as the whole story (§2.4.3, §3.6).
 **top-6 = the six PRs with the highest summed golden-comment severity weight** (Critical=4,
 High=3, Medium=2, Low=1; ties by comment count) — i.e. the six PRs with the **highest original-golden
 severity totals** (CAMPAIGN_GLOSSARY.md; verifier `tools/verify_hitlist.py`; artifact
-`manifold_top6_hitlist.csv`): cal.com/11059 (sev 26, 9 comments), discourse-graphite/4 (21, 8),
-discourse-graphite/10 (21, 7), cal.com/14740 (14, 6), discourse-graphite/8 (14, 6),
-cal.com/10967 (13, 6). This selection is by ground-truth severity density, not by any measured
+`manifold_top6_hitlist.csv`): [cal.com/11059](https://github.com/calcom/cal.com/pull/11059) (sev 26, 9 comments), [discourse-graphite/4](https://github.com/ai-code-review-evaluation/discourse-graphite/pull/4) (21, 8),
+[discourse-graphite/10](https://github.com/ai-code-review-evaluation/discourse-graphite/pull/10) (21, 7), [cal.com/14740](https://github.com/calcom/cal.com/pull/14740) (14, 6), [discourse-graphite/8](https://github.com/ai-code-review-evaluation/discourse-graphite/pull/8) (14, 6),
+[cal.com/10967](https://github.com/calcom/cal.com/pull/10967) (13, 6). This selection is by ground-truth severity density, not by any measured
 detection difficulty for these tools — §2.4.3 below tests directly that the top-6 is *not* measurably
 recall-harder, so read "hard" below as severity-weighted, not as an estimate of what the tools find hard. This is a **deliberate weighting toward higher-severity workloads**: a code-review
 tool that only catches easy issues is not worth buying, and cost/benefit is decided at the hard
@@ -586,26 +586,31 @@ on which the best vanilla cell (0.482, v1 instrument) narrowly leads.
 
 | PR | goldens | verified defects | universe |
 |---|---|---|---|
-| ai-code-review-evaluation/discourse-graphite/pull/4 | 8 | **42** | 50 |
-| ai-code-review-evaluation/discourse-graphite/pull/8 | 6 | **6** | 12 |
-| ai-code-review-evaluation/discourse-graphite/pull/10 | 7 | **20** | 27 |
-| calcom/cal.com/pull/10967 | 6 | **5** | 11 |
-| calcom/cal.com/pull/11059 | 9 | **15** | 24 |
-| calcom/cal.com/pull/14740 | 6 | **17** | 23 |
+| [ai-code-review-evaluation/discourse-graphite/pull/4](https://github.com/ai-code-review-evaluation/discourse-graphite/pull/4) | 8 | **42** | 50 |
+| [ai-code-review-evaluation/discourse-graphite/pull/8](https://github.com/ai-code-review-evaluation/discourse-graphite/pull/8) | 6 | **6** | 12 |
+| [ai-code-review-evaluation/discourse-graphite/pull/10](https://github.com/ai-code-review-evaluation/discourse-graphite/pull/10) | 7 | **20** | 27 |
+| [calcom/cal.com/pull/10967](https://github.com/calcom/cal.com/pull/10967) | 6 | **5** | 11 |
+| [calcom/cal.com/pull/11059](https://github.com/calcom/cal.com/pull/11059) | 9 | **15** | 24 |
+| [calcom/cal.com/pull/14740](https://github.com/calcom/cal.com/pull/14740) | 6 | **17** | 23 |
 | **total** | **42** | **105** | **147** |
 
-> **Figure 3.1b — Recall vs F2′ on the 147-bug true golden set** *(interactive — toggle the key to isolate
-> model/framework/effort series; hover cells for their values)*
+> **Figure 3.1b — The quality frontier: how many bugs a cell finds versus how noisy it is (recall vs F2′)** *(interactive — toggle the legend key to isolate models/frameworks/efforts; hover a point for that cell's numbers)*
 >
-> How to read: each point is a complete cell. x is recall against the 147-bug true golden set; y is **F2′**
-> (our evaluator: recall weighted 4:1, with hallucinations and nitpick-class findings charged). Whiskers are
-> 95% cluster-bootstrap CIs. Partial-coverage cells (fewer than six PRs) are drawn open — read them as gaps,
-> not as results.
+> **What this shows, and why it is here.** F2′ is one number that mixes two things a buyer cares about
+> separately: how many real bugs a cell finds, and how much noise it makes you triage. This chart opens that
+> number up. Every point is one complete cell; **further right means more bugs found** (x = recall: the share
+> of the 147 test-validated bugs that cell actually reported), and **further up means better quality per unit
+> of noise** (y = F2′: recall rewarded, then discounted for hallucinations and important-but-not-a-bug
+> findings). The whiskers are 95% cluster-bootstrap intervals, so overlapping points should be read as tied.
+> A cell dominates another when it is up-and-right of it; the open points are partial-coverage cells (1–2
+> PRs), shown as gaps rather than results.
 >
 > ![Per-cell recall against F2′, with cluster-bootstrap confidence intervals](analysis/figures/fig_true_gold_pareto.png)
 >
-> **Takeaway:** the harness cells occupy the top of the cloud, and the interval on any one cell is wider
-> than the gaps between the leaders — which is why the pair-level facts, not a cell ranking, carry the claim.
+> **Takeaway:** the harness cells occupy the top of the cloud, and the open-weight GLM cells reach the
+> top-right at a fraction of the cost — but the intervals of the leading cells overlap, which is exactly why
+> the claims rest on pair-level comparisons (§3.5) and a selection check (§3.6) rather than on crowning a
+> single cell.
 
 **What each cell is actually credited with.**
 
@@ -1754,12 +1759,12 @@ adjP charges only hallucinations; adjP' also charges nitpicks (user lens: everyt
 
 | PR | goldens | verified additional | verified universe | merged clusters | golden-duplicates removed |
 |---|---|---|---|---|---|
-| calcom/cal.com/pull/11059 | 9 | **24** | 33 | 35 | 11 |
-| ai-code-review-evaluation/discourse-graphite/pull/4 | 8 | **70** | 78 | 81 | 11 |
-| ai-code-review-evaluation/discourse-graphite/pull/10 | 7 | **32** | 39 | 37 | 5 |
-| ai-code-review-evaluation/discourse-graphite/pull/8 | 6 | **21** | 27 | 28 | 7 |
-| calcom/cal.com/pull/14740 | 6 | **33** | 39 | 42 | 9 |
-| calcom/cal.com/pull/10967 | 6 | **31** | 37 | 35 | 4 |
+| [calcom/cal.com/pull/11059](https://github.com/calcom/cal.com/pull/11059) | 9 | **24** | 33 | 35 | 11 |
+| [ai-code-review-evaluation/discourse-graphite/pull/4](https://github.com/ai-code-review-evaluation/discourse-graphite/pull/4) | 8 | **70** | 78 | 81 | 11 |
+| [ai-code-review-evaluation/discourse-graphite/pull/10](https://github.com/ai-code-review-evaluation/discourse-graphite/pull/10) | 7 | **32** | 39 | 37 | 5 |
+| [ai-code-review-evaluation/discourse-graphite/pull/8](https://github.com/ai-code-review-evaluation/discourse-graphite/pull/8) | 6 | **21** | 27 | 28 | 7 |
+| [calcom/cal.com/pull/14740](https://github.com/calcom/cal.com/pull/14740) | 6 | **33** | 39 | 42 | 9 |
+| [calcom/cal.com/pull/10967](https://github.com/calcom/cal.com/pull/10967) | 6 | **31** | 37 | 35 | 4 |
 
 Total: 42 goldens + 211 verified additional bugs = 253 distinct bugs (258 merged clusters; 47 golden-duplicates removed, not counted).
 Per-bug verification cards (location, why-real, replication, found-by): `analysis/TRUE_GOLDEN_EVIDENCE.md`.
@@ -1802,12 +1807,12 @@ across all three clustering variants we tried (verbatim, difflib-only, anchor-pr
 
 | PR | goldens | union clusters | expanded set |
 |---|---|---|---|
-| calcom/cal.com/pull/11059 | 9 | 981 | 990 |
-| ai-code-review-evaluation/discourse-graphite/pull/4 | 8 | 928 | 936 |
-| ai-code-review-evaluation/discourse-graphite/pull/10 | 7 | 680 | 687 |
-| ai-code-review-evaluation/discourse-graphite/pull/8 | 6 | 513 | 519 |
-| calcom/cal.com/pull/14740 | 6 | 919 | 925 |
-| calcom/cal.com/pull/10967 | 6 | 960 | 966 |
+| [calcom/cal.com/pull/11059](https://github.com/calcom/cal.com/pull/11059) | 9 | 981 | 990 |
+| [ai-code-review-evaluation/discourse-graphite/pull/4](https://github.com/ai-code-review-evaluation/discourse-graphite/pull/4) | 8 | 928 | 936 |
+| [ai-code-review-evaluation/discourse-graphite/pull/10](https://github.com/ai-code-review-evaluation/discourse-graphite/pull/10) | 7 | 680 | 687 |
+| [ai-code-review-evaluation/discourse-graphite/pull/8](https://github.com/ai-code-review-evaluation/discourse-graphite/pull/8) | 6 | 513 | 519 |
+| [calcom/cal.com/pull/14740](https://github.com/calcom/cal.com/pull/14740) | 6 | 919 | 925 |
+| [calcom/cal.com/pull/10967](https://github.com/calcom/cal.com/pull/10967) | 6 | 960 | 966 |
 
 **T9 — the expanded matrix**
 
