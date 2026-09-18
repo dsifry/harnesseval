@@ -276,7 +276,7 @@ HTML = """<!DOCTYPE html>
 
   <div class="panel">
     <h2>2 · Effort ladder — quality vs cost as effort rises</h2>
-    <div class="note">One line per model (color) with points at low → medium → high (left to right); when <b>All harnesses</b> is selected, marker shape distinguishes the harness (○ vanilla, □ Compound Engineering (ce), △ metareview (mrv)). Up and to the left is better: the higher a point sits, the more real bugs that setup finds; the further left, the cheaper it is per run. (The x-axis is logarithmic: each gridline to the right costs roughly 10× more.) Hover points for details.</div>
+    <div class="note">One line per model (color) with points at low → medium → high (left to right); when <b>All harnesses</b> is selected, marker shape distinguishes the harness (○ vanilla, □ Compound Engineering (ce), △ metareview (mrv)). Up and to the left is better: the higher a point sits, the better its F2′ (recall weighted 4:1 over the true golden set) and the further left the cheaper it is per run. The y-axis is capped at 0.5 so the spread is readable. (The x-axis is logarithmic: each gridline to the right costs roughly 10× more.) Hover points for details.</div>
     <div class="controls"><label>harness <select id="fwsel"></select></label></div>
     <div id="chart2"></div>
   </div>
@@ -467,15 +467,15 @@ function draw2(){
     for (const fw of fws){
       const pts = DATA.cells.filter(c=>c.fwShort===fw && c.model===m && vis(c)).sort((a,b)=>['low','medium','high'].indexOf(a.eff)-['low','medium','high'].indexOf(b.eff));
       if(!pts.length) continue;
-      ts.push({x:pts.map(c=>c.cost_run), y:pts.map(c=>(DATA.exp[c.model+'|'+c.fw+'|'+c.eff]||{}).F1p_sem ?? c.F1), mode:'lines+markers', name:m+(fws.length>1?'':''),
+      ts.push({x:pts.map(c=>c.cost_run), y:pts.map(c=>(DATA.exp[c.model+'|'+c.fw+'|'+c.eff]||{}).F2p_sem ?? c.F2), mode:'lines+markers', name:m+(fws.length>1?'':''),
         line:{color:mcol[m],width:1.4, dash: sel==='ALL'&&fw==='CE'?'dot':undefined},
         marker:{color:mcol[m],symbol:msym[fw],size:7},
         customdata:pts.map(c=>({...c, fwFull: FW_FULL[c.fwShort]})),
-        hovertemplate:'<b>%{customdata.modelShort} · %{customdata.fwFull} · %{customdata.eff}</b><br>$%{x:.3g} / run · F1\u2032 (true golden set) %{y:.3f}<extra></extra>',
+        hovertemplate:'<b>%{customdata.modelShort} · %{customdata.fwFull} · %{customdata.eff}</b><br>$%{x:.3g} / run · F2\u2032 (our evaluator, true golden set) %{y:.3f}<extra></extra>',
         showlegend: sel!=='ALL' || fw==='van'});
     }
   }
-  Plotly.react('chart2', ts, {margin:{l:56,r:16,t:8,b:44}, xaxis:{title:'metered $ / run (log)',type:'log',gridcolor:'#eee'}, yaxis:{title:'F1\u2032 (true golden set, nitpicks charged)',gridcolor:'#eee'}, legend:{font:{size:11},orientation:'h',y:-0.2}, paper_bgcolor:'rgba(0,0,0,0)'}, {displayModeBar:false, responsive:true});
+  Plotly.react('chart2', ts, {margin:{l:56,r:16,t:8,b:44}, xaxis:{title:'metered $ / run (log)',type:'log',gridcolor:'#eee'}, yaxis:{title:'F2\u2032 (our evaluator, true golden set)',gridcolor:'#eee',range:[0,0.5]}, legend:{font:{size:11},orientation:'h',y:-0.2}, paper_bgcolor:'rgba(0,0,0,0)'}, {displayModeBar:false, responsive:true});
 }
 fwsel.onchange=draw2; draw2();
 
