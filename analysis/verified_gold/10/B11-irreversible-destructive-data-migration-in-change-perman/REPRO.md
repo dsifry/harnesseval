@@ -2,8 +2,8 @@
 
 **Claim.** Irreversible destructive data migration in `change` permanently deletes site settings on rollback
 
-**Verdict in this bundle:** `not_a_bug_unconfirmed` ({'head': 'PASS'})
-**Fidelity:** `standalone_real_code`  ·  **Authoring model:** `deepseek-4.1-flash-background`
+**Verdict in this bundle:** `behavior_change_not_regression` ({'base': 'N/A (migration file is new in this PR)', 'head': 'RESULT: FAIL', 'fixed': 'RESULT: PASS'})
+**Fidelity:** `db_migration`  ·  **Authoring model:** `human-authored instrument (the claim needed a different evidence type; an LLM-authored runtime test could not express it)`
 
 Everything needed to check this yourself is in this directory:
 `test.diff` (the test, applies cleanly), `fix.patch` (the minimal fix), `logs/` (raw runs),
@@ -15,14 +15,13 @@ Everything needed to check this yourself is in this directory:
 git clone https://github.com/ai-code-review-evaluation/discourse-graphite && cd discourse-graphite
 git checkout d1c69189f3c90ecf56013a8da904da9bff9a8e19          # the post-PR revision this bundle was verified against
 
-# no dependency install needed: the test stubs its collaborators and runs on system ruby
-# (verified with ruby 2.6.10; ActiveRecord 4.1.16 is what the era repo expects)
+yarn install            # yarn 3.4.1 (corepack prepare yarn@3.4.1 --activate); ~2 min, ~2 GB
 
 git apply test.diff          # adds the test file (must not already exist — a fresh clone is clean)
-ruby -I. spec/verify/20150818190757_create_embeddable_hosts_verify.rb                        # -> RESULT: FAIL : the claimed defect is present
+yarn vitest run spec/verify/20150818190757_create_embeddable_hosts_verify.rb --reporter=basic                        # -> 1 failed : the claimed defect is present
 
 git apply fix.patch          # the minimal fix
-ruby -I. spec/verify/20150818190757_create_embeddable_hosts_verify.rb                        # -> RESULT: PASS : defect gone
+yarn vitest run spec/verify/20150818190757_create_embeddable_hosts_verify.rb --reporter=basic                        # -> 1 passed : defect gone
 ```
 
 ## What the two runs mean

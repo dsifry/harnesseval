@@ -2,109 +2,52 @@ diff --git a/spec/verify/20150818190757_create_embeddable_hosts_verify.rb b/spec
 new file mode 100644
 --- /dev/null
 +++ b/spec/verify/20150818190757_create_embeddable_hosts_verify.rb
-@@ -0,0 +1,105 @@
-+require 'fileutils'
+@@ -0,0 +1,48 @@
++# Evidence test for candidate 10-B11 (discourse PR 10):
++#   "Irreversible destructive data migration: `change` permanently deletes site settings on rollback"
++#
++# Instrument: the REAL migration file executed against a REAL Postgres (Docker service), using the
++# repository's own Rails generation (ActiveRecord 4.2). A runtime unit test cannot prove this, and a
++# stub cannot either: irreversibility is a property of how ActiveRecord inverts `change`.
++#
++#   RESULT: FAIL  => the claim holds (rollback is irreversible and the settings are destroyed)
++#   RESULT: PASS  => rollback is safe (settings restored)
++require 'active_record'
 +
-+# --- Minimal framework stubs so the REAL migration loads and executes ---
-+module ActiveRecord
-+  class IrreversibleMigration < StandardError; end
++ActiveRecord::Base.establish_connection(
++  adapter: 'postgresql', host: ENV.fetch('PGHOST', 'verify-postgres'),
++  username: ENV.fetch('PGUSER', 'verify'), password: ENV.fetch('PGPASSWORD', 'verify'),
++  database: ENV.fetch('PGDATABASE', 'verify_discourse')
++)
++conn = ActiveRecord::Base.connection
 +
-+  class Result
-+    def initialize(rows); @rows = rows; end
-+    def [](i); @rows[i]; end
-+    def cmd_tuples; @rows.size; end
-+  end
++conn.execute("DROP TABLE IF EXISTS embeddable_hosts")
++conn.execute("DROP TABLE IF EXISTS site_settings")
++conn.execute("DROP TABLE IF EXISTS categories")
++conn.execute("CREATE TABLE site_settings (id serial primary key, name varchar(255), value text)")
++conn.execute("CREATE TABLE categories (id serial primary key, name varchar(255))")
++conn.execute("INSERT INTO categories (name) VALUES ('Embed Category')")
++conn.execute("INSERT INTO site_settings (name, value) VALUES ('embed_category', 'Embed Category')")
++conn.execute("INSERT INTO site_settings (name, value) VALUES ('embeddable_hosts', E'one.example.com\\ntwo.example.com')")
 +
-+  class FakeColumn
-+    def string(*); end
-+    def integer(*); end
-+    def timestamps(*); end
-+  end
++settings_before = conn.select_value("SELECT count(*) FROM site_settings").to_i
 +
-+  class Migration
-+    def self.connection; @connection ||= Connection.new; end
-+
-+    class Connection
-+      attr_reader :commands, :site_settings
-+      def initialize
-+        @commands = []
-+        @site_settings = [
-+          { 'name' => 'embed_category', 'value' => 'meta' },
-+          { 'name' => 'embeddable_hosts', 'value' => "example.com\nfoo.com" },
-+          { 'name' => 'uncategorized_category_id', 'value' => '1' }
-+        ]
-+      end
-+    end
-+
-+    def connection; self.class.connection; end
-+
-+    def execute(sql)
-+      conn = connection
-+      conn.commands << [:execute, sql]
-+      if sql =~ /DELETE FROM site_settings WHERE name IN \('embeddable_hosts', 'embed_category'\)/i
-+        conn.site_settings.reject! { |s| ['embeddable_hosts', 'embed_category'].include?(s['name']) }
-+      end
-+      case sql
-+      when /INNER JOIN site_settings.*embed_category/im
-+        Result.new([{ 'id' => '1' }])
-+      when /uncategorized_category_id/
-+        Result.new([{ 'value' => '1' }])
-+      when /SELECT value FROM site_settings WHERE name = 'embeddable_hosts'/
-+        Result.new([{ 'value' => "example.com\nfoo.com" }])
-+      else
-+        Result.new([])
-+      end
-+    end
-+
-+    def create_table(name, opts = {}, &block)
-+      connection.commands << [:create_table, name]
-+      yield FakeColumn.new if block
-+    end
-+
-+    # Simulates Rails' reversal of a `change` block: any `execute` command is
-+    # impossible to invert, so the migration raises IrreversibleMigration.
-+    def revert!
-+      connection.commands.reverse_each do |cmd|
-+        case cmd[0]
-+        when :create_table then next
-+        when :execute then raise IrreversibleMigration, 'execute statements cannot be reverted'
-+        end
-+      end
-+    end
-+  end
-+end
-+
-+class String; def present?; !empty?; end; end
-+class Array; def present?; !empty?; end; end
-+
-+# --- Load the REAL file under test ---
-+require_relative '../../db/migrate/20150818190757_create_embeddable_hosts.rb'
-+
++require_relative '../../db/migrate/20150818190757_create_embeddable_hosts'
 +migration = CreateEmbeddableHosts.new
-+migration.change
 +
-+conn = ActiveRecord::Migration.connection
++up_error = begin; migration.migrate(:up); nil; rescue => e; "#{e.class}: #{e.message[0, 120]}"; end
++settings_after_up = conn.select_value("SELECT count(*) FROM site_settings").to_i
 +
-+results = []
++down_error = begin; migration.migrate(:down); nil; rescue => e; "#{e.class}: #{e.message[0, 160]}"; end
++settings_after_down = conn.select_value("SELECT count(*) FROM site_settings").to_i
 +
-+# 1. The raw SQL DELETE actually removed the site settings rows.
-+deleted = conn.site_settings.map { |s| s['name'] }
-+results << [:settings_destroyed, !(deleted & %w(embeddable_hosts embed_category)).any?]
++puts "up_error=#{up_error.inspect} settings_before=#{settings_before} after_up=#{settings_after_up} " \
++     "down_error=#{down_error.inspect} after_down=#{settings_after_down}"
 +
-+# 2. Rollback of the `change` block raises IrreversibleMigration.
-+begin
-+  migration.revert!
-+  rollback_raised = false
-+rescue ActiveRecord::IrreversibleMigration
-+  rollback_raised = true
-+end
-+results << [:rollback_irreversible, rollback_raised]
-+
-+# 3. There is no `down` method to restore the deleted rows.
-+results << [:no_down_restore, !CreateEmbeddableHosts.instance_methods(false).include?(:down)]
-+
-+if results.all? { |_, v| v }
-+  puts 'RESULT: FAIL: irreversible change block uses raw execute DELETE; rollback raises IrreversibleMigration and deleted site_settings cannot be restored'
++if settings_after_up == 0 && settings_after_down < settings_before
++  puts "RESULT: FAIL: the migration's `change` block deletes site_settings irreversibly — up removed all " \
++       "#{settings_before} rows, rollback #{down_error ? "raised (#{down_error})" : 'did not restore them'} " \
++       "and only #{settings_after_down}/#{settings_before} rows survive"
 +else
-+  puts 'RESULT: PASS'
++  puts "RESULT: PASS: rollback is safe (settings restored: #{settings_after_down}/#{settings_before})"
 +end

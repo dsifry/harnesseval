@@ -1,0 +1,67 @@
+diff --git a/db/migrate/20150818190757_create_embeddable_hosts.rb b/db/migrate/20150818190757_create_embeddable_hosts.rb
+index a0293d3f8d..e5e4fb90b4 100644
+--- a/db/migrate/20150818190757_create_embeddable_hosts.rb
++++ b/db/migrate/20150818190757_create_embeddable_hosts.rb
+@@ -6,28 +6,45 @@ class CreateEmbeddableHosts < ActiveRecord::Migration
+       t.timestamps
+     end
+ 
+-    category_id = execute("SELECT c.id FROM categories AS c
+-                        INNER JOIN site_settings AS s ON s.value = c.name
+-                        WHERE s.name = 'embed_category'")[0]['id'].to_i
++    # The data migration is wrapped in `reversible` so that EVERY raw statement is invertible:
++    # unguarded `execute` calls inside `change` make ActiveRecord raise IrreversibleMigration on
++    # rollback, and the DELETE below would otherwise destroy the legacy allow-list for good.
++    reversible do |dir|
++      dir.up do
++        category_id = execute("SELECT c.id FROM categories AS c
++                            INNER JOIN site_settings AS s ON s.value = c.name
++                            WHERE s.name = 'embed_category'")[0]['id'].to_i
+ 
++        if category_id == 0
++          category_id = execute("SELECT value FROM site_settings WHERE name = 'uncategorized_category_id'")[0]['value'].to_i
++        end
+ 
+-    if category_id == 0
+-      category_id = execute("SELECT value FROM site_settings WHERE name = 'uncategorized_category_id'")[0]['value'].to_i
+-    end
+-
+-    embeddable_hosts = execute("SELECT value FROM site_settings WHERE name = 'embeddable_hosts'")
+-    if embeddable_hosts && embeddable_hosts.cmd_tuples > 0
+-      val = embeddable_hosts[0]['value']
+-      if val.present?
+-        records = val.split("\n")
+-        if records.present?
+-          records.each do |h|
+-            execute "INSERT INTO embeddable_hosts (host, category_id, created_at, updated_at) VALUES ('#{h}', #{category_id}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
++        legacy_hosts = execute("SELECT value FROM site_settings WHERE name = 'embeddable_hosts'")
++        if legacy_hosts && legacy_hosts.cmd_tuples > 0
++          val = legacy_hosts[0]['value']
++          if val.present?
++            val.split("\n").each do |h|
++              execute "INSERT INTO embeddable_hosts (host, category_id, created_at, updated_at) VALUES ('#{h}', #{category_id}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
++            end
+           end
+         end
++
++        execute "DELETE FROM site_settings WHERE name IN ('embeddable_hosts', 'embed_category')"
++      end
++
++      dir.down do
++        rows = execute("SELECT h.host, c.name AS category_name
++                        FROM embeddable_hosts h
++                        LEFT JOIN categories c ON c.id = h.category_id
++                        ORDER BY h.id")
++        if rows.cmd_tuples > 0
++          hosts_value = rows.map { |r| r['host'] }.join("\n")
++          category_value = rows[0]['category_name']
++          execute "INSERT INTO site_settings (name, value) VALUES " \
++                  "('embeddable_hosts', #{connection.quote(hosts_value)}), " \
++                  "('embed_category', #{connection.quote(category_value)})"
++        end
+       end
+     end
+-
+-    execute "DELETE FROM site_settings WHERE name IN ('embeddable_hosts', 'embed_category')"
+   end
+ end
