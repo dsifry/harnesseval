@@ -988,15 +988,15 @@ throughput-limited by the gateway** (glm-vis MRV medium 2,282 s [1,458, 3,305]; 
 ### 6.5 The efficiency frontier (headline figure)
 
 Both figures below are rebuilt on the **true golden set** (§10d: 42 goldens + 110 individually
-test-validated defects): F1′ (nitpicks charged) is the quality axis and comes from the §10d metrics;
-the F1 panel remains the strict-benchmark (goldens-only) axis, and a strict-benchmark version of each
-figure remains in git history (data freeze 2026-09-16).
+test-validated defects = 152) and both use **F2′ — our evaluator** (recall weighted 4:1, nitpick-charged
+precision) for the quality axis, with the axis capped at 0.5 so the distribution is readable. A
+strict-benchmark version of each figure remains in git history (data freeze 2026-09-16).
 
 `analysis/figures/fig_pareto_frontier.png` plots every complete cell as (metered $ per real
-finding = TP + beyond-gold real, log scale) vs F1 (left) and F1′ (right), both with 95% CIs.
+finding = TP + beyond-gold real, log scale) vs **recall** (left) and **F2′** (right), both with 95% CIs.
 The Pareto frontier is **entirely GLM cells**: glm-flash van/CE low, glm-flash CE high,
 glm-flash MRV high, glm-vis MRV medium. glm-vis MRV low sits one step off the frontier with the
-best F1′-per-dollar among sub-$0.30/run cells; the frontier-model harness cells (opus CE/MRV,
+best F2′-per-dollar among sub-$0.30/run cells; the frontier-model harness cells (opus CE/MRV,
 sonnet CE/MRV, fable CE/MRV-gap cells) are dominated on both axes by the GLM harness cells.
 
 `analysis/figures/fig_efficiency_2x2.png` is the four-panel efficiency view, every point with its
