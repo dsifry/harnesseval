@@ -2,7 +2,7 @@
 
 **Claim.** Updating a group without `visible` param unintentionally flips visibility to false
 
-**Verdict in this bundle:** `not_a_bug_unconfirmed` ({'head': 'PASS'})
+**Verdict in this bundle:** `confirmed_regression` ({'head': 'FAIL', 'fixed': 'PASS', 'base': 'PASS'})
 **Fidelity:** `standalone_real_code`  ·  **Authoring model:** `deepseek-4.1-flash-background`
 
 Everything needed to check this yourself is in this directory:
