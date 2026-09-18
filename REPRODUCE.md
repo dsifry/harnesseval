@@ -2,7 +2,7 @@
 
 > **⚠️ Historical (August 2026, tag `v0.8.2-eval`).** This page replicates the **August 384-cell
 > matrix** and the numbers in [`report.md`](report.md). The **current report** is
-> [`REPORT_FINAL.md`](REPORT_FINAL.md); its reproduction chain lives in **`REPORT_FINAL.md` §11**
+> [`REPORT.md`](REPORT.md); its reproduction chain lives in **`REPORT.md` §5**
 > (clone + `git checkout report-2026-09-18`, expected-output checksums, tested-environment record,
 > and the three-mode taxonomy: recompute statistics from saved inputs / re-execute saved defect
 > tests via `analysis/verified_gold/REPLICATION_KIT.md` / model judgments — not reproducible by

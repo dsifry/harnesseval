@@ -2,7 +2,7 @@
 """FINAL REPORT compute engine — reads analysis/final_report_dataset.json and emits
 analysis/final_report_metrics.json plus markdown tables on stdout.
 
-Methodology (REPORT_FINAL.md §Methodology mirrors this):
+Methodology (REPORT.md §2 mirrors this):
   * cell = (model, framework, effort); matrix surface = 8 models x 3 frameworks x 3 efforts
     on the six severity-top PRs (CAMPAIGN_GLOSSARY.md ordering).
   * one selected run per (cell, PR) — selection rule in tools/final_report_extract.py.

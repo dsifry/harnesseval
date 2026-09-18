@@ -4,7 +4,7 @@
 lanes `logs/mx_glm_fullmatrix_run.log` and `logs/mx_glm_vanilla_full_run.log` last wrote at
 09:09/09:31 and were verified dead at 09:45). This table was re-verified after the freeze with the
 handoff §5.5 coverage query and with `tools/verify_hitlist.py --verbose` (hitlist: 111 rows —
-82 done, 29 remaining, all 29 fable). **Nothing in this document or in `REPORT_FINAL.md` uses
+82 done, 29 remaining, all 29 fable). **Nothing in this document or in `REPORT.md` uses
 post-freeze data.**
 
 **Selection basis.** One healthy scored run per (model × framework × effort × PR), selected by
@@ -17,7 +17,7 @@ shown, additional healthy scored runs existed for the same cell and PRs; they we
 **Instruments.** Precision-side verdicts come from rj3 (v3.1 clustered, k=1 — the campaign
 judgement lock) where the selected run has `readjudication3.json`, else the in-run v2 three-way
 adjudicator (`harnesseval/adjudicate.py`, 2026-09-07), else the v1 binary in-run adjudicator
-(pre-2026-09-07 vanilla reuse runs; known to over-count hallucinations — see REPORT_FINAL §3.3).
+(pre-2026-09-07 vanilla reuse runs; known to over-count hallucinations — see REPORT.md §2.3.3).
 "+"-joined entries mean the cell mixes instruments across its selected runs.
 
 **Judges.** Judge per model row (matcher and adjudicator): Anthropic-model rows and GLM rows are
@@ -85,7 +85,7 @@ is not reported except as a capability-floor aside.
 - **Fable compound/metareview (the only top-6 gaps).** `claude-fable-5-1`'s account was rate-capped
   for ~3 days (`logs/campaign_fable.log`, last write 2026-09-13 09:35; orchestrator alive, probing
   every 10 min). All 29 outstanding hitlist rows are fable. The few compound/mrv runs that landed
-  (1–2 of 6 top-6 PRs per cell) are shown in REPORT_FINAL §5 as *coverage gaps, not results*.
+  (1–2 of 6 top-6 PRs per cell) are shown in REPORT.md §3.2 as *coverage gaps, not results*.
 - **Opus/sonnet vanilla = top-6 only.** Held deliberately by operator decision (banked 2026-09-13):
   their vanilla cells reuse healthy August-era runs (era rule allows it for vanilla), and no
   full-50 vanilla fill was queued. Their compound cells are full 50/50; their metareview cells are
@@ -103,7 +103,7 @@ the conservative cutoff for the Lunaroute gateway / streaming / SDK fixes (hando
 GLM cells contain pre-fix runs except glm-vis metareview medium (5/6) and high (2/6) and the
 glm-flash vanilla cells (which selected the post-fix 2026-09-16 runs). The incident was
 operational (wedged calls, silent SDK retries), not a prompt or dataset change; every affected run
-passed the health gate, but per-cell exposure is listed above and repeated in REPORT_FINAL §3.4.
+passed the health gate, but per-cell exposure is listed above and repeated in REPORT.md §2.3.4.
 
 ## What this does to each claim's strength
 
@@ -117,7 +117,7 @@ passed the health gate, but per-cell exposure is listed above and repeated in RE
   outside recall noise).
 - **Effort ladder (low/med/high):** complete top-6 — *moderate*; mostly "not resolved by this
   sample", which is itself the finding.
-- **Top-6 → full-50 extrapolation:** *directly tested* on 33 cells with ≥40/50 PRs (see REPORT_FINAL
+- **Top-6 → full-50 extrapolation:** *directly tested* on 33 cells with ≥40/50 PRs (see REPORT.md
   §4.3): ranking agreement Spearman 0.37–1.00 (median 0.80); recall gaps small (mean ≈ −0.00 to
   +0.01); F1 gaps larger (harness adjP is higher on the top-6, mean +0.08) — so top-6 F1s should
   not be read as full-set F1s without the correction reported there.

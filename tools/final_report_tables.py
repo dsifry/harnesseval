@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Emit REPORT_FINAL.md data tables as markdown (from final_report_metrics.json).
+"""Emit REPORT.md data tables as markdown (from final_report_metrics.json).
 Every cell carries its cluster-bootstrap 95% CI. Writes /tmp/final_report_tables.md."""
 import json, os
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -64,7 +64,7 @@ w()
 # ---- T2 cost matrix
 w("### T2 — cost & throughput per cell (top-6), 95% cluster-bootstrap CIs")
 w()
-w("Metered $ at published list prices retrieved 2026-09-16 (REPORT_FINAL §6.1). tok/run includes")
+w("Metered $ at published list prices retrieved 2026-09-16 (REPORT.md §3.4.1). tok/run includes")
 w("fresh input + cached reads + cache writes + output (incl. reasoning). GLM cells marked * are")
 w("conservative (all input priced at the fresh rate; no per-model token split available).")
 w("Values < $0.01 are shown in cents (¢) to avoid leading-zero drowning; ≥ $0.01 in $.")
@@ -162,7 +162,7 @@ w()
 w("### T9 — expanded-gold matrix (top-6): recall/adjP/F1 against the hidden-gold union")
 w()
 w("Strict = Martian benchmark (goldens only). Expanded = goldens + cross-run/cross-model")
-w("deduplicated confirmed-bug union (see REPORT_FINAL §5b for construction and caveats).")
+w("deduplicated confirmed-bug union (see REPORT.md §3.2 for construction and caveats).")
 w("recall_exp and F1_exp levels are conservative lower bounds; the paired deltas in T10 are")
 w("the robust comparison.")
 w()

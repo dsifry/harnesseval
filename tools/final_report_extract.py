@@ -3,7 +3,7 @@
 
 Extracts, for every healthy scored run of the §8 apples-to-apples surface
 (8 models x 3 frameworks x 3 efforts, era rule applied, health rule applied),
-the per-run quantities needed by REPORT_FINAL.md:
+the per-run quantities needed by REPORT.md:
 
   recall side   : tp / fn (frozen matcher, judge.py) + per-profile TP/FN
                   (Strict/Core/All) derived from summary.json per_golden_matches

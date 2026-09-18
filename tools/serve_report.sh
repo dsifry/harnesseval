@@ -19,8 +19,8 @@ cd "$ROOT" || exit 1
 LAN=$(ipconfig getifaddr en0 2>/dev/null || hostname -I 2>/dev/null | awk '{print $1}')
 echo "serving $ROOT on 0.0.0.0:$PORT"
 echo "  this machine : http://127.0.0.1:$PORT/analysis/figures/interactive_dashboard.html"
-echo "  report (html) : http://127.0.0.1:$PORT/REPORT_FINAL.html"
-echo "  exec summary  : http://127.0.0.1:$PORT/EXECUTIVE_SUMMARY_FINAL.html"
+echo "  report (html) : http://127.0.0.1:$PORT/REPORT.html"
+echo "  exec summary  : http://127.0.0.1:$PORT/EXECUTIVE_SUMMARY.html"
 [ -n "$LAN" ] && echo "  share this   : http://$LAN:$PORT/analysis/figures/interactive_dashboard.html"
 echo "  (viewers need internet for the dashboard's Plotly CDN; the PNGs in analysis/figures/ need nothing)"
 exec python3 -m http.server "$PORT" --bind 0.0.0.0

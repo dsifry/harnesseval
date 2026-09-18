@@ -18,72 +18,88 @@ Companion documents: **`EXECUTIVE_SUMMARY.md`** (1–2 pages, decision-first),
 
 ## Abstract
 
-<!-- WAVE1B: abstract — ~250 words: question, method, four headline results with CIs, caveats. -->
+Agentic code-review harnesses — orchestrators that dispatch several model passes and synthesise the
+result — are increasingly positioned as a step change over single-prompt review, and priced like one.
+This report measures that claim against ground truth that can be *executed*, not only read. Eight models
+(three Claude-family, three OpenAI-family, two open-weight GLM) ran through three frameworks — one-shot
+prompting plus two agentic harnesses — at three reasoning-effort levels on the six highest-severity PRs
+of a public 50-PR benchmark: 2,416 healthy runs, 66 of 72 complete model×framework×effort cells. Quality
+is scored under two lenses: the benchmark's 42 human-verified golden comments, and a primary true golden
+set built by auditing the campaign's own discoveries into 105 individually test-validated defects — each
+owning an executed fail-on-head/pass-on-fix test (147 distinct bugs; a September 2026 audit withdrew
+three and merged two duplicates). Unmatched findings are adjudicated real-bug/hallucination, headline
+numbers carry PR-level cluster-bootstrap intervals, and cost, tokens and wall-clock are metered.
 
-### Draft: executive view (fold into Abstract/Introduction)
+Harnesses beat one-shot prompting on recall in 39 of 42 matched model·effort pairs (mean Δrecall +0.135;
+peak-recall ratio 1.63×). Within harnesses, metareview is the better bet on average (ΔF2′ +17/−4 across
+21 matched pairs) — but no single cell wins: the top cell on our evaluator (F2′ 0.494) is statistically
+indistinguishable from its metareview counterpart (0.491). The best harness cell leads the best
+single-prompt cell 0.494 to 0.406, a 1.22× point estimate whose paired 95% CI (−0.007 to +0.169) crosses
+zero. The winners are open-weight: GLM harness cells reach equal-or-better F2′ at $0.22–$0.63 per review
+against $6.12 for the best commercial harness cell (9.8×–27.6× cheaper), trading wall-clock, not
+tokens.
 
-
-On the six PRs with the highest summed original-golden severity totals of the Martian offline benchmark, a cheap open-weight model
-(`glm-5.3-vision-background`, ~$1.40/$4.40 per M tokens) inside the metareview harness at *low*
-reasoning effort matched the best frontier-model harness cell on golden recall within overlapping CIs
-(0.81 [0.74, 0.86] vs opus-5 harness 0.81–0.83) and F1 (0.73 [0.67, 0.80] vs 0.44–0.57) at
-**7.5% of the opus compound-engineering cost** (6.7–8.5% CI) and about a thirteenth of its token volume (7.7%), with
-wall-clock in the same range (95 s vs 100–110 s per PR). The even cheaper `glm-5.3-flash-background`
-at low effort delivers recall 0.83 [0.74, 0.92] at **0.8% of opus CE-low cost**, at the price of
-more hallucinated noise (adjP 0.54 vs 0.67). The operator's working figures of "~1/200th per token,
-~1/10th per task" are **not supported** by our measured list-price accounting (§3.5.2); the measured
-flash-vs-fable numbers are 1/57 per blended token and 1/38 per task — still a large win, but state
-the measured ratios, not the folklore.
-
-**Update (§3.1, PRIMARY — the hidden-gold set was rebuilt, then deduplicated and individually verified):**
-the the Appendix A unions LLM-merged bug sets were still clusters, carrying both over-counts (one defect restated
-several ways) and under-counts (defects the audit split away). Every candidate was therefore **executed**:
-a test that fails on the PR head, a minimal fix that makes it pass, and — where a sibling defect shares the
-site — an orthogonality check that the bundle's fix leaves it red. Independent duplicate passes
-(six reviewers + fix-location adjudication) removed 23 restatements and container folding removed 17 more,
-while a walk of the audits' own label lists restored 10 dropped defects. The verified universe is
-**42 goldens + 105 individually test-validated defects = 147 distinct bugs**
-(`analysis/verified_gold/GOLD_DEFECT_CATALOG.md`; a 2026-09-18 post-publication audit withdrew 3
-defects whose tests did not demonstrate the claim and merged 2 as duplicates — see
-`WITHDRAWALS_AND_DEDUP_2026-09-18.md`). Under those denominators, the robust findings are at the
-**framework level, not the single-cell level**:
-
-- **Review harnesses substantially outperform one-shot prompting.** Δrecall > 0 in **39/42** matched
-  model·effort pairs (mean **+0.135**; peak-recall ratio **1.63×** versus the best vanilla cell), and every
-cell in the F2′ top six is a harness cell. This is the headline claim, and it is pair-level.
-- **The harness wins are led by open-weight models at an order-of-magnitude lower price.** The best
-  commercial harness cell (opus·CE·medium) reaches F2′ **0.460 at $6.12/review**; GLM-vision harness
-  cells reach equal-or-better F2′ at **$0.22–$0.63/review — 9.8× to 27.6× cheaper** (glm-vis·CE·medium
-  0.494 at $0.63; glm-vis·MRV·low 0.470 at $0.22 — the latter beats the best commercial cell's F2′ at
-  1/28th of its price). The trade-off is **wall-clock, not tokens**: GLM harness cells run slower
-  (median ≈1,500 s vs ≈190 s per review at matched effort — partly gateway-throughput-limited) but
-  consume ~7× *fewer* tokens than the opus harness cells (0.37M vs 2.5M per review); the price gap is
-  how much harness work each model consumed, not per-token price.
-- **Within the harness family, MRV remains the better bet on average**: ΔF2′ point estimates **+17/−4**
-  over 21 matched pairs (7/21 resolve positive at 95%). The best single cell on F2′ happens to be a CE cell
-  (glm-vis·CE·medium **0.494**) but it sits **inside the statistical error range of its MRV counterpart**
-  (glm-vis·MRV·medium 0.491; Δ −0.004, CI [−0.052, +0.052]) and of glm-vis·MRV·high (0.488) — so we claim
-  **no single-cell winner**; cell choice within the GLM-vision harness family is not resolved by this
-  experiment.
-- On F2′ — our evaluator (recall-weighted 4:1, a **chosen preference, not a measured cost**) — the best
-  harness cell leads the best vanilla cell 0.494 to 0.406, a **1.22× point-estimate edge whose paired
-  95% CI (−0.007 to +0.169) crosses zero**; the equal-weight F1′ lens is volume-sensitive and is reported
-  only as a diagnostic. Selecting the best cells after observing their results biases such pairwise
-  comparisons optimistic; read the interval, not the ratio. Where the best single cell still misses, it is **configuration complementarity, not
-blindness, and not measured repeat-run variance**: the best cell finds 88 of the 147 true bugs, and
-of the 52 it missed that any cell found, **all 52** were found by a *different configuration*
-(a different model/framework/effort); with n = 1 run per cell per PR, repeat-run variance is not
-measured by this experiment. The union of all 66 complete cells reaches **140/147 (95%)**.
-
+Caveats: one run per cell per PR (intervals cover PR sampling only); a severity-weighted six-PR sample;
+instrument-sensitive precision. Read the intervals, not the rankings.
 
 ## 1. Introduction
 
-<!-- WAVE1B: introduction — what we were trying to do and why; the four questions; scope and history. -->
+**Why this report exists.** Code review is one of the largest recurring engineering costs in a software
+organisation, and automated review is sold as a way to cut it. The dominant claim is not that a model can
+read a diff — that is table stakes — but that an *agentic harness*, an orchestrator that dispatches
+several model passes and synthesises them, finds materially more real bugs than prompting once. That
+claim is plausible but rarely backed by evidence a buyer can check: quality figures usually rest on
+vendor-chosen examples or human-labelled ground truth nobody can execute, and cost claims are quoted per
+token rather than per review. A working figure inside this project — that open-weight models are
+"~1/200th per token, ~1/10th per task" — is a case in point: at published list prices the real ratios for
+the comparison it describes are **1/57 per blended token and 1/38 per task** (§3.5.2).
+
+**What we set out to do.** We ran the same eight models through one-shot prompting and two agentic
+harnesses at three reasoning-effort levels, over a public 50-PR benchmark spanning five codebases,
+measuring for every cell the four things a buyer cares about: real bugs found, noise a human must triage,
+cost in money/tokens/wall-clock, and whether those answers survive honest adjudication. That last word is
+load-bearing: the benchmark's 42 golden comments are incomplete, so we audited the campaign's entire
+output into a true golden set of 147 distinct bugs in which every hidden defect owns a fail-on-head,
+pass-on-fix test. Where a claim could not be tested that way, we say so rather than rounding in the
+tool's favour.
+
+**The questions.**
+
+1. **Q1 — Do harnesses find more real bugs than one-shot prompting?** If not, the orchestrator premium
+   buys nothing; if so, how large is the gap, and does it hold across models and efforts?
+2. **Q2 — Which framework, effort and model cell should a team actually run?** The practitioner's choice
+   is among cells, so the results are organised around cell-level cost/benefit.
+3. **Q3 — What do those cells cost in money, tokens and wall-clock?** Measured at published list prices
+   with a retrieval date, cache pricing included — the folklore ratios above show how easily cost claims
+   drift.
+4. **Q4 — How much of the apparent signal survives evidence audit and instrument comparability?** A
+   cluster is not a bug, an unmatched finding is not necessarily a hallucination, and a metric that
+   cannot be computed for some cells is not a zero.
+
+**Scope and history.** One selected run per cell per PR — PR-level uncertainty is quantified by cluster
+bootstrap, but repeat-run variance is *not* measured. One benchmark, one 50-PR sample, headline numbers
+from its six highest-severity PRs (§2.4 tests that this is a hard-but-valid slice, not a recall-harder
+one). This report supersedes the August 2026 experiment (`archive/report-2026-08-26-batch083.md`), which
+scored the same frameworks against human labels only; what is new here is executed, audited hidden-gold
+ground truth and per-review metered cost.
+
+**In brief.** Under the strict 42-golden lens, the recommended open-weight cell
+(`glm-5.3-vision-background`, metareview, low effort) matched the best frontier harness on golden recall
+within overlapping CIs and beat it on F1 at **7.5% [6.7–8.5%] of the opus compound-engineering cost**;
+the cheaper
+`glm-5.3-flash-background` reaches recall 0.83 [0.74, 0.92] at **0.8% of the opus CE-low cost**, paying
+in precision (adjP 0.54 vs 0.67). Under the true-set lens the robust results are framework-level:
+harnesses beat one-shot prompting in **39/42** matched pairs (mean Δrecall **+0.135**); **MRV leads CE on
+average** (ΔF2′ **+17/−4**); the best harness cell leads the best vanilla cell **1.22× on F2′** (0.494 vs
+0.406) with a paired CI that **crosses zero**; no single cell wins inside the GLM-vision family (0.494 vs
+0.491); and the best commercial harness cell (opus·CE·medium, F2′ 0.460) costs **$6.12 per review** while
+GLM harness cells reach equal-or-better F2′ at **$0.22–$0.63** (9.8×–27.6× cheaper). Where the best cell
+still misses, it misses *complementarily*: it finds 88 of the 147 true bugs and all 52 of its misses were
+found by another configuration (the union of all 66 complete cells covers 140/147).
 
 ## 2. Methodology
 
 ### 2.1 The lab and the benchmark
-
 
 **Benchmark-defined** (Martian offline code-review benchmark, README
 `third_party/code-review-benchmark/offline/README.md`): 50 PRs across 5 codebases; 173 human-verified
@@ -128,7 +144,44 @@ deduplicate → LLM-judge semantic matching → profile-based scoring.
 
 ### 2.2 What we ran: frameworks, models, efforts, judges
 
-<!-- WAVE1B: runs-matrix — the campaign matrix (8 models x 3 frameworks x 3 efforts, 2,416 healthy runs, cross-family judges, 6-PR primary / full-50 secondary). -->
+**The matrix.** 8 models × 3 frameworks × 3 reasoning-effort levels = 72 cells, a cell being one run of
+one combination on one PR. On the six-PR primary sample 66 cells are complete (396 runs, n = 1 run/PR);
+six fable compound/metareview cells have 1–2 PRs — coverage gaps, not results (`analysis/COVERAGE.md`).
+The campaign holds 2,416 healthy runs, 2,234 of them selected (one per cell×PR); run health and the era
+rule deciding which batches a framework may draw from are in §2.3.2.
+
+**Models.** Three vendor families plus open weights:
+
+| model | family | role in the study |
+|---|---|---|
+| `claude-fable-5-1` | Claude | strongest one-shot performer (best vanilla cell on F2′) |
+| `claude-opus-5` | Claude | frontier reference for the cost comparisons |
+| `claude-sonnet-5` | Claude | mid-tier commercial |
+| `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-6-astra` | OpenAI | commercial comparison family |
+| `glm-5.3-vision-background` | open-weight (GLM) | the recommended cell's model |
+| `glm-5.3-flash-background` | open-weight (GLM) | cheapest strong cell |
+
+**Frameworks.** `vanilla-engineered` is an engineered single prompt (8-category rubric plus severity
+guidance) executed as one model call with no subagents — the baseline of pointing a coding agent at a
+diff. `compound-realistic` (CE) drives the Compound Engineering `ce-code-review` skill: a risk-driven
+persona roster dispatched as parallel subagents, then a separate synthesis pass. `metareview-realistic`
+(MRV) drives the metareview binary: deterministic Go gates (free) plus eight adversarial LLM lenses as
+parallel subagents, single-pass synthesis. Both harness adapters run the real plugin/CLI inside a host
+agent loop, so subagent dispatch is real — with cost-attribution consequences disclosed in §2.3.
+
+**Effort.** `low` / `medium` / `high` map to the provider's reasoning-effort setting (Anthropic: thinking
+disabled at low/medium; OpenAI/GLM: `reasoning_effort`); `xhigh` is outside this matrix (§3.5.4).
+
+**Judges and adjudication instruments.** Golden matching and three-way adjudication
+(`bug` / `important_non_bug` / `hallucination`) use cross-family judges to avoid self-preference:
+`gpt-5.2` for Claude- and GLM-family rows, `claude-opus-4-5-20251101` for OpenAI-family rows, k = 1
+(campaign lock). Three precision instruments appear across cells — `v1` (legacy binary, unable to
+classify nitpick-class findings), `v2` (in-run three-way), `rj3` (v3.1 clustered re-adjudication); their
+comparability limits are disclosed in §2.3.3 and qualify the F1′/F2′ comparisons in §2.6.
+
+**Samples.** Primary: the six PRs with the highest summed original-golden severity weight (§2.4).
+Secondary: the full 50, used only for the selection-effect check on the 33 cells with ≥40/50 healthy
+scored PRs (§3.6). All headline numbers are primary-sample numbers unless labelled otherwise.
 
 ### 2.3 Instruments, comparability, and disclosure rules
 
@@ -239,20 +292,18 @@ top-6 0.62 vs full 0.76), the T3 table is the correction.
 
 ### 2.5 Building ground truth we could execute
 
-<!-- WAVE1B: ground-truth-narrative — the 359->253->152->147 story and its lessons. Source: the construction paragraphs at the head of §3.1, the audit paragraph in §4, and WITHDRAWALS_AND_DEDUP_2026-09-18.md. -->
+**Why the human-labelled gold was not enough.** The benchmark's 42 golden comments are expert-labelled and
+well defined, but they are only what those reviewers happened to write — they cannot tell us whether a
+finding *outside* the list is real, and a buyer comparing harnesses needs exactly that. The campaign's own
+discoveries are the only larger source of candidate truth, and a discovery is only trustworthy if it can be
+checked mechanically. So the ground truth used in §3.1 is not a label set: it is a set of defects each of
+which owns an executed test.
 
-### 2.6 Metrics and the evaluator choice
-
-<!-- WAVE1B: metrics-evaluator — move the 'Which composite to read' / 'Why F2′ is our evaluator' / 'Instrument caveat' passages here from §3.1. -->
-
-## 3. Results
-
-### 3.1 The primary matrix: the true golden set
-
-
-Appendix A's "211 additional bugs" were still *clusters* — produced by an LLM merge over candidate keys, so they
+**From clusters to executed defects.** Appendix A's "211 additional bugs" were still *clusters* — produced by an LLM merge over candidate keys, so they
 carried both over-counts (one defect restated several ways) and under-counts (real defects the audit split
-away and never restored). §3.1 replaces them with **individually executed defects**.
+away and never restored). §3.1 replaces them with **individually executed defects**, and the count chain in
+full runs: **359** raw pre-merge clusters → **253** after the strict re-merge → **152** candidates →
+**147** distinct after the 2026-09-18 audit (42 goldens + 105 verified defects).
 
 **Construction (all artifacts in `analysis/verified_gold/`).** For each candidate the pipeline authored a
 test, ran it on the PR head (must **FAIL**), authored a minimal fix, ran it again (must **PASS**), and — where
@@ -276,22 +327,48 @@ All 105 are `D-verified` (fail-on-head → own-fix-pass). A 2026-09-18 post-publ
 external review — withdrew 3 defects whose tests did not demonstrate the claimed behavior (11059-D28,
 4-D04, 4-D29) and merged 2 as duplicates (11059-D32 → 11059-D19; 11059-D14, already described by the
 original golden); see `analysis/verified_gold/WITHDRAWALS_AND_DEDUP_2026-09-18.md`.
+**What the audit taught us.** Three pipeline failures were found by adversarial re-checking, and each one
+changed the numbers:
+
+- **A test can manufacture its own failure.** One candidate's test mocked the very dependency whose
+  behaviour the claim was about (a mocked `zod` with no default export, while the installed package has
+  one); another's recorded "head failure" was a harness stub error (`blank?` on a String) that fired
+  *before* the claimed behaviour was ever reached; a third failed with an unrelated `NameError` while the
+  claimed exception never fired. Re-reading the **failure reason** in every one of the 110 head logs — not
+  just the red/green exit status — is what surfaced them, and is why the three defects named above were
+  withdrawn rather than counted.
+- **Duplicates can hide across containers.** Two defects described the same missing-secret guard at the
+  same call site, differing only in the HTTP status the fix returns; a third restated a mechanism the
+  original golden already names, fix site included. Candidate pairs were adjudicated with the repo's
+  cross-fix standard — a pair is one defect only if *neither* defect's own minimal fix cures the other's
+  test — which merged 2 and kept 4 borderline pairs (4-D14, 4-D45, 11059-D33-vs-D22, 4-D56-vs-4-D36) as
+  genuinely distinct.
+- **The scoring map itself had a quiet hole.** The finding→defect assignment considered only the first 60
+  findings of each multi-defect bundle: **276 findings were silently dropped** (51 of them in cells that
+  were being credited), and at least one finding was mis-credited (the `embed_by_username.downcase`-on-nil
+  finding went to the queue-flooding defect 4-D04 instead of 4-D56). The repaired pipeline considers all
+  **2,923** findings, permits explicit no-match `null`s (71 of them), and re-verifies low-signal
+  assignments (`DEFECT_ASSIGN_AUDIT.json`). Every §3.1 number was recomputed from the repaired inputs —
+  which is why absolute recall and F2′ levels rose.
+
+The audit's full record, with the evidence behind every decision, is
+`analysis/verified_gold/WITHDRAWALS_AND_DEDUP_2026-09-18.md`.
+
+One honest boundary: the 105 are the defects the pipeline could *execute*. The earlier audits' label lists
+suggest a small number of further claims whose tests did not converge; we report those as in-doubt plumbing
+rather than as verified bugs (`UNDERCOUNT_2026-09-18.md`).
+
+### 2.6 Metrics and the evaluator choice
+
+Three choices shape every number in §3: how defects are counted (the metrics tool below), which composite
+is read (F2′), and which cells are allowed to be compared at all (the instrument caveat). Each is a stated
+choice with a cost, and each is stated here rather than buried in the results.
+
 Metrics: `tools/verified_gold_defect_metrics.py` (cluster bootstrap, B=10,000, seed 20260916); finding-to-
 defect assignment by `tools/verified_gold_defect_assign.py` (repaired 2026-09-18: every one of the 2,923
 findings is now considered — the pre-repair version silently dropped 276 past a 60-finding cap; audit trail
 in `DEFECT_ASSIGN_AUDIT.json`); the section is also exposed as `true_gold_defects` in
 `analysis/final_report_metrics.json`.
-
-**Headline (true set).**
-
-| | cell | recall | adjP (real-bug precision) | **F2′ — our evaluator** | F1′ (diagnostic only) |
-|---|---|---|---|---|---|
-| best harness recall | `claude-opus-5 · CE · medium` | **0.599** | 0.518 | 0.460 | 0.342 |
-| **best harness F2′** | `glm-vis · CE · medium` | 0.544 [0.477, 0.691] | 0.792 | **0.494** [0.443, 0.593] | 0.435 |
-| best vanilla | `claude-fable-5-1 · van · medium` † | 0.367 [0.269, 0.484] | 0.701 | 0.406 | 0.482 |
-
-† v1 binary adjudicator: the nitpick (important_non_bug) category is **structurally unmeasured** for this
-cell — see the instrument caveat below; its adjP′ = adjP by construction.
 
 **Which composite to read.** The campaign's *declared preference* is that a missed bug matters more
 than a false alarm (4:1) — which corresponds to β=2, i.e. **F2**, not F1. That is a **choice of emphasis we
@@ -301,21 +378,10 @@ volume-sensitive in a particular direction — it can rank a terse cell above a 
 below) — but that is the preference debate F1′ and F2′ encode, not an artifact one of them removes; they
 are two legitimate readings and we report both. We lead with **F2′** (recall-weighted, nitpicks charged)
 as the composite, next to **recall** and **adjP** (real-bug precision), and keep **F1′** as the labelled
-equal-weight, nitpick-averse alternative. On F2′ the best harness cell leads the best vanilla cell by a
-**1.22× point estimate** (0.494 vs 0.406; paired 95% CI −0.007 to +0.169 — the interval crosses zero, so
-this is a higher point estimate, not an established win), and the top six cells are all harness cells; of
-the composite scores only F1′ ranks a vanilla cell first (claim-soundness adjP also does, since terse runs
-raise few unsupported claims). Caveat on cell selection: the best harness and best vanilla cells above
+equal-weight, nitpick-averse alternative. Caveat on cell selection: the best harness and best vanilla cells above
 were picked *after* observing the results, which biases exactly this kind of post-hoc pairwise comparison
 optimistic — the MRV-high-vs-vanilla-high pair below resolves at 95% while this best-vs-best pair does not,
 which is the fragility that selection induces.
-
-**Top by F2′ (our evaluator, complete cells only):** glm-vis·CE·medium 0.494 [0.443, 0.593], glm-vis·MRV·medium 0.491,
-glm-vis·MRV·high 0.488, glm-vis·MRV·low 0.470, glm-flash·MRV·high 0.463, opus·CE·medium 0.460 — the top six
-are all harness cells; the best vanilla cell is fable·van·medium at 0.406 (14th; v1 instrument — see the
-caveat below). The ordering within the top three is inside the mutual CIs (glm-vis·CE·medium vs
-glm-vis·MRV·medium: Δ −0.004, CI [−0.052, +0.052]) — a cell-level crown is not established; the
-pair-level facts (39/42 Δrecall; MRV +17/−4 on ΔF2′) are the load-bearing ones.
 
 **Why F2′ is our evaluator (and not F1, F1′, or recall alone).**
 This is a stated preference, not a measurement, and it follows from what a code-review tool is *for*:
@@ -345,24 +411,45 @@ This is a stated preference, not a measurement, and it follows from what a code-
   structurally identical to adjP. Under F2′ (recall weighted 4×) the extra real bugs outweigh the extra
   nitpicks and the harness cells lead — though it is still not a pure bugs-found ranking (opus · CE ·
   medium finds the most real bugs, 88/147, and sits 6th on F2′ at 0.460).
-- **Result**: the best harness cell beats the best vanilla cell by a **1.22× F2′ point estimate**
-  (0.494 vs 0.406; paired 95% CI crosses zero), and the top six cells are all harness
-  cells. The previously-published pair (glm-vis·MRV·high 0.488 vs fable·van·high 0.386, 1.26×) does
-  resolve at 95% under the repaired data (Δ +0.102, CI +0.003 to +0.168) — report both, with the
-  selection caveat above. F1′ is retained as a labelled alternative lens (on it the best vanilla cell,
-  0.482, narrowly leads the best harness cell, 0.472) and `adjP` is reported alongside so the noise story
-  stays visible.
+- **What follows.** On F2′ the best harness cell leads the best vanilla cell by a point estimate
+  whose paired 95% CI crosses zero, while F1′ ranks the best vanilla cell narrowly first (§3.1) —
+  the two composites disagree about the *size* of the harness lead, not about which family occupies
+  the top of the table.
 
 **Instrument caveat (read nitpick-charged metrics with it).** The six selected fable·van·medium and
 fable·van·high runs were adjudicated by the older **v1 binary instrument**, which has no
 `important_non_bug` category (`tools/final_report_extract.py` sets `imp = 0` for v1 by construction). For
 those cells "nitpick-class: 0" means **not measured**, not "precise". Because v1 cells are never charged
 nitpicks, their adjP′/F1′/F2′ are *inflated relative to v2/rj3 cells* — a bias that **favors the vanilla
-side** in every harness-vs-vanilla comparison here, so the harness leads reported above are conservative on
+side** in every harness-vs-vanilla comparison here, so the harness leads reported in §3.1 are conservative on
 this axis. Cross-instrument comparisons of nitpick-charged metrics are only apples-to-apples among
 v2/rj3 cells; `DEFECT_METRICS.json` now carries a per-cell `instruments` field so any consumer can filter.
 
-The raw counts behind that decision:
+## 3. Results
+
+### 3.1 The primary matrix: the true golden set
+
+The true-golden ground truth built in §2.5 gives the results below on the six-PR sample; **F2′** is
+defined and justified in §2.6, and its instrument caveat applies to every nitpick-charged number here.
+
+**Headline (true set).**
+
+| | cell | recall | adjP (real-bug precision) | **F2′ — our evaluator** | F1′ (diagnostic only) |
+|---|---|---|---|---|---|
+| best harness recall | `claude-opus-5 · CE · medium` | **0.599** | 0.518 | 0.460 | 0.342 |
+| **best harness F2′** | `glm-vis · CE · medium` | 0.544 [0.477, 0.691] | 0.792 | **0.494** [0.443, 0.593] | 0.435 |
+| best vanilla | `claude-fable-5-1 · van · medium` † | 0.367 [0.269, 0.484] | 0.701 | 0.406 | 0.482 |
+
+† v1 binary adjudicator: the nitpick (important_non_bug) category is **structurally unmeasured** for this
+cell — see the instrument caveat in §2.6; its adjP′ = adjP by construction.
+
+**Top by F2′ (our evaluator, complete cells only):** glm-vis·CE·medium 0.494 [0.443, 0.593], glm-vis·MRV·medium 0.491,
+glm-vis·MRV·high 0.488, glm-vis·MRV·low 0.470, glm-flash·MRV·high 0.463, opus·CE·medium 0.460 — the top six
+are all harness cells; the best vanilla cell is fable·van·medium at 0.406 (14th; v1 instrument — see §2.6). The ordering within the top three is inside the mutual CIs (glm-vis·CE·medium vs
+glm-vis·MRV·medium: Δ −0.004, CI [−0.052, +0.052]) — a cell-level crown is not established; the
+pair-level facts (39/42 Δrecall; MRV +17/−4 on ΔF2′) are the load-bearing ones.
+
+The raw counts behind the F2′ ranking:
 
 | cell | reported findings | goldens | **hidden-gold defects** | total real | halluc. | nitpick-class. | halluc. % of findings | nitpick % of findings | adjP | adjP′ | F2′ |
 |---|---|---|---|---|---|---|---|---|---|---|---|
@@ -374,8 +461,7 @@ The raw counts behind that decision:
 | astra · MRV · high | 113 | 25 | **24** | 49 | 8 | 8 | 7% | 7% | 0.860 | 0.754 | 0.375 |
 | opus · MRV · high | 511 | 31 | **40** | 71 | 49 | 111 | 10% | 22% | 0.592 | 0.307 | 0.433 |
 
-† v1 binary instrument: the nitpick category is **structurally unmeasured** for these cells (see the
-instrument caveat above), so their adjP′ = adjP and their nitpick-charged metrics are not comparable to
+† v1 binary instrument: the nitpick category is **structurally unmeasured** for these cells (see §2.6), so their adjP′ = adjP and their nitpick-charged metrics are not comparable to
 the v2 cells' — they are inflated in the vanilla cells' favor.
 
 The consequence is visible in the ranking: by **hidden-gold defects found** the leaders are
@@ -389,11 +475,24 @@ is what pushes adjP′ to ~0.36–0.40 and F1′ below vanilla.
 
 **So: for "did it find the real bugs", read hidden-gold defects found / recall (harness cells lead). For
 "how much noise per real bug", read adjP (claim soundness) and the nitpick share. For a single composite,
-read **F2′** — the recall-weighted preference this campaign declares (β=2; not a measured cost — see the
-sensitivity note above), on which the best harness cell leads the best vanilla cell 0.494 to 0.406 (a
+read **F2′** — the recall-weighted preference this campaign declares (β=2; defined and justified in §2.6), on which the best harness cell leads the best vanilla cell 0.494 to 0.406 (a
 point-estimate lead whose paired CI crosses zero). Read **F1′** as the legitimate equal-weight alternative
-on which the best vanilla cell (0.482, v1 instrument) narrowly leads.** Chart:
-`analysis/figures/fig_true_gold_defects_found.png`.
+on which the best vanilla cell (0.482, v1 instrument) narrowly leads.
+
+> **Figure 3.1a — What each cell found, and how much of it is noise** *(interactive — toggle the key to
+> isolate cells; hover bars for counts)*
+>
+> How to read: each cell's reported findings are decomposed into original goldens found, hidden-gold defects
+> found, hallucinations and nitpick-class findings. The nitpick share here is of *adjudicated* findings
+> (goldens + distinct defects + hallucinations + nitpicks) — a different denominator from the report's
+> "nitpick % of findings" column. Cells run on the v1 binary instrument show n/a for the nitpick category,
+> because that instrument cannot measure it.
+>
+> ![Per-cell findings decomposed into goldens, hidden-gold defects, hallucinations and nitpicks](analysis/figures/fig_true_gold_defects_found.png)
+>
+> **Takeaway:** harness cells find substantially more real bugs — `opus · CE · medium` leads with 53
+> hidden-gold defects and 88 real bugs — but they also carry the larger nitpick charge; the vanilla cells
+> report the fewest findings in total.
 
 **What the true set changes.**
 - **Recall levels rise** (denominator 253 → 147 after the re-merge and the 2026-09-18 audit) and the harness
@@ -423,8 +522,18 @@ on which the best vanilla cell (0.482, v1 instrument) narrowly leads.** Chart:
 | calcom/cal.com/pull/14740 | 6 | **17** | 23 |
 | **total** | **42** | **105** | **147** |
 
-**Charts.** `analysis/figures/fig_true_gold_pareto.png` (recall vs F2′, our evaluator, with cluster-bootstrap CIs) and
-`analysis/figures/fig_true_gold_efficiency.png` ($ per true bug found vs recall).
+> **Figure 3.1b — Recall vs F2′ on the 147-bug true golden set** *(interactive — toggle the key to isolate
+> model/framework/effort series; hover cells for their values)*
+>
+> How to read: each point is a complete cell. x is recall against the 147-bug true golden set; y is **F2′**
+> (our evaluator: recall weighted 4:1, with hallucinations and nitpick-class findings charged). Whiskers are
+> 95% cluster-bootstrap CIs. Partial-coverage cells (fewer than six PRs) are drawn open — read them as gaps,
+> not as results.
+>
+> ![Per-cell recall against F2′, with cluster-bootstrap confidence intervals](analysis/figures/fig_true_gold_pareto.png)
+>
+> **Takeaway:** the harness cells occupy the top of the cloud, and the interval on any one cell is wider
+> than the gaps between the leaders — which is why the pair-level facts, not a cell ranking, carry the claim.
 
 **Why the recall levels — and therefore F2′ — look low, and why no cell finds everything.**
 The denominator is not a list of things an agent could reasonably be expected to find; it is what the whole
@@ -453,28 +562,10 @@ So F2′ ≈ 0.49 is the product of an ensemble-union recall (~0.50–0.60) and 
 denominator in hand; read the *ordering* for the comparison.
 
 **Honest limitations.** The adjudication/duplicate judges are non-deterministic (documented); duplicate
-calls used majority rules and fix-location evidence rather than a single judge's word. **2026-09-18
-post-publication audit (triggered by external review)**: all 110 defect head-logs' failure reasons were
-re-audited (not just red/green exit status); three verified defects whose tests did not demonstrate the
-claimed behavior were **withdrawn** (11059-D28 — its test mocks zod with `default: undefined` while the
-installed zod exports a default; 4-D04 — its head failure is a harness stub error (`blank?` on String)
-fired before the claimed queue-flooding behavior, and its fix also edits production code to survive
-incomplete stubs; 4-D29 — its head failure is a `NameError` (uninitialized constant) while the claimed
-`URI::InvalidURIError` never fired on the recorded toolchain); two were **merged as duplicates**
-(11059-D32 → 11059-D19 — same missing-secret guard at the same site, only the expected status differs;
-11059-D14 — already described, fix-site included, by the original golden). The flagged borderline pairs
-were adjudicated with the cross-fix standard and kept (4-D14, 4-D45, 11059-D33-vs-D22, 4-D56-vs-4-D36);
-see `WITHDRAWALS_AND_DEDUP_2026-09-18.md`. The finding→defect assignment was repaired the same day: the
-old scorer considered only the first 60 findings of each multi-defect bundle (276 findings silently
-dropped, 51 of them in cells that were being credited), and at least one finding was mis-assigned
-(the `embed_by_username.downcase`-on-nil finding was credited to the queue-flooding defect 4-D04
-instead of 4-D56); the repaired pipeline considers all 2,923 findings, permits explicit no-match nulls
-(71), and re-verifies low-signal assignments (`DEFECT_ASSIGN_AUDIT.json`). Every §3.1 number here was
-recomputed from the repaired inputs — absolute recall/F2′ levels rose because fuller assignment credits
-more defect hits. The 105 remaining defects are those the pipeline could *execute*; the earlier audits'
-label lists suggest a small number of further claims whose tests did not converge, which we report as
-in-doubt plumbing rather than as verified bugs (see `UNDERCOUNT_2026-09-18.md`).
-
+calls used majority rules and fix-location evidence rather than a single judge's word. The ground-truth
+construction, the 2026-09-18 evidence audit (3 withheld from the verified universe, 2 merged as
+duplicates) and the finding→defect assignment repair are described in §2.5, with per-defect evidence in
+`WITHDRAWALS_AND_DEDUP_2026-09-18.md`.
 
 ### 3.2 The strict benchmark lens (42 goldens), kept for comparison
 
@@ -579,42 +670,18 @@ harness is only as good as the models it actually calls. (c) *adjP is where fron
 bleed*: opus-5 CE/MRV adjP 0.30–0.44 vs glm-vis MRV medium 0.85 and astra MRV low 0.93 — the
 expensive harnesses emit large volumes of non-golden content of which more is judged waste.
 
-Figures: `analysis/figures/fig_recall_grid.png` (recall with CIs per cell),
-`fig_cost_per_cell.png`, `fig_effort_ladder.png`.
+> **Figure 3.2a — Recall with CIs, per cell (strict 42-golden lens)** *(static figure)*
+>
+> How to read: one bar per cell, grouped by framework within model; bar height is recall against the
+> benchmark's 42 human-verified golden comments, with 95% cluster-bootstrap whiskers. This is the
+> benchmark's own lens, kept here for comparison with the true-golden results in §3.1.
+>
+> ![Per-cell recall with confidence intervals under the strict benchmark lens](analysis/figures/fig_recall_grid.png)
+>
+> **Takeaway:** under the benchmark's own lens, harnesses raise recall where the base model is weak or
+> mid-tier and leave it unchanged or worse at the top of the frontier (reading (a) above).
 
 
-
-> **SUPERSEDED by §3.1 (levels only; the Appendix A unions were intermediate steps).** The T9/T10/T11 unions below overcount distinct
-> bugs ~17× (paraphrase splits) and, due to a since-fixed extract bug, omit all
-> rj3-adjudicated runs' confirmed bugs (706 findings, mostly vanilla cells). The paired
-> Δ *directions* survive; all levels should be read from §3.1. Retained for provenance.
-
-The strict-benchmark numbers above answer the question Martian defines: *does the tool
-find the human-verified golden comments, without hallucinating?* They deliberately do
-not credit findings outside the golden set — which is the right call for a benchmark,
-but the wrong lens for a buyer comparing a single-pass reviewer against a harness:
-a harness that finds 55 real bugs but only 8 goldens scores the same recall as a
-vanilla that finds 8 goldens, and the 47 real-but-ungold bugs are invisible to the
-metric. This section separates the two analyses and recomputes recall/precision/F1
-against an **expanded ground truth**.
-
-**Construction (our extension, fully disclosed).** Per PR, take every confirmed-bug
-finding (rj3 `bug` / in-run `real_but_ungold`) across **ALL healthy scored runs of all
-models/frameworks/efforts** (era-legal universe, low/medium/high). Cluster them with a
-**file:startline:endline primary key** extracted from each finding's own text prefix
-(the `tools/anchor_matcher.py` pattern; 45% of bugtexts carry an anchor), with
-rj3-normalization + difflib 0.75 (bucketed by file path) as the fallback for anchorless
-findings. The expanded set = goldens ∪ distinct keys (T11). Per cell:
-tp_exp = golden TP + own distinct keys; fn_exp = expanded size − tp_exp;
-adjP_exp = tp_exp/(tp_exp + hallucinations); F1/F2_exp from the pair. Cluster bootstrap
-CIs (B=10,000, rng3 — frozen numbers above untouched). important_non_bug is excluded
-(bugs only). **Caveats:** no LLM semantic-merge pass, so cross-model rewordings stay
-separate and the union is overcounted ⇒ recall_exp levels are conservative lower bounds;
-distinct issues sharing one anchor can over-merge; golden-vs-cluster overlaps may
-double-count a few entries. The robust quantity is the paired Δ (T10), which is stable
-across all three clustering variants we tried (verbatim, difflib-only, anchor-primary).
-
-**T11 — union sizes per top-6 PR**
 
 
 ### 3.3 CE vs MRV on the same PRs
@@ -696,7 +763,7 @@ Pairs-level aggregate: mean ΔF1 +0.044 [+0.019, +0.073], mean ΔF1' +0.042 [+0.
 | astra MRV low | 6 | +0.123 [+0.081, +0.171] | + |
 | astra MRV medium | 6 | +0.087 [+0.007, +0.130] | + |
 
-Resolved positive 39/43 (vs 38/42 under the frozen key-union, 17/42 strict).
+Resolved positive 39/43 on this superseded semantic-union metric (vs 38/42 under the frozen key-union, 17/42 strict); the primary true-gold count is 39/42.
 
 
 ### 3.4 Cost, tokens, wall-clock, and the open-weight story
@@ -807,9 +874,29 @@ Values < $0.01 are shown in cents (¢) to avoid leading-zero drowning; ≥ $0.01
 | glm-flash | MRV | high | $0.31726 [$0.21397, $0.42794] | 0.35916¢ [0.22542¢, 0.55112¢] | $0.05949 [$0.0394, $0.0844] | 743,571 [527,665, 969,148] | 2,984 [1,797, 4,190] | 0.04267¢ [0.04037¢, 0.04408¢] |
 
 
+> **Figure 3.4a — Cost per review, per cell (log scale)** *(static figure)*
+>
+> How to read: one point per cell; y is metered dollars per PR review at published list prices on a log
+> scale, with 95% cluster-bootstrap whiskers; cells are ordered by framework within model.
+>
+> ![Metered cost per PR review for every cell, log scale, with confidence intervals](analysis/figures/fig_cost_per_cell.png)
+>
+> **Takeaway:** the GLM cells sit one to two orders of magnitude below the frontier-model harness cells —
+> a difference in how many tokens each harness consumes, not in per-token price (§3.4.3).
+
 #### 3.4.3 Why one harness is cheap and another is not (token composition)
 
-`analysis/figures/fig_token_composition.png`: the frontier harnesses are *input-cache* machines —
+> **Figure 3.4b — Where the tokens go** *(static figure)*
+>
+> How to read: stacked token composition per review (fresh input, cached input, output) for each cell; the
+> cached-input share is what makes a frontier harness's *blended* rate look cheap.
+>
+> ![Token composition per cell, split into fresh input, cached input and output](analysis/figures/fig_token_composition.png)
+>
+> **Takeaway:** the frontier harnesses are input-cache machines — roughly 75–90% of their tokens are cached
+> reads at a tenth of list input price — while the GLM harnesses simply burn 10–20× fewer tokens.
+
+The frontier harnesses are *input-cache* machines —
 opus-5 CE/MRV burn 1.7–4.4M tokens per PR, ~75–90% of them **cached reads at 10% of list input**
 ($0.50/Mtok), which is why their blended rate drops to 0.14–0.18 ¢ per k-token ($0.0014–$0.0018). The GLM harnesses burn
 10–20× fewer total tokens (100–570k/PR) at list input rates ($1.40 fresh / $0.26 cached for
@@ -820,7 +907,18 @@ call is ~100k tokens — but they find the fewest real issues (T4 recall deltas)
 
 #### 3.4.4 Wall-clock
 
-`analysis/figures/fig_wallclock.png` + the wall column of T2. At **low effort** the recommendation
+> **Figure 3.4c — Wall-clock per review** *(static figure)*
+>
+> How to read: per-cell wall-clock seconds per PR review (median with CI), at each effort level. The same
+> numbers appear in the wall column of T2.
+>
+> ![Median wall-clock seconds per review, per cell](analysis/figures/fig_wallclock.png)
+>
+> **Takeaway:** at low effort the GLM cells are latency-competitive (`glm-vis MRV low` 95 s/run vs
+> `opus-5 CE low` 110 s); at medium and high effort the GLM lane is gateway-throughput-limited — an
+> operational difference, not a quality one (§3.5.5).
+
+At **low effort** the recommendation
 cells are latency-competitive with everything: glm-vis MRV low 95 s/run [77, 114] vs opus-5 CE low
 110 s [99, 121] and opus-5 MRV low 100 s [91, 108]. At **medium/high effort the GLM lane is
 throughput-limited by the gateway** (glm-vis MRV medium 2,282 s [1,458, 3,305]; glm-flash MRV high
@@ -833,7 +931,20 @@ test-verified distinct defects = 147) and both use **F2′ — our evaluator** (
 precision) for the quality axis, with the axis capped at 0.5 so the distribution is readable. A
 strict-benchmark version of each figure remains in git history (data freeze 2026-09-16).
 
-`analysis/figures/fig_pareto_frontier.png` plots every complete cell as (metered $ per real
+> **Figure 3.4d — The efficiency frontier: cost vs recall, and cost vs F2′** *(interactive — toggle the key
+> to isolate families; hover points for cell values)*
+>
+> How to read: every complete cell plotted as metered dollars per real finding (log x) against recall (left
+> panel) and F2′ (right panel), both with 95% CIs; the frontier is the upper-left envelope. The axis is
+> capped at 0.5 so the distribution stays readable.
+>
+> ![Cost/quality frontiers: dollars per real finding versus recall and versus F2′](analysis/figures/fig_pareto_frontier.png)
+>
+> **Takeaway:** the F2′ frontier is entirely GLM cells, while the recall frontier ends at the premium
+> `opus · CE · medium` cell — two different purchases: recall is what the opus cell buys, F2′-per-dollar is
+> what the GLM cells buy.
+
+The frontier figure plots every complete cell as (metered $ per real
 finding = TP + beyond-gold real, log scale) vs **recall** (left) and **F2′** (right), both with 95% CIs.
 The **recall frontier is not entirely GLM**: glm-flash van/CE low, glm-flash MRV low, glm-flash MRV high,
 glm-vis CE medium, and **opus CE medium** — the overall recall maximum (0.599 at $0.072/real) — so the
@@ -846,12 +957,33 @@ against glm-vis MRV low's ~2.1 at $0.22); the frontier-model harness cells (opus
 sonnet CE/MRV, fable CE/MRV-gap cells) are dominated on both axes by the GLM harness cells in the F2′
 panel — but not in the recall panel, where opus CE medium holds the frontier.
 
-`analysis/figures/fig_efficiency_2x2.png` is the four-panel efficiency view, every point with its
+> **Figure 3.4e — Four views of efficiency** *(static figure)*
+>
+> How to read: four panels, every point with its 95% CI — **(a)** price/performance ($ per PR review vs
+> F2′), **(b)** F2′ per dollar, **(c)** F2′ vs wall-clock per run, **(d)** $ per true bug found vs recall.
+>
+> ![Four-panel efficiency view: price/performance, F2′ per dollar, F2′ vs latency, and cost per true bug](analysis/figures/fig_efficiency_2x2.png)
+>
+> **Takeaway:** panel (d) is the buyer's panel — the GLM harness cells buy F2′ for a small fraction of what
+> the frontier-model cells pay — while the recall axis in panel (a) still favours the premium cells.
+
+The four-panel efficiency view puts every point with its
 95% CI: **(a)** price/performance ($ per PR review vs F2′ — how much quality a dollar buys *per
 review*), **(b)** F2′ per $ (approx CI = F2′ CI / cost point), **(c)** F2′ vs wall-clock per
 run (latency/quality; the low-effort GLM cells sit in the fast/high-F2′ corner), and
 **(d)** $ per true bug found vs recall (true golden set; the buyer's panel: what a caught real
 bug costs, against how many are caught).
+
+> **Figure 3.4f — What a caught real bug costs** *(static figure)*
+>
+> How to read: dollars per true bug found (true golden set: 42 goldens + 105 verified defects) against
+> recall, per cell, with 95% CIs.
+>
+> ![Dollars per true bug found versus recall, per cell](analysis/figures/fig_true_gold_efficiency.png)
+>
+> **Takeaway:** the harness cells' cheap end is very cheap per real bug (GLM rows), and the premium
+> frontier cells pay multiples of that for their recall — the same trade as figure 3.4d, from the
+> cost-per-bug side.
 
 **Interactive versions of all main figures** — single-file HTML, no server needed:
 `analysis/figures/interactive_dashboard.html` (open in any browser; built by
@@ -860,12 +992,10 @@ drives every panel at once. All quality metrics presented are the expanded (real
 numbers; strict benchmark numbers appear as the comparison (panel 1f). Sections: five independent panels, each its own test with a
 question-as-title, how-to-read note, own CI toggle (off by default), own chart, takeaway
 callout and click-details card —
-1a price/performance ($/run vs F2′); 1b latency/quality (wall vs F2′); 1c cost per true bug ($/true bug vs F2′)
-($/TP vs recall); 1d cost per real finding ($/real vs F1); 1e token volume (tokens/run vs F1);
-then (1f) strict-vs-expanded recall dumbbell (the hidden-gold flip); then (2) effort
-ladder per framework; (3) token composition per effort; (4) sample-bias check — dumbbell
-of the pairs; (5) per-PR selection view. The details cards carry the expanded-gold
-metrics per cell. (2) effort ladder per framework; (3) token composition
+(1a) price/performance ($/run vs F2′); (1b) latency/quality (wall vs F2′); (1c) cost per true bug
+($/TP vs recall); (1d) cost per real finding ($/real vs F1); (1e) token volume (tokens/run vs F1);
+(1f) strict-vs-expanded recall dumbbell (the hidden-gold flip); (2) effort ladder per framework;
+(3) token composition
 per effort; (4) sample-bias check — a dumbbell chart of the pairs (full-50 gray vs top-6 colored,
 sorted by gap, recall/F1 toggle); (5) per-PR selection view (severity vs recall, the six chosen
 PRs in bold color). Style follows the OWID/NYT minimal-chrome school:
@@ -1149,13 +1279,32 @@ on average, model *rankings* mostly agree (Spearman 0.80 median; CE-low 0.37 the
 fable compound/metareview cells are gaps (rate-cap), opus/sonnet vanilla are top-6-only by operator
 decision, GLM partial fills were stopped at the data freeze.
 
+> **Figure 3.6a — Does the six-PR sample distort the picture?** *(interactive — toggle the key to isolate
+> cells; hover for values)*
+>
+> How to read: each point compares a cell's score on the selected six highest-severity PRs (y) with the
+> same score on the full 50-PR benchmark (x). Points above the diagonal therefore did *better* on the
+> selected six than on the full set — the opposite of a "these PRs were harder than average" reading.
+>
+> ![Top-6 versus full-50 scores per cell, showing the selection effect](analysis/figures/fig_selection_effect.png)
+>
+> **Takeaway:** recall is essentially unbiased by the selection (mean gap +0.006, median +0.014), while
+> harness F1 is overstated by about +0.084 on average; model rankings mostly agree (Spearman 0.80 median).
+
 
 ### 3.7 Effort ladder and cost curves
 
 
-`analysis/figures/fig_effort_ladder.png` (F1 vs $/run per model within each framework, CIs on both
-axes): the GLM rows buy F1 with dollars at low effort and then flatten; the frontier rows start
-high-cost and mostly move sideways (§3.5.3). `fig_cost_per_cell.png`: $/run per cell, log scale, CIs.
+> **Figure 3.7a — The effort ladder: does more thinking buy more quality?** *(static figure)*
+>
+> How to read: F1 against dollars per run for each model within each framework, with CIs on both axes.
+> Movement up-and-right is buying quality with money; movement sideways is not.
+>
+> ![F1 versus dollars per run, per model, within each framework](analysis/figures/fig_effort_ladder.png)
+>
+> **Takeaway:** the GLM rows buy F1 with dollars at low effort and then flatten, while the frontier rows
+> start high-cost and mostly move sideways (§3.5.3) — higher thinking budgets do not reliably buy more bugs.
+> Cost per cell is figure 3.4a.
 
 
 ## 4. What we cannot claim
@@ -1388,7 +1537,7 @@ with adjP/adjP′. CIs: cluster bootstrap, B=10,000, seed 20260916, rng5=SEED+4;
 - **MRV still beats CE**: mean ΔF1 **+0.044 [+0.019, +0.073]**
   (17+/4− over 21 paired model·effort
   comparisons); ΔF1′ +0.042 [+0.024, +0.063].
-- **Harness-vs-vanilla holds**: 39/43 paired Δrecall_sem resolve positive.
+- **Harness-vs-vanilla holds**: 39/43 paired Δrecall_sem resolve positive on this superseded semantic-union metric (primary true-gold count: 39/42).
 - Rule A vs B differ by <0.01 on harness cells (e.g. glm-vis·MRV·high 0.435 vs
   0.443); they matter more for weak cells.
 
@@ -1410,7 +1559,7 @@ with adjP/adjP′. CIs: cluster bootstrap, B=10,000, seed 20260916, rng5=SEED+4;
    227 are in the PR's changed files vs **1** out-of-diff.
 
 
-#### T12 — verified-union matrix (Appendix A; superseded by T16): per-cell metrics with 95% cluster-bootstrap CIs
+#### T12 — verified-union matrix (Appendix A; superseded by the §3.1 primary matrix): per-cell metrics with 95% cluster-bootstrap CIs
 
 Union = distinct real bugs after (a) a stricter whole-PR re-merge and (b) removal of clusters verified
 to duplicate a golden (47 across the six PRs). recall_sem = (goldens found + additional bugs found) /
@@ -1493,7 +1642,7 @@ adjP charges only hallucinations; adjP' also charges nitpicks (user lens: everyt
 | sonnet-5 CE low | 6 | 0.079 [0.062, 0.102] | 0.800 | 0.426 | 0.144 [0.115, 0.180] | 0.133 [0.108, 0.160] |
 
 
-#### T15 — verified key-union per PR (Appendix A; superseded by T17)
+#### T15 — verified key-union per PR (Appendix A; superseded by the §3.1 per-PR table)
 
 | PR | goldens | verified additional | verified universe | merged clusters | golden-duplicates removed |
 |---|---|---|---|---|---|
@@ -1509,6 +1658,37 @@ Per-bug verification cards (location, why-real, replication, found-by): `analysi
 
 
 ### A.2 Expanded-gold union tables (superseded by §3.1)
+
+> **SUPERSEDED by §3.1 (levels only; the Appendix A unions were intermediate steps).** The T9/T10/T11 unions below overcount distinct
+> bugs ~17× (paraphrase splits) and, due to a since-fixed extract bug, omit all
+> rj3-adjudicated runs' confirmed bugs (706 findings, mostly vanilla cells). The paired
+> Δ *directions* survive; all levels should be read from §3.1. Retained for provenance.
+
+The strict-benchmark numbers above answer the question Martian defines: *does the tool
+find the human-verified golden comments, without hallucinating?* They deliberately do
+not credit findings outside the golden set — which is the right call for a benchmark,
+but the wrong lens for a buyer comparing a single-pass reviewer against a harness:
+a harness that finds 55 real bugs but only 8 goldens scores the same recall as a
+vanilla that finds 8 goldens, and the 47 real-but-ungold bugs are invisible to the
+metric. This section separates the two analyses and recomputes recall/precision/F1
+against an **expanded ground truth**.
+
+**Construction (our extension, fully disclosed).** Per PR, take every confirmed-bug
+finding (rj3 `bug` / in-run `real_but_ungold`) across **ALL healthy scored runs of all
+models/frameworks/efforts** (era-legal universe, low/medium/high). Cluster them with a
+**file:startline:endline primary key** extracted from each finding's own text prefix
+(the `tools/anchor_matcher.py` pattern; 45% of bugtexts carry an anchor), with
+rj3-normalization + difflib 0.75 (bucketed by file path) as the fallback for anchorless
+findings. The expanded set = goldens ∪ distinct keys (T11). Per cell:
+tp_exp = golden TP + own distinct keys; fn_exp = expanded size − tp_exp;
+adjP_exp = tp_exp/(tp_exp + hallucinations); F1/F2_exp from the pair. Cluster bootstrap
+CIs (B=10,000, rng3 — frozen numbers above untouched). important_non_bug is excluded
+(bugs only). **Caveats:** no LLM semantic-merge pass, so cross-model rewordings stay
+separate and the union is overcounted ⇒ recall_exp levels are conservative lower bounds;
+distinct issues sharing one anchor can over-merge; golden-vs-cluster overlaps may
+double-count a few entries. The robust quantity is the paired Δ (T10), which is stable
+across all three clustering variants we tried (verbatim, difflib-only, anchor-primary).
+
 
 #### T11 — hidden-gold union sizes per top-6 PR
 
@@ -1527,7 +1707,7 @@ Per-bug verification cards (location, why-real, replication, found-by): `analysi
 #### T9 — expanded-gold matrix (top-6): recall/adjP/F1 against the hidden-gold union
 
 Strict = Martian benchmark (goldens only). Expanded = goldens + cross-run/cross-model
-deduplicated confirmed-bug union (see REPORT.md §3.2 for construction and caveats).
+deduplicated confirmed-bug union (construction and caveats above in this appendix).
 recall_exp and F1_exp levels are conservative lower bounds; the paired deltas in T10 are
 the robust comparison.
 

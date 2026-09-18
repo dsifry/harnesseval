@@ -20,7 +20,7 @@ ap.add_argument("--model", default=None)
 ap.add_argument("--rj-since", default=None, help="only use readjudication3.json newer than this, e.g. '2026-09-11 21:50'")
 ap.add_argument("--beta", type=float, default=2.0,
                 help="F-beta weighting (default 2.0 = recall-weighted, the benchmark default); "
-                     "emitted as an extra Fb column (REPORT_FINAL extension 2026-09-16)")
+                     "emitted as an extra Fb column (REPORT.md extension 2026-09-16)")
 args = ap.parse_args()
 
 cutoff = time.mktime(time.strptime(args.rj_since, "%Y-%m-%d %H:%M")) if args.rj_since else 0

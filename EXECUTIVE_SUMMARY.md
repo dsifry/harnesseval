@@ -7,11 +7,25 @@ the manifold campaign (50-PR Martian offline benchmark, 8 models × 3 frameworks
 
 ## Background
 
-<!-- WAVE1B: background — 3-4 sentences of context: why AI code review is a live spend decision; the claim under test (agentic harnesses vs one-shot prompting); why the usual evidence is weak and what makes this evaluation different (ground truth that executes, not just human labels; cost accounting at list prices; pre-registered honest-adjudication rules). -->
+Engineering organisations are being asked to fund AI code review, and the claim being sold is
+specific: an *agentic harness* — an orchestrator that dispatches several model passes and synthesises
+them — finds materially more real bugs than prompting a model once, and is worth its extra cost. The
+evidence normally offered is hard to audit: vendor-chosen examples, human-labelled ground truth nobody
+can execute, and cost claims quoted per token rather than per review. This evaluation was built to be
+checked — its hidden-gold ground truth is executable, its headline numbers carry intervals, and its costs
+are metered at published list prices.
 
 ## How we evaluated
 
-<!-- WAVE1B: how-we-evaluated — one short paragraph: 2,416 healthy runs across 8 models x 3 frameworks x 3 efforts on a 50-PR public benchmark; ground truth = 42 original golden comments + 105 individually test-validated hidden defects (147 distinct bugs), post-audited 2026-09-18; cluster-bootstrap CIs on every headline number; cost/token/latency metered at published list prices. Note the two lenses (strict 42-golden benchmark vs the 147-bug true set) and that both are reported. -->
+Eight models (three Claude-family, three OpenAI-family, two open-weight GLM) × three frameworks (an
+engineered single prompt and two agentic harnesses) × three reasoning-effort levels were run on a public
+50-PR benchmark spanning five codebases: 2,416 healthy runs, with 66 of 72 cells complete on the six
+highest-severity PRs that carry the headline numbers. Quality is reported under two lenses — the
+benchmark's 42 human-verified golden comments, and our primary true golden set of 42 goldens plus 105
+individually test-validated hidden defects (147 distinct bugs), audited on 2026-09-18 when three defects
+were withdrawn and two merged. Headline numbers carry PR-level cluster-bootstrap intervals; cost, token
+and latency figures are metered at list prices; and the design is one run per cell per PR, so the
+intervals cover PR variation, not run-to-run variance.
 
 ## The recommendation
 
@@ -34,7 +48,7 @@ what carries. Effort-matched claim
 soundness agrees at low effort (adjP **0.809 vs 0.703**, vision ahead); at high effort flash is
 nominally ahead (0.924 vs 0.916). So the two lenses agree on the harness family and, at low effort, both favor vision
 on quality — while flash remains the pick where API budget dominates, and the evidence does not establish
-that vision's extra cost buys net developer savings (developer time is unmeasured). §10d. If
+that vision's extra cost buys net developer savings (developer time is unmeasured). §3.1. If
 noise-tolerance is high and budget dominates, `glm-5.3-flash-background` at low effort delivers recall
 0.83 [0.74–0.92] at **0.8% of the opus cost** — but with visibly lower precision (0.54) and fewer real
 findings beyond the golden set where that drop is demonstrated (§"where it stops holding").
@@ -71,7 +85,7 @@ the fastest frontier low-effort cell)
   Sep-15 gateway/SDK fixes — quality direction unknown, likely operational; (3) the beyond-gold
   breadth drop is flash's where it is demonstrated: −39 [−62, −16] (CE low), −104 [−179, −45]
   (CE medium), −201 [−266, −141] (MRV medium) per cell — but at the recommended MRV-low cell
-  the delta is +3 [−56, +64], i.e. **no demonstrated drop there** (§7.4 T6); prefer vision for
+  the delta is +3 [−56, +64], i.e. **no demonstrated drop there** (§3.5.4, T6); prefer vision for
   breadth on the cells where the drop is shown, not as a blanket rule; (4) the numbers
   are for the six *hardest* PRs — recall generalises to the full 50 (mean gap +0.006, model
   rankings mostly preserved) but harness F1 on the top-6 overstates full-set F1 by ~+0.08
@@ -80,7 +94,7 @@ the fastest frontier low-effort cell)
 
 ## Our results are the expanded (real-world) numbers; the strict benchmark is the artificial lens kept for comparison
 
-We report the **verified true-golden-set analysis** (REPORT_FINAL §10d) as our results throughout; the strict benchmark (goldens only) and the earlier unions (§5b, §10b, §10c) are kept for provenance.
+We report the **verified true-golden-set analysis** (REPORT.md §3.1) as our results throughout; the strict benchmark (goldens only) and the earlier unions (§3.2, Appendix A) are kept for provenance.
 
 The benchmark's golden set is a floor, not a ceiling. We rebuilt the hidden-gold set from every
 confirmed-bug finding across all 2,416 healthy runs (hallucinations and nitpicks excluded at the
@@ -122,7 +136,7 @@ Under those honest denominators, the load-bearing findings are **pair-level, not
 score 1.0 and be useless), so it must be paired with a noise term — and the only free parameter is β, the
 ratio at which a missed bug is charged against a false alarm. We *choose* β=2 to weight recall 4:1
 because missed bugs matter more to us than false alarms; that is not a measured developer cost, and the
-report (§10d) shows a literal 4×FN+noise utility can favor either cell depending on the pair — no economic
+report (§3.1) shows a literal 4×FN+noise utility can favor either cell depending on the pair — no economic
 claim is safe without an explicit utility model. F1′ (β=1) is a legitimate alternative preference, not an
 artifact to be "fixed"; it is reported alongside because adjP′-charged rankings are volume-sensitive — and
 comparable only among cells whose adjudicator *measures* nitpicks: the fable vanilla cells run the older

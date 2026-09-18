@@ -100,7 +100,8 @@ fig.suptitle(textwrap.fill(
     f"Cost/quality frontier, verified true golden set ({TG_GOLDENS} goldens + {TG_DEFECTS} additional bugs "
     f"= {TG_DEN} true bugs) — top-6 cells", width=80), fontsize=9)
 fig.tight_layout()
-fig.savefig(f"{FIG}/fig_pareto_frontier.png"); plt.close(fig)
+fig.savefig(f"{FIG}/fig_pareto_frontier.png"); fig.savefig(f"{FIG}/fig_pareto_frontier.svg")   # vector twin, same basename
+plt.close(fig)
 
 # ------------------------------------------------------ 2. cost per cell bars
 fig, axes = plt.subplots(1, 3, figsize=(14, 6), sharey=False)
@@ -127,7 +128,8 @@ for ax, e in zip(axes, EFFORTS):
     ax.set_ylabel("metered $ / run (top-6, log)")
 fig.suptitle("Metered cost per PR-review run per cell, with 95% cluster-bootstrap CIs", fontsize=9)
 fig.tight_layout()
-fig.savefig(f"{FIG}/fig_cost_per_cell.png"); plt.close(fig)
+fig.savefig(f"{FIG}/fig_cost_per_cell.png"); fig.savefig(f"{FIG}/fig_cost_per_cell.svg")   # vector twin, same basename
+plt.close(fig)
 
 # ------------------------------------------------------ 3. token composition
 sel = {}
@@ -161,7 +163,8 @@ for ax, e in zip(axes, EFFORTS):
         ax.legend(fontsize=6)
 fig.suptitle("Token composition per run: why a harness is cheap or expensive (fresh/cached/write/output)", fontsize=9)
 fig.tight_layout()
-fig.savefig(f"{FIG}/fig_token_composition.png"); plt.close(fig)
+fig.savefig(f"{FIG}/fig_token_composition.png"); fig.savefig(f"{FIG}/fig_token_composition.svg")   # vector twin, same basename
+plt.close(fig)
 
 # ------------------------------------------------------ 4. effort ladder
 fig, axes = plt.subplots(1, 3, figsize=(13, 4.6))
@@ -192,7 +195,8 @@ fig.suptitle(textwrap.fill(
     "Effort ladder: real-world quality vs cost as effort rises (low → medium → high), CIs shown — "
     "complete 6-PR cells only (partial-coverage cells with 1–2 PRs are excluded)", width=86), fontsize=9)
 fig.tight_layout()
-fig.savefig(f"{FIG}/fig_effort_ladder.png"); plt.close(fig)
+fig.savefig(f"{FIG}/fig_effort_ladder.png"); fig.savefig(f"{FIG}/fig_effort_ladder.svg")   # vector twin, same basename
+plt.close(fig)
 
 # ------------------------------------------------------ 5. selection effect
 se = M["selection_effect"]
@@ -225,7 +229,8 @@ for _ax in axes:
     _ax.text(0.60, 0.13, "below the line:\nrelatively stronger on the full 50", transform=_ax.transAxes,
              fontsize=6, color="#555", va="bottom")
 fig.tight_layout()
-fig.savefig(f"{FIG}/fig_selection_effect.png"); plt.close(fig)
+fig.savefig(f"{FIG}/fig_selection_effect.png"); fig.savefig(f"{FIG}/fig_selection_effect.svg")   # vector twin, same basename
+plt.close(fig)
 
 # ------------------------------------------------------ 6. wall clock
 fig, ax = plt.subplots(figsize=(13, 4.6))
@@ -247,7 +252,8 @@ ax.set_xticks(x); ax.set_xticklabels(labels, rotation=90, fontsize=5)
 ax.set_ylabel("median wall seconds / run (top-6)")
 ax.set_title("Wall-clock per run per cell (median of PRs, 95% cluster-bootstrap CI)", fontsize=9)
 fig.tight_layout()
-fig.savefig(f"{FIG}/fig_wallclock.png"); plt.close(fig)
+fig.savefig(f"{FIG}/fig_wallclock.png"); fig.savefig(f"{FIG}/fig_wallclock.svg")   # vector twin, same basename
+plt.close(fig)
 
 # ------------------------------------------------------ 7. recall grid bars
 fig, axes = plt.subplots(1, 3, figsize=(14, 5))
@@ -272,7 +278,8 @@ for ax, e in zip(axes, EFFORTS):
     ax.set_title(f"effort = {e}", fontsize=8)
 fig.suptitle("Golden recall per cell on the severity top-6, 95% cluster-bootstrap CIs", fontsize=9)
 fig.tight_layout()
-fig.savefig(f"{FIG}/fig_recall_grid.png"); plt.close(fig)
+fig.savefig(f"{FIG}/fig_recall_grid.png"); fig.savefig(f"{FIG}/fig_recall_grid.svg")   # vector twin, same basename
+plt.close(fig)
 
 # ------------------------------------------------------ 8. efficiency 2x2
 fig, axes = plt.subplots(2, 2, figsize=(12, 10))
@@ -380,6 +387,7 @@ ax.set_title(f"(d) cost per true bug vs F2\u2032 ({TG_DEN} true bugs)", fontsize
 
 fig.suptitle("Efficiency 2×2, verified true golden set — top-6 cells, 95% cluster-bootstrap CIs", fontsize=10)
 fig.tight_layout()
-fig.savefig(f"{FIG}/fig_efficiency_2x2.png"); plt.close(fig)
+fig.savefig(f"{FIG}/fig_efficiency_2x2.png"); fig.savefig(f"{FIG}/fig_efficiency_2x2.svg")   # vector twin, same basename
+plt.close(fig)
 
 print("figures written:", sorted(os.listdir(FIG)))

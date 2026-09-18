@@ -1,6 +1,6 @@
 # AI Code-Review Frameworks — Empirical Comparison for Practitioners
 
-> **⚠️ DEPRECATED (2026-09-16): superseded by [`REPORT_FINAL.md`](REPORT_FINAL.md)** — see also [`EXECUTIVE_SUMMARY_FINAL.md`](EXECUTIVE_SUMMARY_FINAL.md) and [`analysis/COVERAGE_FINAL.md`](analysis/COVERAGE_FINAL.md). Content below is frozen as-is.
+> **⚠️ DEPRECATED (2026-09-16): superseded by [`REPORT.md`](REPORT.md)** — see also [`EXECUTIVE_SUMMARY.md`](EXECUTIVE_SUMMARY.md) and [`analysis/COVERAGE.md`](analysis/COVERAGE.md). Content below is frozen as-is.
 
 > **Status: complete (384/384 cells).** All numbers come from the full **384/384 pass-cell matrix** (batch_083, completed 2026-08-26T05:30Z after multiple Claude quota-window reruns and an output-cap fix to all three realistic adapters). N is small (6 PRs per cell; bootstrap CIs wide or undefined). Treat this as a directional, reproducible read — not a published ranking. Phase C (50 PRs + confidence intervals) remains the bar before any final claim. **Re-run `uv run python bin/analyze_batch_083.py` for the latest snapshot.**
 >

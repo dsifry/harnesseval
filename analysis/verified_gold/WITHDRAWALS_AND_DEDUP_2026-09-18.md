@@ -1,6 +1,6 @@
 # Withdrawals and deduplication — 2026-09-18
 
-Post-publication evidence audit triggered by an external review of REPORT_FINAL.md, which found
+Post-publication evidence audit triggered by an external review of REPORT.md (then `REPORT_FINAL.md`), which found
 (a) two "verified" defects whose tests do not demonstrate them, and (b) duplicates inside the
 supposedly distinct verified universe. Every decision below was independently validated against
 the stored artifacts (tests, fixes, logs, registry, golden comments) before being applied, and the
