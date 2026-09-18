@@ -19,7 +19,10 @@ per PR).
 *Lens note:* the figures just quoted are the **benchmark-defined** analysis (the 42 goldens only, scored as
 F1). On the **true golden set** — our reported lens — the recommended cell scores **F2′ 0.470 [0.40–0.55]**,
 ahead of `glm-flash · MRV · low` (**0.436 [0.39–0.51]**), which costs about a ninth as much per review
-(**$0.024 vs $0.222**); the best cell overall is `glm-vis · CE · medium` (**0.494**). Effort-matched claim
+(**$0.024 vs $0.222**); the best-scoring cell overall is `glm-vis · CE · medium` (**0.494**) — but
+that sits inside the statistical error range of the best MRV cells (glm-vis · MRV · medium 0.491,
+glm-vis · MRV · high 0.488), so no single-cell winner is claimed; the framework guidance below is
+what carries. Effort-matched claim
 soundness agrees at low effort (adjP **0.809 vs 0.703**, vision ahead); at high effort flash is
 nominally ahead (0.924 vs 0.916). So the two lenses agree on the harness family and, at low effort, both favor vision
 on quality — while flash remains the pick where API budget dominates, and the evidence does not establish
@@ -85,16 +88,26 @@ stub-artifact failures), and **merged 2 duplicates** (including one already desc
 golden). The verified universe is **42 goldens + 105 individually test-validated defects = 147 distinct
 bugs**, every one owning its own test, fix and logs (`analysis/verified_gold/GOLD_DEFECT_CATALOG.md`).
 
-Under those honest denominators: **harnesses still find more real bugs** — Δrecall > 0 in **39/42**
-matched model·effort pairs (mean **+0.135**; peak-recall ratio **1.63×** versus the best vanilla cell,
-0.599 vs 0.367) — and that advantage survives our evaluator as a point estimate: on **F2′ the best harness
-cell leads the best vanilla cell 0.494 to 0.406 (1.22×)**, a paired difference whose 95% CI (−0.007 to
-+0.169) **crosses zero** — a higher point estimate, not an established win (and selecting the best
-configurations after observing their results is a disclosed, favorable caveat). The equal-weight **F1′**
-lens ranks a vanilla cell first (0.482 vs 0.451); it is reported as a **legitimate alternative
-preference**, not an artifact, for the volume-sensitivity and instrument reasons set out below.
-**MRV is ahead of CE on average, not uniformly** (ΔF2′ point estimate +17/−4 over 21 matched pairs,
-7/21 resolving at 95%).
+Under those honest denominators, the load-bearing findings are **pair-level, not single-cell**:
+
+- **Harnesses substantially outperform one-shot prompting** — the headline result. Δrecall > 0 in
+  **39/42** matched model·effort pairs (mean **+0.135**; peak-recall ratio **1.63×** versus the best
+  vanilla cell, 0.599 vs 0.367), and every cell in the F2′ top six is a harness cell.
+- **The winners are harnesses running open-weight models.** The best commercial harness cell
+  (opus·CE·medium) reaches F2′ 0.460 at **$6.12/review**; GLM-vision harness cells reach
+  equal-or-better F2′ at **$0.22–$0.63/review — 10× to 28× cheaper** (glm-vis·CE·medium 0.494 at
+  $0.63; glm-vis·MRV·low 0.470 at $0.22 beats the best commercial cell's F2′ at 1/28th of its price).
+  The trade is latency, not tokens: GLM harness medians run ~1,500 s vs ~190 s per review (partly
+  gateway-throughput-limited), while consuming ~7× fewer tokens than the opus harness cells.
+- **Within the harness family, MRV remains the better bet on average, not uniformly** (ΔF2′ point
+  estimate **+17/−4** over 21 matched pairs, 7/21 resolving at 95%). The best single cell happens to be a
+  CE cell, but it is statistically indistinguishable from its MRV counterparts — cell choice inside the
+  GLM-vision family is not resolved by this experiment.
+- On **F2′** the best harness cell leads the best vanilla cell **0.494 to 0.406 (1.22×)** — a **point
+  estimate, not an established win**: the paired 95% CI (−0.007 to +0.169) **crosses zero**, and selecting
+  the best configurations after observing their results is a disclosed, favorable caveat. The equal-weight
+  **F1′** lens ranks a vanilla cell first (0.482 vs 0.451); it is reported as a **legitimate alternative
+  preference**, not an artifact, for the volume-sensitivity and instrument reasons set out below.
 
 **Our evaluator is F2′, on the full 147-bug true golden set.** The choice is deliberate — a stated
 *preference*, not a measurement. Recall alone is half a metric (a tool that comments on everything would

@@ -36,14 +36,31 @@ while a walk of the audits' own label lists restored 10 dropped defects. The ver
 **42 goldens + 105 individually test-validated defects = 147 distinct bugs**
 (`analysis/verified_gold/GOLD_DEFECT_CATALOG.md`; a 2026-09-18 post-publication audit withdrew 3
 defects whose tests did not demonstrate the claim and merged 2 as duplicates — see
-`WITHDRAWALS_AND_DEDUP_2026-09-18.md`). Under those denominators: harnesses still find more real
-bugs — Δrecall > 0 in **39/42** matched model·effort pairs (mean **+0.135**; peak-recall ratio
-**1.63×** versus the best vanilla cell). **On F2′ — our evaluator (recall-weighted 4:1, a chosen
-preference, not a measured cost) — the best harness cell leads the best vanilla cell 0.494 to
-0.406, a 1.22× point-estimate edge whose paired 95% CI (−0.007 to +0.169) crosses zero**; the
-equal-weight F1′ lens is volume-sensitive and is reported only as a diagnostic. **MRV is ahead of CE on
-average** (ΔF2′ point estimate +17/−4 over 21 matched pairs; 7/21 resolve positive at 95%). The cost advantages above are
-unchanged. Where the best single cell still misses, it is **configuration complementarity, not
+`WITHDRAWALS_AND_DEDUP_2026-09-18.md`). Under those denominators, the robust findings are at the
+**framework level, not the single-cell level**:
+
+- **Review harnesses substantially outperform one-shot prompting.** Δrecall > 0 in **39/42** matched
+  model·effort pairs (mean **+0.135**; peak-recall ratio **1.63×** versus the best vanilla cell), and every
+cell in the F2′ top six is a harness cell. This is the headline claim, and it is pair-level.
+- **The harness wins are led by open-weight models at an order-of-magnitude lower price.** The best
+  commercial harness cell (opus·CE·medium) reaches F2′ **0.460 at $6.12/review**; GLM-vision harness
+  cells reach equal-or-better F2′ at **$0.22–$0.63/review — 9.8× to 27.6× cheaper** (glm-vis·CE·medium
+  0.494 at $0.63; glm-vis·MRV·low 0.470 at $0.22 — the latter beats the best commercial cell's F2′ at
+  1/28th of its price). The trade-off is **wall-clock, not tokens**: GLM harness cells run slower
+  (median ≈1,500 s vs ≈190 s per review at matched effort — partly gateway-throughput-limited) but
+  consume ~7× *fewer* tokens than the opus harness cells (0.37M vs 2.5M per review); the price gap is
+  how much harness work each model consumed, not per-token price.
+- **Within the harness family, MRV remains the better bet on average**: ΔF2′ point estimates **+17/−4**
+  over 21 matched pairs (7/21 resolve positive at 95%). The best single cell on F2′ happens to be a CE cell
+  (glm-vis·CE·medium **0.494**) but it sits **inside the statistical error range of its MRV counterpart**
+  (glm-vis·MRV·medium 0.491; Δ −0.004, CI [−0.052, +0.052]) and of glm-vis·MRV·high (0.488) — so we claim
+  **no single-cell winner**; cell choice within the GLM-vision harness family is not resolved by this
+  experiment.
+- On F2′ — our evaluator (recall-weighted 4:1, a **chosen preference, not a measured cost**) — the best
+  harness cell leads the best vanilla cell 0.494 to 0.406, a **1.22× point-estimate edge whose paired
+  95% CI (−0.007 to +0.169) crosses zero**; the equal-weight F1′ lens is volume-sensitive and is reported
+  only as a diagnostic. Selecting the best cells after observing their results biases such pairwise
+  comparisons optimistic; read the interval, not the ratio. Where the best single cell still misses, it is **configuration complementarity, not
 blindness, and not measured repeat-run variance**: the best cell finds 88 of the 147 true bugs, and
 of the 52 it missed that any cell found, **all 52** were found by a *different configuration*
 (a different model/framework/effort); with n = 1 run per cell per PR, repeat-run variance is not
@@ -799,7 +816,9 @@ which is the fragility that selection induces.
 **Top by F2′ (our evaluator):** glm-vis·CE·medium 0.494 [0.443, 0.593], glm-vis·MRV·medium 0.491,
 glm-vis·MRV·high 0.488, glm-vis·MRV·low 0.470, glm-flash·MRV·high 0.463, opus·CE·medium 0.460 — the top six
 are all harness cells; the best vanilla cell is fable·van·medium at 0.406 (14th; v1 instrument — see the
-caveat below).
+caveat below). The ordering within the top three is inside the mutual CIs (glm-vis·CE·medium vs
+glm-vis·MRV·medium: Δ −0.004, CI [−0.052, +0.052]) — a cell-level crown is not established; the
+pair-level facts (39/42 Δrecall; MRV +17/−4 on ΔF2′) are the load-bearing ones.
 
 **Why F2′ is our evaluator (and not F1, F1′, or recall alone).**
 This is a stated preference, not a measurement, and it follows from what a code-review tool is *for*:
@@ -1456,7 +1475,10 @@ git checkout report-2026-09-18    # the report pin — clone at the tagged revis
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt     # numpy + matplotlib — the published numbers need nothing else
 ```
-<!-- COMMIT_HASH_PLACEHOLDER -->
+
+The content revisions this report revision comprises are the 2026-09-18 commit series starting at
+`d8645b27` ("post-audit revision"); the `report-2026-09-18` tag pins the final state, including this
+hash record and the checksum table below.
 
 **To re-run an eval yourself** (not needed to reproduce the published numbers, which are stored), see
 `INSTALL.md` §6–§7: install the harness deps (`pip install -e .`), provide the pinned `third_party/` checkout
@@ -1532,12 +1554,11 @@ Figures may still differ in bytes across matplotlib versions, which the pins nar
 
 | artifact | sha256 (expected) |
 |---|---|
-| `analysis/final_report_dataset.json` | `PENDING` |
-| `analysis/final_report_metrics.json` | `PENDING` |
-| `analysis/verified_gold/DEFECT_METRICS.json` | `PENDING` |
-| `analysis/verified_gold/DEFECT_ASSIGN.json` | `PENDING` |
-| `analysis/verified_gold/GOLD_DEFECT_CATALOG.json` | `PENDING` |
-<!-- SHA256_PLACEHOLDER -->
+| `analysis/final_report_dataset.json` | `76bf029718e49d85ae28ea102887260b064bef7bb0dbfa06be6abe0d13d02bc2` |
+| `analysis/final_report_metrics.json` | `d3737e40f8accee9efe505f6707799b8e209da55d9c0c166ccc098f05dff4380` |
+| `analysis/verified_gold/DEFECT_METRICS.json` | `2fa65ec40f198fc3b8efc712f923cd9ca4b129715b270b76ebf944674888a7aa` |
+| `analysis/verified_gold/DEFECT_ASSIGN.json` | `67dca6a64ee5779fd86e24f95a82f531fef85f677cecca7b5aa7d7db97bb772d` |
+| `analysis/verified_gold/GOLD_DEFECT_CATALOG.json` | `c43b6e8b0536113ca89f22a14e0cf9bbc89974008a16f7344c44ffb3ca0e9a1a` |
 
 The chain was re-run in a **fresh clone** with every chain output deleted first (so a match cannot be a
 stale file matching itself) and compared byte-for-byte. Full record, including the eight problems the test
