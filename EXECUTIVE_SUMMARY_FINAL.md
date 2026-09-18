@@ -2,14 +2,14 @@
 
 **For:** engineering leadership deciding on automated code review · **Data:** 2026-09-16 freeze of
 the manifold campaign (50-PR Martian offline benchmark, 8 models × 3 frameworks × 3 efforts;
-66 of 72 cells complete on the six hardest PRs) · **Full report:** `REPORT_FINAL.md` ·
+66 of 72 cells complete on the six severity-hardest PRs) · **Full report:** `REPORT_FINAL.md` ·
 **Coverage:** `analysis/COVERAGE_FINAL.md`
 
 ## The recommendation
 
 **Run the metareview harness on `glm-5.3-vision-background` at low reasoning effort.**
 
-On the six hardest benchmark PRs it matched the best frontier harness on golden recall —
+On the six severity-hardest benchmark PRs it matched the best frontier harness on golden recall —
 **0.81 [CI 0.74–0.86] vs opus-5 harness 0.81–0.83** — beat it on F1 (0.73 [0.67–0.80] vs
 0.44–0.57) and on precision (adjP 0.67 vs 0.30–0.44), and cost **7.5% [6.7–8.5] of the opus
 compound-engineering cell**: **$0.22 vs $2.95 per PR review**, **$0.04 vs $0.52 per golden defect
@@ -68,10 +68,11 @@ own test, fix and logs (`analysis/verified_gold/GOLD_DEFECT_CATALOG.md`; none un
 
 Under those honest denominators: **harnesses still find more real bugs** — Δrecall > 0 in **45/48**
 matched model·effort pairs (mean **+0.107**; peak-recall ratio **1.51×** versus the best vanilla cell,
-0.487 vs 0.322) — but the recall lead now costs precision, so on **F1′ the best cell is vanilla**
-(fable·van·high 0.441 vs the best harness 0.415; ΔF1′ > 0 in only 25/48 pairs, mean +0.008).
-**MRV is ahead of CE on average, not uniformly** (ΔF1′ point estimate +19/−2 over 21 matched pairs,
-mean +0.047; 8/21 resolve positive at 95%; +18/−3 on ΔF2′).
+0.487 vs 0.322) — and that advantage survives our evaluator: on **F2′ the best harness cell beats the
+best vanilla cell 0.436 to 0.361 (1.21×)**. The equal-weight **F1′** lens is the outlier that ranks a
+vanilla cell first (0.441 vs 0.415); it is reported only as a labelled diagnostic, for the volume-
+sensitivity reasons set out below. **MRV is ahead of CE on average, not uniformly** (ΔF2′ point
+estimate +18/−3 over 21 matched pairs, 7/21 resolving at 95%; Δrecall +17/−4).
 
 **Our evaluator is F2′, on the full 152-bug true golden set.** The choice is deliberate. Recall alone is
 half a metric (a tool that comments on everything would score 1.0 and be useless), so it must be paired with
@@ -87,10 +88,11 @@ harness cells. `adjP` is reported alongside F2′ so the noise story stays visib
 labelled diagnostic.
 
 **Why even the best harness misses what it misses.** Three mechanisms, separated: (1) *denominator
-inflation* — paraphrase splits and golden duplicates (now fixed) made the universe look ~1.6× bigger
-than it is; (2) *variance, not blindness* — the best single cell found 133 of 359 pre-merge clusters,
-but 91% of what it missed was found by another harness cell, and harnesses collectively found 94%;
-(3) a *genuine blind tail of 12 verified bugs no harness cell found* — overwhelmingly a different
+inflation* — paraphrase splits and golden duplicates made the pre-merge universe look ~1.6× bigger
+than it is (fixed: 359 raw clusters → 152 true bugs); (2) *variance, not blindness* — the best single
+cell finds **74 of 152**, and of the misses that any cell found, **every one** was found by another
+cell; the union of all 66 cells reaches **133/152 (88%)** and the harness cells alone reach 130/152
+(86%); (3) a *genuine blind tail of 19 true bugs no cell found* — overwhelmingly a different
 class (performance/N+1/eager-loading, test-quality gaps, framework idioms, migration-lock semantics),
 i.e. outside the correctness/security brief the lenses are built for. A scope explanation was tested
 and rejected: anchored findings are 227 in-diff vs 1 out-of-diff.

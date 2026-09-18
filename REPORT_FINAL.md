@@ -40,8 +40,9 @@ harnesses still find more real bugs — Δrecall > 0 in **45/48** matched model�
 (recall-weighted 4:1) — the harness leads the best vanilla cell 0.436 to 0.361, a 1.21× edge**; the
 equal-weight F1′ lens is volume-sensitive and is reported only as a diagnostic. **MRV is ahead of CE on
 average** (ΔF2′ point estimate +18/−3 over 21 matched pairs; 7/21 resolve positive at 95%). The cost advantages above are
-unchanged. Where the best single cell still misses, it is mostly **variance, not blindness**: 91% of the
-best cell's misses were found by another harness cell.
+unchanged. Where the best single cell still misses, it is mostly **variance, not blindness**: the best
+cell finds 74 of the 152 true bugs, and of the misses that any cell found, **every one** was found by
+another cell; the union of all 66 cells reaches **133/152 (88%)**.
 
 ## 2. What we measured (benchmark-defined vs our extensions)
 
@@ -153,6 +154,12 @@ end. (A lexicographic misreading of "top-6" already corrupted one subset earlier
 the severity ordering is binding.)
 
 ### 4.2 Representativeness claim, stated as testable
+**How hard is the sample?** Measured directly (panel 5 of the dashboard): summing each PR's golden severity
+weights (Critical 4 … Low 1), the six headlined PRs average **18.2** against **6.1** for the other 44 — about
+**3×** — and the **mildest of the six is as severe as the most severe PR we did not pick** (both 13). The
+sample is therefore not merely representative but a deliberately hard slice of the benchmark; where setups
+score lower on the six, our headline figures are the pessimistic ones.
+
 
 Claim: *the top-6 is a deliberately hard-biased but internally valid sample; differences measured
 on it are expected to persist on the full 50.* Tested two ways on the 33 cells with ≥40/50
