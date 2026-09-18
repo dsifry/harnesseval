@@ -1345,38 +1345,72 @@ high-cost and mostly move sideways (§7.3). `fig_cost_per_cell.png`: $/run per c
 
 ## 11. Reproducibility (every number → a command)
 
-**§10b pipeline (semantic union + evidence pack):**
-- `tools/final_report_extract.py` — rebuild dataset (includes the 2026-09-17 rj3 bugfix; ~1 min)
-- `tools/semantic_union_pilot.py --pr <url>` — LLM semantic clustering of one PR's confirmed bugs
-  (judge gpt-5.2; ~$2/PR; artifacts `analysis/exp_union_semantic_pilot_<pr>.json`)
-- `tools/semantic_union_evidence.py --pr <url>` — verification cards per bug, grounded in the
-  gh-cached PR diff (artifacts `analysis/semantic_true_golden_<pr>.json`)
-- `tools/semantic_true_golden_doc.py` — compile `analysis/TRUE_GOLDEN_EVIDENCE.md`
-- `tools/final_report_compute.py` — §10b metrics + CIs (rng4; frozen sections byte-identical)
-- LLM steps are recorded as artifacts; re-running them is not byte-reproducible (disclosed in §10b)
+### 11.1 Setup
 
 ```bash
-.venv/bin/python tools/final_report_extract.py    # runs/* → analysis/final_report_dataset.json
-                                                   #   (era rule, health rule, selection rule)
-.venv/bin/python tools/final_report_compute.py    #   → analysis/final_report_metrics.json
-                                                   #   (metrics + cluster bootstrap B=10,000,
-                                                   #    seed 20260916; paired deltas; ratios)
-.venv/bin/python tools/final_report_figures.py    #   → analysis/figures/*.png
-.venv/bin/python tools/final_report_html.py      #   → analysis/figures/interactive_dashboard.html
-.venv/bin/python tools/final_report_tables.py     #   → markdown tables embedded in this report
-.venv/bin/python tools/verify_hitlist.py --verbose#   top-6 scope check
-.venv/bin/python tools/key_usage_report.py        #   ledger (gateway-level GLM call accounting)
+git clone <this repo> && cd harnesseval
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt     # numpy + matplotlib — the published numbers need nothing else
 ```
 
-**Tool changes made for this report (disclosed, per the hard rules):**
+**All required inputs are committed** (verified by re-running the chain in a fresh clone):
 
-1. `tools/scoreboard.py` — added an `Fb` column with `--beta` (default 2.0, the benchmark's
-   recall-weighted default). The F1/recall/adjP semantics are untouched. Diff: adds
-   `ap.add_argument("--beta", ...)` and one line per row
+| input | where | size |
+|---|---|---|
+| campaign run registry (7,315 runs, manifests + summaries) | `runs/` | 260 MB |
+| extracted dataset (era/health/selection rules applied) | `analysis/final_report_dataset.json` | 20 MB |
+| §10b/§10c LLM artifacts (semantic clustering, overlap checks) | `analysis/exp_union_semantic_pilot_*.json`, `analysis/semantic_*.json` | 6 + 34 files |
+| **benchmark golden comments** (the 42 goldens + severity) | `analysis/inputs/golden_comments/` (5 files, vendored) | 144 KB |
+| verified hidden-gold evidence | `analysis/verified_gold/` (defects, tests, fixes, logs, tarballs) | 3.7 MB + 4.5 MB |
+
+> The benchmark's golden comments are **vendored** at `analysis/inputs/golden_comments/` because the upstream
+> checkout lives in `third_party/`, which is gitignored (and is a nested git checkout, so its files cannot be
+> committed from here). Provenance and SHA-256 checksums are in that directory's `README.md`. The tools prefer
+> the vendored copy and fall back to `third_party/` if present; if neither is found they now **abort with a
+> FATAL message** rather than writing a dataset with empty denominators.
+
+### 11.2 The chain (run in this order)
+
+```bash
+.venv/bin/python tools/final_report_extract.py            # runs/*        → analysis/final_report_dataset.json
+.venv/bin/python tools/final_report_compute.py            # dataset       → analysis/final_report_metrics.json
+                                                          #   (frozen §1–§9 + §10b/§10c; appends true_gold_defects)
+.venv/bin/python tools/verified_gold_defect_metrics.py    # registry+data → analysis/verified_gold/DEFECT_METRICS.json
+.venv/bin/python tools/gold_defect_catalog.py             # registry      → analysis/verified_gold/GOLD_DEFECT_CATALOG.{json,md,csv}
+.venv/bin/python tools/final_report_figures.py            # → analysis/figures/*.png + interactive_dashboard.html
+.venv/bin/python tools/final_report_figures_true_gold.py  # → the true-gold charts
+.venv/bin/python tools/final_report_tables.py             # → markdown tables (writes /tmp/final_report_tables.md)
+.venv/bin/python tools/final_report_html.py               # → analysis/figures/interactive_dashboard.html
+```
+
+### 11.3 What reproduces exactly, and what does not (measured, not asserted)
+
+The chain was re-run in a **fresh clone** of the committed state and compared byte-for-byte:
+
+| artifact | result |
+|---|---|
+| `analysis/final_report_dataset.json` | **byte-identical** |
+| `analysis/verified_gold/DEFECT_METRICS.json` | **byte-identical** |
+| `analysis/verified_gold/GOLD_DEFECT_CATALOG.json` | **byte-identical** |
+| `analysis/verified_gold/DEFECT_REGISTRY.json` | **byte-identical** |
+| `final_report_metrics.json` — §10d `true_gold_defects` | **identical**: headline, per-cell metrics, CIs, MRV-vs-CE pairs, derived comparisons |
+| `final_report_metrics.json` — §10c `expanded_gold_verified` | identical once the golden comments are present; the bootstrap CIs are fixed-seed draws and reproduce on the same numpy major version |
+| `analysis/figures/*.png` | same data, **different bytes** across matplotlib versions |
+| every LLM step (§10b clustering, §10c overlap checks, §10d defect verification) | **not** reproducible by re-running, by design — the stored artifacts are the record |
+
+### 11.4 Tool changes made for this report (disclosed, per the hard rules)
+
+1. `tools/scoreboard.py` — added an `Fb` column with `--beta` (default 2.0, the benchmark's recall-weighted
+   default). F1/recall/adjP semantics untouched: adds `ap.add_argument("--beta", ...)` and one line per row
    `fb = (1+b*b)*rec*adjp/max(1e-9, b*b*adjp+rec)`.
 2. New analysis tools (no frozen instrument touched): `tools/final_report_extract.py`,
-   `tools/final_report_compute.py`, `tools/final_report_figures.py`,
-   `tools/final_report_tables.py`.
+   `tools/final_report_compute.py`, `tools/final_report_figures.py`, `tools/final_report_tables.py`,
+   `tools/final_report_true_gold.py`, `tools/verified_gold_defect_metrics.py`,
+   `tools/gold_defect_catalog.py`, `tools/final_report_figures_true_gold.py`, and the `verified_gold_*.py`
+   verification/merge tools.
+3. Input resolvers + loud failure: the eight tools that read the golden comments now prefer
+   `analysis/inputs/golden_comments/`; `final_report_extract.py` and `final_report_compute.py` abort instead of
+   writing a degenerate dataset when the golden set is empty.
 
 `harnesseval/judge.py`, `readjudicate3.py` semantics, and the golden dataset were **not** modified.
 

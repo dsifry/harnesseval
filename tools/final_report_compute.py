@@ -1099,11 +1099,17 @@ for _u in TOP6:
 
 def _goldens_list(pr):
     import glob as _glob
-    for _f in _glob.glob(f"{ROOT}/third_party/code-review-benchmark/offline/golden_comments/*.json"):
+    for _f in _(glob.glob(f"{ROOT}/analysis/inputs/golden_comments/*.json")
+              or glob.glob(f"{ROOT}/third_party/code-review-benchmark/offline/golden_comments/*.json")):
         for _e in json.load(open(_f)):
             if _e["url"] == pr:
                 return [c["comment"] for c in _e["comments"]]
-    return []
+    raise SystemExit(
+        f"FATAL: the benchmark golden set could not be loaded for {pr}.\n"
+        "  Expected analysis/inputs/golden_comments/*.json (vendored) or\n"
+        "  third_party/code-review-benchmark/offline/golden_comments/*.json. Refusing to write metrics with\n"
+        "  zero denominators - see analysis/inputs/golden_comments/README.md."
+    )
 
 if _VERIFIED_OK:
     _v_pr = {}

@@ -64,7 +64,8 @@ PROFILE = {
 
 # --- golden set: severity weights + the top-6 -------------------------------
 pr_golden = {}
-for f in glob.glob(f"{ROOT}/third_party/code-review-benchmark/offline/golden_comments/*.json"):
+for f in (glob.glob(f"{ROOT}/analysis/inputs/golden_comments/*.json")
+              or glob.glob(f"{ROOT}/third_party/code-review-benchmark/offline/golden_comments/*.json")):
     for e in json.load(open(f)):
         cs = e["comments"]
         pr_golden[e["url"]] = {
@@ -73,6 +74,14 @@ for f in glob.glob(f"{ROOT}/third_party/code-review-benchmark/offline/golden_com
             "categories": sorted(c["category"] for c in cs),
         }
 top6 = sorted(pr_golden, key=lambda u: (-pr_golden[u]["sev_weight"], -pr_golden[u]["n_comments"]))[:6]
+
+if not pr_golden:
+    raise SystemExit(
+        "FATAL: the benchmark golden set is empty, so no recall number can be computed.\n"
+        "  Expected analysis/inputs/golden_comments/*.json (vendored) or\n"
+        "  third_party/code-review-benchmark/offline/golden_comments/*.json (upstream checkout).\n"
+        "  Refusing to write a degenerate dataset - see analysis/inputs/golden_comments/README.md."
+    )
 
 # --- run extraction -----------------------------------------------------------
 def health_ok(s):

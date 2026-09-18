@@ -36,7 +36,8 @@ HARNESS = {"compound-realistic", "metareview-realistic"}
 
 def goldens_for(pr):
     import glob
-    for f in glob.glob(f"{ROOT}/third_party/code-review-benchmark/offline/golden_comments/*.json"):
+    for f in (glob.glob(f"{ROOT}/analysis/inputs/golden_comments/*.json")
+              or glob.glob(f"{ROOT}/third_party/code-review-benchmark/offline/golden_comments/*.json")):
         for e in json.load(open(f)):
             if e["url"] == pr:
                 return [c["comment"] for c in e["comments"]]
