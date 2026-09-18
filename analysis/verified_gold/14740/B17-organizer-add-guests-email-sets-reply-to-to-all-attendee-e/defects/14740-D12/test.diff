@@ -1,43 +1,63 @@
-import { describe, expect, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { test } from "@calcom/web/test/fixtures/fixtures";
-
-import { buildCalendarEvent, buildPerson } from "../../../lib/test/builder";
-import OrganizerAddGuestsEmail from "./organizer-add-guests-email";
-
-vi.mock("../", async () => {
-  const actual = await vi.importActual("../");
-  return {
-    ...actual,
-    renderEmail: vi.fn().mockResolvedValue("<html>mocked</html>"),
-  };
+process.env.NEXT_PUBLIC_WEBAPP_URL = "http://localhost:3000";
+process.env.NEXT_PUBLIC_WEBSITE_URL = "http://localhost:3000";
+process.env.EMAIL_FROM = "test@example.com";
+process.env.EMAIL_SERVER = JSON.stringify({
+  host: "localhost",
+  port: 1025,
+  auth: { user: "user", pass: "pass" },
 });
 
-describe("OrganizerAddGuestsEmail", () => {
-  test("team-member variant should not leak attendee emails in replyTo and should personalize with team member", async () => {
-    const organizer = buildPerson({ email: "organizer@example.com", name: "Organizer" });
-    const teamMember = buildPerson({ email: "team@example.com", name: "Team Member" });
-    const attendee1 = buildPerson({ email: "attendee1@example.com", name: "Attendee One" });
-    const attendee2 = buildPerson({ email: "attendee2@example.com", name: "Attendee Two" });
+vi.mock("../", async () => {
+  const actual = await vi.importActual<any>("../");
+  return {
+    ...actual,
+    renderEmail: vi.fn(async () => "<html>mocked</html>"),
+  } as any;
+});
+
+describe("OrganizerAddGuestsEmail (team-member variant)", () => {
+  it("personalizes content for the team member and does not leak attendee emails via replyTo", async () => {
+    const { default: OrganizerAddGuestsEmail } = await import("./organizer-add-guests-email");
+    const { buildCalendarEvent, buildPerson } = await import("../../lib/test/builder");
+    const { renderEmail } = await import("../");
+
+    const organizer = buildPerson({ email: "organizer@example.com", name: "Organizer Name" });
+    const attendeeOne = buildPerson({ email: "attendee.one@example.com", name: "Attendee One" });
+    const attendeeTwo = buildPerson({ email: "attendee.two@example.com", name: "Attendee Two" });
+    const teamMember = buildPerson({ email: "team.member@example.com", name: "Team Member Name" });
 
     const calEvent = buildCalendarEvent({
       organizer,
-      attendees: [attendee1, attendee2],
-      type: "event type",
+      attendees: [attendeeOne, attendeeTwo],
     });
 
     const email = new OrganizerAddGuestsEmail(calEvent, teamMember);
-    const payload = await (email as any).getNodeMailerPayload();
+    const payload = (await (email as unknown as {
+      getNodeMailerPayload(): Promise<Record<string, unknown>>;
+    }).getNodeMailerPayload()) as {
+      to: string;
+      replyTo: string[];
+    };
 
-    // The replyTo should not include attendee emails; it should only be the organizer or team member
-    expect(payload.replyTo).toEqual([organizer.email]);
+    expect(payload.to).toBe("team.member@example.com");
 
-    // The html should be rendered with the team member as the attendee, not the organizer
-    const { renderEmail } = await import("../");
-    expect(renderEmail).toHaveBeenCalledWith(
+    expect(payload.replyTo).not.toContain("attendee.one@example.com");
+    expect(payload.replyTo).not.toContain("attendee.two@example.com");
+    expect(payload.replyTo).toEqual(["team.member@example.com"]);
+
+    const renderEmailMock = renderEmail as unknown as ReturnType<typeof vi.fn>;
+    renderEmailMock.mockClear();
+
+    await (email as unknown as {
+      getNodeMailerPayload(): Promise<Record<string, unknown>>;
+    }).getNodeMailerPayload();
+
+    expect(renderEmailMock).toHaveBeenCalledWith(
       "OrganizerAddGuestsEmail",
       expect.objectContaining({
-        attendee: teamMember,
+        attendee: expect.objectContaining({ email: "team.member@example.com" }),
       })
     );
   });

@@ -112,8 +112,25 @@ async def do_defect(d, findings, apply):
     file = file if file and (mod.REPO / file).exists() else None
     if not file:
         return did, "skipped_no_file"
-    content = (mod.REPO / file).read_text()
-    content = content if len(content) <= 12000 else content[:12000]
+    full = (mod.REPO / file).read_text()
+    if len(full) <= 14000:
+        content = full
+    else:
+        # Window by the FINDINGS' OWN ANCHORS (file:start-end), which is the context the campaign
+        # already has: label-token matching picked the wrong one of three `references.find` sites.
+        loc = re.compile(r"([A-Za-z0-9_./-]+\.[A-Za-z0-9]{1,4}):~?(\d+)(?:-(\d+))?")
+        want = norm(Path(file).name)
+        starts = []
+        for t in findings:
+            for m2 in loc.finditer(t):
+                if norm(Path(m2.group(1)).name) == want:
+                    starts.append(int(m2.group(2)))
+        starts = sorted(starts)
+        best_i = (starts[len(starts)//2] - 1) if starts else 0
+        lines = full.splitlines()
+        lo, hi = max(0, best_i - 60), min(len(lines), best_i + 60)
+        content = (f"// … lines 1-40 of {len(lines)}\n" + "\n".join(lines[:40]) +
+                   f"\n// … REGION CITED BY THE REPORTS (lines {lo+1}-{hi}) …\n" + "\n".join(lines[lo:hi]))
     import os as _os
     rel = _os.path.relpath(str(mod.REPO / file), str(mod.REPO / Path(file).parent))
     load_hint = (f"REQUIRED: the file under test is {file}. Load it with `require_relative '{rel}'` "
@@ -145,9 +162,11 @@ async def do_defect(d, findings, apply):
         if (cls == "?" or cls.startswith("ERROR")) and attempt < 3:
             # the test could not run (bad require path, missing stub, ActiveSupport blank?, ...):
             # feed the error back and rewrite the test
-            content = content[:12000] + ("\n\nLAST RUN (fix the TEST/stubs so it executes; it must then FAIL "
-                                         "on this code for the claimed defect - do not change the file under test):\n"
-                                         + head_log[-1500:])
+            content = content + ("\n\nLAST RUN (make the TEST execute; it must then FAIL on this code for the "
+                                 "claimed defect - never change the file under test):\n" + head_log[-1500:] +
+                                 "\nIf the error is 'Failed to load url <path>', the RELATIVE IMPORT DEPTH is wrong: "
+                                 "count the directories from the test file's own directory to the target and adjust "
+                                 "the number of leading '../' accordingly.")
             continue
         break
     if not parsed.get("test_code"):

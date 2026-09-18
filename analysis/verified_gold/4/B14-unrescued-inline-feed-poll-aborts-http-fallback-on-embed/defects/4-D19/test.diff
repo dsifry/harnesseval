@@ -1,79 +1,53 @@
-# frozen_string_literal: true
 require 'uri'
 
-# ---- minimal stubs so the REAL lib/topic_retriever.rb can load & run ----
-
-class NilClass
-  def blank?; true; end
-end
-
-module SiteSetting
+# --- Minimal stubs so the real file under test can load and run ---
+class SiteSetting
   def self.embeddable_host; 'example.com'; end
   def self.feed_polling_enabled?; true; end
-  def self.embed_by_username; 'system'; end
+  def self.embed_by_username; 'embedder'; end
 end
 
-$redis = Object.new
-def $redis.setnx(_k, _v)
-  @seen ||= {}
-  return false if @seen[_k]
-  @seen[_k] = true
-  true
+class FakeRedis
+  def initialize; @h = {}; end
+  def setnx(k, v); return false if @h.key?(k); @h[k] = v; true; end
+  def expire(k, t); true; end
 end
-def $redis.expire(_k, _t); true; end
+$redis = FakeRedis.new
 
-class TopicEmbed
-  def self.where(_cond); WhereChain.new; end
-  def self.import_remote(_user, _url); :imported; end
-  class WhereChain
-    def exists?; false; end # cache is empty so we always hit the miss path
-  end
-end
-
+class FakeUser; def blank?; false; end; end
 class User
-  def self.where(_cond); WhereChain.new; end
-  class WhereChain
-    def first; nil; end # no embed_by_username user -> fetch_http bails
-  end
+  def self.where(*); self; end
+  def self.first; FakeUser.new; end
 end
 
-# Synchronous counter: if PollFeed.new.execute runs inline, count increments
-# during TopicRetriever#retrieve. If it were deferred/enqueued, it would not.
-$poll_feed_calls = 0
-
-module Jobs
-  class PollFeed
-    def initialize; end
-    def execute(_opts)
-      $poll_feed_calls += 1
-    end
-  end
+class FakeScope
+  def initialize(e); @e = e; end
+  def exists?; @e; end
 end
 
-# ---- load the REAL file under test (no redefinition) ----
-require File.expand_path('../../lib/topic_retriever.rb', File.dirname(__FILE__))
-
-# ---- exercise observable behaviour ----
-# Three distinct cache-miss embed URLs, each with the throttle disabled
-# (i.e. every request proceeds to perform_retrieve).
-urls = (1..3).map { |i| "http://example.com/post/#{i}" }
-
-urls.each do |u|
-  before = $poll_feed_calls
-  TopicRetriever.new(u, no_throttle: true).retrieve
-  inline = $poll_feed_calls - before
-  raise "expected >=1 inline feed poll for #{u}, got #{inline}" if inline < 1
+$imported = []
+class TopicEmbed
+  def self.where(embed_url:); FakeScope.new(false); end
+  def self.import_remote(user, url); $imported << url; end
 end
 
-# ---- verdict ----
-# Correct behaviour: no synchronous poll runs per cache-miss request
-#                    (the hourly scheduler owns feed polling).
-# Defect present : each cache-miss request ran a full feed poll inline.
-if $poll_feed_calls == 0
+$poll_count = 0
+module Jobs; end
+class Jobs::PollFeed
+  def execute(*args); $poll_count += 1; end
+end
+
+# Load the REAL file under test (no Rails, no DB).
+require_relative '../../lib/topic_retriever'
+
+# Three distinct embed URLs, none of them previously seen -> all cache misses.
+urls = (1..3).map { |i| "http://example.com/article/#{i}" }
+urls.each { |u| TopicRetriever.new(u).retrieve }
+
+# Claimed defect: every cache miss synchronously runs a full feed poll.
+# Correct behaviour: at most one poll (e.g. the scheduled one), not one per request.
+if $poll_count <= 1
   puts "RESULT: PASS"
-elsif $poll_feed_calls == urls.size
-  puts "RESULT: FAIL: every cache-miss embed synchronously ran a full feed poll " \
-       "(#{ $poll_feed_calls } inline Jobs::PollFeed#execute calls for #{ urls.size } distinct URLs)"
 else
-  puts "RESULT: FAIL: unexpected inline poll count #{$poll_feed_calls}"
+  puts "RESULT: FAIL: every cache-miss embed ran a synchronous full feed poll #{'(' + $poll_count.to_s} PollFeed.execute calls for #{urls.size} embed URLs)"
 end
