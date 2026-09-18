@@ -1410,3 +1410,10 @@ import subprocess as _sp, sys as _sys  # noqa: E402
 _r = _sp.run([_sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "final_report_true_gold.py")],
              capture_output=True, text=True)
 print(_r.stdout.strip() or _r.stderr.strip()[-400:])
+if _r.returncode != 0:
+    raise SystemExit(
+        "FATAL: the true-gold (§10d) section could not be appended, so analysis/final_report_metrics.json\n"
+        "  would be written without it and every downstream figure/dashboard would fail with a KeyError.\n"
+        "  It needs analysis/verified_gold/DEFECT_REGISTRY.json + DEFECT_ASSIGN.json (committed INPUTS, not\n"
+        "  outputs of this chain) and the dataset. Underlying error:\n" + _r.stderr.strip()[-1200:]
+    )
