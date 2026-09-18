@@ -126,6 +126,10 @@ def main():
             "merged_in_from": [m["merged"] for m in reg.get("merged_duplicates", []) if m["kept"] == did],
             "restored": d.get("restored"),
             "label_corrected": d.get("label_corrected"),
+            "withdrawn": d.get("withdrawn"),
+            "withdrawn_reason": d.get("withdrawn_reason"),
+            "duplicate_of": (d.get("duplicate_of") if d.get("tier") == "D-duplicate" else None),
+            "dup_reason": d.get("dup_reason"),
             "label_review": mismatch,
             "label_vs_test_mismatch": None,
         }
@@ -135,9 +139,15 @@ def main():
                "defects": recs}, open(VG / "GOLD_DEFECT_CATALOG.json", "w"), indent=1)
 
     # markdown
+    nv = sum(1 for r in recs if r["tier"] == "D-verified")
+    nw = sum(1 for r in recs if r["tier"] == "D-withdrawn")
+    nd = sum(1 for r in recs if r["tier"] == "D-duplicate")
     L = ["# Hidden-gold defect catalogue", "",
-         f"**{len(recs)} distinct verified defects.** Every one has an executed test that failed on the PR head and a",
+         f"**{nv} distinct verified defects.** Every one has an executed test that failed on the PR head and a",
          "documented fix that made it pass. Two evidence levels:", "",
+         (f"{nw} defects are WITHDRAWN (their tests do not demonstrate the claim) and {nd} are merged as DUPLICATES "
+          "(2026-09-18 audit — see WITHDRAWALS_AND_DEDUP_2026-09-18.md). They are retained below, marked, but no longer count as verified.")
+          if (nw or nd) else "",
          "**Every defect is an independent unit**: it owns `defects/<id>/{test.diff,fix.patch,logs/,meta.json}`.",
          "No defect shares a test with another. `test_origin` records whether the test was written by the verifier",
          "for this defect alone (with a sibling-fix orthogonality check) or copied from the original execution",
@@ -157,8 +167,17 @@ def main():
         L += [f"## PR {pr} — {len(by_pr[pr])} defects", ""]
         for r in sorted(by_pr[pr], key=lambda x: int(re.search(r"(\d+)$", x["id"]).group(1))):
             tag = "own_executed" if r["evidence_level"] == "own_executed" else ("bundle-primary" if r["defect_is_bundle_primary_claim"] else "bundle-executed")
-            L.append(f"### {r['id']} — {r['label']}")
+            if r["tier"] == "D-withdrawn":
+                L.append(f"### {r['id']} — {r['label']} — WITHDRAWN 2026-09-18")
+            elif r["tier"] == "D-duplicate":
+                L.append(f"### {r['id']} — {r['label']} — DUPLICATE of {r['duplicate_of']}")
+            else:
+                L.append(f"### {r['id']} — {r['label']}")
             L.append(f"- **location**: `{r['anchor'] or 'n/a'}`  ·  **evidence**: `{tag}`  ·  bundle `{r['bundle']}` ({r['bundle_verdict']})")
+            if r.get("withdrawn_reason"):
+                L.append(f"- **withdrawn**: {r['withdrawn_reason']}")
+            if r.get("dup_reason"):
+                L.append(f"- **duplicate**: {r['dup_reason']}")
             L.append(f"- **test**: `{r['test']}`")
             L.append(f"- **fix**: `{r['fix']}`  ·  **logs**: `{r['logs']}`")
             if r["sibling_fix_leaves_red"] is not None:
@@ -175,7 +194,7 @@ def main():
         w = csv.DictWriter(f, fieldnames=["id", "pr", "label", "tier", "evidence_level",
                                           "defect_is_bundle_primary_claim", "exact_test", "anchor", "bundle", "bundle_verdict",
                                           "test", "fix", "logs", "sibling_fix_leaves_red",
-                                          "n_assigned_findings", "merged_in_from", "restored"])
+                                          "n_assigned_findings", "merged_in_from", "restored", "withdrawn", "duplicate_of"])
         w.writeheader()
         for r in recs:
             w.writerow({**{k: r.get(k) for k in w.fieldnames}})

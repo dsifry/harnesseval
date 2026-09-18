@@ -60,12 +60,20 @@ def derived_numbers(dm_var, M, ROOT):
     def sha(t):
         return hashlib.sha1(t.encode()).hexdigest()[:16]
 
-    valid = {d["id"] for d in reg["defects"]}
+    # The verified universe ONLY: withdrawn (2026-09-18 audit) and duplicate-tier defects must not
+    # inflate the union coverage, the best-cell counts, or any denominator. See
+    # analysis/verified_gold/WITHDRAWALS_AND_DEDUP_2026-09-18.md.
+    valid = {d["id"] for d in reg["defects"] if d.get("tier") == "D-verified"}
     # the 66 complete cells (all six PRs) - the same basis the recall / F2' metrics use. Partial-coverage
     # cells in the same block are excluded so that the union and the per-cell metrics cannot disagree.
     cells = {k: v for k, v in dm_var["cells"].items() if v.get("n_pr") == 6}
     sel = {(r["model"], r["framework"], r["effort"], r["url"]): r for r in D["selected_runs"]}
     slug = {u: u.rstrip("/").split("/")[-1] for u in M["expanded_gold"]["per_pr"]}
+    # Derive the denominators instead of hardcoding them: goldens from the expanded-gold per-PR golden
+    # counts (sums to 42 for the six campaign PRs), defects from the verified registry universe.
+    goldens_den = sum((M["expanded_gold"]["per_pr"].get(u) or {}).get("golden") or 0 for u in slug)
+    defects_den = len(valid)
+    den = goldens_den + defects_den
 
     hits = {}
     for c in cells:
@@ -108,14 +116,14 @@ def derived_numbers(dm_var, M, ROOT):
     return {
         "coverage": {
             "all_cells": len(allG) + len(allD), "harness_cells_only": len(harG) + len(harD),
-            "den": 152, "goldens": len(allG), "goldens_den": 42, "defects": len(allD), "defects_den": 110,
-            "unfound_total": 152 - (len(allG) + len(allD)),
-            "unfound_goldens": 42 - len(allG), "unfound_defects": 110 - len(allD),
+            "den": den, "goldens": len(allG), "goldens_den": goldens_den, "defects": len(allD), "defects_den": defects_den,
+            "unfound_total": den - (len(allG) + len(allD)),
+            "unfound_goldens": goldens_den - len(allG), "unfound_defects": defects_den - len(allD),
             "note": "union over the 66 complete cells (all six PRs); a golden counts once matched by any cell, a "
                     "defect once its finding text is assigned to it by any cell. Basis chosen to match the "
                     "recall/F2' per-cell metrics.",
         },
-        "best_cell": {"cell": bestk, "found": len(bg) + len(bd), "den": 152,
+        "best_cell": {"cell": bestk, "found": len(bg) + len(bd), "den": den,
                       "misses_within_reach": len(missed), "misses_found_by_another_cell": len(missed & others)},
         "harness_vs_vanilla": {
             "n_pairs": n, "n_positive_recall": sum(1 for a, _ in hv if a > 0),
@@ -158,7 +166,7 @@ def main():
     reg = json.load(open(ROOT / "analysis/verified_gold/DEFECT_REGISTRY.json"))
     ds = json.load(open(ROOT / "analysis/final_report_dataset.json"))
     from collections import Counter
-    per_pr_slug = Counter(d["pr"] for d in reg["defects"])
+    per_pr_slug = Counter(d["pr"] for d in reg["defects"] if d.get("tier") == "D-verified")
     gold_pr = {u: v.get("goldens") for u, v in (met.get("expanded_gold_verified", {}).get("per_pr") or {}).items()}
     per_pr = {}
     for url, gold in gold_pr.items():          # gold_pr is keyed by the 6 campaign PR urls

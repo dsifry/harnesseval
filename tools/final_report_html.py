@@ -20,6 +20,12 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 M = json.load(open(f"{ROOT}/analysis/final_report_metrics.json"))
 D = json.load(open(f"{ROOT}/analysis/final_report_dataset.json"))
 
+# Derived true-gold universe (never hardcode the counts — they change with the verified registry).
+TGDER = M["true_gold_defects"]["verified"]["derived"]["coverage"]
+TG_DEN = int(TGDER["den"])            # 147 true bugs
+TG_GOLDENS = int(TGDER["goldens_den"])  # 42 Martian goldens
+TG_DEFECTS = int(TGDER["defects_den"])  # verified distinct hidden-gold defects (105)
+
 MODELS = ["claude-fable-5-1", "gpt-6-astra", "gpt-5.6-sol", "claude-opus-5",
           "glm-5.3-vision-background", "gpt-5.6-terra", "claude-sonnet-5",
           "glm-5.3-flash-background"]
@@ -203,7 +209,7 @@ HTML = """<!DOCTYPE html>
 <body>
 <div class="wrap">
   <h1>Automated code review — final campaign explorer</h1>
-  <div class="sub">8 models × 3 harnesses × 3 effort levels on the six severity-hardest Martian-benchmark PRs · 66 complete cells · data freeze 2026-09-16 09:35 · quality panels use the <b>true golden set</b> (42 goldens + 110 individually test-validated defects — REPORT_FINAL §10d; catalogue: GOLD_DEFECT_CATALOG.md)</div>
+  <div class="sub">8 models × 3 harnesses × 3 effort levels on the six severity-hardest Martian-benchmark PRs · 66 complete cells · data freeze 2026-09-16 09:35 · quality panels use the <b>true golden set</b> (__TGGOLD__ goldens + __TGDEF__ individually test-validated defects = __TGDEN__ true bugs — REPORT_FINAL §10d; catalogue: GOLD_DEFECT_CATALOG.md)</div>
   <div id="filtersSentinel"></div>
   <div id="filterWrap">
   <div class="panel" id="filtersPanel">
@@ -219,15 +225,15 @@ HTML = """<!DOCTYPE html>
   </div>
   </div>
 
-  <div class="caveat">Quality panels score <b>F2′</b>: real bugs found on the true golden set (42 goldens + 110 hand-verified defects), penalised for wrong claims and nitpicks, with a missed bug counted 4× worse than a false alarm — so a lower-scoring setup missed more than it made up for in precision. Every point is one (model × harness × effort level) cell, one selected healthy scored run per PR (n=6). Bars/whiskers are 95% cluster-bootstrap CIs over PRs. <b>Hover</b> for detail; <b>click</b> a point for the full cell card (right); <b>double-click</b> a legend entry to isolate a model; single-click to toggle. Full report: <a href="../../REPORT_FINAL.md">REPORT_FINAL.md</a> · coverage: <a href="../COVERAGE_FINAL.md">COVERAGE_FINAL.md</a>.</div>
+  <div class="caveat">Quality panels score <b>F2′</b>: real bugs found on the true golden set (__TGGOLD__ goldens + __TGDEF__ hand-verified defects), penalised for wrong claims and nitpicks, with a missed bug counted 4× worse than a false alarm — so a lower-scoring setup missed more than it made up for in precision. Every point is one (model × harness × effort level) cell, one selected healthy scored run per PR (n=6). Bars/whiskers are 95% cluster-bootstrap CIs over PRs. <b>Hover</b> for detail; <b>click</b> a point for the full cell card (right); <b>double-click</b> a legend entry to isolate a model; single-click to toggle. Full report: <a href="../../REPORT_FINAL.md">REPORT_FINAL.md</a> · coverage: <a href="../COVERAGE_FINAL.md">COVERAGE_FINAL.md</a>.</div>
 
   <div class="panel">
   <div class="panel">
     <h2>1a · Value for money — how many real bugs does a dollar per PR review buy?</h2>
-    <div class="note"><div><b>How to read the y-axis — F2′, our overall quality score.</b> It rewards a setup for <b>finding real bugs</b> and penalises it for <b>noise</b>. "Real bugs" = the true golden set: 42 Martian goldens + 110 defects we verified by hand (152 total). "Noise" = claims the adjudicator rejected, plus nitpicks. A <b>missed bug counts 4× as much as a false alarm</b>, which is why the score is <b>F2′</b> and not the more familiar F1. <b>Higher is better, and the chart is zoomed in so you can actually see the differences</b> — the axis stopping at 0.5 is a zoom level, not a limit on the score: 1.0 would mean catching all 152 real bugs with no noise, and the best setup here reaches 0.44, the best of a deliberately hard field. <i>Full definition: REPORT_FINAL §10d.</i></div><div class="mech">x = metered $ per PR review (log) — what a single review costs. One point per cell (66 complete top-6 cells). <b>Color</b> = model; <b>shape</b> = harness (○ van, □ CE, △ MRV); <b>connecting lines</b> follow one model × harness across effort levels (solid vanilla, dashed CE, dotted MRV). <b>Hover</b> for the value + CI; <b>click</b> a point for its card below; <b>double-click</b> a legend entry to isolate a model. CIs are off by default.</div></div>
+    <div class="note"><div><b>How to read the y-axis — F2′, our overall quality score.</b> It rewards a setup for <b>finding real bugs</b> and penalises it for <b>noise</b>. "Real bugs" = the true golden set: __TGGOLD__ Martian goldens + __TGDEF__ defects we verified by hand (__TGDEN__ total). "Noise" = claims the adjudicator rejected, plus nitpicks. A <b>missed bug counts 4× as much as a false alarm</b>, which is why the score is <b>F2′</b> and not the more familiar F1. <b>Higher is better, and the chart is zoomed in so you can actually see the differences</b> — the axis stopping at 0.5 is a zoom level, not a limit on the score: 1.0 would mean catching all __TGDEN__ real bugs with no noise, and the best setup here reaches 0.49, the best of a deliberately hard field. <i>Full definition: REPORT_FINAL §10d.</i></div><div class="mech">x = metered $ per PR review (log) — what a single review costs. One point per cell (66 complete top-6 cells). <b>Color</b> = model; <b>shape</b> = harness (○ van, □ CE, △ MRV); <b>connecting lines</b> follow one model × harness across effort levels (solid vanilla, dashed CE, dotted MRV). <b>Hover</b> for the value + CI; <b>click</b> a point for its card below; <b>double-click</b> a legend entry to isolate a model. CIs are off by default.</div></div>
     <div class="controls"><label><input type="checkbox" id="showci1a"> show 95% CIs</label></div>
     <div id="chart1a" style="height:430px"></div>
-    <div class="takeaway" style="margin-top:10px;padding:10px 14px;border-left:4px solid #B07AA1;background:#faf7fa;font-size:13.5px;border-radius:0 8px 8px 0"><b>Takeaway:</b> the GLM harness rows dominate the value frontier \u2014 glm-vis \u00b7 MRV \u00b7 low delivers F2\u2032 0.388 at $0.22/run (7.5% of opus CE-low's $2.95, F2\u2032 0.349), and glm-flash \u00b7 MRV \u00b7 low delivers F2\u2032 0.392 at $0.02/run \u2014 about 1/125 of opus CE-low's price per review for the same score. fable-5.1 vanilla's best cell scores F2\u2032 0.361 \u2014 below both GLM harness cells above, and it finds 49 real bugs (19 hidden-gold) where glm-vis \u00b7 MRV \u00b7 high finds 69 (37). So on value per dollar the cheap harness lane is not a compromise.</div>
+    <div class="takeaway" style="margin-top:10px;padding:10px 14px;border-left:4px solid #B07AA1;background:#faf7fa;font-size:13.5px;border-radius:0 8px 8px 0"><b>Takeaway:</b> the GLM harness rows dominate the value frontier — glm-vis · MRV · low delivers F2′ 0.470 at $0.22/run (7.5% of opus CE-low's $2.95, F2′ 0.397), and glm-flash · MRV · low delivers F2′ 0.436 at $0.02/run — about 1/125 of opus CE-low's price per review. fable-5.1 vanilla's best 6-PR cell scores F2′ 0.406 — below the GLM harness cells above — and it finds 54 real bugs where glm-vis · MRV · high finds 76 (the overall best cell, glm-vis · CE · medium, finds 80). So on value per dollar the cheap harness lane is not a compromise.</div>
     <div id="details1a" style="margin-top:10px;border:1px solid var(--line);border-radius:8px;padding:14px;font-size:13px;background:#fbfbfb"><h3 style="margin:0 0 6px;font-size:14px">Cell details</h3><div style="color:#888">Click a point.</div></div>
   </div>
 
@@ -242,19 +248,19 @@ HTML = """<!DOCTYPE html>
 
   <div class="panel">
     <h2>1c · What does it cost to catch one true bug?</h2>
-    <div class="note"><div><b>This is the price per true bug</b> — one of the 152 real bugs in our golden set (42 Martian goldens plus 110 we verified by hand) — plotted against overall review quality. Cheap and high is the win. A setup far to the left but low is buying cheap catches while missing a lot; one far right and high is thorough but you pay for it. Compare it with 1d: this counts each <i>distinct true bug once</i>, while 1d counts every confirmed finding, including real ones outside the golden set — so the gap between the two shows how much a setup finds that the benchmark never scores. y = <b>F2′</b>, our overall quality score — how many real bugs a setup finds, penalised for noise, with a missed bug counted 4× worse than a false alarm. <i>Full definition under 1a.</i></div><div class="mech">One point per cell (66 complete top-6 cells). <b>Color</b> = model; <b>shape</b> = harness (○ van, □ CE, △ MRV); <b>connecting lines</b> follow one model × harness across effort levels (solid vanilla, dashed CE, dotted MRV). <b>Hover</b> for the value + CI; <b>click</b> a point for its card below; <b>double-click</b> a legend entry to isolate a model. CIs are off by default.</div></div>
+    <div class="note"><div><b>This is the price per true bug</b> — one of the __TGDEN__ real bugs in our golden set (__TGGOLD__ Martian goldens plus __TGDEF__ we verified by hand) — plotted against overall review quality. Cheap and high is the win. A setup far to the left but low is buying cheap catches while missing a lot; one far right and high is thorough but you pay for it. Compare it with 1d, and mind the denominators: <b>1c counts each distinct true bug once</b> (a bug is credited once no matter how many times it was reported), while <b>1d divides by every adjudicated real finding</b> — the same bug reported repeatedly counts each time, and beyond-gold findings count too — so 1d's dollars are always lower and never comparable to 1c's. A wide 1c↔1d gap means many confirmed findings per distinct credited bug. y = <b>F2′</b>, our overall quality score — how many real bugs a setup finds, penalised for noise, with a missed bug counted 4× worse than a false alarm. <i>Full definition under 1a.</i></div><div class="mech">One point per cell (66 complete top-6 cells). <b>Color</b> = model; <b>shape</b> = harness (○ van, □ CE, △ MRV); <b>connecting lines</b> follow one model × harness across effort levels (solid vanilla, dashed CE, dotted MRV). <b>Hover</b> for the value + CI; <b>click</b> a point for its card below; <b>double-click</b> a legend entry to isolate a model. CIs are off by default.</div></div>
     <div class="controls"><label><input type="checkbox" id="showci1c"> show 95% CIs</label></div>
     <div id="chart1c" style="height:430px"></div>
-    <div class="takeaway" style="margin-top:10px;padding:10px 14px;border-left:4px solid #B07AA1;background:#faf7fa;font-size:13.5px;border-radius:0 8px 8px 0"><b>Takeaway (true golden set):</b> per true bug found, the GLM harness cells pay far less than the frontier models: glm-flash · MRV · low $0.0022/bug, glm-vis · MRV · low $0.0222/bug, glm-vis · MRV · high $0.2249/bug, versus opus · CE · low $0.3049/bug and fable · vanilla · high $0.1587/bug — and fable finds 49 real bugs to glm-vis MRV high's 69.</div>
+    <div class="takeaway" style="margin-top:10px;padding:10px 14px;border-left:4px solid #B07AA1;background:#faf7fa;font-size:13.5px;border-radius:0 8px 8px 0"><b>Takeaway (true golden set):</b> per distinct true bug found, the GLM harness cells pay far less than the frontier models: glm-flash · MRV · low $0.0020/bug, glm-vis · MRV · low $0.0185/bug, glm-vis · MRV · high $0.204/bug, versus opus · CE · low $0.272/bug and fable · vanilla · high $0.152/bug — and fable finds 51 real bugs to glm-vis MRV high's 76.</div>
     <div id="details1c" style="margin-top:10px;border:1px solid var(--line);border-radius:8px;padding:14px;font-size:13px;background:#fbfbfb"><h3 style="margin:0 0 6px;font-size:14px">Cell details</h3><div style="color:#888">Click a point.</div></div>
   </div>
 
   <div class="panel">
     <h2>1d · What does a review deliver per dollar?</h2>
-    <div class="note"><div><b>This is the value question: what you actually get for the money.</b> Unlike 1c, it counts every real bug found — including the 110 we verified by hand that the benchmark never scores. The strict benchmark only pays for 42 bugs; this counts all 152. So 1d answers 'what does the review deliver', while 1c answers 'what does it score'. <b>Cheap and high is best.</b> A setup that looks weak on 1c but strong here is being punished by the benchmark, not by reality — which is the whole reason we report the true golden set. y = <b>F2′</b>, our overall quality score — how many real bugs a setup finds, penalised for noise, with a missed bug counted 4× worse than a false alarm. <i>Full definition under 1a.</i></div><div class="mech">One point per cell (66 complete top-6 cells). <b>Color</b> = model; <b>shape</b> = harness (○ van, □ CE, △ MRV); <b>connecting lines</b> follow one model × harness across effort levels (solid vanilla, dashed CE, dotted MRV). <b>Hover</b> for the value + CI; <b>click</b> a point for its card below; <b>double-click</b> a legend entry to isolate a model. CIs are off by default.</div></div>
+    <div class="note"><div><b>This is the value question: what you actually get for the money.</b> <b>Read the x-axis carefully — it is $ per ADJUDICATED REAL FINDING, not $ per distinct true bug.</b> It divides the run's cost by every finding the adjudicator confirmed as real — golden hits plus beyond-gold real findings, counted with multiplicity: if a setup reports the same bug three times, it counts three times. That is a different denominator from panel 1c, which prices each of the __TGDEN__ distinct true bugs (__TGGOLD__ goldens + __TGDEF__ verified hidden-gold) once. For glm-vis · MRV · low the same run is $0.0037 per adjudicated finding (360 findings) but $0.019 per distinct true bug (72 credited) — the two numbers are ~6× apart and answer different questions: 1d asks 'what does a delivered finding cost', 1c asks 'what does a distinct bug cost'. <b>Cheap and high is best.</b> A wide 1c↔1d gap means many confirmed findings per distinct bug — including duplicates and beyond-gold items the true-set score does not credit. y = <b>F2′</b>, our overall quality score — how many real bugs a setup finds, penalised for noise, with a missed bug counted 4× worse than a false alarm. <i>Full definition under 1a.</i></div><div class="mech">One point per cell (66 complete top-6 cells). <b>Color</b> = model; <b>shape</b> = harness (○ van, □ CE, △ MRV); <b>connecting lines</b> follow one model × harness across effort levels (solid vanilla, dashed CE, dotted MRV). <b>Hover</b> for the value + CI; <b>click</b> a point for its card below; <b>double-click</b> a legend entry to isolate a model. CIs are off by default.</div></div>
     <div class="controls"><label><input type="checkbox" id="showci1d"> show 95% CIs</label></div>
     <div id="chart1d" style="height:430px"></div>
-    <div class="takeaway" style="margin-top:10px;padding:10px 14px;border-left:4px solid #B07AA1;background:#faf7fa;font-size:13.5px;border-radius:0 8px 8px 0"><b>Takeaway:</b> counting everything the adjudicator confirms (golden + beyond-gold), across all cells on the true set, $ per true bug runs $0.0006–$1.41 — the GLM harness cells sit at the cheap end and the high-effort frontier-model cells at the expensive end. The Pareto frontier (fig_pareto_frontier.png) is entirely GLM cells.</div>
+    <div class="takeaway" style="margin-top:10px;padding:10px 14px;border-left:4px solid #B07AA1;background:#faf7fa;font-size:13.5px;border-radius:0 8px 8px 0"><b>Takeaway:</b> counting every adjudicated real finding (golden + beyond-gold, with multiplicity), $ per confirmed finding runs $0.0002–$0.37 across cells — the GLM harness cells sit at the cheap end and the high-effort frontier-model cells at the expensive end. Do not read this as the price of a distinct true bug — that is panel 1c, ~6× higher for the recommended cell. In fig_pareto_frontier.png the F2′-panel frontier is entirely GLM cells; the recall-panel frontier ends at opus · CE · medium, the recall leader.</div>
     <div id="details1d" style="margin-top:10px;border:1px solid var(--line);border-radius:8px;padding:14px;font-size:13px;background:#fbfbfb"><h3 style="margin:0 0 6px;font-size:14px">Cell details</h3><div style="color:#888">Click a point.</div></div>
   </div>
 
@@ -271,7 +277,7 @@ HTML = """<!DOCTYPE html>
 
   <div class="panel">
     <h2>1f · How many real bugs does each setup actually find — and how many does the benchmark ignore?</h2>
-    <div class="note"><div><b>This is the &ldquo;how much does it actually find&rdquo; panel — with the benchmark&rsquo;s blind spot exposed.</b> Each bar is one setup. The grey part is bugs the strict benchmark knows about and scores; the coloured part is <b>real bugs the benchmark never scores</b> — defects we verified by hand, each with its own test that fails before the fix and passes after. A long coloured section means the setup found genuine problems that a benchmark-based score simply cannot see. <b>Read this ranked by bugs found, not by F2′</b>: a setup can lead here and still sit mid-table on quality, because F2′ also charges for noise — a terse setup registers no nitpicks while a verbose one is charged for every real-but-minor item it raises. The two panels answer different questions: 1f asks &ldquo;how much did it find?&rdquo;, the quality panels ask &ldquo;how good is what it found?&rdquo;</div><div class="mech">One bar per setup, sorted by total real bugs found. <b>Grey</b> = Martian goldens (the only thing the strict benchmark scores); <b>coloured</b> = hidden-gold defects it never scores. The dashed line at <b>152</b> is every true bug on the six PRs (42 goldens + 110 verified defects); the small grey tick on a row is that setup&rsquo;s <i>coverage ceiling</i> — some setups cover fewer than the six PRs and cannot reach 152. <b>Hover</b> for details.</div></div>
+    <div class="note"><div><b>This is the &ldquo;how much does it actually find&rdquo; panel — with the benchmark&rsquo;s blind spot exposed.</b> Each bar is one setup. The grey part is bugs the strict benchmark knows about and scores; the coloured part is <b>real bugs the benchmark never scores</b> — defects we verified by hand, each with its own test that fails before the fix and passes after. A long coloured section means the setup found genuine problems that a benchmark-based score simply cannot see. <b>Read this ranked by bugs found, not by F2′</b>: a setup can lead here and still sit mid-table on quality, because F2′ also charges for noise — a terse setup registers no nitpicks while a verbose one is charged for every real-but-minor item it raises. The two panels answer different questions: 1f asks &ldquo;how much did it find?&rdquo;, the quality panels ask &ldquo;how good is what it found?&rdquo;</div><div class="mech">One bar per setup, sorted by total real bugs found. <b>Grey</b> = Martian goldens (the only thing the strict benchmark scores); <b>coloured</b> = hidden-gold defects it never scores. The dashed line at <b>__TGDEN__</b> is every true bug on the six PRs (__TGGOLD__ goldens + __TGDEF__ verified defects); the small grey tick on a row is that setup&rsquo;s <i>coverage ceiling</i> — some setups cover fewer than the six PRs and cannot reach __TGDEN__. <b>Hover</b> for details.</div></div>
     <div id="chart1f" style="height:920px"></div>
     <div id="takeaway1f" style="margin-top:10px;padding:10px 14px;border-left:4px solid #B07AA1;background:#faf7fa;font-size:13.5px;border-radius:0 8px 8px 0"></div>
   </div>
@@ -285,7 +291,7 @@ HTML = """<!DOCTYPE html>
 
   <div class="panel">
     <h2>3 · Where does a review's token bill actually come from?</h2>
-    <div class="note"><div><b>Two setups can deliver similar review quality at very different cost, and this panel shows where the money went.</b> Each bar breaks a review's tokens into the four things you pay for: input read for the first time, input re-read from cached context, cache writes paid to store that context, and the model's own output including its reasoning. A setup that is expensive because of output is doing a lot of thinking; one that is expensive because of cache writes is paying to remember things it may never reuse. <b>Read this when you want to change a cost, not just compare it</b> — it tells you which lever to pull.</div><div class="mech">One stacked bar per cell = mean k-tokens per PR across the six PRs, split into fresh input, cached read, cache write and output (incl. reasoning). Label = model · harness · effort level. Default sort: total tokens, descending. Use the effort dropdown to compare like with like, and the sort dropdown to group rows by model or by harness.</div></div>
+    <div class="note"><div><b>Two setups can deliver similar review quality at very different cost, and this panel shows where the money went.</b> Each bar breaks a review's tokens into the four things you pay for: input read for the first time, input re-read from cached context, cache writes paid to store that context, and the model's own output including its reasoning. A setup that is expensive because of output is doing a lot of thinking; one that is expensive because of cache writes is paying to remember things it may never reuse. <b>Read this when you want to change a cost, not just compare it</b> — it tells you which lever to pull.</div><div class="mech">One stacked bar per cell = mean k-tokens per PR across the six PRs, split into fresh input, cached read, cache write and output (incl. reasoning). Label = model · harness · effort level. Default sort: total tokens, descending. Use the effort dropdown to compare like with like, and the sort dropdown to group rows by model or by harness. The global effort filter above also applies here: the panel shows the intersection of the global filter and the local dropdown selection.</div></div>
     <div class="controls"><label>effort <select id="effsel"></select></label><label>sort <select id="sortsel"><option value="tokens_desc">by total tokens (desc)</option><option value="tokens_asc">by total tokens (asc)</option><option value="model_fw">by model, then harness</option><option value="fw_model">by harness, then model</option></select></label></div>
     <div id="chart3"></div>
   </div>
@@ -320,7 +326,7 @@ function redrawAll(){
   // isolate every panel: a filter combination that empties one panel must not stop the others redrawing
   const safe = (fn, arg) => { try { fn(arg); } catch (e) { console.warn('panel redraw failed', e); } };
   VIEWS.forEach(v => safe(drawView, v));
-  safe(draw2); safe(draw3); safe(draw4); safe(refreshCellsel); safe(draw5); safe(draw6);
+  safe(draw2); safe(refreshEffsel); safe(draw3); safe(draw4); safe(refreshCellsel); safe(draw5); safe(draw6);
 }
 (function dockFilters(){
   const wrap = document.getElementById('filterWrap');
@@ -354,7 +360,7 @@ const fmt = (v, n=5) => { if(v==null||isNaN(v)||!isFinite(v)) return '—'; retu
 const fmtA = (v, n=5) => { if(v==null||isNaN(v)||!isFinite(v)) return '—'; if(Math.abs(v)>0 && Math.abs(v)<0.01) return parseFloat((v*100).toFixed(n)).toString()+'¢'; return '$'+parseFloat(v.toFixed(n)).toString(); };
 // bracket takes the POINT's unit (no $/¢ mixing inside one CI)
 const fmtAB = (pt, lo, hi, n=5) => { if(Math.abs(pt)>0 && Math.abs(pt)<0.01) return fmtA(pt,n)+' ['+fmtA(lo,n)+', '+fmtA(hi,n)+']'; return '$'+fmt(pt,n)+' [$'+fmt(lo,n)+', $'+fmt(hi,n)+']'; };
-const metName = {cost_run:'$/run', usd_per_tp_sem:'$/true bug found', usd_per_real:'$/real finding', tok_run:'tokens/run', wall_run:'wall s/run', price_per_ktok:'price per k-tok', F1_sem:'F1 (true set, real-bug precision)', F1p_sem:'F1\u2032 (true set, nitpick-averse lens)', F2_sem:'F2 (true set, recall-weighted 4:1)', F2p_sem:'F2\u2032 (true set \u2014 RECOMMENDED composite)', recall_sem:'recall (true golden set)', adjP_sem:'adjP (claim soundness)', adjPp_sem:'adjP\u2032 (user lens)'};
+const metName = {cost_run:'$/run', usd_per_tp_sem:'$/true bug found', usd_per_real:'$/adjudicated real finding (legacy, not $/distinct bug)', tok_run:'tokens/run', wall_run:'wall s/run', price_per_ktok:'price per k-tok', F1_sem:'F1 (true set, real-bug precision)', F1p_sem:'F1\u2032 (true set, nitpick-averse lens)', F2_sem:'F2 (true set, recall-weighted 4:1)', F2p_sem:'F2\u2032 (true set \u2014 RECOMMENDED composite)', recall_sem:'recall (true golden set)', adjP_sem:'adjP (claim soundness)', adjPp_sem:'adjP\u2032 (user lens)'};
 
 function tracesFor(xmet, ymet, showci) {
   const ts = [];
@@ -438,7 +444,7 @@ VIEWS.forEach(v => {
     ['F1 (benchmark)', fmt(c.F1)+' ['+fmt(c.F1_lo)+','+fmt(c.F1_hi)+']'],
     ['F2 (benchmark)', fmt(c.F2)+' ['+fmt(c.F2_lo)+','+fmt(c.F2_hi)+']'],
     ['cost/run', fmtAB(c.cost_run, c.cost_run_lo, c.cost_run_hi)],
-    ['per golden TP', fmtA(c.usd_per_tp)],['per real finding', fmtA(c.usd_per_real)],
+    ['per golden TP (benchmark)', fmtA(c.usd_per_tp)],['per adjudicated real finding (legacy)', fmtA(c.usd_per_real)],
     ['tokens/run', Math.round(c.tok_run).toLocaleString()],['wall s/run', Math.round(c.wall_run)],
     ['beyond-gold/PR', fmt(c.beyond_per_pr)],['instrument', c.instruments],['judge', c.judges],
     ['run dates', c.run_dates],['GLM pre-fix runs', c.glm_prefix==null?'—':c.glm_prefix+'/6'],
@@ -467,12 +473,12 @@ function draw6(){
     {x:rows.map(r=>r.ceiling), y:yx, mode:'markers', name:'coverage ceiling for this cell', marker:{color:'#666',symbol:'line-ns-open',size:8,line:{width:1}},
      customdata:rows, hovertemplate:'<b>%{customdata.k}</b><br>coverage ceiling (covered PRs): %{x}<extra></extra>'},
   ];
-  const PERFECT = 152; // "perfect" agent = 42 goldens + 110 individually test-validated defects (facetious: bounded by what the campaign found)
+  const PERFECT = __TGDEN__; // "perfect" agent = __TGGOLD__ goldens + __TGDEF__ individually test-validated defects (facetious: bounded by what the campaign found)
   const shapes=[{type:'line', xref:'x', x0:PERFECT, x1:PERFECT, yref:'y', y0:-0.5, y1:rows.length-0.5,
     line:{color:'#333', width:1.2, dash:'dash'}, layer:'below'}];
-  const annotations=[{xref:'x', x:PERFECT, yref:'y', y:-0.5, text:'"perfect" agent (as far as we know): 42 goldens + 110 verified defects', showarrow:false, font:{size:9}, xanchor:'right', yanchor:'bottom'}];
+  const annotations=[{xref:'x', x:PERFECT, yref:'y', y:-0.5, text:'"perfect" agent (as far as we know): __TGGOLD__ goldens + __TGDEF__ verified defects', showarrow:false, font:{size:9}, xanchor:'right', yanchor:'bottom'}];
   Plotly.react('chart1f', ts, {shapes:shapes, annotations:annotations, barmode:'stack', margin:{l:150,r:16,t:8,b:44},
-    xaxis:{title:'distinct real bugs found (of 42 goldens + 110 verified defects)', gridcolor:'#eee'},
+    xaxis:{title:'distinct real bugs found (of __TGGOLD__ goldens + __TGDEF__ verified defects)', gridcolor:'#eee'},
     yaxis:{tickvals:yx, ticktext:labels, tickfont:{size:9.5}, autorange:'reversed'},
     legend:{font:{size:11},orientation:'h',y:-0.06}, paper_bgcolor:'rgba(0,0,0,0)'}, {displayModeBar:false, responsive:true});
   const el=document.getElementById('takeaway1f');
@@ -510,9 +516,19 @@ const effsel=document.getElementById('effsel');
 ['low','medium','high'].forEach(e=>effsel.add(new Option(e,e)));
 effsel.value='low';
 const sortsel=document.getElementById('sortsel');
+// keep the panel-local effort dropdown in sync with the GLOBAL effort filter: only offer efforts
+// the global checkboxes leave visible, and fall back to the first visible one if the current
+// selection gets hidden. draw3() then intersects: local selection AND global filter.
+function refreshEffsel(){
+  const cur=effsel.value;
+  const avail=['low','medium','high'].filter(x=>fEffs.has(x));
+  effsel.innerHTML='';
+  avail.forEach(x=>effsel.add(new Option(x,x)));
+  effsel.value = avail.includes(cur) ? cur : (avail[0]||'');
+}
 function draw3(){
   const e=effsel.value; const sort=sortsel.value;
-  let keys=Object.keys(DATA.tok).filter(k=>{const t=DATA.tok[k]; return t.eff===e && fModels.has(t.model) && fFws.has(t.fw);});
+  let keys=Object.keys(DATA.tok).filter(k=>{const t=DATA.tok[k]; return t.eff===e && fModels.has(t.model) && fFws.has(t.fw) && fEffs.has(t.eff);});
   const fwOrder={van:0, CE:1, MRV:2};
   const parse=k=>{const p=k.split('·');return {m:p[0], fw:p[1], eff:p[2]};};
   if (sort==='tokens_desc') keys.sort((a,b)=>DATA.tok[b].total-DATA.tok[a].total);
@@ -598,7 +614,10 @@ cellsel.onchange=draw5; draw5();
 out = HTML.replace("__DATA__", json.dumps(DATA, separators=(",", ":")).replace("</", "<\\/")) \
           .replace("__MCOL__", json.dumps(MCOL)) \
           .replace("__MSYM__", json.dumps(SYM)) \
-          .replace("__SH2__", json.dumps(SH))
+          .replace("__SH2__", json.dumps(SH)) \
+          .replace("__TGDEN__", str(TG_DEN)) \
+          .replace("__TGGOLD__", str(TG_GOLDENS)) \
+          .replace("__TGDEF__", str(TG_DEFECTS))
 path = f"{ROOT}/analysis/figures/interactive_dashboard.html"
 open(path, "w").write(out)
 print("wrote", path, len(out), "bytes")

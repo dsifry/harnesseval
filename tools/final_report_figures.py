@@ -5,7 +5,7 @@ Reads analysis/final_report_dataset.json + analysis/final_report_metrics.json an
 writes analysis/figures/*.png. Reproducible: no randomness here; the CIs were
 bootstrapped in tools/final_report_compute.py (B=10,000, seed 20260916).
 """
-import json, os
+import json, os, textwrap
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")
@@ -47,6 +47,12 @@ plt.rcParams.update({"figure.dpi": 150, "font.size": 8, "axes.grid": True,
 
 def cell(m, fw, e):
     return M["matrix"].get(f"{m}|{fw}|{e}")
+
+# Derived true-gold universe (42 goldens + N verified distinct defects) — never hardcode the counts.
+TGDER = M["true_gold_defects"]["verified"]["derived"]["coverage"]
+TG_GOLDENS = int(TGDER["goldens_den"])          # 42 Martian goldens
+TG_DEFECTS = int(TGDER["defects_den"])           # verified distinct hidden-gold defects (105)
+TG_DEN = int(TGDER["den"])                       # true-bug universe size (147)
 
 def err(ci):
     return [[ci[0] - ci[1]], [ci[2] - ci[0]]]
@@ -90,7 +96,9 @@ for ax, met, xlab in ((axes[0], "recall_sem", "recall, true golden set (CI)"),
     ax.set_ylim(0.0, 0.5)
     if met == "recall_sem":
         ax.legend(fontsize=6)
-fig.suptitle("Cost/quality frontier, verified true golden set (42 goldens + 211 additional bugs) — top-6 cells", fontsize=9)
+fig.suptitle(textwrap.fill(
+    f"Cost/quality frontier, verified true golden set ({TG_GOLDENS} goldens + {TG_DEFECTS} additional bugs "
+    f"= {TG_DEN} true bugs) — top-6 cells", width=80), fontsize=9)
 fig.tight_layout()
 fig.savefig(f"{FIG}/fig_pareto_frontier.png"); plt.close(fig)
 
@@ -163,7 +171,7 @@ for ax, fw in zip(axes, FRAMEWORKS):
         for e in EFFORTS:
             v = cell(m, fw, e)
             sc = sem_cell(m, fw, e)
-            if v is None or not sc:
+            if v is None or not sc or v["n_pr"] < 6:   # partial-coverage cells excluded (1–2 PRs)
                 continue
             yci = sc["ci"]["F2p"]
             xs.append(v["ci"]["cost_run"][0]); ys.append(yci[0])
@@ -180,7 +188,9 @@ for ax, fw in zip(axes, FRAMEWORKS):
     ax.set_ylabel("F2\u2032 (our evaluator, true golden set)"); ax.set_ylim(0, 0.5)
     ax.set_title(fw, fontsize=8)
     ax.legend(fontsize=5.5, ncol=2)
-fig.suptitle("Effort ladder: real-world quality vs cost as effort rises (low → medium → high), CIs shown", fontsize=9)
+fig.suptitle(textwrap.fill(
+    "Effort ladder: real-world quality vs cost as effort rises (low → medium → high), CIs shown — "
+    "complete 6-PR cells only (partial-coverage cells with 1–2 PRs are excluded)", width=86), fontsize=9)
 fig.tight_layout()
 fig.savefig(f"{FIG}/fig_effort_ladder.png"); plt.close(fig)
 
@@ -205,7 +215,15 @@ for ax, ka, kb, lab in ((axes[0], "recall_t6", "recall_full", "recall"),
         ax.scatter([], [], color=c, s=6, label=M_SHORT[m])
     handles, labels_ = ax.get_legend_handles_labels()
     ax.legend(handles[-9:], labels_[-9:], fontsize=5, ncol=2, loc="upper left")
-fig.suptitle("Selection effect: top-6 (hardest PRs) vs full-50 — points above y=x are harder-than-average", fontsize=9)
+fig.suptitle(textwrap.fill(
+    "Selection effect: top-6 (hardest PRs) vs full-50 — points ABOVE y=x score higher on the "
+    "selected top-6 than on the full 50 (the selection favored them); points BELOW do relatively "
+    "better on the full 50", width=80), fontsize=9)
+for _ax in axes:
+    _ax.text(0.13, 0.93, "above the line:\nrelatively stronger on the top-6", transform=_ax.transAxes,
+             fontsize=6, color="#555", va="top")
+    _ax.text(0.60, 0.13, "below the line:\nrelatively stronger on the full 50", transform=_ax.transAxes,
+             fontsize=6, color="#555", va="bottom")
 fig.tight_layout()
 fig.savefig(f"{FIG}/fig_selection_effect.png"); plt.close(fig)
 
@@ -358,7 +376,7 @@ for m, fw, e, v in pts:
     scatter_ci(ax, x, x * 0.98, x * 1.02, r[0], r[1], r[2], m, fw, e)
 ax.set_xlabel("metered $ per true bug found (log)"); ax.set_ylabel("F2\u2032 (our evaluator) [CI]")
 ax.set_ylim(0, 0.5)
-ax.set_title("(d) cost per true bug vs F2\u2032 (152 true bugs)", fontsize=9)
+ax.set_title(f"(d) cost per true bug vs F2\u2032 ({TG_DEN} true bugs)", fontsize=9)
 
 fig.suptitle("Efficiency 2×2, verified true golden set — top-6 cells, 95% cluster-bootstrap CIs", fontsize=10)
 fig.tight_layout()

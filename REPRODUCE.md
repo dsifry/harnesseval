@@ -1,5 +1,13 @@
 # Reproduce
 
+> **⚠️ Historical (August 2026, tag `v0.8.2-eval`).** This page replicates the **August 384-cell
+> matrix** and the numbers in [`report.md`](report.md). The **current report** is
+> [`REPORT_FINAL.md`](REPORT_FINAL.md); its reproduction chain lives in **`REPORT_FINAL.md` §11**
+> (clone + `git checkout report-2026-09-18`, expected-output checksums, tested-environment record,
+> and the three-mode taxonomy: recompute statistics from saved inputs / re-execute saved defect
+> tests via `analysis/verified_gold/REPLICATION_KIT.md` / model judgments — not reproducible by
+> design). This page is kept as the record of the August experiment.
+
 How to replicate the 384-cell matrix and every number in [`report.md`](report.md). The eval
 is **reproducible**: the exact code is pinned, the dataset + grader are an established public
 benchmark, and the analysis is one command per snapshot.

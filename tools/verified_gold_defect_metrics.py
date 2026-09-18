@@ -53,10 +53,13 @@ def main():
     for d in reg["defects"]:
         tier[d["id"]] = d["tier"]
     valid_ids = set(tier)
-    # defects that at least one finding anywhere was assigned to. 13 of the verified defects were surfaced by
-    # the AUDIT (merge-audit label lists / under-count triage) and were never reported by any run, so no cell
-    # can score them; recall against them is structurally capped. Reported as a separate 'reachable' variant.
-    reported_ids = {d for _pr, m in assign.items() for _h, d in m.items() if d in valid_ids}
+    # Defects that at least one finding anywhere was assigned to, restricted to the D-verified universe.
+    # (Post-2026-09-18 audit: withdrawn/duplicate tiers must never inflate a denominator or a credit --
+    #  see analysis/verified_gold/WITHDRAWALS_AND_DEDUP_2026-09-18.md. The never-reported count below is
+    #  computed dynamically; it is no longer the historical "13".)
+    reported_ids = {d for _pr, m in assign.items() for _h, d in m.items()
+                    if d in valid_ids and tier.get(d) == "D-verified"}
+    n_never_reported = sum(1 for i in valid_ids if tier.get(i) == "D-verified" and i not in reported_ids)
 
     sel = {(r["model"], r["framework"], r["effort"], r["url"]): r for r in D["selected_runs"]}
     try:
@@ -68,6 +71,12 @@ def main():
     EFFS = ["low", "medium", "high"]
     rng = np.random.default_rng(SEED + 5)
 
+    def eff_instrument(r):
+        """Where this run's hal/imp counts actually come from: the v3.1 re-adjudication when present,
+        else the in-run adjudicator. 'v1' means the binary instrument with NO important_non_bug
+        category, so a nitpick count of 0 from a v1 run is structurally unmeasured, not observed."""
+        return "rj3" if r.get("rj3") else (r.get("inrun") or {}).get("instrument") or "unknown"
+
     def run_row(r, variant):
         pr = slug.get(r["url"], r["url"].rstrip("/").split("/")[-1])
         amap = assign.get(pr, {})
@@ -77,7 +86,7 @@ def main():
             if not did or did not in valid_ids:      # merged-away defects no longer count
                 continue
             if variant == "verified" and tier.get(did) != "D-verified":
-                continue
+                continue            # withdrawn (2026-09-18 audit) and duplicate-tier defects are never credited
             if variant == "reachable" and did not in reported_ids:
                 continue
             own.add(did)
@@ -123,6 +132,7 @@ def main():
                     if not urls:
                         continue
                     rows = np.array([[run_row(sel[(m, fw, e, u)], variant)[k] for k in ("tp", "den", "hal", "imp")] for u in urls], dtype=float)
+                    insts = sorted({eff_instrument(sel[(m, fw, e, u)]) for u in urls})
                     n = len(rows)
                     idx = rng.integers(0, n, size=(B, n))
                     S = rows[idx]
@@ -131,7 +141,7 @@ def main():
                     cells[f"{m}|{fw}|{e}"] = {
                         "n_pr": n, "TP": int(rows[:, 0].sum()), "den": int(rows[:, 1].sum()),
                         "recall": p[0], "adjP": p[1], "adjPp": p[2], "F1": p[3], "F1p": p[4],
-                        "F2": p[5], "F2p": p[6],
+                        "F2": p[5], "F2p": p[6], "instruments": insts,
                         "ci": {"recall": (float(p[0]), float(np.percentile(rec, 2.5)), float(np.percentile(rec, 97.5)), 1.0),
                                "F1": (float(p[3]), float(np.percentile(f1, 2.5)), float(np.percentile(f1, 97.5)), 1.0),
                                "F1p": (float(p[4]), float(np.percentile(f1p, 2.5)), float(np.percentile(f1p, 97.5)), 1.0),
@@ -162,18 +172,23 @@ def main():
                         "totals": {"TP": sum(c["TP"] for c in cells.values()), "den": sum(c["den"] for c in cells.values())}}
     (VG / "DEFECT_METRICS.json").write_text(json.dumps(out, indent=1))
 
+    n_verified_now = sum(1 for d in reg['defects'] if d['tier'] == 'D-verified')
     L = ["# §10d — defect-level metrics (per-run matching at the individual-bug unit)", "",
          "Denominators are computed from the registry (see _final in analysis/verified_gold/DEFECT_REGISTRY.json): "
-         "verified = 42 goldens + every D-verified defect; reachable = 42 + only those defects that some run "
-         "actually reported (13 were audit-surfaced and no run ever reported them, so they cap recall for "
-         "everyone); full = 42 + all registry defects. "
+         f"verified = 42 goldens + every D-verified defect ({n_verified_now} after the 2026-09-18 "
+         "withdrawal/dedup audit — 3 withdrawn, 2 merged; see WITHDRAWALS_AND_DEDUP_2026-09-18.md); "
+         f"reachable = 42 + only those D-verified defects that some run actually reported ({n_never_reported} "
+         f"verified defect{' is' if n_never_reported == 1 else 's are'} reported by no run and cap recall for everyone); "
+         "full = 42 + all registry defects. The assignment map covers every finding (null = no clear match; see "
+         "DEFECT_ASSIGN.md and DEFECT_ASSIGN_AUDIT.json). Nitpick counts from cells whose instruments include "
+         "'v1' are structurally unmeasured (the binary instrument has no important_non_bug category), not observed zeros. "
          "recall = (golden TP + distinct defects hit) / denominator; adjP charges hallucinations, adjP' also nitpicks.", ""]
     for variant in ("verified", "reachable", "full"):
-        L += [f"## variant: {variant}", "", "| cell | n PRs | recall [CI] | adjP | adjP' | F1 | F1' | F2 | F2' |", "|---|---|---|---|---|---|---|"]
+        L += [f"## variant: {variant}", "", "| cell | n PRs | recall [CI] | adjP | adjP' | F1 | F1' | F2 | F2' | instruments |", "|---|---|---|---|---|---|---|---|---|---|"]
         for k, c in sorted(out[variant]["cells"].items(), key=lambda kv: -kv[1]["F1p"]):
             m, fw, e = k.split("|")
             L.append(f"| {m} · {fw} · {e} | {c['n_pr']} | {c['recall']:.3f} [{c['ci']['recall'][1]:.3f}, {c['ci']['recall'][2]:.3f}] "
-                     f"| {c['adjP']:.3f} | {c['adjPp']:.3f} | {c['F1']:.3f} | {c['F1p']:.3f} | {c['F2']:.3f} | {c['F2p']:.3f} |")
+                     f"| {c['adjP']:.3f} | {c['adjPp']:.3f} | {c['F1']:.3f} | {c['F1p']:.3f} | {c['F2']:.3f} | {c['F2p']:.3f} | {'/'.join(c.get('instruments') or [])} |")
         pos = sum(1 for v in out[variant]["pairs"].values() if v["dF1p"][1] > 0)
         _p = out[variant]['pairs']
         _p2 = sum(1 for v in _p.values() if v['dF2p'][1] > 0)

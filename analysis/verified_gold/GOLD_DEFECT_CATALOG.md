@@ -1,8 +1,9 @@
 # Hidden-gold defect catalogue
 
-**110 distinct verified defects.** Every one has an executed test that failed on the PR head and a
+**105 distinct verified defects.** Every one has an executed test that failed on the PR head and a
 documented fix that made it pass. Two evidence levels:
 
+3 defects are WITHDRAWN (their tests do not demonstrate the claim) and 2 are merged as DUPLICATES (2026-09-18 audit — see WITHDRAWALS_AND_DEDUP_2026-09-18.md). They are retained below, marked, but no longer count as verified.
 **Every defect is an independent unit**: it owns `defects/<id>/{test.diff,fix.patch,logs/,meta.json}`.
 No defect shares a test with another. `test_origin` records whether the test was written by the verifier
 for this defect alone (with a sibling-fix orthogonality check) or copied from the original execution
@@ -25,7 +26,7 @@ Merged duplicates and restored/renamed entries carry a provenance note.
 - **location**: `app/models/topicembed.rb:64`  ·  **evidence**: `own_executed`  ·  bundle `4-B01` (behavior_change_not_regression)
 - **test**: `analysis/verified_gold/4/B01-absolutizeurls-treats-protocol-relative-urls----as-r/defects/4-D01/test.diff`
 - **fix**: `analysis/verified_gold/4/B01-absolutizeurls-treats-protocol-relative-urls----as-r/defects/4-D01/fix.patch`  ·  **logs**: `analysis/verified_gold/4/B01-absolutizeurls-treats-protocol-relative-urls----as-r/defects/4-D01/logs`
-- **finding**: app/models/topicembed.rb:64 incorrectly rewrites protocol-relative urls as root-relative paths on the article host
+- **finding**: absolutizeurls incorrectly rewrites protocol-relative urls under the article host
 - **merged_in_from**: 4-D44
 
 ### 4-D03 — Referer header trusted as spoofable embeddability/auth gate
@@ -33,40 +34,42 @@ Merged duplicates and restored/renamed entries carry a provenance note.
 - **test**: `analysis/verified_gold/4/B02-embed-requests-are-wrongly-rejected-due-to-strict-unnorm/defects/4-D03/test.diff`
 - **fix**: `analysis/verified_gold/4/B02-embed-requests-are-wrongly-rejected-due-to-strict-unnorm/defects/4-D03/fix.patch`  ·  **logs**: `analysis/verified_gold/4/B02-embed-requests-are-wrongly-rejected-due-to-strict-unnorm/defects/4-D03/logs`
 - **orthogonality**: bundle fix leaves it red = `True`
-- **finding**: embedcontroller.rb:26 requiring a referer breaks legitimate embeds when browsers strip it (https→http navigation, referrer-policy: no-referrer), causing 403
+- **finding**: referer header check gating topicretriever fetching is not an authentication mechanism and can be manipulated by attackers
 
-### 4-D04 — Retrieval jobs enqueued before throttle/dedupe, allowing Sidekiq queue flooding
+### 4-D04 — Retrieval jobs enqueued before throttle/dedupe, allowing Sidekiq queue flooding — WITHDRAWN 2026-09-18
 - **location**: `app/controllers/embedcontroller.rb:15`  ·  **evidence**: `own_executed`  ·  bundle `4-B02` (behavior_change_not_regression)
+- **withdrawn**: Head failure is a harness stub artifact ('undefined method blank? for "example.com":String') that fires before the claimed queue-flooding behavior is reached; sibling run fails on missing response; fix.patch also changes production code solely to survive incomplete stubs (blank? -> to_s.strip.empty?, respond_to?(:response) guard). Not attributable to the claimed defect. Validated 2026-09-18.
 - **test**: `analysis/verified_gold/4/B02-embed-requests-are-wrongly-rejected-due-to-strict-unnorm/defects/4-D04/test.diff`
 - **fix**: `analysis/verified_gold/4/B02-embed-requests-are-wrongly-rejected-due-to-strict-unnorm/defects/4-D04/fix.patch`  ·  **logs**: `analysis/verified_gold/4/B02-embed-requests-are-wrongly-rejected-due-to-strict-unnorm/defects/4-D04/logs`
 - **orthogonality**: bundle fix leaves it red = `True`
-- **finding**: the loading page reloads every 30 seconds unconditionally, looping forever on permanent retrieval failure instead of showing an error
+- **finding**: every cache miss enqueues a job before throttling occurs in the worker, allowing repeated requests to flood the sidekiq queue
 
 ### 4-D05 — Case-sensitive/unnormalized host comparison against free-form embeddablehost setting
-- **location**: `app/controllers/embedcontroller.rb:26-27`  ·  **evidence**: `own_executed`  ·  bundle `4-B02` (behavior_change_not_regression)
+- **location**: `app/controllers/embedcontroller.rb:26`  ·  **evidence**: `own_executed`  ·  bundle `4-B02` (behavior_change_not_regression)
 - **test**: `analysis/verified_gold/4/B02-embed-requests-are-wrongly-rejected-due-to-strict-unnorm/defects/4-D05/test.diff`
 - **fix**: `analysis/verified_gold/4/B02-embed-requests-are-wrongly-rejected-due-to-strict-unnorm/defects/4-D05/fix.patch`  ·  **logs**: `analysis/verified_gold/4/B02-embed-requests-are-wrongly-rejected-due-to-strict-unnorm/defects/4-D05/logs`
 - **orthogonality**: bundle fix leaves it red = `True`
-- **finding**: referer check in embedcontroller.rb:25 is a weak/forgeable authorization gate for the new public embed/best route, and uri(referer).host may not match embeddablehost with port/scheme
+- **finding**: [medium/bug] app/controllers/embedcontroller.rb:21 — exact-host referer comparison blocks legit embedding on www. vs bare host mismatch, and referer may be absent for privacy-set browsers even for legitimate embeds
 
 ### 4-D06 — Staff-only throttle bypass in RetrieveTopic job
-- **location**: `app/controllers/embed_controller.rb`  ·  **evidence**: `own_executed`  ·  bundle `4-B02` (behavior_change_not_regression)
+- **location**: `app/jobs/regular/retrievetopic.rb:17`  ·  **evidence**: `own_executed`  ·  bundle `4-B02` (behavior_change_not_regression)
 - **test**: `analysis/verified_gold/4/B02-embed-requests-are-wrongly-rejected-due-to-strict-unnorm/defects/4-D06/test.diff`
 - **fix**: `analysis/verified_gold/4/B02-embed-requests-are-wrongly-rejected-due-to-strict-unnorm/defects/4-D06/fix.patch`  ·  **logs**: `analysis/verified_gold/4/B02-embed-requests-are-wrongly-rejected-due-to-strict-unnorm/defects/4-D06/logs`
 - **orthogonality**: bundle fix leaves it red = `True`
+- **finding**: app/jobs/regular/retrievetopic.rb:17 — staff skip the throttle entirely, so two concurrent requests both performretrieve, both create a topic, and the loser's topicembed.create! raises recordnotunique on the unique index
 
 ### 4-D07 — topicembed remote article download lacks open/read timeout and size limit
 - **location**: `app/models/topicembed.rb:48`  ·  **evidence**: `own_executed`  ·  bundle `4-B03` (behavior_change_not_regression)
 - **test**: `analysis/verified_gold/4/B03-unbounded-open-uri-fetch-in-topicembed-can-hang-jobs-or-/defects/4-D07/test.diff`
 - **fix**: `analysis/verified_gold/4/B03-unbounded-open-uri-fetch-in-topicembed-can-hang-jobs-or-/defects/4-D07/fix.patch`  ·  **logs**: `analysis/verified_gold/4/B03-unbounded-open-uri-fetch-in-topicembed-can-hang-jobs-or-/defects/4-D07/logs`
-- **finding**: open(url).read buffers responses without a size limit, allowing large responses to exhaust sidekiq worker memory
+- **finding**: no fetch timeout or size cap is set on the open() fetches, so retrieval/poll jobs can be hung or oom'd
 
 ### 4-D10 — topicembeds migration uses destructive force: true and lacks foreign keys/dependent cleanup
 - **location**: `db/migrate/20131217174004createtopicembeds.rb:3`  ·  **evidence**: `own_executed`  ·  bundle `4-B04` (confirmed_regression)
 - **test**: `analysis/verified_gold/4/B04-destructive-force-true-in-createtable-migration-can-dr/defects/4-D10/test.diff`
 - **fix**: `analysis/verified_gold/4/B04-destructive-force-true-in-createtable-migration-can-dr/defects/4-D10/fix.patch`  ·  **logs**: `analysis/verified_gold/4/B04-destructive-force-true-in-createtable-migration-can-dr/defects/4-D10/logs`
 - **orthogonality**: bundle fix leaves it red = `True`
-- **finding**: db/migrate/20131217174004createtopicembeds.rb:3 — force: true drops an existing topicembeds table and its data if present when this migration runs.
+- **finding**: db/migrate/20131217174004createtopicembeds.rb:3 — force: true in a migration drops an existing topicembeds table, destroying data on re-run
 
 ### 4-D11 — Redis throttle key can become permanent due to non-atomic SETNX + EXPIRE
 - **location**: `lib/topicretriever.rb:27`  ·  **evidence**: `own_executed`  ·  bundle `4-B06` (behavior_change_not_regression)
@@ -93,7 +96,7 @@ Merged duplicates and restored/renamed entries carry a provenance note.
 - **location**: `app/models/topicembed.rb:15`  ·  **evidence**: `own_executed`  ·  bundle `4-B09` (behavior_change_not_regression)
 - **test**: `analysis/verified_gold/4/B09-race-condition-non-atomic-exists-create-on-topicembed-c/defects/4-D15/test.diff`
 - **fix**: `analysis/verified_gold/4/B09-race-condition-non-atomic-exists-create-on-topicembed-c/defects/4-D15/fix.patch`  ·  **logs**: `analysis/verified_gold/4/B09-race-condition-non-atomic-exists-create-on-topicembed-c/defects/4-D15/logs`
-- **finding**: topicembed lookup-then-create logic is race-unsafe, so concurrent retrieval jobs can hit a unique-index exception instead of reusing the embed.
+- **finding**: p2: race condition on unique embedurl — import does check-then-create instead of upsert, so concurrent retrieves raise recordnotunique
 
 ### 4-D16 — enqueue/publish before outer transaction commits
 - **location**: `app/models/topicembed.rb:21`  ·  **evidence**: `own_executed`  ·  bundle `4-B09` (behavior_change_not_regression)
@@ -146,12 +149,13 @@ Merged duplicates and restored/renamed entries carry a provenance note.
 - **fix**: `analysis/verified_gold/4/B25-existing-topicembed-updates-ignore-title-only-changes-le/defects/4-D28/fix.patch`  ·  **logs**: `analysis/verified_gold/4/B25-existing-topicembed-updates-ignore-title-only-changes-le/defects/4-D28/logs`
 - **finding**: app/models/topicembed.rb:34 ignores title changes for existing embeds, preventing title-only feed updates and title corrections
 
-### 4-D29 — Degenerate/malformed embed URL reaches `URI()` in `absolutize_urls` and raises `URI::InvalidURIError`, aborting the import
-- **location**: `app/models/topic_embed.rb`  ·  **evidence**: `own_executed`  ·  bundle `4-B26` (behavior_change_not_regression)
+### 4-D29 — Degenerate/malformed embed URL reaches `URI()` in `absolutize_urls` and raises `URI::InvalidURIError`, aborting the import — WITHDRAWN 2026-09-18
+- **location**: `app/models/topicembed.rb:11`  ·  **evidence**: `own_executed`  ·  bundle `4-B26` (behavior_change_not_regression)
+- **withdrawn**: Head failure is a NameError (uninitialized constant TopicEmbed::Nokogiri) at a later site; the claimed URI::InvalidURIError never fired on the recorded toolchain (ruby 2.6.10 accepts URI('http://') with empty host), and the fix's own guard manufactures the expected exception. The underlying line-anchored regex class may be real but is not demonstrated by this evidence. Validated 2026-09-18.
 - **test**: `analysis/verified_gold/4/B26-topicembed-url-guard-uses-line-anchored-regex-and-later-/defects/4-D29/test.diff`
 - **fix**: `analysis/verified_gold/4/B26-topicembed-url-guard-uses-line-anchored-regex-and-later-/defects/4-D29/fix.patch`  ·  **logs**: `analysis/verified_gold/4/B26-topicembed-url-guard-uses-line-anchored-regex-and-later-/defects/4-D29/logs`
 - **orthogonality**: bundle fix leaves it red = `True`
-- **finding**: topicembedimport mutates the caller's contents string in place, and url =~ /^https?\:\/\// accepts degenerate urls like 'http://' causing uri::invalidurierror in absolutizeurls, crashing the importing job instead of reje
+- **finding**: absolutizeurls: unhandled invalidurierror from uri(url) inside import causes job crash (p3)
 - **label_corrected**: its own test asserts the URI error for 'http://' (and separately the mutation, which is 4-D26); its own fix is the URI/host guard, so the URI-parse claim is what it demonstrates
 
 ### 4-D33 — Embed/topic retrieval synchronously runs full feed poll (Jobs::PollFeed) on cache miss, coupling embeds to feed health and enabling resource
@@ -206,7 +210,7 @@ Merged duplicates and restored/renamed entries carry a provenance note.
 - **finding**: pollfeed.rb:20 feedkey is defined but never used
 
 ### 4-D43 — incorrect default-port comparison in absolutize_urls
-- **location**: `topicembed.rb:59`  ·  **evidence**: `own_executed`  ·  bundle `4-B42` (behavior_change_not_regression)
+- **location**: `spec/models/topicembedspec.rb:34`  ·  **evidence**: `own_executed`  ·  bundle `4-B42` (behavior_change_not_regression)
 - **test**: `analysis/verified_gold/4/B42-topicembedrb59-port-logic-should-compare-against-uridef/defects/4-D43/test.diff`
 - **fix**: `analysis/verified_gold/4/B42-topicembedrb59-port-logic-should-compare-against-uridef/defects/4-D43/fix.patch`  ·  **logs**: `analysis/verified_gold/4/B42-topicembedrb59-port-logic-should-compare-against-uridef/defects/4-D43/logs`
 - **finding**: topicembed.rb:59 port logic should compare against uri.defaultport; https://host:80 and http://host:443 produce wrong prefixes
@@ -231,10 +235,10 @@ Merged duplicates and restored/renamed entries carry a provenance note.
 - **finding**: p2: importremote with skipvalidations: true can create topics with nil/blank titles when both opts[:title] and doc.title are nil
 
 ### 4-D48 — poll_feed job processes unbounded RSS items, creating/enqueuing work for every entry in a single run
-- **location**: `app/jobs/scheduled/poll_feed.rb`  ·  **evidence**: `own_executed`  ·  bundle `4-B56` (behavior_change_not_regression)
+- **location**: `app/jobs/scheduled/pollfeed.rb:29`  ·  **evidence**: `own_executed`  ·  bundle `4-B56` (behavior_change_not_regression)
 - **test**: `analysis/verified_gold/4/B56-pollfeed-job-processes-unbounded-rss-items-creating-enqu/defects/4-D48/test.diff`
 - **fix**: `analysis/verified_gold/4/B56-pollfeed-job-processes-unbounded-rss-items-creating-enqu/defects/4-D48/fix.patch`  ·  **logs**: `analysis/verified_gold/4/B56-pollfeed-job-processes-unbounded-rss-items-creating-enqu/defects/4-D48/logs`
-- **finding**: [advisory] pollfeed fetches the feed with open() and then iterates rss.items with no count cap, running postcreator (which enqueues per-post processing jobs) for every item in a single job. a feed with thousands of entri
+- **finding**: app/jobs/scheduled/pollfeed.rb:29 — rss = simplerss.parse open(sitesetting.feedpollingurl) followed by rss.items.each materializes and processes every item from an unbounded remote feed in one worker, so a large feed exh
 
 ### 4-D49 — EmbedController enqueues RetrieveTopic job but spec expects synchronous TopicRetriever call
 - **location**: `app/controllers/embedcontroller.rb:16`  ·  **evidence**: `own_executed`  ·  bundle `4-B60` (behavior_change_not_regression)
@@ -258,7 +262,7 @@ Merged duplicates and restored/renamed entries carry a provenance note.
 - **location**: `lib/topicretriever.rb:9`  ·  **evidence**: `own_executed`  ·  bundle `4-B71` (behavior_change_not_regression)
 - **test**: `analysis/verified_gold/4/B71-invalid-or-wrong-host-embed-urls-are-treated-as-successf/defects/4-D52/test.diff`
 - **fix**: `analysis/verified_gold/4/B71-invalid-or-wrong-host-embed-urls-are-treated-as-successf/defects/4-D52/fix.patch`  ·  **logs**: `analysis/verified_gold/4/B71-invalid-or-wrong-host-embed-urls-are-treated-as-successf/defects/4-D52/logs`
-- **finding**: lib/topicretriever.rb:9 — [p1, confidence 100] performretrieve unless (invalidhost? || retrievedrecently?) acknowledges a malformed or wrong-host embed url as successful background work, so the controller’s loading page 
+- **finding**: app/controllers/embedcontroller.rb:9 — the route accepts malformed or off-host embedurl values as a loading success even though the worker rejects them, leaving the iframe in a permanent reload loop.
 
 ### 4-D54 — Feed item URL fallback uses entry.id (often not a URL), causing items to be silently skipped
 - **location**: `app/jobs/scheduled/poll_feed.rb`  ·  **evidence**: `own_executed`  ·  bundle `4-B73` (behavior_change_not_regression)
@@ -267,37 +271,43 @@ Merged duplicates and restored/renamed entries carry a provenance note.
 - **finding**: pollfeed.rb falls back to i.id which may not be a url, causing silent skipping of feed items with no logging (p3)
 
 ### 4-D55 — Premature throttle key: the dedupe key is written BEFORE the retrieval succeeds, so a failed fetch suppresses its own retry for 60s
-- **location**: `lib/topic_retriever.rb`  ·  **evidence**: `own_executed`  ·  bundle `4-B21` (None)
+- **location**: `lib/topicretriever.rb:27`  ·  **evidence**: `own_executed`  ·  bundle `4-B21` (None)
 - **test**: `analysis/verified_gold/4/B21-throttle-key-is-acquired-before-successful-fetch-and-use/defects/4-D55/test.diff`
 - **fix**: `analysis/verified_gold/4/B21-throttle-key-is-acquired-before-successful-fetch-and-use/defects/4-D55/fix.patch`  ·  **logs**: `analysis/verified_gold/4/B21-throttle-key-is-acquired-before-successful-fetch-and-use/defects/4-D55/logs`
+- **finding**: lib/topicretriever.rb:27 — recording the throttle before retrieval makes a failed fetch's sidekiq retry silently return success instead of retrying
 - **restored**: recovered in the 2026-09-18 total-gold duplicate review: the earlier duplicate-folding kept only this bundle's extra label (4-D11's non-atomic facet) and dropped the bundle's own claim; 4-B21's own executed test demonstrates it
 
 ### 4-D56 — Nil/blank `embed_by_username` raises NoMethodError on `downcase` during retrieval
-- **location**: `lib/topic_retriever.rb`  ·  **evidence**: `own_executed`  ·  bundle `4-B33` (pending)
+- **location**: `lib/topicretriever.rb:49`  ·  **evidence**: `own_executed`  ·  bundle `4-B33` (pending)
 - **test**: `analysis/verified_gold/4/B33-embed-topic-retrieval-can-crash-or-silently-no-op-when-e/defects/4-D56/test.diff`
 - **fix**: `analysis/verified_gold/4/B33-embed-topic-retrieval-can-crash-or-silently-no-op-when-e/defects/4-D56/fix.patch`  ·  **logs**: `analysis/verified_gold/4/B33-embed-topic-retrieval-can-crash-or-silently-no-op-when-e/defects/4-D56/logs`
+- **finding**: lib/topicretriever.rb:49 — a blank embedbyusername raises on downcase after every valid-host cache miss, and the loading page keeps re-enqueuing the permanently failing retrieval.
 
 ### 4-D57 — Case-sensitive hostname comparison in `invalid_host?` rejects valid embed hosts (mixed-case configured host)
-- **location**: `lib/topic_retriever.rb`  ·  **evidence**: `own_executed`  ·  bundle `4-B39` (None)
+- **location**: `lib/topicretriever.rb:15`  ·  **evidence**: `own_executed`  ·  bundle `4-B39` (None)
 - **test**: `analysis/verified_gold/4/B39-embeddable-host-validation-uses-strict-string-equality-r/defects/4-D57/test.diff`
 - **fix**: `analysis/verified_gold/4/B39-embeddable-host-validation-uses-strict-string-equality-r/defects/4-D57/fix.patch`  ·  **logs**: `analysis/verified_gold/4/B39-embeddable-host-validation-uses-strict-string-equality-r/defects/4-D57/logs`
+- **finding**: lib/topicretriever.rb:15 — hostnames are compared case-sensitively even though dns host matching is case-insensitive, rejecting otherwise valid embed urls
 
 ### 4-D58 — `import_remote` does not validate the URL scheme before `open(url)` (SSRF / pipe-to-shell)
-- **location**: `app/models/topic_embed.rb`  ·  **evidence**: `own_executed`  ·  bundle `4-B07` (pending)
+- **location**: `app/models/topicembed.rb:48`  ·  **evidence**: `own_executed`  ·  bundle `4-B07` (pending)
 - **test**: `analysis/verified_gold/4/B07-redirect-based-ssrf-only-initial-url-host-is-validated-w/defects/4-D58/test.diff`
 - **fix**: `analysis/verified_gold/4/B07-redirect-based-ssrf-only-initial-url-host-is-validated-w/defects/4-D58/fix.patch`  ·  **logs**: `analysis/verified_gold/4/B07-redirect-based-ssrf-only-initial-url-host-is-validated-w/defects/4-D58/logs`
 - **orthogonality**: bundle fix leaves it red = `True`
+- **finding**: app/models/topicembed.rb:48 — the server fetches the user-selected url without revalidating scheme, port, redirects, or resolved addresses, enabling ssrf through the allowed host.
 
 ### 4-D60 — Scheduled feed poll fetch has no timeout or error handling
-- **location**: `app/jobs/scheduled/poll_feed.rb`  ·  **evidence**: `own_executed`  ·  bundle `4-B03` (pending)
+- **location**: `app/jobs/scheduled/pollfeed.rb:29`  ·  **evidence**: `own_executed`  ·  bundle `4-B03` (pending)
 - **test**: `analysis/verified_gold/4/B03-unbounded-open-uri-fetch-in-topicembed-can-hang-jobs-or-/defects/4-D60/test.diff`
 - **fix**: `analysis/verified_gold/4/B03-unbounded-open-uri-fetch-in-topicembed-can-hang-jobs-or-/defects/4-D60/fix.patch`  ·  **logs**: `analysis/verified_gold/4/B03-unbounded-open-uri-fetch-in-topicembed-can-hang-jobs-or-/defects/4-D60/logs`
 - **orthogonality**: bundle fix leaves it red = `True`
+- **finding**: pollfeed.rb open(sitesetting.feedpollingurl) has no timeout, size limit, or error handling; hung feed url stalls the job (p2)
 
 ### 4-D62 — Historic create_top_topics migration carries destructive force: true
-- **location**: `db/migrate/20131223171005_create_top_topics.rb`  ·  **evidence**: `own_executed`  ·  bundle `4-B04` (pending)
+- **location**: `db/migrate/20131223171005createtoptopics.rb:3`  ·  **evidence**: `own_executed`  ·  bundle `4-B04` (pending)
 - **test**: `analysis/verified_gold/4/B04-destructive-force-true-in-createtable-migration-can-dr/defects/4-D62/test.diff`
 - **fix**: `analysis/verified_gold/4/B04-destructive-force-true-in-createtable-migration-can-dr/defects/4-D62/fix.patch`  ·  **logs**: `analysis/verified_gold/4/B04-destructive-force-true-in-createtable-migration-can-dr/defects/4-D62/logs`
+- **finding**: db/migrate/20131223171005createtoptopics.rb:3 — force: true drops any existing toptopics table and its data before recreating it
 
 ## PR 8 — 6 defects
 
@@ -333,10 +343,11 @@ Merged duplicates and restored/renamed entries carry a provenance note.
 - **finding**: groupscontrollerupdate does not strip group.name (unlike create), so a name like " bob " can be saved via update, inconsistent with create and the username-style name rule
 
 ### 8-D07 — Admin Groups API contract broken: nested group[...] params no longer accepted without deprecation
-- **location**: `app/controllers/admin/groups_controller.rb`  ·  **evidence**: `own_executed`  ·  bundle `8-B05` (pending)
+- **location**: `app/controllers/admin/groupscontroller.rb:34`  ·  **evidence**: `own_executed`  ·  bundle `8-B05` (pending)
 - **test**: `analysis/verified_gold/8/B05-patch-updates-unintentionally-hide-groups-when-visible-p/defects/8-D07/test.diff`
 - **fix**: `analysis/verified_gold/8/B05-patch-updates-unintentionally-hide-groups-when-visible-p/defects/8-D07/fix.patch`  ·  **logs**: `analysis/verified_gold/8/B05-patch-updates-unintentionally-hide-groups-when-visible-p/defects/8-D07/logs`
 - **orthogonality**: bundle fix leaves it red = `True`
+- **finding**: admin group update sets visible to false when the parameter is omitted, so partial patch requests can unexpectedly hide the group
 
 ## PR 10 — 20 defects
 
@@ -347,7 +358,7 @@ Merged duplicates and restored/renamed entries carry a provenance note.
 - **finding**: store.js.es6 plural branch leaves null entries in the hydrated array for unresolved ids
 
 ### 10-D02 — port handling mismatch between validation and lookup
-- **location**: `app/models/embeddablehost.rb:17`  ·  **evidence**: `own_executed`  ·  bundle `10-B03` (behavior_change_not_regression)
+- **location**: `app/models/embeddablehost.rb:2`  ·  **evidence**: `own_executed`  ·  bundle `10-B03` (behavior_change_not_regression)
 - **test**: `analysis/verified_gold/10/B03-embeddable-hosts-saved-with-a-port-never-match-because-l/defects/10-D02/test.diff`
 - **fix**: `analysis/verified_gold/10/B03-embeddable-hosts-saved-with-a-port-never-match-because-l/defects/10-D02/fix.patch`  ·  **logs**: `analysis/verified_gold/10/B03-embeddable-hosts-saved-with-a-port-never-match-because-l/defects/10-D02/logs`
 - **finding**: hosts containing ports can be saved but never match because uri parsing drops the port before lookup
@@ -358,6 +369,7 @@ Merged duplicates and restored/renamed entries carry a provenance note.
 - **test**: `analysis/verified_gold/10/B03-embeddable-hosts-saved-with-a-port-never-match-because-l/defects/10-D03/test.diff`
 - **fix**: `analysis/verified_gold/10/B03-embeddable-hosts-saved-with-a-port-never-match-because-l/defects/10-D03/fix.patch`  ·  **logs**: `analysis/verified_gold/10/B03-embeddable-hosts-saved-with-a-port-never-match-because-l/defects/10-D03/logs`
 - **orthogonality**: bundle fix leaves it red = `True`
+- **finding**: embeddablehostscontrollerspec.rb and embeddingcontrollerspec.rb only assert class hierarchy, leaving create/update/destroy, the nil-record 500s, the missing-param crash, and the uncategorized-category fallback untested
 - **label_corrected**: the test asserts normalization + lookup + that a nil host does not raise on the mutating path; the inherited label described test coverage, which is not a behaviour
 
 ### 10-D04 — case-insensitive host comparison only lowercases stored column
@@ -372,7 +384,7 @@ Merged duplicates and restored/renamed entries carry a provenance note.
 - **test**: `analysis/verified_gold/10/B05-embeddablehost-hostname-validation-regex-rejects-valid-h/defects/10-D07/test.diff`
 - **fix**: `analysis/verified_gold/10/B05-embeddablehost-hostname-validation-regex-rejects-valid-h/defects/10-D07/fix.patch`  ·  **logs**: `analysis/verified_gold/10/B05-embeddablehost-hostname-validation-regex-rejects-valid-h/defects/10-D07/logs`
 - **orthogonality**: bundle fix leaves it red = `True`
-- **finding**: app/models/embeddablehost.rb:2 — validation regex rejects tlds longer than 5 chars, localhost, ips with ports and idns; hosts migrated raw from the old setting will load but can never be re-saved from the ui.
+- **finding**: hostname validation rejects valid domains with tlds longer than five characters
 - **merged_in_from**: 10-D05
 
 ### 10-D08 — EmbeddableHost allows duplicate host mappings, making lookup via `.first` nondeterministic
@@ -492,11 +504,10 @@ Merged duplicates and restored/renamed entries carry a provenance note.
 - **finding**: [p2] handlecancelbooking recurring-deletion loop nested inside bookingcalendarreference loop, multiplying duplicate delete calls per reference per credential
 
 ### 10967-D05 — Inner references.find only deletes the first calendar reference per updated booking, leaving orphaned secondary-host events
-- **location**: `handlecancelbooking.ts:441-463`  ·  **evidence**: `own_executed`  ·  bundle `10967-B14` (confirmed_regression)
+- **location**: `handlecancelbooking.ts`  ·  **evidence**: `own_executed`  ·  bundle `10967-B14` (confirmed_regression)
 - **test**: `analysis/verified_gold/10967/B14-recurring-cancellation-delete-sweep-runs-once-per-calendar/defects/10967-D05/test.diff`
 - **fix**: `analysis/verified_gold/10967/B14-recurring-cancellation-delete-sweep-runs-once-per-calendar/defects/10967-D05/fix.patch`  ·  **logs**: `analysis/verified_gold/10967/B14-recurring-cancellation-delete-sweep-runs-once-per-calendar/defects/10967-D05/logs`
 - **orthogonality**: bundle fix leaves it red = `True`
-- **finding**: handlecancelbooking.ts:441-463 — recurring-event deletion branch is nested inside the loop over bookingcalendarreference, so it runs n times issuing duplicate delete calls that fail; it also still only deletes the first 
 
 ## PR 11059 — 18 defects
 
@@ -504,22 +515,22 @@ Merged duplicates and restored/renamed entries carry a provenance note.
 - **location**: `apps/web/pages/api/webhook/app-credential.ts:25`  ·  **evidence**: `own_executed`  ·  bundle `11059-B05` (behavior_change_not_regression)
 - **test**: `analysis/verified_gold/11059/B05-webhook-secret-validation-uses-non-constant-time-string-co/defects/11059-D01/test.diff`
 - **fix**: `analysis/verified_gold/11059/B05-webhook-secret-validation-uses-non-constant-time-string-co/defects/11059-D01/fix.patch`  ·  **logs**: `analysis/verified_gold/11059/B05-webhook-secret-validation-uses-non-constant-time-string-co/defects/11059-D01/logs`
-- **finding**: non-constant-time string comparison of webhook secret allows timing attacks; use crypto.timingsafeequal or hmac comparison
+- **finding**: webhook secret comparison uses non-constant-time !== operator, enabling timing attacks against calcomwebhooksecret
 
 ### 11059-D03 — Missing rate limiting on webhook secret verification
 - **location**: `apps/web/pages/api/webhook/app-credential.ts`  ·  **evidence**: `own_executed`  ·  bundle `11059-B05` (behavior_change_not_regression)
 - **test**: `analysis/verified_gold/11059/B05-webhook-secret-validation-uses-non-constant-time-string-co/defects/11059-D03/test.diff`
 - **fix**: `analysis/verified_gold/11059/B05-webhook-secret-validation-uses-non-constant-time-string-co/defects/11059-D03/fix.patch`  ·  **logs**: `analysis/verified_gold/11059/B05-webhook-secret-validation-uses-non-constant-time-string-co/defects/11059-D03/logs`
 - **orthogonality**: bundle fix leaves it red = `True`
-- **finding**: webhook secret in apps/web/pages/api/webhook/app-credential.ts is compared with !== (not constant-time) with no rate limiting, on an endpoint that can create/replace oauth credentials for any user; use crypto.timingsafee
+- **finding**: [advisory] the only authorization for overwriting any user's app credentials is a single static shared secret sent verbatim in a header — no hmac, no timestamp, no nonce, no per-user scoping, no rate limit on the route —
 - **merged_in_from**: 11059-D29, 11059-D04
 
 ### 11059-D09 — Handler lacks request hardening: no HTTP-method guard and an unescaped ZodError from malformed input
-- **location**: `apps/web/pages/api/webhook/app-credential.ts`  ·  **evidence**: `own_executed`  ·  bundle `11059-B09` (behavior_change_not_regression)
+- **location**: `apps/web/pages/api/webhook/app-credential.ts:17`  ·  **evidence**: `own_executed`  ·  bundle `11059-B09` (behavior_change_not_regression)
 - **test**: `analysis/verified_gold/11059/B09-webhook-api-handler-performs-credential-create-update-with/defects/11059-D09/test.diff`
 - **fix**: `analysis/verified_gold/11059/B09-webhook-api-handler-performs-credential-create-update-with/defects/11059-D09/fix.patch`  ·  **logs**: `analysis/verified_gold/11059/B09-webhook-api-handler-performs-credential-create-update-with/defects/11059-D09/logs`
 - **orthogonality**: bundle fix leaves it red = `True`
-- **finding**: unhandled zod.parse and json.parse of decrypted keys in app-credential webhook throw 500s instead of 400s on malformed input
+- **finding**: no http method check on webhook endpoint (missing req.method !== "post" validation)
 - **merged_in_from**: 11059-D08
 - **label_corrected**: the test asserts GET -> 405 and a malformed body -> 400 rather than an escaped schema error; the inherited label only mentioned 'unhandled schema/decryption/JSON parse errors'
 
@@ -538,8 +549,9 @@ Merged duplicates and restored/renamed entries carry a provenance note.
 - **orthogonality**: bundle fix leaves it red = `True`
 - **finding**: credential-sync requests include no authentication secret or authorization header, allowing attackers to potentially obtain oauth tokens by enumerating user ids
 
-### 11059-D14 — HubSpot refresh treats raw credential-sync response as HubSpotToken object
+### 11059-D14 — HubSpot refresh treats raw credential-sync response as HubSpotToken object — DUPLICATE of golden:cal_dot_com.json:158
 - **location**: `packages/app-store/_utils/oauth/refreshOAuthTokens.ts`  ·  **evidence**: `own_executed`  ·  bundle `11059-B10` (behavior_change_not_regression)
+- **duplicate**: Mechanism explicitly described by the original golden comment (names HubSpot/HubspotToken and the fetch-Response mismatch, and prescribes adjusting the return value — D14's exact fix); not distinct hidden gold.
 - **test**: `analysis/verified_gold/11059/B10-credential-sync-token-refresh-request-omits-shared-secret-/defects/11059-D14/test.diff`
 - **fix**: `analysis/verified_gold/11059/B10-credential-sync-token-refresh-request-omits-shared-secret-/defects/11059-D14/fix.patch`  ·  **logs**: `analysis/verified_gold/11059/B10-credential-sync-token-refresh-request-omits-shared-secret-/defects/11059-D14/logs`
 - **orthogonality**: bundle fix leaves it red = `True`
@@ -571,7 +583,7 @@ Merged duplicates and restored/renamed entries carry a provenance note.
 - **location**: `apps/web/pages/api/webhook/app-credential.ts:9-13`  ·  **evidence**: `own_executed`  ·  bundle `11059-B22` (behavior_change_not_regression)
 - **test**: `analysis/verified_gold/11059/B22-instance-wide-shared-webhook-secret-allows-overwriting-any/defects/11059-D20/test.diff`
 - **fix**: `analysis/verified_gold/11059/B22-instance-wide-shared-webhook-secret-allows-overwriting-any/defects/11059-D20/fix.patch`  ·  **logs**: `analysis/verified_gold/11059/B22-instance-wide-shared-webhook-secret-allows-overwriting-any/defects/11059-D20/logs`
-- **finding**: apps/web/pages/api/webhook/app-credential.ts:62 — a single global webhook secret authorizes credential create/overwrite for any userid, so one leaked secret compromises every user's app credentials
+- **finding**: webhook endpoint allows writing credentials for arbitrary app types with no allowlist or install verification, gated only by a single static secret
 
 ### 11059-D21 — No replay/event-identity/version guard permits stale or concurrent credential overwrites
 - **location**: `apps/web/pages/api/webhook/app-credential.ts:72`  ·  **evidence**: `own_executed`  ·  bundle `11059-B22` (behavior_change_not_regression)
@@ -584,7 +596,7 @@ Merged duplicates and restored/renamed entries carry a provenance note.
 - **location**: `packages/app-store/utils/oauth/parserefreshtokenresponse.ts:19-21`  ·  **evidence**: `own_executed`  ·  bundle `11059-B23` (behavior_change_not_regression)
 - **test**: `analysis/verified_gold/11059/B23-parserefreshtokenresponse-throws-on-schema-mismatch-and-ca/defects/11059-D22/test.diff`
 - **fix**: `analysis/verified_gold/11059/B23-parserefreshtokenresponse-throws-on-schema-mismatch-and-ca/defects/11059-D22/fix.patch`  ·  **logs**: `analysis/verified_gold/11059/B23-parserefreshtokenresponse-throws-on-schema-mismatch-and-ca/defects/11059-D22/logs`
-- **finding**: parserefreshtokenresponse now unconditionally throws on parse failure, but callers in office365calendar, salesforce, and zoom still branch on success, making the office365 fallback path unreachable and silently changing 
+- **finding**: concurrent getservice() calls race on the credential update; injected parserefreshtokenresponse sync branch returns parse result but sibling branch rejects with new error, inconsistent with httperror usage
 - **merged_in_from**: 11059-D27, 11059-D23
 
 ### 11059-D26 — Webhook credential sync updates key but does not clear previously set invalid flag
@@ -593,35 +605,41 @@ Merged duplicates and restored/renamed entries carry a provenance note.
 - **fix**: `analysis/verified_gold/11059/B24-webhook-credential-sync-updates-key-but-does-not-clear-pre/defects/11059-D26/fix.patch`  ·  **logs**: `analysis/verified_gold/11059/B24-webhook-credential-sync-updates-key-but-does-not-clear-pre/defects/11059-D26/logs`
 - **finding**: apps/web/pages/api/webhook/app-credential.ts:77: updating a previously invalid credential replaces only its key without clearing the invalid flag, so newly synchronized valid credentials can remain disabled.
 
-### 11059-D28 — API route default-imports zod, making `z` undefined and crashing on module load
+### 11059-D28 — API route default-imports zod, making `z` undefined and crashing on module load — WITHDRAWN 2026-09-18
 - **location**: `apps/web/pages/api/webhook/app-credential.ts`  ·  **evidence**: `own_executed`  ·  bundle `11059-B31` (behavior_change_not_regression)
+- **withdrawn**: Test manufactures the failure: vi.mock('zod') sets default: undefined, while the installed zod 3.22.2 exports a default (lib/index.js:29 'exports.default = z'; index.mjs:4006 'export { z as default }'); the recorded head crash cannot occur against the real dependency. No runtime defect in the PR is demonstrated. Validated 2026-09-18.
 - **test**: `analysis/verified_gold/11059/B31-api-route-default-imports-zod-making-z-undefined-and-cras/defects/11059-D28/test.diff`
 - **fix**: `analysis/verified_gold/11059/B31-api-route-default-imports-zod-making-z-undefined-and-cras/defects/11059-D28/fix.patch`  ·  **logs**: `analysis/verified_gold/11059/B31-api-route-default-imports-zod-making-z-undefined-and-cras/defects/11059-D28/logs`
 - **finding**: [bug] the route default-imports zod (import z from "zod"), but zod's commonjs entry sets esmodule and exports no default, so z binds to undefined at runtime. z.object(...) on line 9 throws typeerror: cannot read properti
 
 ### 11059-D30 — Webhook header lookup is not case-normalized, so a differently-cased header name fails the secret check
-- **location**: `apps/web/pages/api/webhook/app-credential.ts`  ·  **evidence**: `own_executed`  ·  bundle `11059-B19` (pending)
+- **location**: `apps/web/pages/api/webhook/app-credential.ts:22`  ·  **evidence**: `own_executed`  ·  bundle `11059-B19` (pending)
 - **test**: `analysis/verified_gold/11059/B19-webhook-secret-header-lookup-uses-raw-env-header-name-brea/defects/11059-D30/test.diff`
 - **fix**: `analysis/verified_gold/11059/B19-webhook-secret-header-lookup-uses-raw-env-header-name-brea/defects/11059-D30/fix.patch`  ·  **logs**: `analysis/verified_gold/11059/B19-webhook-secret-header-lookup-uses-raw-env-header-name-brea/defects/11059-D30/logs`
+- **finding**: in apps/web/pages/api/webhook/app-credential.ts:24-29, the header comparison silently depends on the header name being lowercase
 - **merged_in_from**: 11059-D31
 
-### 11059-D32 — Unset webhook secret and absent header both compare as undefined, bypassing the auth check
+### 11059-D32 — Unset webhook secret and absent header both compare as undefined, bypassing the auth check — DUPLICATE of 11059-D19
 - **location**: `apps/web/pages/api/webhook/app-credential.ts`  ·  **evidence**: `own_executed`  ·  bundle `11059-B19` (pending)
+- **duplicate**: Same missing-secret/missing-header auth bypass at apps/web/pages/api/webhook/app-credential.ts:25; both fixes add a missing-secret guard to the same hunk; only the expected status (500 vs 403) differs — one fail-closed decision, per the repo's own D22/D23 merge precedent.
 - **test**: `analysis/verified_gold/11059/B19-webhook-secret-header-lookup-uses-raw-env-header-name-brea/defects/11059-D32/test.diff`
 - **fix**: `analysis/verified_gold/11059/B19-webhook-secret-header-lookup-uses-raw-env-header-name-brea/defects/11059-D32/fix.patch`  ·  **logs**: `analysis/verified_gold/11059/B19-webhook-secret-header-lookup-uses-raw-env-header-name-brea/defects/11059-D32/logs`
 - **orthogonality**: bundle fix leaves it red = `True`
+- **finding**: webhook auth check passes when both header and calcomwebhooksecret env are undefined, bypassing authentication; also duplicated headers yield string[] causing spurious 403s
 
 ### 11059-D33 — Salesforce token schema requires `scope`, which its refresh response omits, breaking refresh
 - **location**: `packages/app-store/salesforce/lib/CalendarService.ts`  ·  **evidence**: `own_executed`  ·  bundle `11059-B23` (pending)
 - **test**: `analysis/verified_gold/11059/B23-parserefreshtokenresponse-throws-on-schema-mismatch-and-ca/defects/11059-D33/test.diff`
 - **fix**: `analysis/verified_gold/11059/B23-parserefreshtokenresponse-throws-on-schema-mismatch-and-ca/defects/11059-D33/fix.patch`  ·  **logs**: `analysis/verified_gold/11059/B23-parserefreshtokenresponse-throws-on-schema-mismatch-and-ca/defects/11059-D33/logs`
 - **orthogonality**: bundle fix leaves it red = `True`
+- **finding**: salesforce's refresh-token schema incorrectly requires scope, which salesforce refresh responses omit, causing valid responses to be rejected.
 
 ### 11059-D34 — Hardcoded Salesforce login host breaks sandbox orgs
-- **location**: `packages/app-store/salesforce/lib/CalendarService.ts`  ·  **evidence**: `own_executed`  ·  bundle `11059-B23` (pending)
+- **location**: `packages/app-store/salesforce/lib/calendarservice.ts:795`  ·  **evidence**: `own_executed`  ·  bundle `11059-B23` (pending)
 - **test**: `analysis/verified_gold/11059/B23-parserefreshtokenresponse-throws-on-schema-mismatch-and-ca/defects/11059-D34/test.diff`
 - **fix**: `analysis/verified_gold/11059/B23-parserefreshtokenresponse-throws-on-schema-mismatch-and-ca/defects/11059-D34/fix.patch`  ·  **logs**: `analysis/verified_gold/11059/B23-parserefreshtokenresponse-throws-on-schema-mismatch-and-ca/defects/11059-D34/logs`
 - **orthogonality**: bundle fix leaves it red = `True`
+- **finding**: packages/app-store/salesforce/lib/calendarservice.ts:795 — the !accesstokenparsed.success branch is dead because parserefreshtokenresponse throws on failure, and the hardcoded login.salesforce.com breaks sandbox orgs.
 
 ## PR 14740 — 17 defects
 
@@ -629,15 +647,15 @@ Merged duplicates and restored/renamed entries carry a provenance note.
 - **location**: `packages/trpc/server/routers/viewer/bookings/addguests.schema.ts:5`  ·  **evidence**: `own_executed`  ·  bundle `14740-B03` (behavior_change_not_regression)
 - **test**: `analysis/verified_gold/14740/B03-addguests-input-schema-allows-unbounded-guests-array-email/defects/14740-D01/test.diff`
 - **fix**: `analysis/verified_gold/14740/B03-addguests-input-schema-allows-unbounded-guests-array-email/defects/14740-D01/fix.patch`  ·  **logs**: `analysis/verified_gold/14740/B03-addguests-input-schema-allows-unbounded-guests-array-email/defects/14740-D01/logs`
-- **finding**: guests array has no max() in the zod schema, allowing authorized callers to add thousands of attendees in one mutation
+- **finding**: the guest array has no maximum size, enabling excessive database, calendar, translation, and email fan-out
 - **merged_in_from**: 14740-D02
 
 ### 14740-D03 — Missing booking status/end-time validation allows adding guests to cancelled, rejected, or past bookings
-- **location**: `packages/trpc/server/routers/viewer/bookings/addguests.handler.ts:26`  ·  **evidence**: `own_executed`  ·  bundle `14740-B06` (behavior_change_not_regression)
+- **location**: `packages/trpc/server/routers/viewer/bookings/addguests.handler.ts:52`  ·  **evidence**: `own_executed`  ·  bundle `14740-B06` (behavior_change_not_regression)
 - **test**: `analysis/verified_gold/14740/B06-authorization-bypass-any-attendee-can-add-arbitrary-guests/defects/14740-D03/test.diff`
 - **fix**: `analysis/verified_gold/14740/B06-authorization-bypass-any-attendee-can-add-arbitrary-guests/defects/14740-D03/fix.patch`  ·  **logs**: `analysis/verified_gold/14740/B06-authorization-bypass-any-attendee-can-add-arbitrary-guests/defects/14740-D03/logs`
 - **orthogonality**: bundle fix leaves it red = `True`
-- **finding**: cancelled or past bookings are accepted, allowing attendees and confirmed calendar invitations to be added to inactive events.
+- **finding**: isattendee grants any existing attendee permission to add arbitrary new guests without organizer consent
 - **merged_in_from**: 14740-D04
 
 ### 14740-D05 — add-guests handler emails raw guests list instead of filtered uniqueGuests, causing duplicate/wrong notifications

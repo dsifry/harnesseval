@@ -9,11 +9,18 @@ The central question is not *"which framework is best"* but *"which gives the be
 quality and finds and fixes the most bugs per unit of cost and triage effort"* — the
 **quality-vs-cost Pareto frontier**.
 
-> **Status:** the **384/384 pass-cell matrix is complete** (batch_083, 2026-08-26). N is small
-> (6 PRs per cell); treat the numbers as a **directional, reproducible read — not a published
-> ranking**. Phase C (50 PRs + confidence intervals) remains the bar before any final claim.
-> See [`report.md`](report.md) for the results and [`FURTHER-RESEARCH.md`](FURTHER-RESEARCH.md)
-> for what's next.
+> **Status (2026-09-18):** the **current report** is [`REPORT_FINAL.md`](REPORT_FINAL.md) — the
+> 50-PR campaign with the verified **true golden set** (42 goldens + 105 individually test-validated
+> defects = 147 distinct bugs; see [`analysis/verified_gold/GOLD_DEFECT_CATALOG.md`] and
+> [`analysis/verified_gold/TRUE_GOLD_HEADLINES.md`]), confidence intervals, cost analysis, and the
+> **2026-09-18 post-publication audit**
+> ([`analysis/verified_gold/WITHDRAWALS_AND_DEDUP_2026-09-18.md`](analysis/verified_gold/WITHDRAWALS_AND_DEDUP_2026-09-18.md))
+> that withdrew 3 defect demonstrations whose tests did not support the claim and merged 2 duplicates.
+> The executive summary is [`EXECUTIVE_SUMMARY_FINAL.md`](EXECUTIVE_SUMMARY_FINAL.md).
+>
+> The material below (the 384/384 pass-cell matrix, batch_083, 2026-08-26, tag `v0.8.2-eval`) is
+> **historical** — superseded by `REPORT_FINAL.md`, kept as the record of the August experiment and
+> its methodology.
 
 ## What this is
 
@@ -80,7 +87,11 @@ loop is the active research direction — see [`FURTHER-RESEARCH.md`](FURTHER-RE
 
 ## Reproducibility pin
 
-The exact code that produced the 384/384 matrix is pinned:
+The exact code that produced the **current report** is pinned by tag — `git checkout report-2026-09-18`
+after cloning (see `REPORT_FINAL.md` §11 for the full chain, expected-output checksums, and the
+three-mode taxonomy).
+
+The exact code that produced the **August 384/384 matrix** (historical) is pinned:
 
 ```
 harnesseval  @ tag v0.8.2-eval  (= commit 1847f7d)
@@ -92,12 +103,31 @@ combo. See [`REPRODUCE.md`](REPRODUCE.md).
 
 ## Read these first
 
-- [`report.md`](report.md) — the report: methodology, the 384-cell results, per-framework verdicts, SDLC recommendation, caveats.
+**Current (2026-09-18):**
+
+- [`REPORT_FINAL.md`](REPORT_FINAL.md) — the current report: 50-PR campaign, verified true golden set (147 distinct bugs), cluster-bootstrap CIs, cost/quality frontiers, honest-limitations register.
+- [`EXECUTIVE_SUMMARY_FINAL.md`](EXECUTIVE_SUMMARY_FINAL.md) — the leadership summary.
+- [`analysis/verified_gold/GOLD_DEFECT_CATALOG.md`](analysis/verified_gold/GOLD_DEFECT_CATALOG.md) — every verified defect with its executed test, fix, and logs.
+- [`analysis/verified_gold/WITHDRAWALS_AND_DEDUP_2026-09-18.md`](analysis/verified_gold/WITHDRAWALS_AND_DEDUP_2026-09-18.md) — the post-publication evidence audit.
+
+**Historical (August 2026, tag `v0.8.2-eval`):**
+
+- [`report.md`](report.md) — the August 384-cell report: methodology, per-framework verdicts, SDLC recommendation, caveats. *(Deprecated; superseded by `REPORT_FINAL.md`.)*
 - [`INSTALL.md`](INSTALL.md) — set up the lab (Python, CLIs, keys, pinned third-party checkouts, metareview binary).
-- [`REPRODUCE.md`](REPRODUCE.md) — replicate the matrix + analyses.
+- [`REPRODUCE.md`](REPRODUCE.md) — replicate the August matrix + analyses.
 - [`FURTHER-RESEARCH.md`](FURTHER-RESEARCH.md) — Phase C, the SDLC-loop validation (vanilla `/goal` vs opinionated metareview with deterministic hard gates), GLM, OpenEnv.
 - [`docs/SPEC.md`](docs/SPEC.md) — full design spec.
 - [`docs/FRAMEWORK_COMPARISON.md`](docs/FRAMEWORK_COMPARISON.md) — the detailed working analysis (the predecessor to `report.md`).
+
+## Reproducibility modes
+
+Three distinct things people mean by "reproduce" — each has its own entry point:
+
+| Mode | What it means | Where |
+|---|---|---|
+| **(i) Recompute published statistics** | deterministic: rebuild every number/CI/figure in `REPORT_FINAL.md` from the saved inputs (no model calls) | `REPORT_FINAL.md` §11 |
+| **(ii) Re-execute saved defect tests** | run the archived failing-test/fix bundles for the 105 verified defects against the pinned PR revisions | [`analysis/verified_gold/REPLICATION_KIT.md`](analysis/verified_gold/REPLICATION_KIT.md) |
+| **(iii) Regenerate model judgments** | the LLM clustering/adjudication/judge steps — **not reproducible by re-running** (nondeterministic by design; the stored artifacts are the record) | `REPORT_FINAL.md` §11 |
 
 ## Quick start
 

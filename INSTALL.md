@@ -1,5 +1,12 @@
 # Install
 
+> **⚠️ Historical (August 2026, tag `v0.8.2-eval`).** This page documents the environment for the
+> **August 384-cell matrix experiment** (`batch_083`, described in [`report.md`](report.md)).
+> The **current report** is [`REPORT_FINAL.md`](REPORT_FINAL.md) (the 2026-09 50-PR campaign, verified
+> true golden set, post-publication audit); its reproduction chain, pinned revision
+> (`report-2026-09-18`), and mode taxonomy are in **`REPORT_FINAL.md` §11**. The environment basics
+> below still apply, but treat every August-specific pointer accordingly.
+
 How to set up the `harnesseval` lab so you can run the matrix and reproduce the results in
 [`report.md`](report.md). Reproducibility-pin setup (the exact tested combo) is in
 [`REPRODUCE.md`](REPRODUCE.md); this page covers the environment once.

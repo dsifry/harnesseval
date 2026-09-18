@@ -1,14 +1,17 @@
 ## True-gold headline (deduplicated verified hidden-gold set)
 
-Denominator (the true golden set): **152** = 42 Martian goldens + 110 verified hidden-gold defects. TP counts are per cell over the campaign's 6 PRs; `totals.TP/den` (2789/10246) sums findings across cells and is not the gold-set ratio.
+Denominator (the true golden set): **147** = 42 Martian goldens + 105 verified hidden-gold defects. TP counts are per cell over the campaign's 6 PRs; `totals.TP/den` (3124/9914) sums findings across cells and is not the gold-set ratio.
 
 | | cell | recall | **F2′** | adjusted precision (adjP) |
 |---|---|---|---|---|
-| best harness recall | `claude-opus-5|compound-realistic|medium` | 0.487 | 0.385 | 0.474 |
-| **best harness F2′ (our evaluator)** | `glm-5.3-vision-background|metareview-realistic|high` | 0.454 | 0.436 | 0.908 |
-| best vanilla recall | `claude-fable-5-1|vanilla-engineered|high` | 0.322 | 0.361 | 0.700 |
-| best vanilla F2′ | `claude-fable-5-1|vanilla-engineered|high` | 0.322 | 0.361 | 0.700 |
+| best harness recall | `claude-opus-5|compound-realistic|medium` | 0.599 | 0.460 | 0.518 |
+| **best harness F2′ (our evaluator)** | `glm-5.3-vision-background|compound-realistic|medium` | 0.544 | 0.494 | 0.792 |
+| best vanilla recall | `claude-fable-5-1|vanilla-engineered|medium` | 0.367 | 0.406 | 0.701 |
+| best vanilla F2′ | `claude-fable-5-1|vanilla-engineered|medium` | 0.367 | 0.406 | 0.701 |
 
-- **harness ÷ vanilla on F2′: 1.21×**
-- peak-recall ratio, harness ÷ vanilla: 1.51×
-- (F1′, the equal-weight lens, for reference: 0.94×)
+- **harness ÷ vanilla on F2′: 1.22×**
+- peak-recall ratio, harness ÷ vanilla: 1.63×
+- (F1′, the equal-weight lens, for reference: 0.98×)
+
+**Partial-coverage cells** (1–2 PRs only; drawn with open markers in the figures and never cited as a best cell):
+`fable CE high` (1 PR), `fable CE low` (2 PR), `fable CE medium` (1 PR), `fable MRV high` (1 PR), `fable MRV low` (1 PR), `fable MRV medium` (1 PR).

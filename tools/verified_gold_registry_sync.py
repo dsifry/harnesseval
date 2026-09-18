@@ -33,6 +33,11 @@ def main():
     merged_ids = {i for i, o in metas.items() if o.get("verdict") == "duplicate_of_bundle_defect"}
     kept, merged = [], []
     for d in reg["defects"]:
+        if d.get("tier") in ("D-withdrawn", "D-duplicate"):
+            # audit-decided states (2026-09-18 withdrawals/dedup — see WITHDRAWALS_AND_DEDUP_2026-09-18.md).
+            # Never re-tier these from bundle metas; the reasons live in withdrawn_reason/dup_reason.
+            kept.append(d)
+            continue
         o = metas.get(d["id"])
         if not o:
             # a bundle-verified defect with no separate test pass: KEEP its existing tier
@@ -72,7 +77,9 @@ def main():
     reg["defects"] = kept
     reg["n_defects"] = len(kept)
     reg["n_verified"] = sum(1 for d in kept if d["tier"] == "D-verified")
-    reg["n_labelled"] = reg["n_defects"] - reg["n_verified"]
+    reg["n_withdrawn"] = sum(1 for d in kept if d["tier"] == "D-withdrawn")
+    reg["n_duplicate"] = sum(1 for d in kept if d["tier"] == "D-duplicate")
+    reg["n_labelled"] = sum(1 for d in kept if d["tier"] == "D-labelled")
     prev_merged = {m["id"]: m for m in (reg.get("merged_same_defect") or [])}
     reg["merged_same_defect"] = sorted(
         list({**prev_merged, **{d["id"]: {"id": d["id"], "bundle": d["bundle"], "label": d["label"],
@@ -80,6 +87,7 @@ def main():
         key=lambda m: m["id"])
     reg["_final"] = {"goldens": 42, "total_defects": reg["n_defects"],
                      "test_validated": reg["n_verified"], "undemonstrated_in_harness": reg["n_labelled"],
+                     "withdrawn": reg["n_withdrawn"], "duplicates": reg["n_duplicate"],
                      "merged_away": len(reg["merged_same_defect"]), "total_gold": 42 + reg["n_defects"]}
     json.dump(reg, open(VG / "DEFECT_REGISTRY.json", "w"), indent=1)
     f = reg["_final"]
@@ -93,7 +101,7 @@ def main():
          f"- {f['undemonstrated_in_harness']} defects are undemonstrated in this harness, each with a specific reason.", "",
          "| defect | bundle | class | why not demonstrated |", "|---|---|---|---|"]
     for d in kept:
-        if d["tier"] != "D-verified":
+        if d["tier"] == "D-labelled":
             u = d.get("undemonstrated") or {}
             if isinstance(u, tuple):
                 u = {"class": u[0], "reason": u[1]}

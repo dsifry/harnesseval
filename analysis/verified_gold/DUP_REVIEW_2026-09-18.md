@@ -1,5 +1,7 @@
 # Total-gold duplicate determination — 2026-09-18
 
+See also WITHDRAWALS_AND_DEDUP_2026-09-18.md for the 2026-09-18 withdrawal/dedup round (3 withdrawn, 2 merged).
+
 Six independent reviewers (one per PR) proposed 17 candidate duplicate groups over the 120 verified
 defects. **Every group was re-adjudicated against hard evidence, not against its label**: the defect's own
 test assertions, its own minimal fix diff, and the PR-head source. Labels were frequently wrong (they were
