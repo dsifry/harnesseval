@@ -2,8 +2,16 @@
 
 **For:** engineering leadership deciding on automated code review · **Data:** 2026-09-16 freeze of
 the manifold campaign (50-PR Martian offline benchmark, 8 models × 3 frameworks × 3 efforts;
-66 of 72 cells complete on the six severity-hardest PRs) · **Full report:** `REPORT_FINAL.md` ·
-**Coverage:** `analysis/COVERAGE_FINAL.md`
+66 of 72 cells complete on the six highest-severity PRs) · **Full report:** `REPORT.md` ·
+**Coverage:** `analysis/COVERAGE.md`
+
+## Background
+
+<!-- WAVE1B: background — 3-4 sentences of context: why AI code review is a live spend decision; the claim under test (agentic harnesses vs one-shot prompting); why the usual evidence is weak and what makes this evaluation different (ground truth that executes, not just human labels; cost accounting at list prices; pre-registered honest-adjudication rules). -->
+
+## How we evaluated
+
+<!-- WAVE1B: how-we-evaluated — one short paragraph: 2,416 healthy runs across 8 models x 3 frameworks x 3 efforts on a 50-PR public benchmark; ground truth = 42 original golden comments + 105 individually test-validated hidden defects (147 distinct bugs), post-audited 2026-09-18; cluster-bootstrap CIs on every headline number; cost/token/latency metered at published list prices. Note the two lenses (strict 42-golden benchmark vs the 147-bug true set) and that both are reported. -->
 
 ## The recommendation
 

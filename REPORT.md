@@ -1,18 +1,27 @@
-# REPORT_FINAL — calibrated cost/benefit evaluation of automated code-review harnesses
+# Calibrated cost/benefit evaluation of automated code-review harnesses
 
-**Campaign:** `20260910-mrv0120-manifold` (+ vanilla reuse batches, era rule below) · **Data freeze:**
+*(report revision 2026-09-18 · tag `report-2026-09-18`)*
+
+**Campaign:** `20260910-mrv0120-manifold` (+ vanilla reuse batches, era rule in §2.3.2) · **Data freeze:**
 2026-09-16 09:35 (verified: no data-generating lanes alive at 09:45; every number below is
-computed from `runs/*/summary.json` as of the freeze — re-run the commands in §11 and you will get
-these numbers) · **This report supersedes** `report.md`, `report2.md`, `docs/FRAMEWORK_COMPARISON.md`.
+computed from `runs/*/summary.json` as of the freeze — re-run the commands in §5 and you will get
+these numbers) · **This report supersedes** `archive/report-2026-08-26-batch083.md`,
+`archive/report2-2026-08-26-batch083.md`, `docs/FRAMEWORK_COMPARISON.md`.
 
-Companion documents: **`EXECUTIVE_SUMMARY_FINAL.md`** (1–2 pages, decision-first),
-**`analysis/COVERAGE_FINAL.md`** (coverage table + sampling disclosure), figures in
-`analysis/figures/`, machine-readable numbers in `analysis/final_report_metrics.json` /
-`analysis/final_report_dataset.json`.
+Companion documents: **`EXECUTIVE_SUMMARY.md`** (1–2 pages, decision-first),
+**`analysis/COVERAGE.md`** (coverage table + sampling disclosure), figures in
+`analysis/figures/` (embedded in the HTML rendering), machine-readable numbers in
+`analysis/final_report_metrics.json` / `analysis/final_report_dataset.json`.
 
----
+> **Note on naming:** this file was `REPORT_FINAL.md`; the `FINAL` name was dropped because the
+> report is a living revision, not a final artifact. The historical August-2026 reports live in `archive/`.
 
-## 1. Executive view (3 sentences)
+## Abstract
+
+<!-- WAVE1B: abstract — ~250 words: question, method, four headline results with CIs, caveats. -->
+
+### Draft: executive view (fold into Abstract/Introduction)
+
 
 On the six PRs with the highest summed original-golden severity totals of the Martian offline benchmark, a cheap open-weight model
 (`glm-5.3-vision-background`, ~$1.40/$4.40 per M tokens) inside the metareview harness at *low*
@@ -22,12 +31,12 @@ reasoning effort matched the best frontier-model harness cell on golden recall w
 wall-clock in the same range (95 s vs 100–110 s per PR). The even cheaper `glm-5.3-flash-background`
 at low effort delivers recall 0.83 [0.74, 0.92] at **0.8% of opus CE-low cost**, at the price of
 more hallucinated noise (adjP 0.54 vs 0.67). The operator's working figures of "~1/200th per token,
-~1/10th per task" are **not supported** by our measured list-price accounting (§7.2); the measured
+~1/10th per task" are **not supported** by our measured list-price accounting (§3.5.2); the measured
 flash-vs-fable numbers are 1/57 per blended token and 1/38 per task — still a large win, but state
 the measured ratios, not the folklore.
 
-**Update (§10d, PRIMARY — the hidden-gold set was rebuilt, then deduplicated and individually verified):**
-the §10b/§10c LLM-merged bug sets were still clusters, carrying both over-counts (one defect restated
+**Update (§3.1, PRIMARY — the hidden-gold set was rebuilt, then deduplicated and individually verified):**
+the the Appendix A unions LLM-merged bug sets were still clusters, carrying both over-counts (one defect restated
 several ways) and under-counts (defects the audit split away). Every candidate was therefore **executed**:
 a test that fails on the PR head, a minimal fix that makes it pass, and — where a sibling defect shares the
 site — an orthogonality check that the bundle's fix leaves it red. Independent duplicate passes
@@ -66,7 +75,15 @@ of the 52 it missed that any cell found, **all 52** were found by a *different c
 (a different model/framework/effort); with n = 1 run per cell per PR, repeat-run variance is not
 measured by this experiment. The union of all 66 complete cells reaches **140/147 (95%)**.
 
-## 2. What we measured (benchmark-defined vs our extensions)
+
+## 1. Introduction
+
+<!-- WAVE1B: introduction — what we were trying to do and why; the four questions; scope and history. -->
+
+## 2. Methodology
+
+### 2.1 The lab and the benchmark
+
 
 **Benchmark-defined** (Martian offline code-review benchmark, README
 `third_party/code-review-benchmark/offline/README.md`): 50 PRs across 5 codebases; 173 human-verified
@@ -79,13 +96,13 @@ deduplicate → LLM-judge semantic matching → profile-based scoring.
   rewarded nor penalised. Our frozen matcher matches against all 173 goldens, so stored recall is
   the **All** profile; Core/Strict splits are derived per run from `per_golden_matches`. On the
   severity top-6, the three profiles differ by at most one golden (PR 10967's single style
-  comment), so top-6 numbers are effectively profile-invariant (§5, T1).
+  comment), so top-6 numbers are effectively profile-invariant (§3.2, T1).
 - **F-beta:** F1 and F2 (recall-weighted 4:1 — a missed bug costs more than a false alarm) are
   reported for every cell. Fβ = (1+β²)·R·P/(β²·P+R).
 - **Judges:** gpt-5.2 for the Anthropic-model rows (fable/opus/sonnet) and the GLM rows;
   claude-opus-4-5-20251101 for the OpenAI rows (sol/terra/astra). Anti-self-preference by vendor,
   single judge family per row (so within-row framework comparisons are judge-consistent);
-  cross-judge agreement is only partially measured (§10, `analysis/ADJUDICATOR_INTERRATER.md`).
+  cross-judge agreement is only partially measured (§4, `analysis/ADJUDICATOR_INTERRATER.md`).
 
 **Our extensions beyond the benchmark** (each with its tool, each disclosed per-metric):
 
@@ -96,9 +113,9 @@ deduplicate → LLM-judge semantic matching → profile-based scoring.
   cross-run clustering, grounded hallucination, provenance stripping, k-vote). adjP =
   TP/(TP+hallucinations); **beyond-gold** = bug+important_non_bug outside the golden set.
   Campaign judgement lock: **rj3 at k=1 with v3.1 clustering**; no re-adjudication was performed
-  for this report, so k=1 everywhere (§3.3 quantifies the instrument effects).
-- **Cluster (PR-level) bootstrap CIs** on every headline number (§3.2).
-- **Metered cost accounting** at published list prices (§6) with a retrieval date, pricing
+  for this report, so k=1 everywhere (§2.3.3 quantifies the instrument effects).
+- **Cluster (PR-level) bootstrap CIs** on every headline number (§2.3.2).
+- **Metered cost accounting** at published list prices (§3.4) with a retrieval date, pricing
   fresh input / cached reads / cache writes / output separately.
 - Analysis docs we build on and do not rewrite: `analysis/ADJUDICATOR_INTERRATER.md`
   (adjudicator agreement 0.43–0.83 across judge models; the v1→v3 instability motivation),
@@ -108,18 +125,24 @@ deduplicate → LLM-judge semantic matching → profile-based scoring.
   `analysis/ACCEPTANCE_0111_FINAL.md` (0.11.1 acceptance with k=3 adjudication),
   `analysis/CE_RESIDUE_AFTER_UPGRADE.md` (hidden-gold gap decomposition), `FURTHER-RESEARCH.md`.
 
-## 3. Instruments, comparability, and disclosure rules
 
-### 3.1 Frozen instruments (unchanged; do not modify)
+### 2.2 What we ran: frameworks, models, efforts, judges
+
+<!-- WAVE1B: runs-matrix — the campaign matrix (8 models x 3 frameworks x 3 efforts, 2,416 healthy runs, cross-family judges, 6-PR primary / full-50 secondary). -->
+
+### 2.3 Instruments, comparability, and disclosure rules
+
+
+#### 2.3.1 Frozen instruments (unchanged; do not modify)
 
 `harnesseval/judge.py` (golden matcher), `readjudicate3.py` prompt/version semantics, and the
 golden dataset were **not modified** for this report. n = 1 selected run per cell×PR (selection
-rule in §3.2); duplicate healthy scored runs exist for some vanilla cells (listed in
-`analysis/COVERAGE_FINAL.md`) and were not pooled. Adjudication k = 1 (campaign lock); if anyone
+rule in §2.3.2); duplicate healthy scored runs exist for some vanilla cells (listed in
+`analysis/COVERAGE.md`) and were not pooled. Adjudication k = 1 (campaign lock); if anyone
 re-adjudicates at k≥3, both numbers must be reported (`analysis/ACCEPTANCE_0111_FINAL.md` shows
 what k=3 looks like on the 0.11.1 acceptance cells).
 
-### 3.2 Run selection and the era rule
+#### 2.3.2 Run selection and the era rule
 
 One healthy, scored run per (model × framework × effort × PR): health rule = no error, tokens>0,
 findings-or-≤20k-tokens; scored = integer tp/fn present; **era rule (banked 2026-09-13):**
@@ -128,7 +151,7 @@ come from batch `20260910-mrv0120-manifold` (pre-0.12 metareview binaries are in
 Within the rule we prefer the current campaign batch, then the fable vanilla batches, then newer
 legacy batches (`tools/final_report_extract.py`).
 
-### 3.3 Precision-instrument disclosure (per cell, in T1)
+#### 2.3.3 Precision-instrument disclosure (per cell, in T1)
 
 rj3 files exist for ~half the vanilla cells (opus/sonnet vanilla, fable vanilla low, parts of
 astra/sol/terra/glm-flash) but almost no compound/metareview cells of the current campaign; the
@@ -141,7 +164,7 @@ vanilla reuse) over-counts hallucinations massively — e.g. opus-5 vanilla low 
 cells; `analysis/CE_VS_MRV_GAPS.md` measured ~9% verdict flips across phrasings under v2 that v3.1
 clustering removes by construction — direction of bias on aggregate adjP is not established.
 
-### 3.4 Provider incident disclosure (GLM rows)
+#### 2.3.4 Provider incident disclosure (GLM rows)
 
 The 2026-09-14/15 Lunaroute gateway incident (aggregate concurrent output > ~400k tokens wedging
 the batch; OpenAI SDK `max_retries=2` silently tripling timeouts) was fixed by ~2026-09-15 16:00
@@ -150,9 +173,9 @@ exposure, using a conservative cutoff of 2026-09-15 23:00 UTC (16:00 PDT): **eve
 on the top-6 contains pre-fix runs** (glm-vis mrv medium 5/6, high 2/6 are the least exposed); the
 glm-flash vanilla cells selected the post-fix 2026-09-16 runs. The incident was operational
 (reliability), not a prompt or dataset change, and every selected run passed the health gate; but
-the headline GLM cells (incl. the §8 recommendation cell glm-vis MRV low, run 2026-09-10) cannot
+the headline GLM cells (incl. the §3.6 recommendation cell glm-vis MRV low, run 2026-09-10) cannot
 claim post-fix infrastructure. Treat GLM quality numbers as carrying this caveat; the
-gateway-capacity caveat (throughput, not quality) is in §7.5.
+gateway-capacity caveat (throughput, not quality) is in §3.5.5.
 
 Also disclosed: the six glm-*-compound cells and glm-vis MRV low lack per-model token splits
 (`per_model_usage`); their metered $ prices **all** input at the fresh rate (no cache discount), so
@@ -161,9 +184,11 @@ those cells' $ are upper bounds on the input side. Anthropic rows carry real pro
 0.96/0.96) and underestimates fable-5.1 billing by ~15% (median 0.85 — cache-write pricing), so
 fable $ are conservative.
 
-## 4. The top-6 design choice, argued and tested
 
-### 4.1 Definition and rationale (deliberate, not convenience)
+### 2.4 The top-6 design choice, argued and tested
+
+
+#### 2.4.1 Definition and rationale (deliberate, not convenience)
 
 **top-6 = the six PRs with the highest summed golden-comment severity weight** (Critical=4,
 High=3, Medium=2, Low=1; ties by comment count) — i.e. the six PRs with the **highest original-golden
@@ -171,13 +196,13 @@ severity totals** (CAMPAIGN_GLOSSARY.md; verifier `tools/verify_hitlist.py`; art
 `manifold_top6_hitlist.csv`): cal.com/11059 (sev 26, 9 comments), discourse-graphite/4 (21, 8),
 discourse-graphite/10 (21, 7), cal.com/14740 (14, 6), discourse-graphite/8 (14, 6),
 cal.com/10967 (13, 6). This selection is by ground-truth severity density, not by any measured
-detection difficulty for these tools — §4.3 below tests directly that the top-6 is *not* measurably
+detection difficulty for these tools — §2.4.3 below tests directly that the top-6 is *not* measurably
 recall-harder, so read "hard" below as severity-weighted, not as an estimate of what the tools find hard. This is a **deliberate weighting toward higher-severity workloads**: a code-review
 tool that only catches easy issues is not worth buying, and cost/benefit is decided at the hard
 end. (A lexicographic misreading of "top-6" already corrupted one subset earlier in this campaign —
 the severity ordering is binding.)
 
-### 4.2 Representativeness claim, stated as testable
+#### 2.4.2 Representativeness claim, stated as testable
 **How hard is the sample?** Measured directly (panel 5 of the dashboard): summing each PR's golden severity
 weights (Critical 4 … Low 1), the six headlined PRs average **18.2** against **6.1** for the other 44 — about
 **3×** — and the **mildest of the six is as severe as the most severe PR we did not pick** (both 13). The
@@ -202,560 +227,32 @@ healthy scored PRs (T3):
    (sonnet-5 collapses from 3rd on full-50 to last on top-6); everywhere else ranks are preserved
    or near-preserved. This is direct, if not uniform, evidence for the claim.
 
-### 4.3 Monotonicity check — the "lower bound" sub-claim is NOT supported
+#### 2.4.3 Monotonicity check — the "lower bound" sub-claim is NOT supported
 
 If recall were systematically lower on higher-severity PRs, the top-6 ranking would be a lower
 bound on full-set recall. Measured: Spearman ρ(per-PR severity weight, per-PR recall) over the 33
 full rows averages **+0.10**, with 6/33 negative — recall is *not* monotonically lower on harder
 PRs. **Report the top-6 as a hard-weighted sample whose recall matches the full set on average
-(§4.2), not as a lower bound.** Where a specific cell shows a large gap (e.g. sol vanilla high:
+(§2.4.2), not as a lower bound.** Where a specific cell shows a large gap (e.g. sol vanilla high:
 top-6 0.62 vs full 0.76), the T3 table is the correction.
 
-## 5. The §8 apples-to-apples matrix (8 × 3 × 3 × same 6 PRs)
 
-66 of 72 cells are complete (6/6 PRs each; 396 runs, n = 1 run/PR, k = 1); the six fable
-compound/metareview cells have 1–2 PRs each (**coverage gaps, not results** — fable's account was
-rate-capped ~3 days; `analysis/COVERAGE_FINAL.md`). `xhigh` is out of the matrix by operator
-decision (legacy rows aside: §7.4). Judges, batches, instruments per cell are in T1/T2 notes and
-`analysis/COVERAGE_FINAL.md`.
+### 2.5 Building ground truth we could execute
 
-### T1 — §8 apples-to-apples matrix (severity top-6): quality, 95% cluster-bootstrap CIs
+<!-- WAVE1B: ground-truth-narrative — the 359->253->152->147 story and its lessons. Source: the construction paragraphs at the head of §3.1, the audit paragraph in §4, and WITHDRAWALS_AND_DEDUP_2026-09-18.md. -->
 
-recall = frozen-matcher TP/(TP+FN) vs all 173 goldens (All profile; Core/Strict differ only by
-PR 10967's single style golden on this PR set). adjP = TP/(TP+hallucinations), k=1 verdicts;
-`inst` = precision instrument (rj3 = v3.1 clustered k=1, v2 = in-run three-way, v1 = binary legacy).
-n = PRs with a selected healthy scored run (1 run/PR). Judge: gpt-5.2 for fable/opus/sonnet/glm rows,
-claude-opus-4-5-20251101 for sol/terra/astra rows.
+### 2.6 Metrics and the evaluator choice
 
-| model | fw | eff | n | recall [CI] | adjP [CI] | F1 [CI] | F2 [CI] | beyond-gold/PR | inst |
-|---|---|---|---|---|---|---|---|---|---|
-| fable-5.1 | van | low | 6 | 0.74 [0.67, 0.81] | 0.82 [0.74, 0.89] | 0.78 [0.72, 0.81] | 0.75 [0.70, 0.81] | 12.3 | rj3 |
-| fable-5.1 | van | medium | 6 | 0.69 [0.55, 0.82] | 0.56 [0.50, 0.61] | 0.62 [0.54, 0.68] | 0.66 [0.56, 0.75] | 7.8 | v1 |
-| fable-5.1 | van | high | 6 | 0.71 [0.57, 0.84] | 0.59 [0.54, 0.65] | 0.65 [0.59, 0.70] | 0.68 [0.58, 0.77] | 8.8 | v1 |
-| fable-5.1 **GAP** | CE | low | 2 | 0.60 [0.38, 0.86] | 0.28 [0.21, 0.33] | 0.38 [0.27, 0.48] | 0.49 [0.33, 0.65] | 66.0 | v2 |
-| fable-5.1 **GAP** | CE | medium | 1 | 0.86 [0.86, 0.86] | 0.38 [0.38, 0.38] | 0.52 [0.52, 0.52] | 0.68 [0.68, 0.68] | 75.0 | v2 |
-| fable-5.1 **GAP** | CE | high | 1 | 0.86 [0.86, 0.86] | 0.40 [0.40, 0.40] | 0.55 [0.55, 0.55] | 0.70 [0.70, 0.70] | 54.0 | v2 |
-| fable-5.1 **GAP** | MRV | low | 1 | 0.86 [0.86, 0.86] | 0.46 [0.46, 0.46] | 0.60 [0.60, 0.60] | 0.73 [0.73, 0.73] | 50.0 | v2 |
-| fable-5.1 **GAP** | MRV | medium | 1 | 0.86 [0.86, 0.86] | 0.50 [0.50, 0.50] | 0.63 [0.63, 0.63] | 0.75 [0.75, 0.75] | 65.0 | v2 |
-| fable-5.1 **GAP** | MRV | high | 1 | 0.86 [0.86, 0.86] | 0.75 [0.75, 0.75] | 0.80 [0.80, 0.80] | 0.83 [0.83, 0.83] | 59.0 | v2 |
-| astra | van | low | 6 | 0.40 [0.33, 0.49] | 1.00 [1.00, 1.00] | 0.58 [0.49, 0.66] | 0.46 [0.38, 0.55] | 2.5 | rj3/v2 |
-| astra | van | medium | 6 | 0.43 [0.33, 0.51] | 0.95 [0.83, 1.00] | 0.59 [0.48, 0.68] | 0.48 [0.38, 0.57] | 2.3 | rj3 |
-| astra | van | high | 6 | 0.40 [0.29, 0.54] | 1.00 [1.00, 1.00] | 0.58 [0.44, 0.70] | 0.46 [0.33, 0.60] | 2.8 | rj3 |
-| astra | CE | low | 6 | 0.52 [0.44, 0.62] | 0.69 [0.58, 0.81] | 0.59 [0.53, 0.68] | 0.55 [0.47, 0.63] | 11.3 | rj3/v2 |
-| astra | CE | medium | 6 | 0.62 [0.51, 0.74] | 0.87 [0.70, 1.00] | 0.72 [0.59, 0.84] | 0.66 [0.54, 0.77] | 9.0 | rj3/v2 |
-| astra | CE | high | 6 | 0.55 [0.43, 0.68] | 0.74 [0.59, 0.90] | 0.63 [0.50, 0.77] | 0.58 [0.45, 0.71] | 8.3 | rj3/v2 |
-| astra | MRV | low | 6 | 0.62 [0.47, 0.77] | 0.93 [0.86, 1.00] | 0.74 [0.62, 0.84] | 0.66 [0.52, 0.80] | 9.5 | rj3 |
-| astra | MRV | medium | 6 | 0.60 [0.47, 0.71] | 0.86 [0.74, 0.97] | 0.70 [0.59, 0.81] | 0.63 [0.51, 0.74] | 8.2 | rj3/v2 |
-| astra | MRV | high | 6 | 0.60 [0.45, 0.73] | 0.76 [0.59, 1.00] | 0.67 [0.53, 0.78] | 0.62 [0.48, 0.73] | 11.8 | rj3/v2 |
-| sol | van | low | 6 | 0.62 [0.43, 0.80] | 1.00 [1.00, 1.00] | 0.76 [0.60, 0.89] | 0.67 [0.48, 0.83] | 3.7 | v2 |
-| sol | van | medium | 6 | 0.62 [0.42, 0.83] | 0.96 [0.88, 1.00] | 0.75 [0.58, 0.89] | 0.67 [0.47, 0.85] | 3.8 | v2 |
-| sol | van | high | 6 | 0.62 [0.44, 0.77] | 0.96 [0.88, 1.00] | 0.75 [0.60, 0.87] | 0.67 [0.49, 0.81] | 4.8 | v2 |
-| sol | CE | low | 6 | 0.55 [0.31, 0.77] | 0.61 [0.47, 0.71] | 0.57 [0.38, 0.72] | 0.56 [0.33, 0.75] | 18.0 | v2 |
-| sol | CE | medium | 6 | 0.62 [0.40, 0.81] | 0.60 [0.49, 0.79] | 0.61 [0.47, 0.74] | 0.62 [0.43, 0.77] | 21.5 | v2 |
-| sol | CE | high | 6 | 0.74 [0.67, 0.80] | 0.48 [0.37, 0.67] | 0.58 [0.48, 0.70] | 0.67 [0.60, 0.74] | 33.0 | v2 |
-| sol | MRV | low | 6 | 0.60 [0.42, 0.76] | 0.66 [0.54, 0.79] | 0.62 [0.48, 0.77] | 0.61 [0.44, 0.76] | 13.2 | v2 |
-| sol | MRV | medium | 6 | 0.67 [0.40, 0.84] | 0.57 [0.43, 0.67] | 0.62 [0.42, 0.74] | 0.65 [0.41, 0.79] | 19.5 | v2 |
-| sol | MRV | high | 6 | 0.62 [0.42, 0.80] | 0.58 [0.49, 0.68] | 0.60 [0.46, 0.70] | 0.61 [0.44, 0.75] | 22.7 | v2 |
-| opus-5 | van | low | 6 | 0.67 [0.60, 0.72] | 0.90 [0.82, 0.97] | 0.77 [0.70, 0.82] | 0.70 [0.64, 0.76] | 9.3 | rj3 |
-| opus-5 | van | medium | 6 | 0.69 [0.51, 0.84] | 0.47 [0.34, 0.57] | 0.56 [0.41, 0.65] | 0.63 [0.47, 0.75] | 7.7 | v1 |
-| opus-5 | van | high | 6 | 0.69 [0.55, 0.82] | 0.94 [0.85, 1.00] | 0.79 [0.67, 0.89] | 0.73 [0.59, 0.84] | 11.3 | rj3 |
-| opus-5 | CE | low | 6 | 0.81 [0.72, 0.87] | 0.44 [0.33, 0.67] | 0.57 [0.47, 0.71] | 0.69 [0.64, 0.77] | 55.5 | v2 |
-| opus-5 | CE | medium | 6 | 0.83 [0.75, 0.91] | 0.30 [0.23, 0.42] | 0.44 [0.36, 0.56] | 0.61 [0.55, 0.72] | 78.8 | v2 |
-| opus-5 | CE | high | 6 | 0.71 [0.55, 0.84] | 0.32 [0.23, 0.52] | 0.44 [0.33, 0.62] | 0.57 [0.44, 0.70] | 61.5 | v2 |
-| opus-5 | MRV | low | 6 | 0.83 [0.76, 0.91] | 0.41 [0.35, 0.48] | 0.55 [0.50, 0.60] | 0.69 [0.65, 0.74] | 48.8 | v2 |
-| opus-5 | MRV | medium | 6 | 0.67 [0.40, 0.86] | 0.40 [0.30, 0.59] | 0.50 [0.37, 0.65] | 0.59 [0.40, 0.73] | 53.2 | v2 |
-| opus-5 | MRV | high | 6 | 0.74 [0.51, 0.90] | 0.39 [0.28, 0.61] | 0.51 [0.39, 0.69] | 0.63 [0.47, 0.78] | 67.2 | v2 |
-| glm-vis | van | low | 6 | 0.55 [0.38, 0.72] | 0.74 [0.58, 0.90] | 0.63 [0.47, 0.77] | 0.58 [0.42, 0.74] | 9.5 | v2 |
-| glm-vis | van | medium | 6 | 0.62 [0.48, 0.76] | 1.00 [1.00, 1.00] | 0.76 [0.65, 0.86] | 0.67 [0.53, 0.80] | 10.7 | v2 |
-| glm-vis | van | high | 6 | 0.57 [0.40, 0.74] | 0.96 [0.86, 1.00] | 0.72 [0.56, 0.85] | 0.62 [0.45, 0.78] | 12.7 | v2 |
-| glm-vis | CE | low | 6 | 0.76 [0.63, 0.86] | 0.49 [0.35, 0.67] | 0.60 [0.46, 0.73] | 0.69 [0.57, 0.79] | 55.3 | v2 |
-| glm-vis | CE | medium | 6 | 0.83 [0.71, 0.95] | 0.62 [0.45, 0.84] | 0.71 [0.55, 0.89] | 0.78 [0.64, 0.92] | 77.2 | v2 |
-| glm-vis | CE | high | 6 | 0.76 [0.62, 0.90] | 0.80 [0.73, 0.86] | 0.78 [0.68, 0.87] | 0.77 [0.64, 0.89] | 71.3 | v2 |
-| glm-vis | MRV | low | 6 | 0.81 [0.74, 0.86] | 0.67 [0.59, 0.78] | 0.73 [0.67, 0.80] | 0.78 [0.71, 0.83] | 54.3 | v2 |
-| glm-vis | MRV | medium | 6 | 0.83 [0.76, 0.91] | 0.85 [0.80, 0.91] | 0.84 [0.82, 0.87] | 0.84 [0.78, 0.89] | 90.0 | v2 |
-| glm-vis | MRV | high | 6 | 0.76 [0.67, 0.84] | 0.82 [0.68, 0.94] | 0.79 [0.71, 0.87] | 0.77 [0.69, 0.84] | 96.8 | v2 |
-| terra | van | low | 6 | 0.36 [0.25, 0.45] | 0.94 [0.79, 1.00] | 0.52 [0.38, 0.62] | 0.41 [0.29, 0.50] | 2.7 | v2 |
-| terra | van | medium | 6 | 0.40 [0.26, 0.54] | 1.00 [1.00, 1.00] | 0.58 [0.41, 0.70] | 0.46 [0.31, 0.60] | 2.3 | v2 |
-| terra | van | high | 6 | 0.45 [0.35, 0.56] | 1.00 [1.00, 1.00] | 0.62 [0.52, 0.71] | 0.51 [0.40, 0.61] | 2.8 | v2 |
-| terra | CE | low | 6 | 0.48 [0.35, 0.59] | 0.77 [0.65, 0.91] | 0.59 [0.46, 0.70] | 0.52 [0.39, 0.62] | 10.7 | v2 |
-| terra | CE | medium | 6 | 0.48 [0.32, 0.63] | 0.65 [0.53, 0.78] | 0.55 [0.41, 0.67] | 0.50 [0.35, 0.64] | 12.5 | v2 |
-| terra | CE | high | 6 | 0.38 [0.23, 0.54] | 0.59 [0.50, 0.82] | 0.46 [0.34, 0.55] | 0.41 [0.26, 0.54] | 10.7 | v2 |
-| terra | MRV | low | 6 | 0.40 [0.26, 0.56] | 0.55 [0.33, 0.82] | 0.47 [0.28, 0.65] | 0.43 [0.26, 0.59] | 8.5 | v2 |
-| terra | MRV | medium | 6 | 0.52 [0.32, 0.74] | 0.61 [0.51, 0.78] | 0.56 [0.43, 0.68] | 0.54 [0.36, 0.69] | 13.3 | v2 |
-| terra | MRV | high | 6 | 0.50 [0.30, 0.69] | 0.58 [0.44, 0.77] | 0.54 [0.36, 0.70] | 0.51 [0.33, 0.68] | 13.7 | v2 |
-| sonnet-5 | van | low | 6 | 0.43 [0.27, 0.59] | 0.72 [0.56, 0.81] | 0.54 [0.37, 0.68] | 0.47 [0.30, 0.62] | 5.3 | rj3 |
-| sonnet-5 | van | medium | 6 | 0.45 [0.29, 0.59] | 0.76 [0.64, 0.86] | 0.57 [0.40, 0.69] | 0.49 [0.32, 0.63] | 3.8 | rj3 |
-| sonnet-5 | van | high | 6 | 0.50 [0.38, 0.59] | 0.95 [0.88, 1.00] | 0.66 [0.55, 0.72] | 0.55 [0.43, 0.64] | 4.0 | rj3 |
-| sonnet-5 | CE | low | 6 | 0.19 [0.10, 0.30] | 0.62 [0.36, 0.86] | 0.29 [0.15, 0.43] | 0.22 [0.11, 0.34] | 6.5 | v2 |
-| sonnet-5 | CE | medium | 6 | 0.31 [0.25, 0.35] | 0.81 [0.68, 1.00] | 0.45 [0.39, 0.48] | 0.35 [0.29, 0.39] | 10.5 | v2 |
-| sonnet-5 | CE | high | 6 | 0.26 [0.06, 0.47] | 0.61 [0.33, 0.72] | 0.37 [0.10, 0.56] | 0.30 [0.07, 0.50] | 7.7 | v2 |
-| sonnet-5 | MRV | low | 6 | 0.43 [0.38, 0.47] | 0.24 [0.18, 0.32] | 0.31 [0.25, 0.38] | 0.37 [0.32, 0.43] | 24.3 | v2 |
-| sonnet-5 | MRV | medium | 6 | 0.48 [0.38, 0.57] | 0.34 [0.23, 0.49] | 0.40 [0.30, 0.51] | 0.44 [0.35, 0.55] | 29.2 | v2 |
-| sonnet-5 | MRV | high | 6 | 0.62 [0.39, 0.82] | 0.40 [0.33, 0.47] | 0.49 [0.37, 0.59] | 0.56 [0.38, 0.71] | 34.0 | v2 |
-| glm-flash | van | low | 6 | 0.52 [0.39, 0.63] | 0.92 [0.84, 1.00] | 0.67 [0.56, 0.75] | 0.57 [0.45, 0.67] | 8.8 | v2 |
-| glm-flash | van | medium | 6 | 0.64 [0.53, 0.77] | 0.79 [0.69, 0.92] | 0.71 [0.61, 0.83] | 0.67 [0.56, 0.79] | 8.8 | v2 |
-| glm-flash | van | high | 6 | 0.60 [0.40, 0.77] | 0.93 [0.83, 1.00] | 0.72 [0.55, 0.85] | 0.64 [0.44, 0.80] | 12.3 | rj3/v2 |
-| glm-flash | CE | low | 6 | 0.76 [0.63, 0.88] | 0.63 [0.55, 0.72] | 0.69 [0.62, 0.74] | 0.73 [0.63, 0.81] | 48.8 | v2 |
-| glm-flash | CE | medium | 6 | 0.76 [0.55, 0.95] | 0.64 [0.55, 0.75] | 0.70 [0.57, 0.79] | 0.73 [0.56, 0.87] | 60.3 | v2 |
-| glm-flash | CE | high | 6 | 0.76 [0.58, 0.93] | 0.82 [0.72, 0.96] | 0.79 [0.70, 0.86] | 0.77 [0.62, 0.89] | 57.8 | v2 |
-| glm-flash | MRV | low | 6 | 0.83 [0.74, 0.92] | 0.54 [0.49, 0.59] | 0.65 [0.62, 0.69] | 0.75 [0.70, 0.80] | 54.7 | v2 |
-| glm-flash | MRV | medium | 6 | 0.69 [0.51, 0.84] | 0.67 [0.52, 0.82] | 0.68 [0.53, 0.81] | 0.69 [0.52, 0.83] | 57.5 | v2 |
-| glm-flash | MRV | high | 6 | 0.76 [0.56, 0.93] | 0.84 [0.73, 0.93] | 0.80 [0.63, 0.92] | 0.78 [0.59, 0.93] | 83.0 | v2 |
+<!-- WAVE1B: metrics-evaluator — move the 'Which composite to read' / 'Why F2′ is our evaluator' / 'Instrument caveat' passages here from §3.1. -->
 
-**Reading the matrix.** (a) *Harnesses raise recall where the base model is weak or mid-tier and
-leave it unchanged or worse at the top of the frontier*: +0.14…+0.31 recall for opus-5/glm rows
-(17/42 pairs resolve positive and 2 negative, i.e. 19 pairs whose paired CI excludes 0; median Δrecall +0.12), while sol/terra
-rows are inside noise (T4) — a strong model in a single pass already finds what the harness's
-lenses find on these PRs. (b) *sonnet-5 is the counterexample that matters for buyers*: its
-compound cells *lose* recall (−0.24 [−0.46, −0.04] at high effort) because Claude-Code-style
-compound routing sends reviewer subagents to haiku-4.5 (visible in `per_model_usage`) — a
-harness is only as good as the models it actually calls. (c) *adjP is where frontier harness cells
-bleed*: opus-5 CE/MRV adjP 0.30–0.44 vs glm-vis MRV medium 0.85 and astra MRV low 0.93 — the
-expensive harnesses emit large volumes of non-golden content of which more is judged waste.
+## 3. Results
 
-Figures: `analysis/figures/fig_recall_grid.png` (recall with CIs per cell),
-`fig_cost_per_cell.png`, `fig_effort_ladder.png`.
+### 3.1 The primary matrix: the true golden set
 
-## 5b. Two analyses: strict benchmark vs expanded gold (the hidden-gold union)
 
-> **SUPERSEDED by §10d (levels only; §10b/§10c were intermediate steps).** The T9/T10/T11 unions below overcount distinct
-> bugs ~17× (paraphrase splits) and, due to a since-fixed extract bug, omit all
-> rj3-adjudicated runs' confirmed bugs (706 findings, mostly vanilla cells). The paired
-> Δ *directions* survive; all levels should be read from §10d. Retained for provenance.
-
-The strict-benchmark numbers above answer the question Martian defines: *does the tool
-find the human-verified golden comments, without hallucinating?* They deliberately do
-not credit findings outside the golden set — which is the right call for a benchmark,
-but the wrong lens for a buyer comparing a single-pass reviewer against a harness:
-a harness that finds 55 real bugs but only 8 goldens scores the same recall as a
-vanilla that finds 8 goldens, and the 47 real-but-ungold bugs are invisible to the
-metric. This section separates the two analyses and recomputes recall/precision/F1
-against an **expanded ground truth**.
-
-**Construction (our extension, fully disclosed).** Per PR, take every confirmed-bug
-finding (rj3 `bug` / in-run `real_but_ungold`) across **ALL healthy scored runs of all
-models/frameworks/efforts** (era-legal universe, low/medium/high). Cluster them with a
-**file:startline:endline primary key** extracted from each finding's own text prefix
-(the `tools/anchor_matcher.py` pattern; 45% of bugtexts carry an anchor), with
-rj3-normalization + difflib 0.75 (bucketed by file path) as the fallback for anchorless
-findings. The expanded set = goldens ∪ distinct keys (T11). Per cell:
-tp_exp = golden TP + own distinct keys; fn_exp = expanded size − tp_exp;
-adjP_exp = tp_exp/(tp_exp + hallucinations); F1/F2_exp from the pair. Cluster bootstrap
-CIs (B=10,000, rng3 — frozen numbers above untouched). important_non_bug is excluded
-(bugs only). **Caveats:** no LLM semantic-merge pass, so cross-model rewordings stay
-separate and the union is overcounted ⇒ recall_exp levels are conservative lower bounds;
-distinct issues sharing one anchor can over-merge; golden-vs-cluster overlaps may
-double-count a few entries. The robust quantity is the paired Δ (T10), which is stable
-across all three clustering variants we tried (verbatim, difflib-only, anchor-primary).
-
-**T11 — union sizes per top-6 PR**
-
-### T11 — hidden-gold union sizes per top-6 PR
-
-| PR | goldens | union clusters | expanded set |
-|---|---|---|---|
-| calcom/cal.com/pull/11059 | 9 | 981 | 990 |
-| ai-code-review-evaluation/discourse-graphite/pull/4 | 8 | 928 | 936 |
-| ai-code-review-evaluation/discourse-graphite/pull/10 | 7 | 680 | 687 |
-| ai-code-review-evaluation/discourse-graphite/pull/8 | 6 | 513 | 519 |
-| calcom/cal.com/pull/14740 | 6 | 919 | 925 |
-| calcom/cal.com/pull/10967 | 6 | 960 | 966 |
-
-**T9 — the expanded matrix**
-
-### T9 — expanded-gold matrix (top-6): recall/adjP/F1 against the hidden-gold union
-
-Strict = Martian benchmark (goldens only). Expanded = goldens + cross-run/cross-model
-deduplicated confirmed-bug union (see REPORT_FINAL §5b for construction and caveats).
-recall_exp and F1_exp levels are conservative lower bounds; the paired deltas in T10 are
-the robust comparison.
-
-| model | fw | eff | n | recall_strict | recall_exp [CI] | adjP_exp | F1_exp [CI] | F1_strict |
-|---|---|---|---|---|---|---|---|---|
-| fable-5.1 | van | low | 6 | 0.74 | 0.006 [0.005, 0.008] | 0.82 | 0.012 [0.010, 0.016] | 0.78 |
-| fable-5.1 | van | medium | 6 | 0.69 | 0.014 [0.012, 0.016] | 0.76 | 0.028 [0.024, 0.032] | 0.62 |
-| fable-5.1 | van | high | 6 | 0.71 | 0.016 [0.013, 0.020] | 0.79 | 0.032 [0.025, 0.039] | 0.65 |
-| fable-5.1 **GAP** | CE | low | 2 | 0.60 | 0.041 [0.033, 0.047] | 0.74 | 0.078 [0.064, 0.089] | 0.38 |
-| fable-5.1 **GAP** | CE | medium | 1 | 0.86 | 0.047 [0.047, 0.047] | 0.76 | 0.088 [0.088, 0.088] | 0.52 |
-| fable-5.1 **GAP** | CE | high | 1 | 0.86 | 0.035 [0.035, 0.035] | 0.73 | 0.067 [0.067, 0.067] | 0.55 |
-| fable-5.1 **GAP** | MRV | low | 1 | 0.86 | 0.045 [0.045, 0.045] | 0.82 | 0.086 [0.086, 0.086] | 0.60 |
-| fable-5.1 **GAP** | MRV | medium | 1 | 0.86 | 0.054 [0.054, 0.054] | 0.86 | 0.101 [0.101, 0.101] | 0.63 |
-| fable-5.1 **GAP** | MRV | high | 1 | 0.86 | 0.048 [0.048, 0.048] | 0.94 | 0.091 [0.091, 0.091] | 0.80 |
-| astra | van | low | 6 | 0.40 | 0.003 [0.003, 0.004] | 1.00 | 0.007 [0.005, 0.008] | 0.58 |
-| astra | van | medium | 6 | 0.43 | 0.004 [0.003, 0.005] | 0.95 | 0.007 [0.005, 0.009] | 0.59 |
-| astra | van | high | 6 | 0.40 | 0.003 [0.002, 0.005] | 1.00 | 0.007 [0.005, 0.009] | 0.58 |
-| astra | CE | low | 6 | 0.52 | 0.009 [0.005, 0.013] | 0.81 | 0.017 [0.010, 0.025] | 0.59 |
-| astra | CE | medium | 6 | 0.62 | 0.008 [0.005, 0.013] | 0.91 | 0.017 [0.010, 0.025] | 0.72 |
-| astra | CE | high | 6 | 0.55 | 0.006 [0.004, 0.009] | 0.79 | 0.012 [0.008, 0.018] | 0.63 |
-| astra | MRV | low | 6 | 0.62 | 0.005 [0.004, 0.007] | 0.93 | 0.010 [0.007, 0.014] | 0.74 |
-| astra | MRV | medium | 6 | 0.60 | 0.008 [0.005, 0.013] | 0.91 | 0.016 [0.009, 0.025] | 0.70 |
-| astra | MRV | high | 6 | 0.60 | 0.009 [0.005, 0.013] | 0.85 | 0.018 [0.011, 0.026] | 0.67 |
-| sol | van | low | 6 | 0.62 | 0.009 [0.008, 0.011] | 1.00 | 0.019 [0.016, 0.022] | 0.76 |
-| sol | van | medium | 6 | 0.62 | 0.010 [0.008, 0.011] | 0.98 | 0.019 [0.016, 0.022] | 0.75 |
-| sol | van | high | 6 | 0.62 | 0.011 [0.009, 0.013] | 0.98 | 0.021 [0.018, 0.025] | 0.75 |
-| sol | CE | low | 6 | 0.55 | 0.015 [0.010, 0.020] | 0.83 | 0.029 [0.019, 0.038] | 0.57 |
-| sol | CE | medium | 6 | 0.62 | 0.020 [0.016, 0.024] | 0.86 | 0.039 [0.032, 0.047] | 0.61 |
-| sol | CE | high | 6 | 0.74 | 0.025 [0.021, 0.028] | 0.79 | 0.048 [0.042, 0.054] | 0.58 |
-| sol | MRV | low | 6 | 0.60 | 0.016 [0.012, 0.021] | 0.86 | 0.031 [0.024, 0.041] | 0.62 |
-| sol | MRV | medium | 6 | 0.67 | 0.020 [0.015, 0.026] | 0.82 | 0.038 [0.029, 0.051] | 0.62 |
-| sol | MRV | high | 6 | 0.62 | 0.020 [0.017, 0.024] | 0.84 | 0.039 [0.033, 0.046] | 0.60 |
-| opus-5 | van | low | 6 | 0.67 | 0.006 [0.005, 0.007] | 0.90 | 0.011 [0.009, 0.013] | 0.77 |
-| opus-5 | van | medium | 6 | 0.69 | 0.015 [0.011, 0.019] | 0.69 | 0.029 [0.022, 0.037] | 0.56 |
-| opus-5 | van | high | 6 | 0.69 | 0.006 [0.004, 0.008] | 0.94 | 0.011 [0.008, 0.015] | 0.79 |
-| opus-5 | CE | low | 6 | 0.81 | 0.033 [0.026, 0.040] | 0.79 | 0.063 [0.050, 0.075] | 0.57 |
-| opus-5 | CE | medium | 6 | 0.83 | 0.042 [0.036, 0.049] | 0.72 | 0.079 [0.068, 0.091] | 0.44 |
-| opus-5 | CE | high | 6 | 0.71 | 0.034 [0.026, 0.040] | 0.73 | 0.065 [0.050, 0.076] | 0.44 |
-| opus-5 | MRV | low | 6 | 0.83 | 0.033 [0.031, 0.035] | 0.77 | 0.064 [0.060, 0.067] | 0.55 |
-| opus-5 | MRV | medium | 6 | 0.67 | 0.035 [0.030, 0.041] | 0.81 | 0.068 [0.058, 0.078] | 0.50 |
-| opus-5 | MRV | high | 6 | 0.74 | 0.038 [0.033, 0.042] | 0.79 | 0.072 [0.064, 0.079] | 0.51 |
-| glm-vis | van | low | 6 | 0.55 | 0.011 [0.009, 0.013] | 0.88 | 0.022 [0.018, 0.026] | 0.63 |
-| glm-vis | van | medium | 6 | 0.62 | 0.015 [0.013, 0.018] | 1.00 | 0.030 [0.026, 0.035] | 0.76 |
-| glm-vis | van | high | 6 | 0.57 | 0.015 [0.013, 0.017] | 0.99 | 0.030 [0.026, 0.034] | 0.72 |
-| glm-vis | CE | low | 6 | 0.76 | 0.046 [0.040, 0.049] | 0.87 | 0.087 [0.077, 0.093] | 0.60 |
-| glm-vis | CE | medium | 6 | 0.83 | 0.074 [0.063, 0.089] | 0.95 | 0.138 [0.118, 0.162] | 0.71 |
-| glm-vis | CE | high | 6 | 0.76 | 0.069 [0.063, 0.078] | 0.98 | 0.128 [0.118, 0.144] | 0.78 |
-| glm-vis | MRV | low | 6 | 0.81 | 0.054 [0.045, 0.064] | 0.94 | 0.102 [0.085, 0.120] | 0.73 |
-| glm-vis | MRV | medium | 6 | 0.83 | 0.090 [0.079, 0.101] | 0.99 | 0.165 [0.147, 0.183] | 0.84 |
-| glm-vis | MRV | high | 6 | 0.76 | 0.100 [0.089, 0.110] | 0.99 | 0.182 [0.164, 0.198] | 0.79 |
-| terra | van | low | 6 | 0.36 | 0.006 [0.005, 0.007] | 0.97 | 0.012 [0.010, 0.014] | 0.52 |
-| terra | van | medium | 6 | 0.40 | 0.006 [0.005, 0.007] | 1.00 | 0.012 [0.010, 0.014] | 0.58 |
-| terra | van | high | 6 | 0.45 | 0.007 [0.006, 0.009] | 1.00 | 0.014 [0.011, 0.017] | 0.62 |
-| terra | CE | low | 6 | 0.48 | 0.012 [0.010, 0.014] | 0.91 | 0.024 [0.021, 0.027] | 0.59 |
-| terra | CE | medium | 6 | 0.48 | 0.012 [0.009, 0.016] | 0.85 | 0.024 [0.018, 0.031] | 0.55 |
-| terra | CE | high | 6 | 0.38 | 0.011 [0.006, 0.015] | 0.83 | 0.021 [0.012, 0.030] | 0.46 |
-| terra | MRV | low | 6 | 0.40 | 0.012 [0.008, 0.016] | 0.81 | 0.023 [0.016, 0.031] | 0.47 |
-| terra | MRV | medium | 6 | 0.52 | 0.015 [0.009, 0.022] | 0.84 | 0.029 [0.018, 0.042] | 0.56 |
-| terra | MRV | high | 6 | 0.50 | 0.014 [0.011, 0.017] | 0.82 | 0.027 [0.023, 0.033] | 0.54 |
-| sonnet-5 | van | low | 6 | 0.43 | 0.004 [0.002, 0.005] | 0.72 | 0.007 [0.004, 0.011] | 0.54 |
-| sonnet-5 | van | medium | 6 | 0.45 | 0.004 [0.002, 0.005] | 0.76 | 0.008 [0.005, 0.011] | 0.57 |
-| sonnet-5 | van | high | 6 | 0.50 | 0.004 [0.003, 0.006] | 0.95 | 0.008 [0.006, 0.011] | 0.66 |
-| sonnet-5 | CE | low | 6 | 0.19 | 0.005 [0.003, 0.007] | 0.82 | 0.009 [0.005, 0.013] | 0.29 |
-| sonnet-5 | CE | medium | 6 | 0.31 | 0.008 [0.003, 0.014] | 0.93 | 0.015 [0.007, 0.027] | 0.45 |
-| sonnet-5 | CE | high | 6 | 0.26 | 0.006 [0.004, 0.009] | 0.82 | 0.013 [0.007, 0.018] | 0.37 |
-| sonnet-5 | MRV | low | 6 | 0.43 | 0.014 [0.010, 0.019] | 0.56 | 0.028 [0.020, 0.037] | 0.31 |
-| sonnet-5 | MRV | medium | 6 | 0.48 | 0.023 [0.018, 0.029] | 0.75 | 0.045 [0.036, 0.056] | 0.40 |
-| sonnet-5 | MRV | high | 6 | 0.62 | 0.025 [0.020, 0.030] | 0.76 | 0.049 [0.038, 0.058] | 0.49 |
-| glm-flash | van | low | 6 | 0.52 | 0.011 [0.009, 0.012] | 0.96 | 0.021 [0.018, 0.024] | 0.67 |
-| glm-flash | van | medium | 6 | 0.64 | 0.013 [0.011, 0.015] | 0.90 | 0.026 [0.022, 0.030] | 0.71 |
-| glm-flash | van | high | 6 | 0.60 | 0.014 [0.011, 0.018] | 0.97 | 0.028 [0.022, 0.035] | 0.72 |
-| glm-flash | CE | low | 6 | 0.76 | 0.045 [0.036, 0.051] | 0.92 | 0.085 [0.069, 0.097] | 0.69 |
-| glm-flash | CE | medium | 6 | 0.76 | 0.057 [0.050, 0.065] | 0.94 | 0.107 [0.095, 0.121] | 0.70 |
-| glm-flash | CE | high | 6 | 0.76 | 0.060 [0.052, 0.068] | 0.98 | 0.112 [0.098, 0.127] | 0.79 |
-| glm-flash | MRV | low | 6 | 0.83 | 0.047 [0.041, 0.054] | 0.89 | 0.090 [0.077, 0.103] | 0.65 |
-| glm-flash | MRV | medium | 6 | 0.69 | 0.055 [0.046, 0.064] | 0.95 | 0.103 [0.088, 0.121] | 0.68 |
-| glm-flash | MRV | high | 6 | 0.76 | 0.081 [0.068, 0.093] | 0.99 | 0.149 [0.127, 0.170] | 0.80 |
-
-**T10 — harness vs vanilla under the expanded set (paired, same 6 PRs)**
-
-### T10 — harness vs vanilla, paired on the same 6 PRs: Δrecall under the expanded set
-
-| cell (model fw effort) | Δrecall_exp [CI] |
-|---|---|
-| astra CE low | +0.005 [+0.002, +0.009] |
-| astra CE medium | +0.005 [+0.001, +0.009] |
-| astra CE high | +0.003 [+0.000, +0.006] |
-| astra MRV low | +0.002 [+0.001, +0.003] |
-| astra MRV medium | +0.005 [+0.001, +0.009] |
-| astra MRV high | +0.006 [+0.002, +0.010] |
-| sol CE low | +0.005 [+0.001, +0.009] |
-| sol CE medium | +0.011 [+0.005, +0.016] |
-| sol CE high | +0.014 [+0.010, +0.018] |
-| sol MRV low | +0.006 [+0.004, +0.010] |
-| sol MRV medium | +0.010 [+0.006, +0.016] |
-| sol MRV high | +0.009 [+0.005, +0.014] |
-| opus-5 CE low | +0.027 [+0.021, +0.034] |
-| opus-5 CE medium | +0.027 [+0.022, +0.032] |
-| opus-5 CE high | +0.028 [+0.019, +0.035] |
-| opus-5 MRV low | +0.028 [+0.026, +0.029] |
-| opus-5 MRV medium | +0.020 [+0.015, +0.028] |
-| opus-5 MRV high | +0.032 [+0.029, +0.035] |
-| glm-vis CE low | +0.034 [+0.031, +0.037] |
-| glm-vis CE medium | +0.059 [+0.049, +0.071] |
-| glm-vis CE high | +0.054 [+0.048, +0.061] |
-| glm-vis MRV low | +0.043 [+0.033, +0.053] |
-| glm-vis MRV medium | +0.075 [+0.062, +0.087] |
-| glm-vis MRV high | +0.085 [+0.073, +0.095] |
-| terra CE low | +0.006 [+0.005, +0.008] |
-| terra CE medium | +0.006 [+0.003, +0.010] |
-| terra CE high | +0.004 [-0.002, +0.008] |
-| terra MRV low | +0.006 [+0.003, +0.009] |
-| terra MRV medium | +0.008 [+0.003, +0.015] |
-| terra MRV high | +0.006 [+0.004, +0.009] |
-| sonnet-5 CE low | +0.001 [-0.002, +0.004] |
-| sonnet-5 CE medium | +0.004 [-0.000, +0.011] |
-| sonnet-5 CE high | +0.002 [-0.000, +0.004] |
-| sonnet-5 MRV low | +0.011 [+0.006, +0.016] |
-| sonnet-5 MRV medium | +0.019 [+0.014, +0.026] |
-| sonnet-5 MRV high | +0.021 [+0.016, +0.026] |
-| glm-flash CE low | +0.034 [+0.026, +0.041] |
-| glm-flash CE medium | +0.044 [+0.036, +0.051] |
-| glm-flash CE high | +0.045 [+0.038, +0.053] |
-| glm-flash MRV low | +0.037 [+0.029, +0.044] |
-| glm-flash MRV medium | +0.041 [+0.033, +0.052] |
-| glm-flash MRV high | +0.066 [+0.051, +0.080] |
-
-Resolved positive 38/42, negative 0, unresolved 4 (strict-benchmark version: 17/42 positive, 2 negative — see T4).
-
-**Reading.** The expanded numbers are our real-world results — the dashboard presents them as the primary metrics throughout (panels 1a–1f, effort ladder, sample-bias check, selection view); the strict benchmark is the artificial lens kept for comparison. Under the expanded set, the harness-vs-vanilla comparison flips decisively:
-**38/42 paired Δrecall_exp resolve positive (0 negative; 4 unresolved)**, vs 17/42
-positive / 2 negative under the strict benchmark (T4). The vanilla cells collapse
-(recall_exp 0.003–0.011 — they find the goldens but almost none of the hidden-gold
-space), while the harness cells keep meaningful coverage (0.03–0.10). The cells whose
-strict-benchmark harness-vs-vanilla deltas were unresolved (sol/terra) now resolve
-positive; sonnet-5's compound cells — the strict benchmark's one resolved *negative* —
-move to unresolved/marginal. The recommendation cell (glm-vis · MRV · low) holds and
-strengthens: recall_exp 0.054 [0.045, 0.064] — **9× fable-5.1 vanilla low (0.006)** and
-comparable to opus-5 harness cells, at the same fraction of the cost. Levels are
-conservative; the *ranking* and the *ratios* are the reportable quantities.
-
-## 10c. The verified key-union set (SUPERSEDED by §10d; retained for provenance)
-
-§10b introduced the semantic union and was then audited twice more. Both audits found real defects,
-and both are corrected here:
-
-1. **Under-merge.** A stricter whole-PR LLM re-merge (same judge, all cluster representatives in one
-   call instead of file-chunked) collapsed **359 → 258** clusters: PR 11059 alone went 83 → 35.
-   The 359 was an overcount of distinct defects.
-2. **Golden overlap.** 47 clusters describe defects **already in the golden set** — the official
-   text-only matcher missed them, so the adjudicator filed them as `real_but_ungold`. Counting them
-   as additional inflated **both** the denominator and the per-run credit. Judged at the **finding**
-   level (a cluster overlaps a golden only if a single member finding is that golden's exact defect),
-   then low-confidence cases re-judged strictly; 47 survive and are **excluded**
-   from the additional set.
-
-**Verified set: 42 goldens + 211 additional real bugs = 253 distinct bugs.**
-Every additional bug carries a human-verifiable card (location, why-real quoting the code,
-replication steps, and the cells that found it) in **`analysis/TRUE_GOLDEN_EVIDENCE.md`**; the 47
-golden-duplicates are listed there as removed. Judge gpt-5.2, 2026-09-17; artifacts are the record.
-Total LLM cost of the verification chain ≈ $30.
-
-**Metrics.** recall_sem = (goldens found + additional bugs found) / 253.
-Two credit rules: **A** (benchmark-compatible) counts only goldens the official matcher credited;
-**B** (PRIMARY, real-world) counts goldens found officially **∪** goldens whose verified overlapping
-cluster the run produced — a set union, so no bug is ever counted twice. adjP charges only
-hallucinations (claim soundness); adjP′ also charges nitpicks (the user lens). F1/F1′ pair recall_sem
-with adjP/adjP′. CIs: cluster bootstrap, B=10,000, seed 20260916, rng5=SEED+4; every frozen number in
-§5–§8 is byte-identical. Cells with one covered PR have a degenerate (zero-width) CI — flagged in T12.
-
-**Headline (T12).**
-
-| cell (top-6) | recall_sem | adjP | adjP′ | F1 | F1′ |
-|---|---|---|---|---|---|
-| glm-5.3-vision-background · metareview-realistic · medium | 0.455 [0.384, 0.546] | 0.950 | 0.471 | 0.615 | 0.463 |
-| glm-5.3-vision-background · metareview-realistic · high | 0.443 [0.397, 0.500] | 0.941 | 0.496 | 0.602 | 0.468 |
-| glm-5.3-vision-background · compound-realistic · medium | 0.458 [0.414, 0.537] | 0.847 | 0.451 | 0.595 | 0.455 |
-| glm-5.3-vision-background · metareview-realistic · low | 0.375 [0.294, 0.475] | 0.848 | 0.473 | 0.521 | 0.419 |
-| glm-5.3-flash-background · metareview-realistic · low | 0.364 [0.294, 0.440] | 0.754 | 0.371 | 0.491 | 0.367 |
-| claude-opus-5 · compound-realistic · low | 0.372 [0.316, 0.440] | 0.686 | 0.363 | 0.482 | 0.367 |
-| claude-fable-5-1 · vanilla-engineered · low | 0.261 [0.207, 0.314] | 0.904 | 0.647 | 0.405 | 0.372 |
-
-**What the verification changed.**
-- Recall **levels rise** (~0.44–0.46 for the best cells vs 0.33–0.41 under §10b) because the
-  denominator shrank and golden-FN credit was restored — but the **ordering and the comparison
-  verdicts do not move**.
-- **MRV still beats CE**: mean ΔF1 **+0.044 [+0.019, +0.073]**
-  (17+/4− over 21 paired model·effort
-  comparisons); ΔF1′ +0.042 [+0.024, +0.063].
-- **Harness-vs-vanilla holds**: 39/43 paired Δrecall_sem resolve positive.
-- Rule A vs B differ by <0.01 on harness cells (e.g. glm-vis·MRV·high 0.435 vs
-  0.443); they matter more for weak cells.
-
-**Why even the best harness misses so much — three mechanisms, now separated.**
-1. *Denominator inflation* (fixed here): paraphrase splits and golden duplicates made the set look
-   ~1.6× bigger than the final universe (253 after the strict re-merge; 147 after the 2026-09-18
-   audit — 3 withdrawals + 2 duplicate merges; the raw pre-merge count was 359); a large part
-   of the apparent miss was counting the same bug repeatedly.
-2. *Configuration complementarity, not blindness and not measured run-to-run variance*: using the
-   pre-merge cluster graph, the best cell found 133 of
-   359 clusters but **91% of what it missed was found by another harness configuration**; collectively harness
-   cells found **94%** of clusters. Different models/efforts/frameworks surface different slices; with one run
-   per cell per PR, this experiment does not measure what a re-run of the same setup would recover.
-3. *A genuine blind tail of 12* (listed in
-   `TRUE_GOLDEN_EVIDENCE.md`): verified bugs **no harness cell found** are almost all a different class —
-   performance/N+1/eager-loading, test-quality gaps, framework idioms (`String#<<` mutation, Handlebars
-   empty-array truthiness, `\z` anchors), migration-lock semantics. The lenses hunt correctness/security;
-   these are outside their brief. A scope explanation was tested and rejected: among anchored findings,
-   227 are in the PR's changed files vs **1** out-of-diff.
-
-### T12 — verified-union matrix (§10c; superseded by T16): per-cell metrics with 95% cluster-bootstrap CIs
-
-Union = distinct real bugs after (a) a stricter whole-PR re-merge and (b) removal of clusters verified
-to duplicate a golden (47 across the six PRs). recall_sem = (goldens found + additional bugs found) /
-(42 goldens + 211 verified additional).
-adjP charges only hallucinations; adjP' also charges nitpicks (user lens: everything the reader wades through).
-
-| cell | n PRs | recall_sem | adjP | adjP' | F1 | F1' |
-|---|---|---|---|---|---|---|
-| glm-vis MRV high | 6 | 0.443 [0.397, 0.500] | 0.941 | 0.496 | 0.602 [0.556, 0.660] | 0.468 [0.435, 0.510] |
-| glm-vis MRV medium | 6 | 0.455 [0.384, 0.546] | 0.950 | 0.471 | 0.615 [0.547, 0.691] | 0.463 [0.413, 0.521] |
-| fable-5.1 MRV high | 1 | 0.436 [0.436, 0.436] | 0.895 | 0.486 | 0.586 [0.586, 0.586] | 0.459 [0.459, 0.459] |
-| glm-vis CE medium | 6 | 0.458 [0.414, 0.537] | 0.847 | 0.451 | 0.595 [0.543, 0.684] | 0.455 [0.420, 0.514] |
-| glm-flash MRV high | 6 | 0.443 [0.367, 0.542] | 0.949 | 0.467 | 0.604 [0.528, 0.692] | 0.454 [0.418, 0.497] |
-| glm-flash CE high | 6 | 0.391 [0.339, 0.466] | 0.934 | 0.532 | 0.552 [0.503, 0.613] | 0.451 [0.421, 0.487] |
-| glm-vis CE high | 6 | 0.431 [0.350, 0.532] | 0.932 | 0.472 | 0.589 [0.509, 0.680] | 0.450 [0.393, 0.528] |
-| fable-5.1 MRV medium | 1 | 0.436 [0.436, 0.436] | 0.739 | 0.425 | 0.548 [0.548, 0.548] | 0.430 [0.430, 0.430] |
-| sol CE high | 6 | 0.352 [0.312, 0.394] | 0.730 | 0.517 | 0.475 [0.448, 0.513] | 0.419 [0.395, 0.450] |
-| glm-vis MRV low | 6 | 0.375 [0.294, 0.475] | 0.848 | 0.473 | 0.521 [0.433, 0.618] | 0.419 [0.350, 0.505] |
-| fable-5.1 van high | 6 | 0.281 [0.239, 0.329] | 0.772 | 0.772 | 0.412 [0.362, 0.464] | 0.412 [0.362, 0.464] |
-| fable-5.1 MRV low | 1 | 0.410 [0.410, 0.410] | 0.696 | 0.410 | 0.516 [0.516, 0.516] | 0.410 [0.410, 0.410] |
-| astra MRV high | 6 | 0.265 [0.238, 0.301] | 0.893 | 0.807 | 0.409 [0.373, 0.452] | 0.399 [0.364, 0.439] |
-| opus-5 MRV low | 6 | 0.403 [0.367, 0.453] | 0.667 | 0.391 | 0.502 [0.478, 0.535] | 0.397 [0.358, 0.447] |
-| sol MRV high | 6 | 0.289 [0.252, 0.338] | 0.793 | 0.629 | 0.423 [0.386, 0.468] | 0.396 [0.361, 0.439] |
-| opus-5 van high | 6 | 0.269 [0.225, 0.337] | 0.971 | 0.747 | 0.421 [0.364, 0.504] | 0.395 [0.347, 0.462] |
-| opus-5 MRV medium | 6 | 0.375 [0.326, 0.434] | 0.693 | 0.417 | 0.487 [0.431, 0.554] | 0.395 [0.349, 0.454] |
-| glm-flash CE low | 6 | 0.360 [0.314, 0.414] | 0.827 | 0.433 | 0.501 [0.453, 0.549] | 0.393 [0.353, 0.432] |
-| glm-vis van medium | 6 | 0.257 [0.196, 0.339] | 1.000 | 0.823 | 0.409 [0.328, 0.506] | 0.392 [0.318, 0.477] |
-| fable-5.1 van medium | 6 | 0.265 [0.204, 0.347] | 0.744 | 0.744 | 0.391 [0.319, 0.480] | 0.391 [0.319, 0.480] |
-| glm-flash MRV medium | 6 | 0.352 [0.292, 0.432] | 0.864 | 0.438 | 0.500 [0.435, 0.577] | 0.390 [0.347, 0.440] |
-| sol MRV medium | 6 | 0.285 [0.216, 0.365] | 0.774 | 0.621 | 0.416 [0.336, 0.500] | 0.390 [0.319, 0.458] |
-| opus-5 MRV high | 6 | 0.395 [0.340, 0.467] | 0.671 | 0.385 | 0.498 [0.446, 0.564] | 0.390 [0.339, 0.461] |
-| fable-5.1 CE medium | 1 | 0.487 [0.487, 0.487] | 0.655 | 0.322 | 0.559 [0.559, 0.559] | 0.388 [0.388, 0.388] |
-| glm-vis van high | 6 | 0.257 [0.193, 0.341] | 0.985 | 0.722 | 0.408 [0.323, 0.507] | 0.379 [0.303, 0.471] |
-| opus-5 van medium | 6 | 0.261 [0.212, 0.333] | 0.667 | 0.667 | 0.375 [0.312, 0.447] | 0.375 [0.312, 0.447] |
-| glm-flash van high | 6 | 0.249 [0.208, 0.299] | 0.969 | 0.750 | 0.396 [0.341, 0.457] | 0.374 [0.329, 0.424] |
-| astra MRV low | 6 | 0.233 [0.196, 0.284] | 0.967 | 0.922 | 0.376 [0.327, 0.441] | 0.372 [0.324, 0.434] |
-| fable-5.1 van low | 6 | 0.261 [0.207, 0.314] | 0.904 | 0.647 | 0.405 [0.341, 0.465] | 0.372 [0.314, 0.429] |
-| glm-flash MRV low | 6 | 0.364 [0.294, 0.440] | 0.754 | 0.371 | 0.491 [0.430, 0.551] | 0.367 [0.338, 0.402] |
-| opus-5 CE low | 6 | 0.372 [0.316, 0.440] | 0.686 | 0.363 | 0.482 [0.439, 0.541] | 0.367 [0.341, 0.405] |
-| sol CE medium | 6 | 0.265 [0.196, 0.364] | 0.798 | 0.593 | 0.398 [0.319, 0.492] | 0.366 [0.297, 0.445] |
-| sol MRV low | 6 | 0.249 [0.190, 0.322] | 0.829 | 0.670 | 0.383 [0.310, 0.471] | 0.363 [0.294, 0.437] |
-| opus-5 CE medium | 6 | 0.462 [0.405, 0.539] | 0.588 | 0.295 | 0.518 [0.453, 0.597] | 0.360 [0.321, 0.406] |
-| glm-flash CE medium | 6 | 0.324 [0.240, 0.429] | 0.820 | 0.392 | 0.465 [0.369, 0.564] | 0.355 [0.288, 0.439] |
-| opus-5 CE high | 6 | 0.375 [0.293, 0.470] | 0.601 | 0.324 | 0.462 [0.394, 0.540] | 0.348 [0.303, 0.404] |
-| fable-5.1 CE high | 1 | 0.410 [0.410, 0.410] | 0.640 | 0.302 | 0.500 [0.500, 0.500] | 0.348 [0.348, 0.348] |
-| opus-5 van low | 6 | 0.225 [0.184, 0.273] | 0.950 | 0.713 | 0.364 [0.309, 0.423] | 0.342 [0.293, 0.394] |
-| sonnet-5 MRV high | 6 | 0.308 [0.240, 0.387] | 0.667 | 0.379 | 0.422 [0.359, 0.488] | 0.340 [0.287, 0.402] |
-| fable-5.1 CE low | 2 | 0.325 [0.295, 0.385] | 0.623 | 0.352 | 0.427 [0.411, 0.455] | 0.338 [0.336, 0.341] |
-| glm-vis CE low | 6 | 0.336 [0.273, 0.416] | 0.720 | 0.336 | 0.458 [0.398, 0.537] | 0.336 [0.287, 0.404] |
-| glm-flash van medium | 6 | 0.213 [0.166, 0.283] | 0.885 | 0.720 | 0.344 [0.279, 0.429] | 0.329 [0.270, 0.409] |
-| astra MRV medium | 6 | 0.206 [0.153, 0.266] | 0.929 | 0.825 | 0.337 [0.261, 0.413] | 0.329 [0.255, 0.410] |
-| sol van high | 6 | 0.198 [0.152, 0.250] | 0.980 | 0.962 | 0.329 [0.264, 0.399] | 0.328 [0.264, 0.397] |
-| astra CE medium | 6 | 0.202 [0.160, 0.259] | 0.927 | 0.739 | 0.331 [0.270, 0.408] | 0.317 [0.257, 0.391] |
-| astra CE low | 6 | 0.198 [0.155, 0.258] | 0.833 | 0.676 | 0.319 [0.262, 0.390] | 0.306 [0.249, 0.373] |
-| sol CE low | 6 | 0.217 [0.162, 0.295] | 0.786 | 0.514 | 0.341 [0.272, 0.426] | 0.306 [0.241, 0.380] |
-| terra MRV high | 6 | 0.202 [0.143, 0.283] | 0.773 | 0.622 | 0.320 [0.243, 0.415] | 0.304 [0.228, 0.396] |
-| astra CE high | 6 | 0.190 [0.141, 0.262] | 0.857 | 0.762 | 0.311 [0.240, 0.405] | 0.304 [0.229, 0.405] |
-| terra MRV medium | 6 | 0.198 [0.149, 0.273] | 0.781 | 0.641 | 0.315 [0.256, 0.394] | 0.302 [0.247, 0.373] |
-| sol van low | 6 | 0.174 [0.130, 0.233] | 1.000 | 0.978 | 0.296 [0.230, 0.378] | 0.295 [0.229, 0.378] |
-| glm-flash van low | 6 | 0.186 [0.148, 0.242] | 0.959 | 0.662 | 0.311 [0.257, 0.386] | 0.290 [0.245, 0.352] |
-| sol van medium | 6 | 0.170 [0.123, 0.228] | 0.977 | 0.956 | 0.290 [0.218, 0.371] | 0.289 [0.218, 0.369] |
-| terra CE medium | 6 | 0.190 [0.149, 0.245] | 0.814 | 0.571 | 0.308 [0.251, 0.375] | 0.285 [0.236, 0.342] |
-| sonnet-5 MRV medium | 6 | 0.241 [0.177, 0.330] | 0.610 | 0.345 | 0.346 [0.268, 0.442] | 0.284 [0.223, 0.358] |
-| glm-vis van low | 6 | 0.182 [0.149, 0.238] | 0.852 | 0.597 | 0.300 [0.254, 0.371] | 0.279 [0.240, 0.337] |
-| terra CE low | 6 | 0.174 [0.129, 0.239] | 0.880 | 0.647 | 0.290 [0.223, 0.375] | 0.274 [0.216, 0.351] |
-| terra MRV low | 6 | 0.158 [0.115, 0.216] | 0.741 | 0.667 | 0.261 [0.196, 0.343] | 0.256 [0.194, 0.335] |
-| terra CE high | 6 | 0.150 [0.085, 0.238] | 0.776 | 0.567 | 0.252 [0.156, 0.355] | 0.237 [0.153, 0.326] |
-| sonnet-5 van high | 6 | 0.138 [0.092, 0.206] | 0.972 | 0.795 | 0.242 [0.167, 0.338] | 0.236 [0.163, 0.325] |
-| sonnet-5 MRV low | 6 | 0.206 [0.161, 0.276] | 0.477 | 0.263 | 0.287 [0.227, 0.371] | 0.231 [0.178, 0.297] |
-| sonnet-5 van medium | 6 | 0.130 [0.077, 0.226] | 0.846 | 0.702 | 0.226 [0.141, 0.358] | 0.220 [0.137, 0.350] |
-| astra van high | 6 | 0.123 [0.080, 0.174] | 1.000 | 1.000 | 0.218 [0.148, 0.297] | 0.218 [0.148, 0.297] |
-| terra van high | 6 | 0.123 [0.090, 0.170] | 1.000 | 1.000 | 0.218 [0.165, 0.290] | 0.218 [0.165, 0.290] |
-| sonnet-5 van low | 6 | 0.130 [0.091, 0.194] | 0.825 | 0.623 | 0.225 [0.163, 0.316] | 0.216 [0.159, 0.295] |
-| astra van medium | 6 | 0.119 [0.080, 0.161] | 0.968 | 0.968 | 0.211 [0.148, 0.276] | 0.211 [0.148, 0.276] |
-| terra van medium | 6 | 0.115 [0.071, 0.164] | 1.000 | 1.000 | 0.206 [0.132, 0.281] | 0.206 [0.132, 0.281] |
-| astra van low | 6 | 0.111 [0.083, 0.145] | 1.000 | 1.000 | 0.199 [0.153, 0.253] | 0.199 [0.153, 0.253] |
-| terra van low | 6 | 0.111 [0.083, 0.152] | 0.966 | 0.966 | 0.199 [0.151, 0.263] | 0.199 [0.151, 0.263] |
-| sonnet-5 CE high | 6 | 0.111 [0.064, 0.178] | 0.800 | 0.500 | 0.194 [0.118, 0.291] | 0.181 [0.112, 0.264] |
-| sonnet-5 CE medium | 6 | 0.111 [0.067, 0.147] | 0.903 | 0.412 | 0.197 [0.125, 0.253] | 0.174 [0.120, 0.214] |
-| sonnet-5 CE low | 6 | 0.079 [0.062, 0.102] | 0.800 | 0.426 | 0.144 [0.115, 0.180] | 0.133 [0.108, 0.160] |
-
-### T13 — CE vs MRV, paired on the same PRs (Δ = MRV − CE, semantic metrics)
-
-| model · effort | n PRs | Δrecall_sem | ΔF1 | ΔF1' |
-|---|---|---|---|---|
-| opus-5 · high | 6 | +0.020 [-0.996, +0.581] | +0.035 [-0.174, +0.197] | +0.042 [-0.132, +0.144] |
-| opus-5 · low | 6 | +0.032 [-0.342, +0.727] | +0.020 [-0.125, +0.145] | +0.030 [-0.097, +0.119] |
-| opus-5 · medium | 6 | -0.087 [-0.224, +0.250] | -0.031 [-0.070, +0.061] | +0.035 [-0.056, +0.047] |
-| sonnet-5 · high | 6 | +0.198 [-0.636, +0.506] | +0.227 [-0.187, +0.162] | +0.159 [-0.132, +0.129] |
-| sonnet-5 · low | 6 | +0.126 [-0.823, +0.549] | +0.143 [-0.217, +0.178] | +0.097 [-0.178, +0.140] |
-| sonnet-5 · medium | 6 | +0.130 [-1.412, +0.301] | +0.148 [-0.268, +0.175] | +0.109 [-0.255, +0.131] |
-| glm-flash · high | 6 | +0.051 [-0.344, +0.251] | +0.052 [-0.095, +0.082] | +0.003 [-0.071, +0.062] |
-| glm-flash · low | 6 | +0.004 [-0.686, +0.253] | -0.011 [-0.127, +0.113] | -0.026 [-0.109, +0.087] |
-| glm-flash · medium | 6 | +0.028 [-0.311, +0.314] | +0.035 [-0.117, +0.105] | +0.035 [-0.092, +0.085] |
-| glm-vis · high | 6 | +0.012 [-0.109, +0.270] | +0.013 [-0.046, +0.049] | +0.017 [-0.037, +0.045] |
-| glm-vis · low | 6 | +0.040 [-0.428, +0.610] | +0.062 [-0.160, +0.139] | +0.083 [-0.122, +0.104] |
-| glm-vis · medium | 6 | -0.004 [-0.376, +0.315] | +0.020 [-0.097, +0.093] | +0.008 [-0.073, +0.073] |
-| sol · high | 6 | -0.063 [-0.584, +0.399] | -0.051 [-0.135, +0.149] | -0.023 [-0.092, +0.111] |
-| sol · low | 6 | +0.032 [-0.238, +0.356] | +0.042 [-0.091, +0.060] | +0.058 [-0.071, +0.050] |
-| sol · medium | 6 | +0.020 [-0.475, +0.469] | +0.019 [-0.165, +0.180] | +0.024 [-0.114, +0.138] |
-| terra · high | 6 | +0.051 [-1.016, +0.372] | +0.068 [-0.192, +0.175] | +0.067 [-0.141, +0.127] |
-| terra · low | 6 | -0.016 [-0.216, +0.340] | -0.030 [-0.078, +0.075] | -0.019 [-0.062, +0.057] |
-| terra · medium | 6 | +0.008 [-0.341, +0.291] | +0.008 [-0.064, +0.083] | +0.017 [-0.050, +0.068] |
-| astra · high | 6 | +0.075 [-0.350, +0.189] | +0.098 [-0.054, +0.061] | +0.095 [-0.047, +0.047] |
-| astra · low | 6 | +0.036 [-0.180, +0.419] | +0.056 [-0.074, +0.085] | +0.066 [-0.059, +0.064] |
-| astra · medium | 6 | +0.004 [-0.416, +0.279] | +0.005 [-0.108, +0.096] | +0.012 [-0.085, +0.075] |
-
-Pairs-level aggregate: mean ΔF1 +0.044 [+0.019, +0.073], mean ΔF1' +0.042 [+0.024, +0.063] — **resolves positive**. Signs: ΔF1 17+/4−/00; ΔF1' 18+/3−. No single pair's CI excludes zero (6 PRs each); the aggregate over 21 matched pairs is the reportable quantity.
-
-### T14 — harness vs vanilla, paired Δrecall_sem (semantic union)
-
-| model · fw · effort | n PRs | Δrecall_sem (harness − vanilla) | resolved |
-|---|---|---|---|
-| fable-5.1 CE low | 2 | +0.111 [+0.077, +0.128] | + |
-| opus-5 CE high | 6 | +0.107 [+0.008, +0.195] | + |
-| opus-5 CE low | 6 | +0.146 [+0.113, +0.193] | + |
-| opus-5 CE medium | 6 | +0.202 [+0.156, +0.250] | + |
-| opus-5 MRV high | 6 | +0.126 [+0.069, +0.194] | + |
-| opus-5 MRV low | 6 | +0.178 [+0.142, +0.202] | + |
-| opus-5 MRV medium | 6 | +0.115 [+0.052, +0.181] | + |
-| sonnet-5 CE high | 6 | -0.028 [-0.079, +0.010] | ~ |
-| sonnet-5 CE low | 6 | -0.051 [-0.131, -0.003] | − |
-| sonnet-5 CE medium | 6 | -0.020 [-0.123, +0.029] | ~ |
-| sonnet-5 MRV high | 6 | +0.170 [+0.125, +0.233] | + |
-| sonnet-5 MRV low | 6 | +0.075 [+0.005, +0.131] | + |
-| sonnet-5 MRV medium | 6 | +0.111 [+0.049, +0.194] | + |
-| glm-flash CE high | 6 | +0.142 [+0.122, +0.171] | + |
-| glm-flash CE low | 6 | +0.174 [+0.137, +0.196] | + |
-| glm-flash CE medium | 6 | +0.111 [+0.084, +0.168] | + |
-| glm-flash MRV high | 6 | +0.194 [+0.162, +0.248] | + |
-| glm-flash MRV low | 6 | +0.178 [+0.157, +0.215] | + |
-| glm-flash MRV medium | 6 | +0.138 [+0.119, +0.170] | + |
-| glm-vis CE high | 6 | +0.174 [+0.106, +0.275] | + |
-| glm-vis CE low | 6 | +0.154 [+0.134, +0.192] | + |
-| glm-vis CE medium | 6 | +0.202 [+0.135, +0.253] | + |
-| glm-vis MRV high | 6 | +0.186 [+0.135, +0.236] | + |
-| glm-vis MRV low | 6 | +0.194 [+0.161, +0.255] | + |
-| glm-vis MRV medium | 6 | +0.198 [+0.152, +0.247] | + |
-| sol CE high | 6 | +0.154 [+0.121, +0.193] | + |
-| sol CE low | 6 | +0.043 [+0.012, +0.072] | + |
-| sol CE medium | 6 | +0.095 [+0.022, +0.175] | + |
-| sol MRV high | 6 | +0.091 [+0.043, +0.145] | + |
-| sol MRV low | 6 | +0.075 [+0.043, +0.117] | + |
-| sol MRV medium | 6 | +0.115 [+0.080, +0.174] | + |
-| terra CE high | 6 | +0.028 [-0.051, +0.089] | ~ |
-| terra CE low | 6 | +0.063 [+0.035, +0.104] | + |
-| terra CE medium | 6 | +0.075 [+0.034, +0.117] | + |
-| terra MRV high | 6 | +0.079 [+0.034, +0.145] | + |
-| terra MRV low | 6 | +0.047 [+0.026, +0.078] | + |
-| terra MRV medium | 6 | +0.083 [+0.036, +0.140] | + |
-| astra CE high | 6 | +0.067 [+0.012, +0.125] | + |
-| astra CE low | 6 | +0.087 [+0.052, +0.151] | + |
-| astra CE medium | 6 | +0.083 [+0.029, +0.132] | + |
-| astra MRV high | 6 | +0.142 [+0.087, +0.179] | + |
-| astra MRV low | 6 | +0.123 [+0.081, +0.171] | + |
-| astra MRV medium | 6 | +0.087 [+0.007, +0.130] | + |
-
-Resolved positive 39/43 (vs 38/42 under the frozen key-union, 17/42 strict).
-
-### T15 — verified key-union per PR (§10c; superseded by T17)
-
-| PR | goldens | verified additional | verified universe | merged clusters | golden-duplicates removed |
-|---|---|---|---|---|---|
-| calcom/cal.com/pull/11059 | 9 | **24** | 33 | 35 | 11 |
-| ai-code-review-evaluation/discourse-graphite/pull/4 | 8 | **70** | 78 | 81 | 11 |
-| ai-code-review-evaluation/discourse-graphite/pull/10 | 7 | **32** | 39 | 37 | 5 |
-| ai-code-review-evaluation/discourse-graphite/pull/8 | 6 | **21** | 27 | 28 | 7 |
-| calcom/cal.com/pull/14740 | 6 | **33** | 39 | 42 | 9 |
-| calcom/cal.com/pull/10967 | 6 | **31** | 37 | 35 | 4 |
-
-Total: 42 goldens + 211 verified additional bugs = 253 distinct bugs (258 merged clusters; 47 golden-duplicates removed, not counted).
-Per-bug verification cards (location, why-real, replication, found-by): `analysis/TRUE_GOLDEN_EVIDENCE.md`.
-
-## 10d. The TRUE golden set (PRIMARY): deduplicated, individually test-validated defects
-
-§10c's "211 additional bugs" were still *clusters* — produced by an LLM merge over candidate keys, so they
+Appendix A's "211 additional bugs" were still *clusters* — produced by an LLM merge over candidate keys, so they
 carried both over-counts (one defect restated several ways) and under-counts (real defects the audit split
-away and never restored). §10d replaces them with **individually executed defects**.
+away and never restored). §3.1 replaces them with **individually executed defects**.
 
 **Construction (all artifacts in `analysis/verified_gold/`).** For each candidate the pipeline authored a
 test, ran it on the PR head (must **FAIL**), authored a minimal fix, ran it again (must **PASS**), and — where
@@ -912,9 +409,9 @@ on which the best vanilla cell (0.482, v1 instrument) narrowly leads.** Chart:
 - **MRV vs CE** (21 matched model·effort pairs): on our evaluator, **+17 / −4** on ΔF2′ (mean **+0.041**;
   **7/21** resolve at 95%); Δrecall +17 / −4, mean +0.038; for reference ΔF1′ is +17 / −4. MRV is ahead on
   average, not uniformly.
-- The §10c cost and token conclusions are untouched (they do not depend on the gold set).
+- The Appendix A cost and token conclusions are untouched (they do not depend on the gold set).
 
-**Per PR (§10d).**
+**Per PR (§3.1).**
 
 | PR | goldens | verified defects | universe |
 |---|---|---|---|
@@ -972,15 +469,240 @@ old scorer considered only the first 60 findings of each multi-defect bundle (27
 dropped, 51 of them in cells that were being credited), and at least one finding was mis-assigned
 (the `embed_by_username.downcase`-on-nil finding was credited to the queue-flooding defect 4-D04
 instead of 4-D56); the repaired pipeline considers all 2,923 findings, permits explicit no-match nulls
-(71), and re-verifies low-signal assignments (`DEFECT_ASSIGN_AUDIT.json`). Every §10d number here was
+(71), and re-verifies low-signal assignments (`DEFECT_ASSIGN_AUDIT.json`). Every §3.1 number here was
 recomputed from the repaired inputs — absolute recall/F2′ levels rose because fuller assignment credits
 more defect hits. The 105 remaining defects are those the pipeline could *execute*; the earlier audits'
 label lists suggest a small number of further claims whose tests did not converge, which we report as
 in-doubt plumbing rather than as verified bugs (see `UNDERCOUNT_2026-09-18.md`).
 
-## 6. Cost, tokens, wall-clock (the §9 economics)
 
-### 6.1 Price table (retrieved 2026-09-16)
+### 3.2 The strict benchmark lens (42 goldens), kept for comparison
+
+
+66 of 72 cells are complete (6/6 PRs each; 396 runs, n = 1 run/PR, k = 1); the six fable
+compound/metareview cells have 1–2 PRs each (**coverage gaps, not results** — fable's account was
+rate-capped ~3 days; `analysis/COVERAGE.md`). `xhigh` is out of the matrix by operator
+decision (legacy rows aside: §3.5.4). Judges, batches, instruments per cell are in T1/T2 notes and
+`analysis/COVERAGE.md`.
+
+#### T1 — apples-to-apples matrix (severity top-6): quality, 95% cluster-bootstrap CIs
+
+recall = frozen-matcher TP/(TP+FN) vs all 173 goldens (All profile; Core/Strict differ only by
+PR 10967's single style golden on this PR set). adjP = TP/(TP+hallucinations), k=1 verdicts;
+`inst` = precision instrument (rj3 = v3.1 clustered k=1, v2 = in-run three-way, v1 = binary legacy).
+n = PRs with a selected healthy scored run (1 run/PR). Judge: gpt-5.2 for fable/opus/sonnet/glm rows,
+claude-opus-4-5-20251101 for sol/terra/astra rows.
+
+| model | fw | eff | n | recall [CI] | adjP [CI] | F1 [CI] | F2 [CI] | beyond-gold/PR | inst |
+|---|---|---|---|---|---|---|---|---|---|
+| fable-5.1 | van | low | 6 | 0.74 [0.67, 0.81] | 0.82 [0.74, 0.89] | 0.78 [0.72, 0.81] | 0.75 [0.70, 0.81] | 12.3 | rj3 |
+| fable-5.1 | van | medium | 6 | 0.69 [0.55, 0.82] | 0.56 [0.50, 0.61] | 0.62 [0.54, 0.68] | 0.66 [0.56, 0.75] | 7.8 | v1 |
+| fable-5.1 | van | high | 6 | 0.71 [0.57, 0.84] | 0.59 [0.54, 0.65] | 0.65 [0.59, 0.70] | 0.68 [0.58, 0.77] | 8.8 | v1 |
+| fable-5.1 **GAP** | CE | low | 2 | 0.60 [0.38, 0.86] | 0.28 [0.21, 0.33] | 0.38 [0.27, 0.48] | 0.49 [0.33, 0.65] | 66.0 | v2 |
+| fable-5.1 **GAP** | CE | medium | 1 | 0.86 [0.86, 0.86] | 0.38 [0.38, 0.38] | 0.52 [0.52, 0.52] | 0.68 [0.68, 0.68] | 75.0 | v2 |
+| fable-5.1 **GAP** | CE | high | 1 | 0.86 [0.86, 0.86] | 0.40 [0.40, 0.40] | 0.55 [0.55, 0.55] | 0.70 [0.70, 0.70] | 54.0 | v2 |
+| fable-5.1 **GAP** | MRV | low | 1 | 0.86 [0.86, 0.86] | 0.46 [0.46, 0.46] | 0.60 [0.60, 0.60] | 0.73 [0.73, 0.73] | 50.0 | v2 |
+| fable-5.1 **GAP** | MRV | medium | 1 | 0.86 [0.86, 0.86] | 0.50 [0.50, 0.50] | 0.63 [0.63, 0.63] | 0.75 [0.75, 0.75] | 65.0 | v2 |
+| fable-5.1 **GAP** | MRV | high | 1 | 0.86 [0.86, 0.86] | 0.75 [0.75, 0.75] | 0.80 [0.80, 0.80] | 0.83 [0.83, 0.83] | 59.0 | v2 |
+| astra | van | low | 6 | 0.40 [0.33, 0.49] | 1.00 [1.00, 1.00] | 0.58 [0.49, 0.66] | 0.46 [0.38, 0.55] | 2.5 | rj3/v2 |
+| astra | van | medium | 6 | 0.43 [0.33, 0.51] | 0.95 [0.83, 1.00] | 0.59 [0.48, 0.68] | 0.48 [0.38, 0.57] | 2.3 | rj3 |
+| astra | van | high | 6 | 0.40 [0.29, 0.54] | 1.00 [1.00, 1.00] | 0.58 [0.44, 0.70] | 0.46 [0.33, 0.60] | 2.8 | rj3 |
+| astra | CE | low | 6 | 0.52 [0.44, 0.62] | 0.69 [0.58, 0.81] | 0.59 [0.53, 0.68] | 0.55 [0.47, 0.63] | 11.3 | rj3/v2 |
+| astra | CE | medium | 6 | 0.62 [0.51, 0.74] | 0.87 [0.70, 1.00] | 0.72 [0.59, 0.84] | 0.66 [0.54, 0.77] | 9.0 | rj3/v2 |
+| astra | CE | high | 6 | 0.55 [0.43, 0.68] | 0.74 [0.59, 0.90] | 0.63 [0.50, 0.77] | 0.58 [0.45, 0.71] | 8.3 | rj3/v2 |
+| astra | MRV | low | 6 | 0.62 [0.47, 0.77] | 0.93 [0.86, 1.00] | 0.74 [0.62, 0.84] | 0.66 [0.52, 0.80] | 9.5 | rj3 |
+| astra | MRV | medium | 6 | 0.60 [0.47, 0.71] | 0.86 [0.74, 0.97] | 0.70 [0.59, 0.81] | 0.63 [0.51, 0.74] | 8.2 | rj3/v2 |
+| astra | MRV | high | 6 | 0.60 [0.45, 0.73] | 0.76 [0.59, 1.00] | 0.67 [0.53, 0.78] | 0.62 [0.48, 0.73] | 11.8 | rj3/v2 |
+| sol | van | low | 6 | 0.62 [0.43, 0.80] | 1.00 [1.00, 1.00] | 0.76 [0.60, 0.89] | 0.67 [0.48, 0.83] | 3.7 | v2 |
+| sol | van | medium | 6 | 0.62 [0.42, 0.83] | 0.96 [0.88, 1.00] | 0.75 [0.58, 0.89] | 0.67 [0.47, 0.85] | 3.8 | v2 |
+| sol | van | high | 6 | 0.62 [0.44, 0.77] | 0.96 [0.88, 1.00] | 0.75 [0.60, 0.87] | 0.67 [0.49, 0.81] | 4.8 | v2 |
+| sol | CE | low | 6 | 0.55 [0.31, 0.77] | 0.61 [0.47, 0.71] | 0.57 [0.38, 0.72] | 0.56 [0.33, 0.75] | 18.0 | v2 |
+| sol | CE | medium | 6 | 0.62 [0.40, 0.81] | 0.60 [0.49, 0.79] | 0.61 [0.47, 0.74] | 0.62 [0.43, 0.77] | 21.5 | v2 |
+| sol | CE | high | 6 | 0.74 [0.67, 0.80] | 0.48 [0.37, 0.67] | 0.58 [0.48, 0.70] | 0.67 [0.60, 0.74] | 33.0 | v2 |
+| sol | MRV | low | 6 | 0.60 [0.42, 0.76] | 0.66 [0.54, 0.79] | 0.62 [0.48, 0.77] | 0.61 [0.44, 0.76] | 13.2 | v2 |
+| sol | MRV | medium | 6 | 0.67 [0.40, 0.84] | 0.57 [0.43, 0.67] | 0.62 [0.42, 0.74] | 0.65 [0.41, 0.79] | 19.5 | v2 |
+| sol | MRV | high | 6 | 0.62 [0.42, 0.80] | 0.58 [0.49, 0.68] | 0.60 [0.46, 0.70] | 0.61 [0.44, 0.75] | 22.7 | v2 |
+| opus-5 | van | low | 6 | 0.67 [0.60, 0.72] | 0.90 [0.82, 0.97] | 0.77 [0.70, 0.82] | 0.70 [0.64, 0.76] | 9.3 | rj3 |
+| opus-5 | van | medium | 6 | 0.69 [0.51, 0.84] | 0.47 [0.34, 0.57] | 0.56 [0.41, 0.65] | 0.63 [0.47, 0.75] | 7.7 | v1 |
+| opus-5 | van | high | 6 | 0.69 [0.55, 0.82] | 0.94 [0.85, 1.00] | 0.79 [0.67, 0.89] | 0.73 [0.59, 0.84] | 11.3 | rj3 |
+| opus-5 | CE | low | 6 | 0.81 [0.72, 0.87] | 0.44 [0.33, 0.67] | 0.57 [0.47, 0.71] | 0.69 [0.64, 0.77] | 55.5 | v2 |
+| opus-5 | CE | medium | 6 | 0.83 [0.75, 0.91] | 0.30 [0.23, 0.42] | 0.44 [0.36, 0.56] | 0.61 [0.55, 0.72] | 78.8 | v2 |
+| opus-5 | CE | high | 6 | 0.71 [0.55, 0.84] | 0.32 [0.23, 0.52] | 0.44 [0.33, 0.62] | 0.57 [0.44, 0.70] | 61.5 | v2 |
+| opus-5 | MRV | low | 6 | 0.83 [0.76, 0.91] | 0.41 [0.35, 0.48] | 0.55 [0.50, 0.60] | 0.69 [0.65, 0.74] | 48.8 | v2 |
+| opus-5 | MRV | medium | 6 | 0.67 [0.40, 0.86] | 0.40 [0.30, 0.59] | 0.50 [0.37, 0.65] | 0.59 [0.40, 0.73] | 53.2 | v2 |
+| opus-5 | MRV | high | 6 | 0.74 [0.51, 0.90] | 0.39 [0.28, 0.61] | 0.51 [0.39, 0.69] | 0.63 [0.47, 0.78] | 67.2 | v2 |
+| glm-vis | van | low | 6 | 0.55 [0.38, 0.72] | 0.74 [0.58, 0.90] | 0.63 [0.47, 0.77] | 0.58 [0.42, 0.74] | 9.5 | v2 |
+| glm-vis | van | medium | 6 | 0.62 [0.48, 0.76] | 1.00 [1.00, 1.00] | 0.76 [0.65, 0.86] | 0.67 [0.53, 0.80] | 10.7 | v2 |
+| glm-vis | van | high | 6 | 0.57 [0.40, 0.74] | 0.96 [0.86, 1.00] | 0.72 [0.56, 0.85] | 0.62 [0.45, 0.78] | 12.7 | v2 |
+| glm-vis | CE | low | 6 | 0.76 [0.63, 0.86] | 0.49 [0.35, 0.67] | 0.60 [0.46, 0.73] | 0.69 [0.57, 0.79] | 55.3 | v2 |
+| glm-vis | CE | medium | 6 | 0.83 [0.71, 0.95] | 0.62 [0.45, 0.84] | 0.71 [0.55, 0.89] | 0.78 [0.64, 0.92] | 77.2 | v2 |
+| glm-vis | CE | high | 6 | 0.76 [0.62, 0.90] | 0.80 [0.73, 0.86] | 0.78 [0.68, 0.87] | 0.77 [0.64, 0.89] | 71.3 | v2 |
+| glm-vis | MRV | low | 6 | 0.81 [0.74, 0.86] | 0.67 [0.59, 0.78] | 0.73 [0.67, 0.80] | 0.78 [0.71, 0.83] | 54.3 | v2 |
+| glm-vis | MRV | medium | 6 | 0.83 [0.76, 0.91] | 0.85 [0.80, 0.91] | 0.84 [0.82, 0.87] | 0.84 [0.78, 0.89] | 90.0 | v2 |
+| glm-vis | MRV | high | 6 | 0.76 [0.67, 0.84] | 0.82 [0.68, 0.94] | 0.79 [0.71, 0.87] | 0.77 [0.69, 0.84] | 96.8 | v2 |
+| terra | van | low | 6 | 0.36 [0.25, 0.45] | 0.94 [0.79, 1.00] | 0.52 [0.38, 0.62] | 0.41 [0.29, 0.50] | 2.7 | v2 |
+| terra | van | medium | 6 | 0.40 [0.26, 0.54] | 1.00 [1.00, 1.00] | 0.58 [0.41, 0.70] | 0.46 [0.31, 0.60] | 2.3 | v2 |
+| terra | van | high | 6 | 0.45 [0.35, 0.56] | 1.00 [1.00, 1.00] | 0.62 [0.52, 0.71] | 0.51 [0.40, 0.61] | 2.8 | v2 |
+| terra | CE | low | 6 | 0.48 [0.35, 0.59] | 0.77 [0.65, 0.91] | 0.59 [0.46, 0.70] | 0.52 [0.39, 0.62] | 10.7 | v2 |
+| terra | CE | medium | 6 | 0.48 [0.32, 0.63] | 0.65 [0.53, 0.78] | 0.55 [0.41, 0.67] | 0.50 [0.35, 0.64] | 12.5 | v2 |
+| terra | CE | high | 6 | 0.38 [0.23, 0.54] | 0.59 [0.50, 0.82] | 0.46 [0.34, 0.55] | 0.41 [0.26, 0.54] | 10.7 | v2 |
+| terra | MRV | low | 6 | 0.40 [0.26, 0.56] | 0.55 [0.33, 0.82] | 0.47 [0.28, 0.65] | 0.43 [0.26, 0.59] | 8.5 | v2 |
+| terra | MRV | medium | 6 | 0.52 [0.32, 0.74] | 0.61 [0.51, 0.78] | 0.56 [0.43, 0.68] | 0.54 [0.36, 0.69] | 13.3 | v2 |
+| terra | MRV | high | 6 | 0.50 [0.30, 0.69] | 0.58 [0.44, 0.77] | 0.54 [0.36, 0.70] | 0.51 [0.33, 0.68] | 13.7 | v2 |
+| sonnet-5 | van | low | 6 | 0.43 [0.27, 0.59] | 0.72 [0.56, 0.81] | 0.54 [0.37, 0.68] | 0.47 [0.30, 0.62] | 5.3 | rj3 |
+| sonnet-5 | van | medium | 6 | 0.45 [0.29, 0.59] | 0.76 [0.64, 0.86] | 0.57 [0.40, 0.69] | 0.49 [0.32, 0.63] | 3.8 | rj3 |
+| sonnet-5 | van | high | 6 | 0.50 [0.38, 0.59] | 0.95 [0.88, 1.00] | 0.66 [0.55, 0.72] | 0.55 [0.43, 0.64] | 4.0 | rj3 |
+| sonnet-5 | CE | low | 6 | 0.19 [0.10, 0.30] | 0.62 [0.36, 0.86] | 0.29 [0.15, 0.43] | 0.22 [0.11, 0.34] | 6.5 | v2 |
+| sonnet-5 | CE | medium | 6 | 0.31 [0.25, 0.35] | 0.81 [0.68, 1.00] | 0.45 [0.39, 0.48] | 0.35 [0.29, 0.39] | 10.5 | v2 |
+| sonnet-5 | CE | high | 6 | 0.26 [0.06, 0.47] | 0.61 [0.33, 0.72] | 0.37 [0.10, 0.56] | 0.30 [0.07, 0.50] | 7.7 | v2 |
+| sonnet-5 | MRV | low | 6 | 0.43 [0.38, 0.47] | 0.24 [0.18, 0.32] | 0.31 [0.25, 0.38] | 0.37 [0.32, 0.43] | 24.3 | v2 |
+| sonnet-5 | MRV | medium | 6 | 0.48 [0.38, 0.57] | 0.34 [0.23, 0.49] | 0.40 [0.30, 0.51] | 0.44 [0.35, 0.55] | 29.2 | v2 |
+| sonnet-5 | MRV | high | 6 | 0.62 [0.39, 0.82] | 0.40 [0.33, 0.47] | 0.49 [0.37, 0.59] | 0.56 [0.38, 0.71] | 34.0 | v2 |
+| glm-flash | van | low | 6 | 0.52 [0.39, 0.63] | 0.92 [0.84, 1.00] | 0.67 [0.56, 0.75] | 0.57 [0.45, 0.67] | 8.8 | v2 |
+| glm-flash | van | medium | 6 | 0.64 [0.53, 0.77] | 0.79 [0.69, 0.92] | 0.71 [0.61, 0.83] | 0.67 [0.56, 0.79] | 8.8 | v2 |
+| glm-flash | van | high | 6 | 0.60 [0.40, 0.77] | 0.93 [0.83, 1.00] | 0.72 [0.55, 0.85] | 0.64 [0.44, 0.80] | 12.3 | rj3/v2 |
+| glm-flash | CE | low | 6 | 0.76 [0.63, 0.88] | 0.63 [0.55, 0.72] | 0.69 [0.62, 0.74] | 0.73 [0.63, 0.81] | 48.8 | v2 |
+| glm-flash | CE | medium | 6 | 0.76 [0.55, 0.95] | 0.64 [0.55, 0.75] | 0.70 [0.57, 0.79] | 0.73 [0.56, 0.87] | 60.3 | v2 |
+| glm-flash | CE | high | 6 | 0.76 [0.58, 0.93] | 0.82 [0.72, 0.96] | 0.79 [0.70, 0.86] | 0.77 [0.62, 0.89] | 57.8 | v2 |
+| glm-flash | MRV | low | 6 | 0.83 [0.74, 0.92] | 0.54 [0.49, 0.59] | 0.65 [0.62, 0.69] | 0.75 [0.70, 0.80] | 54.7 | v2 |
+| glm-flash | MRV | medium | 6 | 0.69 [0.51, 0.84] | 0.67 [0.52, 0.82] | 0.68 [0.53, 0.81] | 0.69 [0.52, 0.83] | 57.5 | v2 |
+| glm-flash | MRV | high | 6 | 0.76 [0.56, 0.93] | 0.84 [0.73, 0.93] | 0.80 [0.63, 0.92] | 0.78 [0.59, 0.93] | 83.0 | v2 |
+
+**Reading the matrix.** (a) *Harnesses raise recall where the base model is weak or mid-tier and
+leave it unchanged or worse at the top of the frontier*: +0.14…+0.31 recall for opus-5/glm rows
+(17/42 pairs resolve positive and 2 negative, i.e. 19 pairs whose paired CI excludes 0; median Δrecall +0.12), while sol/terra
+rows are inside noise (T4) — a strong model in a single pass already finds what the harness's
+lenses find on these PRs. (b) *sonnet-5 is the counterexample that matters for buyers*: its
+compound cells *lose* recall (−0.24 [−0.46, −0.04] at high effort) because Claude-Code-style
+compound routing sends reviewer subagents to haiku-4.5 (visible in `per_model_usage`) — a
+harness is only as good as the models it actually calls. (c) *adjP is where frontier harness cells
+bleed*: opus-5 CE/MRV adjP 0.30–0.44 vs glm-vis MRV medium 0.85 and astra MRV low 0.93 — the
+expensive harnesses emit large volumes of non-golden content of which more is judged waste.
+
+Figures: `analysis/figures/fig_recall_grid.png` (recall with CIs per cell),
+`fig_cost_per_cell.png`, `fig_effort_ladder.png`.
+
+
+
+> **SUPERSEDED by §3.1 (levels only; the Appendix A unions were intermediate steps).** The T9/T10/T11 unions below overcount distinct
+> bugs ~17× (paraphrase splits) and, due to a since-fixed extract bug, omit all
+> rj3-adjudicated runs' confirmed bugs (706 findings, mostly vanilla cells). The paired
+> Δ *directions* survive; all levels should be read from §3.1. Retained for provenance.
+
+The strict-benchmark numbers above answer the question Martian defines: *does the tool
+find the human-verified golden comments, without hallucinating?* They deliberately do
+not credit findings outside the golden set — which is the right call for a benchmark,
+but the wrong lens for a buyer comparing a single-pass reviewer against a harness:
+a harness that finds 55 real bugs but only 8 goldens scores the same recall as a
+vanilla that finds 8 goldens, and the 47 real-but-ungold bugs are invisible to the
+metric. This section separates the two analyses and recomputes recall/precision/F1
+against an **expanded ground truth**.
+
+**Construction (our extension, fully disclosed).** Per PR, take every confirmed-bug
+finding (rj3 `bug` / in-run `real_but_ungold`) across **ALL healthy scored runs of all
+models/frameworks/efforts** (era-legal universe, low/medium/high). Cluster them with a
+**file:startline:endline primary key** extracted from each finding's own text prefix
+(the `tools/anchor_matcher.py` pattern; 45% of bugtexts carry an anchor), with
+rj3-normalization + difflib 0.75 (bucketed by file path) as the fallback for anchorless
+findings. The expanded set = goldens ∪ distinct keys (T11). Per cell:
+tp_exp = golden TP + own distinct keys; fn_exp = expanded size − tp_exp;
+adjP_exp = tp_exp/(tp_exp + hallucinations); F1/F2_exp from the pair. Cluster bootstrap
+CIs (B=10,000, rng3 — frozen numbers above untouched). important_non_bug is excluded
+(bugs only). **Caveats:** no LLM semantic-merge pass, so cross-model rewordings stay
+separate and the union is overcounted ⇒ recall_exp levels are conservative lower bounds;
+distinct issues sharing one anchor can over-merge; golden-vs-cluster overlaps may
+double-count a few entries. The robust quantity is the paired Δ (T10), which is stable
+across all three clustering variants we tried (verbatim, difflib-only, anchor-primary).
+
+**T11 — union sizes per top-6 PR**
+
+
+### 3.3 CE vs MRV on the same PRs
+
+#### T13 — CE vs MRV, paired on the same PRs (Δ = MRV − CE, semantic metrics)
+
+| model · effort | n PRs | Δrecall_sem | ΔF1 | ΔF1' |
+|---|---|---|---|---|
+| opus-5 · high | 6 | +0.020 [-0.996, +0.581] | +0.035 [-0.174, +0.197] | +0.042 [-0.132, +0.144] |
+| opus-5 · low | 6 | +0.032 [-0.342, +0.727] | +0.020 [-0.125, +0.145] | +0.030 [-0.097, +0.119] |
+| opus-5 · medium | 6 | -0.087 [-0.224, +0.250] | -0.031 [-0.070, +0.061] | +0.035 [-0.056, +0.047] |
+| sonnet-5 · high | 6 | +0.198 [-0.636, +0.506] | +0.227 [-0.187, +0.162] | +0.159 [-0.132, +0.129] |
+| sonnet-5 · low | 6 | +0.126 [-0.823, +0.549] | +0.143 [-0.217, +0.178] | +0.097 [-0.178, +0.140] |
+| sonnet-5 · medium | 6 | +0.130 [-1.412, +0.301] | +0.148 [-0.268, +0.175] | +0.109 [-0.255, +0.131] |
+| glm-flash · high | 6 | +0.051 [-0.344, +0.251] | +0.052 [-0.095, +0.082] | +0.003 [-0.071, +0.062] |
+| glm-flash · low | 6 | +0.004 [-0.686, +0.253] | -0.011 [-0.127, +0.113] | -0.026 [-0.109, +0.087] |
+| glm-flash · medium | 6 | +0.028 [-0.311, +0.314] | +0.035 [-0.117, +0.105] | +0.035 [-0.092, +0.085] |
+| glm-vis · high | 6 | +0.012 [-0.109, +0.270] | +0.013 [-0.046, +0.049] | +0.017 [-0.037, +0.045] |
+| glm-vis · low | 6 | +0.040 [-0.428, +0.610] | +0.062 [-0.160, +0.139] | +0.083 [-0.122, +0.104] |
+| glm-vis · medium | 6 | -0.004 [-0.376, +0.315] | +0.020 [-0.097, +0.093] | +0.008 [-0.073, +0.073] |
+| sol · high | 6 | -0.063 [-0.584, +0.399] | -0.051 [-0.135, +0.149] | -0.023 [-0.092, +0.111] |
+| sol · low | 6 | +0.032 [-0.238, +0.356] | +0.042 [-0.091, +0.060] | +0.058 [-0.071, +0.050] |
+| sol · medium | 6 | +0.020 [-0.475, +0.469] | +0.019 [-0.165, +0.180] | +0.024 [-0.114, +0.138] |
+| terra · high | 6 | +0.051 [-1.016, +0.372] | +0.068 [-0.192, +0.175] | +0.067 [-0.141, +0.127] |
+| terra · low | 6 | -0.016 [-0.216, +0.340] | -0.030 [-0.078, +0.075] | -0.019 [-0.062, +0.057] |
+| terra · medium | 6 | +0.008 [-0.341, +0.291] | +0.008 [-0.064, +0.083] | +0.017 [-0.050, +0.068] |
+| astra · high | 6 | +0.075 [-0.350, +0.189] | +0.098 [-0.054, +0.061] | +0.095 [-0.047, +0.047] |
+| astra · low | 6 | +0.036 [-0.180, +0.419] | +0.056 [-0.074, +0.085] | +0.066 [-0.059, +0.064] |
+| astra · medium | 6 | +0.004 [-0.416, +0.279] | +0.005 [-0.108, +0.096] | +0.012 [-0.085, +0.075] |
+
+Pairs-level aggregate: mean ΔF1 +0.044 [+0.019, +0.073], mean ΔF1' +0.042 [+0.024, +0.063] — **resolves positive**. Signs: ΔF1 17+/4−/00; ΔF1' 18+/3−. No single pair's CI excludes zero (6 PRs each); the aggregate over 21 matched pairs is the reportable quantity.
+
+
+#### T14 — harness vs vanilla, paired Δrecall_sem (semantic union)
+
+| model · fw · effort | n PRs | Δrecall_sem (harness − vanilla) | resolved |
+|---|---|---|---|
+| fable-5.1 CE low | 2 | +0.111 [+0.077, +0.128] | + |
+| opus-5 CE high | 6 | +0.107 [+0.008, +0.195] | + |
+| opus-5 CE low | 6 | +0.146 [+0.113, +0.193] | + |
+| opus-5 CE medium | 6 | +0.202 [+0.156, +0.250] | + |
+| opus-5 MRV high | 6 | +0.126 [+0.069, +0.194] | + |
+| opus-5 MRV low | 6 | +0.178 [+0.142, +0.202] | + |
+| opus-5 MRV medium | 6 | +0.115 [+0.052, +0.181] | + |
+| sonnet-5 CE high | 6 | -0.028 [-0.079, +0.010] | ~ |
+| sonnet-5 CE low | 6 | -0.051 [-0.131, -0.003] | − |
+| sonnet-5 CE medium | 6 | -0.020 [-0.123, +0.029] | ~ |
+| sonnet-5 MRV high | 6 | +0.170 [+0.125, +0.233] | + |
+| sonnet-5 MRV low | 6 | +0.075 [+0.005, +0.131] | + |
+| sonnet-5 MRV medium | 6 | +0.111 [+0.049, +0.194] | + |
+| glm-flash CE high | 6 | +0.142 [+0.122, +0.171] | + |
+| glm-flash CE low | 6 | +0.174 [+0.137, +0.196] | + |
+| glm-flash CE medium | 6 | +0.111 [+0.084, +0.168] | + |
+| glm-flash MRV high | 6 | +0.194 [+0.162, +0.248] | + |
+| glm-flash MRV low | 6 | +0.178 [+0.157, +0.215] | + |
+| glm-flash MRV medium | 6 | +0.138 [+0.119, +0.170] | + |
+| glm-vis CE high | 6 | +0.174 [+0.106, +0.275] | + |
+| glm-vis CE low | 6 | +0.154 [+0.134, +0.192] | + |
+| glm-vis CE medium | 6 | +0.202 [+0.135, +0.253] | + |
+| glm-vis MRV high | 6 | +0.186 [+0.135, +0.236] | + |
+| glm-vis MRV low | 6 | +0.194 [+0.161, +0.255] | + |
+| glm-vis MRV medium | 6 | +0.198 [+0.152, +0.247] | + |
+| sol CE high | 6 | +0.154 [+0.121, +0.193] | + |
+| sol CE low | 6 | +0.043 [+0.012, +0.072] | + |
+| sol CE medium | 6 | +0.095 [+0.022, +0.175] | + |
+| sol MRV high | 6 | +0.091 [+0.043, +0.145] | + |
+| sol MRV low | 6 | +0.075 [+0.043, +0.117] | + |
+| sol MRV medium | 6 | +0.115 [+0.080, +0.174] | + |
+| terra CE high | 6 | +0.028 [-0.051, +0.089] | ~ |
+| terra CE low | 6 | +0.063 [+0.035, +0.104] | + |
+| terra CE medium | 6 | +0.075 [+0.034, +0.117] | + |
+| terra MRV high | 6 | +0.079 [+0.034, +0.145] | + |
+| terra MRV low | 6 | +0.047 [+0.026, +0.078] | + |
+| terra MRV medium | 6 | +0.083 [+0.036, +0.140] | + |
+| astra CE high | 6 | +0.067 [+0.012, +0.125] | + |
+| astra CE low | 6 | +0.087 [+0.052, +0.151] | + |
+| astra CE medium | 6 | +0.083 [+0.029, +0.132] | + |
+| astra MRV high | 6 | +0.142 [+0.087, +0.179] | + |
+| astra MRV low | 6 | +0.123 [+0.081, +0.171] | + |
+| astra MRV medium | 6 | +0.087 [+0.007, +0.130] | + |
+
+Resolved positive 39/43 (vs 38/42 under the frozen key-union, 17/42 strict).
+
+
+### 3.4 Cost, tokens, wall-clock, and the open-weight story
+
+
+#### 3.4.1 Price table (retrieved 2026-09-16)
 
 | model | fresh input | cached read | cache write (5m) | output | source |
 |---|---|---|---|---|---|
@@ -998,13 +720,13 @@ Per 1M tokens, USD, standard tier, short-context rates. Metered $ = fresh_in·in
 the Lunaroute gateway at a flat fee ($0 billed) — the metered figures are what the same token
 counts would cost on the public APIs. Reasoning output is billed at the output rate for OpenAI/GLM
 rows (it is a large share: e.g. glm-vis MRV high ≈ 470k reasoning tokens/run). Anthropic
-reconciliation in §3.4.
+reconciliation in §2.3.4.
 
-### 6.2 Cost & throughput per cell
+#### 3.4.2 Cost & throughput per cell
 
-### T2 — cost & throughput per cell (top-6), 95% cluster-bootstrap CIs
+#### T2 — cost & throughput per cell (top-6), 95% cluster-bootstrap CIs
 
-Metered $ at published list prices retrieved 2026-09-16 (REPORT_FINAL §6.1). tok/run includes
+Metered $ at published list prices retrieved 2026-09-16 (REPORT.md §3.4.1). tok/run includes
 fresh input + cached reads + cache writes + output (incl. reasoning). GLM cells marked * are
 conservative (all input priced at the fresh rate; no per-model token split available).
 Values < $0.01 are shown in cents (¢) to avoid leading-zero drowning; ≥ $0.01 in $.
@@ -1085,7 +807,7 @@ Values < $0.01 are shown in cents (¢) to avoid leading-zero drowning; ≥ $0.01
 | glm-flash | MRV | high | $0.31726 [$0.21397, $0.42794] | 0.35916¢ [0.22542¢, 0.55112¢] | $0.05949 [$0.0394, $0.0844] | 743,571 [527,665, 969,148] | 2,984 [1,797, 4,190] | 0.04267¢ [0.04037¢, 0.04408¢] |
 
 
-### 6.3 Why one harness is cheap and another is not (token composition)
+#### 3.4.3 Why one harness is cheap and another is not (token composition)
 
 `analysis/figures/fig_token_composition.png`: the frontier harnesses are *input-cache* machines —
 opus-5 CE/MRV burn 1.7–4.4M tokens per PR, ~75–90% of them **cached reads at 10% of list input**
@@ -1096,17 +818,17 @@ recommendation point (vision-MRV $0.22 vs opus-CE $2.95) and by ~13× in tokens 
 the opus *harness* cells (T7). The vanilla cells are trivially cheap per task because a single
 call is ~100k tokens — but they find the fewest real issues (T4 recall deltas).
 
-### 6.4 Wall-clock
+#### 3.4.4 Wall-clock
 
 `analysis/figures/fig_wallclock.png` + the wall column of T2. At **low effort** the recommendation
 cells are latency-competitive with everything: glm-vis MRV low 95 s/run [77, 114] vs opus-5 CE low
 110 s [99, 121] and opus-5 MRV low 100 s [91, 108]. At **medium/high effort the GLM lane is
 throughput-limited by the gateway** (glm-vis MRV medium 2,282 s [1,458, 3,305]; glm-flash MRV high
-2,984 s) — an operational, not quality, difference (§7.5).
+2,984 s) — an operational, not quality, difference (§3.5.5).
 
-### 6.5 The efficiency frontier (headline figure)
+#### 3.4.5 The efficiency frontier (headline figure)
 
-Both figures below are rebuilt on the **true golden set** (§10d: 42 goldens + 105 individually
+Both figures below are rebuilt on the **true golden set** (§3.1: 42 goldens + 105 individually
 test-verified distinct defects = 147) and both use **F2′ — our evaluator** (recall weighted 4:1, nitpick-charged
 precision) for the quality axis, with the axis capped at 0.5 so the distribution is readable. A
 strict-benchmark version of each figure remains in git history (data freeze 2026-09-16).
@@ -1150,13 +872,15 @@ PRs in bold color). Style follows the OWID/NYT minimal-chrome school:
 direct annotation of the recommendation cell, muted palette, no chartjunk, all uncertainty
 visible.
 
-## 7. The five claims, tested (state only what the data supports)
 
-### 7.1 Harnesses spend more tokens but find more bugs — both numbers, always
+### 3.5 The five claims, tested
+
+
+#### 3.5.1 Harnesses spend more tokens but find more bugs — both numbers, always
 
 Across 42 harness-vs-vanilla pairs on the same 6 PRs:
 
-### T4 — harness vs vanilla, paired on the same 6 PRs (Δrecall CI; token ×; cost ×)
+#### T4 — harness vs vanilla, paired on the same 6 PRs (Δrecall CI; token ×; cost ×)
 
 | cell (model fw effort) | Δrecall [CI] | token × [CI] | cost × [CI] |
 |---|---|---|---|
@@ -1212,11 +936,11 @@ tokens, 8.0× cost; flash MRV low +0.31 [0.18, 0.49] at 9.4× tokens, 8.1× cost
 (MRV low +0.21 [0.10, 0.33] at 13.6× tokens). sol/terra pairs: token multiples with recall gains
 inside noise — a frontier single pass is already near these harnesses' ceilings on hard PRs.
 
-### 7.2 Per-token price vs per-task cost — the operator's "~1/200th" is not supported
+#### 3.5.2 Per-token price vs per-task cost — the operator's "~1/200th" is not supported
 
 Measured (blended $/ktok from actual token mixes, low effort, same 6 PRs):
 
-### T7 — cost-structure ratios (all pairs, low effort unless stated): per-token / tokens-per-task / net cost-per-task
+#### T7 — cost-structure ratios (all pairs, low effort unless stated): per-token / tokens-per-task / net cost-per-task
 
 | glm cell vs frontier cell | per-token (glm/frontier) [CI] | tokens/task [CI] | cost/task [CI] |
 |---|---|---|---|
@@ -1246,11 +970,11 @@ per blended token and ~1/17–1/40 per task; the vision tier is ~1/3 of frontier
 vanilla but wins on per-task cost only against harness-volume frontier cells.** Token overhead
 partly (not fully) offsets the cheap rate — that is why both ratios must be quoted together.
 
-### 7.3 Higher thinking budgets do not reliably buy more bugs — a null result, stated as one
+#### 3.5.3 Higher thinking budgets do not reliably buy more bugs — a null result, stated as one
 
 22 high-vs-medium paired comparisons:
 
-### T5 — effort ladder: high vs medium, paired (ΔF1 CI; Δrecall CI; cost high/medium)
+#### T5 — effort ladder: high vs medium, paired (ΔF1 CI; Δrecall CI; cost high/medium)
 
 | model × framework | ΔF1 [CI] | Δrecall [CI] | cost high/med |
 |---|---|---|---|
@@ -1285,11 +1009,11 @@ Cost multiples for unresolved pairs are 0.96×–3.0×. A buyer pays 0.96×–4.
 in 18/22 model×framework cases cannot measure a quality difference on 6 PRs. For the GLM rows the
 cost multiple is the steepest (reasoning tokens at output price) with the least demonstrated gain.
 
-### 7.4 Too little capability collapses recall — the floor exists, and where it starts
+#### 3.5.4 Too little capability collapses recall — the floor exists, and where it starts
 
 Within the matrix, flash-vs-vision:
 
-### T6 — glm-flash vs glm-vision, paired on the same 6 PRs (Δ from vision → flash)
+#### T6 — glm-flash vs glm-vision, paired on the same 6 PRs (Δ from vision → flash)
 
 | framework × effort | Δrecall [CI] | Δ real findings [CI] |
 |---|---|---|
@@ -1315,11 +1039,11 @@ top-6 runs (unusable as cells). The capability floor sits between glm-5.2 and gl
 inside the safe zone for golden recall but measurably weaker on breadth where that drop is demonstrated**
 (CE low/medium and MRV medium; at MRV low the delta is +3 [−56, +64] — no demonstrated drop).
 
-### 7.5 The recommendation (supported by this sample, with its stop-holding conditions)
+#### 3.5.5 The recommendation (supported by this sample, with its stop-holding conditions)
 
 **glm-5.3-vision-background @ metareview-realistic, low effort** is the best measured cost/benefit point:
 
-### T8 — recommendation ratios (glm @ low vs frontier reference cells, same 6 PRs)
+#### T8 — recommendation ratios (glm @ low vs frontier reference cells, same 6 PRs)
 
 | glm cell (A) vs frontier cell (F) | recall A/F [CI] | F1 A/F [CI] | cost A/F [CI] |
 |---|---|---|---|
@@ -1356,18 +1080,20 @@ opus-5 CE high: recall 1.13×, F1 1.65×, at **3.2%** of cost. vs fable-5.1 vani
 **Conditions under which this stops holding** (measured, not speculative): (1) *Gateway
 throughput* — at medium/high effort the GLM lane ran 4–12× slower than the frontier cells at the *same*
   effort (up to ~30× against the fastest frontier *low*-effort cell)
-(§6.4) and the 2026-09-14/15 incident showed the cheap lane's capacity limits; the
+(§3.4.4) and the 2026-09-14/15 incident showed the cheap lane's capacity limits; the
 recommendation is a **low-effort** recommendation. (2) *Pre-fix infrastructure confound* — the
-headline GLM cells predate the gateway/SDK fixes (§3.4); quality direction unknown, likely
+headline GLM cells predate the gateway/SDK fixes (§2.3.4); quality direction unknown, likely
 operational. (3) *Breadth* — if beyond-gold real findings matter (they do for review value),
-vision-tier not flash (§7.4). (4) *The top-6 sample* — hard-PR-weighted; §4.2 shows recall
+vision-tier not flash (§3.5.4). (4) *The top-6 sample* — hard-PR-weighted; §2.4.2 shows recall
 generalises but harness adjP does not (top-6 overstates harness F1 by ~+0.08; the glm-vis MRV low
 full-50 F1 is 0.57 vs top-6 0.73 — the *ranking* survives, the level does not). (5) *Single
-judge family per row and k=1 adjudication* (§3.1, §10).
+judge family per row and k=1 adjudication* (§2.3.1, §4).
 
-## 8. Selection effect and sampling
 
-### T3 — selection effect: top-6 vs full-50 (cells with ≥40/50 healthy scored PRs)
+### 3.6 Selection effect and sampling
+
+
+#### T3 — selection effect: top-6 vs full-50 (cells with ≥40/50 healthy scored PRs)
 
 | cell | n | recall top-6 | recall full | F1 top-6 | F1 full | F1 full [CI] |
 |---|---|---|---|---|---|---|
@@ -1415,7 +1141,7 @@ Rank agreement (Spearman of model F1 ranks, top-6 vs full-50, within framework×
 | compound-realistic high | 4 | 0.80 |
 | metareview-realistic low | 4 | 0.80 |
 
-Full sampling disclosure: `analysis/COVERAGE_FINAL.md`.
+Full sampling disclosure: `analysis/COVERAGE.md`.
 
 Summary: 33 cells with ≥40/50 PRs back the
 top-6 with full-50 runs; recall is unbiased (mean gap +0.006), harness F1 is overstated by +0.084
@@ -1423,13 +1149,17 @@ on average, model *rankings* mostly agree (Spearman 0.80 median; CE-low 0.37 the
 fable compound/metareview cells are gaps (rate-cap), opus/sonnet vanilla are top-6-only by operator
 decision, GLM partial fills were stopped at the data freeze.
 
-## 9. Effort-ladder and cost-curve figures
+
+### 3.7 Effort ladder and cost curves
+
 
 `analysis/figures/fig_effort_ladder.png` (F1 vs $/run per model within each framework, CIs on both
 axes): the GLM rows buy F1 with dollars at low effort and then flatten; the frontier rows start
-high-cost and mostly move sideways (§7.3). `fig_cost_per_cell.png`: $/run per cell, log scale, CIs.
+high-cost and mostly move sideways (§3.5.3). `fig_cost_per_cell.png`: $/run per cell, log scale, CIs.
 
-## 10. What we cannot claim (mandatory caveats)
+
+## 4. What we cannot claim
+
 
 1. **Fable harness cells do not exist** (rate-capped ~3 days; 29 hitlist rows outstanding) — fable
    harness numbers in T1/T2 are gaps, not results.
@@ -1442,9 +1172,9 @@ high-cost and mostly move sideways (§7.3). `fig_cost_per_cell.png`: $/run per c
    documented in `analysis/ADJUDICATOR_INTERRATER.md` (the latter is shared-error convergence,
    not correctness).
 4. **k=1 adjudication** (campaign lock): v3.1 clustering removes phrasing flips, but single-vote
-   residual noise remains; §3.3's v1-vs-rj3 deltas bound the *instrument* risk, not vote noise.
-5. **Provider incident** (§3.4): all GLM top-6 harness cells contain pre-fix runs.
-6. **Matched-excluded / profiles**: all headline numbers are All-profile (see §2); Core/Strict
+   residual noise remains; §2.3.3's v1-vs-rj3 deltas bound the *instrument* risk, not vote noise.
+5. **Provider incident** (§2.3.4): all GLM top-6 harness cells contain pre-fix runs.
+6. **Matched-excluded / profiles**: all headline numbers are All-profile (see §2.1); Core/Strict
    differ by ≤1 golden on this PR set.
 7. **Cost is metered list price**, not our invoice (gateway flat fee); retries are inside
    `per_model_usage` for in-run calls, but gateway-level *failed-call* overhead (~5.4k failed GLM
@@ -1454,17 +1184,19 @@ high-cost and mostly move sideways (§7.3). `fig_cost_per_cell.png`: $/run per c
    cells) are real but their developer value is unmeasured (`analysis/ADVISORY_RECALIBRATION.md`,
    `tools/enum_advisory_ceiling.py`; human-preference study not done).
 
-## 11. Reproducibility (every number → a command)
+
+## 5. Reproducibility
+
 
 Three distinct modes — do not conflate them:
 
 | mode | what it means | where |
 |---|---|---|
-| **(i) Recompute published statistics** | deterministic, offline, no keys: rebuild every number/CI/table in this report from the saved inputs | §11.1–§11.2 below |
+| **(i) Recompute published statistics** | deterministic, offline, no keys: rebuild every number/CI/table in this report from the saved inputs | §5.1–§5.2 below |
 | **(ii) Re-execute saved defect tests** | run the archived failing-test/fix bundles for the 105 verified defects against the pinned PR revisions | `analysis/verified_gold/REPLICATION_KIT.md` (per-bundle `REPRO.md`, toolchain pins, tarball SHA-256s) |
-| **(iii) Regenerate model judgments** | the LLM steps (§10b clustering, §10c overlap checks, §10d defect verification, §10d′ finding→defect assignment) are nondeterministic — **not reproducible by re-running; the stored artifacts are the record** | §11.3 below |
+| **(iii) Regenerate model judgments** | the LLM steps (Appendix A clustering, Appendix A overlap checks, §3.1 defect verification, §3.1′ finding→defect assignment) are nondeterministic — **not reproducible by re-running; the stored artifacts are the record** | §5.3 below |
 
-### 11.1 Setup
+### 5.1 Setup
 
 Tested environment (2026-09-18): **Python 3.14.7, numpy 2.5.2, matplotlib 3.11.1** — pinned exactly in
 `requirements.txt`. The chain below is deterministic and offline; only mode (iii) artifacts can differ by
@@ -1482,14 +1214,14 @@ The content revisions this report revision comprises are the 2026-09-18 commit s
 hash record and the checksum table below.
 
 **To re-run an eval yourself** (not needed to reproduce the published numbers, which are stored), see
-`INSTALL.md` §6–§7: install the harness deps (`pip install -e .`), provide the pinned `third_party/` checkout
+`INSTALL.md` §3.4–§3.5: install the harness deps (`pip install -e .`), provide the pinned `third_party/` checkout
 (or authenticated `gh` for PR diffs), then run one cell with `run_model_matrix --fill`. Verified end to end:
 `vanilla-engineered / glm-5.3-flash-background / low` on PR 8 ran in 42 s, produced 10 findings, was judged by
 gpt-5.2, adjudicated (4 real / 1 hallucination), scored TP=5 FP=6 FN=1, and registered in `runs/`.
 
 **API keys: none are needed for the published numbers.** Every step below is deterministic and offline. Only
 the model-running steps (which produced the `runs/` registry and the stored LLM artifacts) need keys: follow
-`INSTALL.md` §3 and use **your own** OpenAI / Anthropic credentials. **Lunarroute is optional** — it is merely
+`INSTALL.md` §2.3 and use **your own** OpenAI / Anthropic credentials. **Lunarroute is optional** — it is merely
 the OpenAI-compatible gateway this campaign happened to use for the open-weight GLM/Kimi lanes; any router or
 direct provider works (`HARNESS_LUNAROUTE_*` in `harnesseval/keys.py`). No key material is committed: the
 harness reads keys from a file outside the repo (`~/.config/harnesseval/keys.env`, chmod 600).
@@ -1500,10 +1232,10 @@ harness reads keys from a file outside the repo (`~/.config/harnesseval/keys.env
 |---|---|---|
 | campaign run registry (7,315 runs, manifests + summaries) | `runs/` | 260 MB |
 | extracted dataset (era/health/selection rules applied) | `analysis/final_report_dataset.json` | 20 MB |
-| §10b/§10c LLM artifacts (semantic clustering, overlap checks) | `analysis/exp_union_semantic_pilot_*.json`, `analysis/semantic_*.json` | 6 + 34 files |
+| the Appendix A unions LLM artifacts (semantic clustering, overlap checks) | `analysis/exp_union_semantic_pilot_*.json`, `analysis/semantic_*.json` | 6 + 34 files |
 | **benchmark golden comments** (the 42 goldens + severity) | `analysis/inputs/golden_comments/` (5 files, vendored) | 144 KB |
 | verified hidden-gold evidence | `analysis/verified_gold/` (defects, tests, fixes, logs, tarballs) | 3.7 MB + 4.5 MB |
-| GLM gateway ledger (backs the §10 caveat) | `analysis/inputs/key_usage.jsonl` (13,475 calls, no key material) | 3.2 MB |
+| GLM gateway ledger (backs the §4 caveat) | `analysis/inputs/key_usage.jsonl` (13,475 calls, no key material) | 3.2 MB |
 
 > The benchmark's golden comments are **vendored** at `analysis/inputs/golden_comments/` because the upstream
 > checkout lives in `third_party/`, which is gitignored (and is a nested git checkout, so its files cannot be
@@ -1511,19 +1243,19 @@ harness reads keys from a file outside the repo (`~/.config/harnesseval/keys.env
 > the vendored copy and fall back to `third_party/` if present; if neither is found they now **abort with a
 > FATAL message** rather than writing a dataset with empty denominators.
 
-### 11.2 The chain (run in this order)
+### 5.2 The chain (run in this order)
 
 ```bash
 # 1. ingest the run registry (needs only the committed runs/ + the golden comments)
 .venv/bin/python tools/final_report_extract.py            # runs/*        → analysis/final_report_dataset.json
 
-# 2. the §10d per-cell metrics, then the registry's derived tier counts/table
+# 2. the §3.1 per-cell metrics, then the registry's derived tier counts/table
 .venv/bin/python tools/verified_gold_defect_metrics.py    # dataset+registry → analysis/verified_gold/DEFECT_METRICS.json
 .venv/bin/python tools/verified_gold_registry_sync.py     # defect meta.json → DEFECT_REGISTRY.{json,md} (_final counts)
 
-# 3. the headline metrics, including the §10d true-gold section it appends
+# 3. the headline metrics, including the §3.1 true-gold section it appends
 .venv/bin/python tools/final_report_compute.py            # dataset + DEFECT_METRICS → analysis/final_report_metrics.json
-                                                          #   (frozen §1–§9 + §10b/§10c + true_gold_defects)
+                                                          #   (frozen §1–§3.7 + the Appendix A unions + true_gold_defects)
 
 # 4. the catalogue, then the presentation layer
 .venv/bin/python tools/gold_defect_catalog.py             # registry → GOLD_DEFECT_CATALOG.{json,md,csv}
@@ -1533,10 +1265,10 @@ harness reads keys from a file outside the repo (`~/.config/harnesseval/keys.env
 .venv/bin/python tools/final_report_html.py               # → analysis/figures/interactive_dashboard.html
 
 # 5. the two scope/ledger checks the report cites (no keys needed)
-.venv/bin/python tools/verify_hitlist.py --verbose        # top-6 scope check (§4). NOTE: exits 1 while
+.venv/bin/python tools/verify_hitlist.py --verbose        # top-6 scope check (§2.4). NOTE: exits 1 while
                                                           #   hitlist rows remain unrun - expected, 29/111,
                                                           #   the disclosed fable coverage gap. Informational.
-.venv/bin/python tools/key_usage_report.py                # GLM gateway ledger (§10 caveat)
+.venv/bin/python tools/key_usage_report.py                # GLM gateway ledger (§4 caveat)
 ```
 
 **Inputs vs outputs.** These files are committed **inputs** produced by the verification campaign, not by this
@@ -1545,12 +1277,12 @@ chain, and must be present: `runs/`, `analysis/inputs/golden_comments/`, `analys
 and the per-defect evidence directories. The chain writes the rest. Step 1 and step 3 each abort with a FATAL
 message if a required input is missing, rather than writing a degenerate artifact.
 
-### 11.3 What reproduces exactly, and what does not (measured, not asserted)
+### 5.3 What reproduces exactly, and what does not (measured, not asserted)
 
 **Expected output checksums** (sha256; verify with `shasum -a 256 -c analysis/verified_gold/OUTPUT_SHA256SUMS`
 after cloning at the pin — the committed list covers the artifacts below and confirms your checkout
 carries the published artifacts exactly. Given the pinned inputs and
-requirements, the §11.2 chain regenerates the four deterministic artifacts byte-for-byte;
+requirements, the §5.2 chain regenerates the four deterministic artifacts byte-for-byte;
 `DEFECT_ASSIGN.json` is a stored mode-(iii) artifact the chain *consumes*, not one it regenerates.
 Figures may still differ in bytes across matplotlib versions, which the pins narrow):
 
@@ -1572,12 +1304,12 @@ found and fixed: `analysis/REPLICATION_TEST_2026-09-18.md`.
 | `analysis/verified_gold/DEFECT_METRICS.json` | **byte-identical** |
 | `analysis/verified_gold/GOLD_DEFECT_CATALOG.json` | **byte-identical** |
 | `analysis/verified_gold/DEFECT_REGISTRY.json` | **byte-identical** |
-| `final_report_metrics.json` — §10d `true_gold_defects` | **identical**: headline, per-cell metrics, CIs, MRV-vs-CE pairs, derived comparisons |
-| `final_report_metrics.json` — §10c `expanded_gold_verified` | identical once the golden comments are present; the bootstrap CIs are fixed-seed draws and reproduce on the same numpy major version |
+| `final_report_metrics.json` — §3.1 `true_gold_defects` | **identical**: headline, per-cell metrics, CIs, MRV-vs-CE pairs, derived comparisons |
+| `final_report_metrics.json` — Appendix A `expanded_gold_verified` | identical once the golden comments are present; the bootstrap CIs are fixed-seed draws and reproduce on the same numpy major version |
 | `analysis/figures/*.png` | same data, **different bytes** across matplotlib versions |
-| every LLM step (§10b clustering, §10c overlap checks, §10d defect verification) | **not** reproducible by re-running, by design — the stored artifacts are the record |
+| every LLM step (Appendix A clustering, Appendix A overlap checks, §3.1 defect verification) | **not** reproducible by re-running, by design — the stored artifacts are the record |
 
-### 11.4 Tool changes made for this report (disclosed, per the hard rules)
+### 5.4 Tool changes made for this report (disclosed, per the hard rules)
 
 1. `tools/scoreboard.py` — added an `Fb` column with `--beta` (default 2.0, the benchmark's recall-weighted
    default). F1/recall/adjP semantics untouched: adds `ap.add_argument("--beta", ...)` and one line per row
@@ -1593,10 +1325,348 @@ found and fixed: `analysis/REPLICATION_TEST_2026-09-18.md`.
 
 `harnesseval/judge.py`, `readjudicate3.py` semantics, and the golden dataset were **not** modified.
 
-## 12. Further work
+
+## 6. Further work
+
 
 Fable account capacity (the only path to a complete matrix); opus/sonnet vanilla full-50 fill;
 rj3 k≥3 re-adjudication as a sensitivity layer; cross-judge recall matching; anchor-level
 correctness via `tools/anchor_matcher.py`; human-preference study on `important_non_bug` volume;
 line-anchored correctness analysis (not yet reported); resuming the GLM fill lanes
 (`--skip-batch` health-gated).
+
+## Appendix A. Superseded analyses (retained for provenance)
+
+> **Superseded.** The material in this appendix is retained for provenance only. The primary results
+> are in §3.1; nothing in this appendix should be cited without that context.
+
+### A.1 The verified key-union set (superseded by §3.1)
+
+Appendix A introduced the semantic union and was then audited twice more. Both audits found real defects,
+and both are corrected here:
+
+1. **Under-merge.** A stricter whole-PR LLM re-merge (same judge, all cluster representatives in one
+   call instead of file-chunked) collapsed **359 → 258** clusters: PR 11059 alone went 83 → 35.
+   The 359 was an overcount of distinct defects.
+2. **Golden overlap.** 47 clusters describe defects **already in the golden set** — the official
+   text-only matcher missed them, so the adjudicator filed them as `real_but_ungold`. Counting them
+   as additional inflated **both** the denominator and the per-run credit. Judged at the **finding**
+   level (a cluster overlaps a golden only if a single member finding is that golden's exact defect),
+   then low-confidence cases re-judged strictly; 47 survive and are **excluded**
+   from the additional set.
+
+**Verified set: 42 goldens + 211 additional real bugs = 253 distinct bugs.**
+Every additional bug carries a human-verifiable card (location, why-real quoting the code,
+replication steps, and the cells that found it) in **`analysis/TRUE_GOLDEN_EVIDENCE.md`**; the 47
+golden-duplicates are listed there as removed. Judge gpt-5.2, 2026-09-17; artifacts are the record.
+Total LLM cost of the verification chain ≈ $30.
+
+**Metrics.** recall_sem = (goldens found + additional bugs found) / 253.
+Two credit rules: **A** (benchmark-compatible) counts only goldens the official matcher credited;
+**B** (PRIMARY, real-world) counts goldens found officially **∪** goldens whose verified overlapping
+cluster the run produced — a set union, so no bug is ever counted twice. adjP charges only
+hallucinations (claim soundness); adjP′ also charges nitpicks (the user lens). F1/F1′ pair recall_sem
+with adjP/adjP′. CIs: cluster bootstrap, B=10,000, seed 20260916, rng5=SEED+4; every frozen number in
+§3.2–§3.6 is byte-identical. Cells with one covered PR have a degenerate (zero-width) CI — flagged in T12.
+
+**Headline (T12).**
+
+| cell (top-6) | recall_sem | adjP | adjP′ | F1 | F1′ |
+|---|---|---|---|---|---|
+| glm-5.3-vision-background · metareview-realistic · medium | 0.455 [0.384, 0.546] | 0.950 | 0.471 | 0.615 | 0.463 |
+| glm-5.3-vision-background · metareview-realistic · high | 0.443 [0.397, 0.500] | 0.941 | 0.496 | 0.602 | 0.468 |
+| glm-5.3-vision-background · compound-realistic · medium | 0.458 [0.414, 0.537] | 0.847 | 0.451 | 0.595 | 0.455 |
+| glm-5.3-vision-background · metareview-realistic · low | 0.375 [0.294, 0.475] | 0.848 | 0.473 | 0.521 | 0.419 |
+| glm-5.3-flash-background · metareview-realistic · low | 0.364 [0.294, 0.440] | 0.754 | 0.371 | 0.491 | 0.367 |
+| claude-opus-5 · compound-realistic · low | 0.372 [0.316, 0.440] | 0.686 | 0.363 | 0.482 | 0.367 |
+| claude-fable-5-1 · vanilla-engineered · low | 0.261 [0.207, 0.314] | 0.904 | 0.647 | 0.405 | 0.372 |
+
+**What the verification changed.**
+- Recall **levels rise** (~0.44–0.46 for the best cells vs 0.33–0.41 under Appendix A) because the
+  denominator shrank and golden-FN credit was restored — but the **ordering and the comparison
+  verdicts do not move**.
+- **MRV still beats CE**: mean ΔF1 **+0.044 [+0.019, +0.073]**
+  (17+/4− over 21 paired model·effort
+  comparisons); ΔF1′ +0.042 [+0.024, +0.063].
+- **Harness-vs-vanilla holds**: 39/43 paired Δrecall_sem resolve positive.
+- Rule A vs B differ by <0.01 on harness cells (e.g. glm-vis·MRV·high 0.435 vs
+  0.443); they matter more for weak cells.
+
+**Why even the best harness misses so much — three mechanisms, now separated.**
+1. *Denominator inflation* (fixed here): paraphrase splits and golden duplicates made the set look
+   ~1.6× bigger than the final universe (253 after the strict re-merge; 147 after the 2026-09-18
+   audit — 3 withdrawals + 2 duplicate merges; the raw pre-merge count was 359); a large part
+   of the apparent miss was counting the same bug repeatedly.
+2. *Configuration complementarity, not blindness and not measured run-to-run variance*: using the
+   pre-merge cluster graph, the best cell found 133 of
+   359 clusters but **91% of what it missed was found by another harness configuration**; collectively harness
+   cells found **94%** of clusters. Different models/efforts/frameworks surface different slices; with one run
+   per cell per PR, this experiment does not measure what a re-run of the same setup would recover.
+3. *A genuine blind tail of 12* (listed in
+   `TRUE_GOLDEN_EVIDENCE.md`): verified bugs **no harness cell found** are almost all a different class —
+   performance/N+1/eager-loading, test-quality gaps, framework idioms (`String#<<` mutation, Handlebars
+   empty-array truthiness, `\z` anchors), migration-lock semantics. The lenses hunt correctness/security;
+   these are outside their brief. A scope explanation was tested and rejected: among anchored findings,
+   227 are in the PR's changed files vs **1** out-of-diff.
+
+
+#### T12 — verified-union matrix (Appendix A; superseded by T16): per-cell metrics with 95% cluster-bootstrap CIs
+
+Union = distinct real bugs after (a) a stricter whole-PR re-merge and (b) removal of clusters verified
+to duplicate a golden (47 across the six PRs). recall_sem = (goldens found + additional bugs found) /
+(42 goldens + 211 verified additional).
+adjP charges only hallucinations; adjP' also charges nitpicks (user lens: everything the reader wades through).
+
+| cell | n PRs | recall_sem | adjP | adjP' | F1 | F1' |
+|---|---|---|---|---|---|---|
+| glm-vis MRV high | 6 | 0.443 [0.397, 0.500] | 0.941 | 0.496 | 0.602 [0.556, 0.660] | 0.468 [0.435, 0.510] |
+| glm-vis MRV medium | 6 | 0.455 [0.384, 0.546] | 0.950 | 0.471 | 0.615 [0.547, 0.691] | 0.463 [0.413, 0.521] |
+| fable-5.1 MRV high | 1 | 0.436 [0.436, 0.436] | 0.895 | 0.486 | 0.586 [0.586, 0.586] | 0.459 [0.459, 0.459] |
+| glm-vis CE medium | 6 | 0.458 [0.414, 0.537] | 0.847 | 0.451 | 0.595 [0.543, 0.684] | 0.455 [0.420, 0.514] |
+| glm-flash MRV high | 6 | 0.443 [0.367, 0.542] | 0.949 | 0.467 | 0.604 [0.528, 0.692] | 0.454 [0.418, 0.497] |
+| glm-flash CE high | 6 | 0.391 [0.339, 0.466] | 0.934 | 0.532 | 0.552 [0.503, 0.613] | 0.451 [0.421, 0.487] |
+| glm-vis CE high | 6 | 0.431 [0.350, 0.532] | 0.932 | 0.472 | 0.589 [0.509, 0.680] | 0.450 [0.393, 0.528] |
+| fable-5.1 MRV medium | 1 | 0.436 [0.436, 0.436] | 0.739 | 0.425 | 0.548 [0.548, 0.548] | 0.430 [0.430, 0.430] |
+| sol CE high | 6 | 0.352 [0.312, 0.394] | 0.730 | 0.517 | 0.475 [0.448, 0.513] | 0.419 [0.395, 0.450] |
+| glm-vis MRV low | 6 | 0.375 [0.294, 0.475] | 0.848 | 0.473 | 0.521 [0.433, 0.618] | 0.419 [0.350, 0.505] |
+| fable-5.1 van high | 6 | 0.281 [0.239, 0.329] | 0.772 | 0.772 | 0.412 [0.362, 0.464] | 0.412 [0.362, 0.464] |
+| fable-5.1 MRV low | 1 | 0.410 [0.410, 0.410] | 0.696 | 0.410 | 0.516 [0.516, 0.516] | 0.410 [0.410, 0.410] |
+| astra MRV high | 6 | 0.265 [0.238, 0.301] | 0.893 | 0.807 | 0.409 [0.373, 0.452] | 0.399 [0.364, 0.439] |
+| opus-5 MRV low | 6 | 0.403 [0.367, 0.453] | 0.667 | 0.391 | 0.502 [0.478, 0.535] | 0.397 [0.358, 0.447] |
+| sol MRV high | 6 | 0.289 [0.252, 0.338] | 0.793 | 0.629 | 0.423 [0.386, 0.468] | 0.396 [0.361, 0.439] |
+| opus-5 van high | 6 | 0.269 [0.225, 0.337] | 0.971 | 0.747 | 0.421 [0.364, 0.504] | 0.395 [0.347, 0.462] |
+| opus-5 MRV medium | 6 | 0.375 [0.326, 0.434] | 0.693 | 0.417 | 0.487 [0.431, 0.554] | 0.395 [0.349, 0.454] |
+| glm-flash CE low | 6 | 0.360 [0.314, 0.414] | 0.827 | 0.433 | 0.501 [0.453, 0.549] | 0.393 [0.353, 0.432] |
+| glm-vis van medium | 6 | 0.257 [0.196, 0.339] | 1.000 | 0.823 | 0.409 [0.328, 0.506] | 0.392 [0.318, 0.477] |
+| fable-5.1 van medium | 6 | 0.265 [0.204, 0.347] | 0.744 | 0.744 | 0.391 [0.319, 0.480] | 0.391 [0.319, 0.480] |
+| glm-flash MRV medium | 6 | 0.352 [0.292, 0.432] | 0.864 | 0.438 | 0.500 [0.435, 0.577] | 0.390 [0.347, 0.440] |
+| sol MRV medium | 6 | 0.285 [0.216, 0.365] | 0.774 | 0.621 | 0.416 [0.336, 0.500] | 0.390 [0.319, 0.458] |
+| opus-5 MRV high | 6 | 0.395 [0.340, 0.467] | 0.671 | 0.385 | 0.498 [0.446, 0.564] | 0.390 [0.339, 0.461] |
+| fable-5.1 CE medium | 1 | 0.487 [0.487, 0.487] | 0.655 | 0.322 | 0.559 [0.559, 0.559] | 0.388 [0.388, 0.388] |
+| glm-vis van high | 6 | 0.257 [0.193, 0.341] | 0.985 | 0.722 | 0.408 [0.323, 0.507] | 0.379 [0.303, 0.471] |
+| opus-5 van medium | 6 | 0.261 [0.212, 0.333] | 0.667 | 0.667 | 0.375 [0.312, 0.447] | 0.375 [0.312, 0.447] |
+| glm-flash van high | 6 | 0.249 [0.208, 0.299] | 0.969 | 0.750 | 0.396 [0.341, 0.457] | 0.374 [0.329, 0.424] |
+| astra MRV low | 6 | 0.233 [0.196, 0.284] | 0.967 | 0.922 | 0.376 [0.327, 0.441] | 0.372 [0.324, 0.434] |
+| fable-5.1 van low | 6 | 0.261 [0.207, 0.314] | 0.904 | 0.647 | 0.405 [0.341, 0.465] | 0.372 [0.314, 0.429] |
+| glm-flash MRV low | 6 | 0.364 [0.294, 0.440] | 0.754 | 0.371 | 0.491 [0.430, 0.551] | 0.367 [0.338, 0.402] |
+| opus-5 CE low | 6 | 0.372 [0.316, 0.440] | 0.686 | 0.363 | 0.482 [0.439, 0.541] | 0.367 [0.341, 0.405] |
+| sol CE medium | 6 | 0.265 [0.196, 0.364] | 0.798 | 0.593 | 0.398 [0.319, 0.492] | 0.366 [0.297, 0.445] |
+| sol MRV low | 6 | 0.249 [0.190, 0.322] | 0.829 | 0.670 | 0.383 [0.310, 0.471] | 0.363 [0.294, 0.437] |
+| opus-5 CE medium | 6 | 0.462 [0.405, 0.539] | 0.588 | 0.295 | 0.518 [0.453, 0.597] | 0.360 [0.321, 0.406] |
+| glm-flash CE medium | 6 | 0.324 [0.240, 0.429] | 0.820 | 0.392 | 0.465 [0.369, 0.564] | 0.355 [0.288, 0.439] |
+| opus-5 CE high | 6 | 0.375 [0.293, 0.470] | 0.601 | 0.324 | 0.462 [0.394, 0.540] | 0.348 [0.303, 0.404] |
+| fable-5.1 CE high | 1 | 0.410 [0.410, 0.410] | 0.640 | 0.302 | 0.500 [0.500, 0.500] | 0.348 [0.348, 0.348] |
+| opus-5 van low | 6 | 0.225 [0.184, 0.273] | 0.950 | 0.713 | 0.364 [0.309, 0.423] | 0.342 [0.293, 0.394] |
+| sonnet-5 MRV high | 6 | 0.308 [0.240, 0.387] | 0.667 | 0.379 | 0.422 [0.359, 0.488] | 0.340 [0.287, 0.402] |
+| fable-5.1 CE low | 2 | 0.325 [0.295, 0.385] | 0.623 | 0.352 | 0.427 [0.411, 0.455] | 0.338 [0.336, 0.341] |
+| glm-vis CE low | 6 | 0.336 [0.273, 0.416] | 0.720 | 0.336 | 0.458 [0.398, 0.537] | 0.336 [0.287, 0.404] |
+| glm-flash van medium | 6 | 0.213 [0.166, 0.283] | 0.885 | 0.720 | 0.344 [0.279, 0.429] | 0.329 [0.270, 0.409] |
+| astra MRV medium | 6 | 0.206 [0.153, 0.266] | 0.929 | 0.825 | 0.337 [0.261, 0.413] | 0.329 [0.255, 0.410] |
+| sol van high | 6 | 0.198 [0.152, 0.250] | 0.980 | 0.962 | 0.329 [0.264, 0.399] | 0.328 [0.264, 0.397] |
+| astra CE medium | 6 | 0.202 [0.160, 0.259] | 0.927 | 0.739 | 0.331 [0.270, 0.408] | 0.317 [0.257, 0.391] |
+| astra CE low | 6 | 0.198 [0.155, 0.258] | 0.833 | 0.676 | 0.319 [0.262, 0.390] | 0.306 [0.249, 0.373] |
+| sol CE low | 6 | 0.217 [0.162, 0.295] | 0.786 | 0.514 | 0.341 [0.272, 0.426] | 0.306 [0.241, 0.380] |
+| terra MRV high | 6 | 0.202 [0.143, 0.283] | 0.773 | 0.622 | 0.320 [0.243, 0.415] | 0.304 [0.228, 0.396] |
+| astra CE high | 6 | 0.190 [0.141, 0.262] | 0.857 | 0.762 | 0.311 [0.240, 0.405] | 0.304 [0.229, 0.405] |
+| terra MRV medium | 6 | 0.198 [0.149, 0.273] | 0.781 | 0.641 | 0.315 [0.256, 0.394] | 0.302 [0.247, 0.373] |
+| sol van low | 6 | 0.174 [0.130, 0.233] | 1.000 | 0.978 | 0.296 [0.230, 0.378] | 0.295 [0.229, 0.378] |
+| glm-flash van low | 6 | 0.186 [0.148, 0.242] | 0.959 | 0.662 | 0.311 [0.257, 0.386] | 0.290 [0.245, 0.352] |
+| sol van medium | 6 | 0.170 [0.123, 0.228] | 0.977 | 0.956 | 0.290 [0.218, 0.371] | 0.289 [0.218, 0.369] |
+| terra CE medium | 6 | 0.190 [0.149, 0.245] | 0.814 | 0.571 | 0.308 [0.251, 0.375] | 0.285 [0.236, 0.342] |
+| sonnet-5 MRV medium | 6 | 0.241 [0.177, 0.330] | 0.610 | 0.345 | 0.346 [0.268, 0.442] | 0.284 [0.223, 0.358] |
+| glm-vis van low | 6 | 0.182 [0.149, 0.238] | 0.852 | 0.597 | 0.300 [0.254, 0.371] | 0.279 [0.240, 0.337] |
+| terra CE low | 6 | 0.174 [0.129, 0.239] | 0.880 | 0.647 | 0.290 [0.223, 0.375] | 0.274 [0.216, 0.351] |
+| terra MRV low | 6 | 0.158 [0.115, 0.216] | 0.741 | 0.667 | 0.261 [0.196, 0.343] | 0.256 [0.194, 0.335] |
+| terra CE high | 6 | 0.150 [0.085, 0.238] | 0.776 | 0.567 | 0.252 [0.156, 0.355] | 0.237 [0.153, 0.326] |
+| sonnet-5 van high | 6 | 0.138 [0.092, 0.206] | 0.972 | 0.795 | 0.242 [0.167, 0.338] | 0.236 [0.163, 0.325] |
+| sonnet-5 MRV low | 6 | 0.206 [0.161, 0.276] | 0.477 | 0.263 | 0.287 [0.227, 0.371] | 0.231 [0.178, 0.297] |
+| sonnet-5 van medium | 6 | 0.130 [0.077, 0.226] | 0.846 | 0.702 | 0.226 [0.141, 0.358] | 0.220 [0.137, 0.350] |
+| astra van high | 6 | 0.123 [0.080, 0.174] | 1.000 | 1.000 | 0.218 [0.148, 0.297] | 0.218 [0.148, 0.297] |
+| terra van high | 6 | 0.123 [0.090, 0.170] | 1.000 | 1.000 | 0.218 [0.165, 0.290] | 0.218 [0.165, 0.290] |
+| sonnet-5 van low | 6 | 0.130 [0.091, 0.194] | 0.825 | 0.623 | 0.225 [0.163, 0.316] | 0.216 [0.159, 0.295] |
+| astra van medium | 6 | 0.119 [0.080, 0.161] | 0.968 | 0.968 | 0.211 [0.148, 0.276] | 0.211 [0.148, 0.276] |
+| terra van medium | 6 | 0.115 [0.071, 0.164] | 1.000 | 1.000 | 0.206 [0.132, 0.281] | 0.206 [0.132, 0.281] |
+| astra van low | 6 | 0.111 [0.083, 0.145] | 1.000 | 1.000 | 0.199 [0.153, 0.253] | 0.199 [0.153, 0.253] |
+| terra van low | 6 | 0.111 [0.083, 0.152] | 0.966 | 0.966 | 0.199 [0.151, 0.263] | 0.199 [0.151, 0.263] |
+| sonnet-5 CE high | 6 | 0.111 [0.064, 0.178] | 0.800 | 0.500 | 0.194 [0.118, 0.291] | 0.181 [0.112, 0.264] |
+| sonnet-5 CE medium | 6 | 0.111 [0.067, 0.147] | 0.903 | 0.412 | 0.197 [0.125, 0.253] | 0.174 [0.120, 0.214] |
+| sonnet-5 CE low | 6 | 0.079 [0.062, 0.102] | 0.800 | 0.426 | 0.144 [0.115, 0.180] | 0.133 [0.108, 0.160] |
+
+
+#### T15 — verified key-union per PR (Appendix A; superseded by T17)
+
+| PR | goldens | verified additional | verified universe | merged clusters | golden-duplicates removed |
+|---|---|---|---|---|---|
+| calcom/cal.com/pull/11059 | 9 | **24** | 33 | 35 | 11 |
+| ai-code-review-evaluation/discourse-graphite/pull/4 | 8 | **70** | 78 | 81 | 11 |
+| ai-code-review-evaluation/discourse-graphite/pull/10 | 7 | **32** | 39 | 37 | 5 |
+| ai-code-review-evaluation/discourse-graphite/pull/8 | 6 | **21** | 27 | 28 | 7 |
+| calcom/cal.com/pull/14740 | 6 | **33** | 39 | 42 | 9 |
+| calcom/cal.com/pull/10967 | 6 | **31** | 37 | 35 | 4 |
+
+Total: 42 goldens + 211 verified additional bugs = 253 distinct bugs (258 merged clusters; 47 golden-duplicates removed, not counted).
+Per-bug verification cards (location, why-real, replication, found-by): `analysis/TRUE_GOLDEN_EVIDENCE.md`.
+
+
+### A.2 Expanded-gold union tables (superseded by §3.1)
+
+#### T11 — hidden-gold union sizes per top-6 PR
+
+| PR | goldens | union clusters | expanded set |
+|---|---|---|---|
+| calcom/cal.com/pull/11059 | 9 | 981 | 990 |
+| ai-code-review-evaluation/discourse-graphite/pull/4 | 8 | 928 | 936 |
+| ai-code-review-evaluation/discourse-graphite/pull/10 | 7 | 680 | 687 |
+| ai-code-review-evaluation/discourse-graphite/pull/8 | 6 | 513 | 519 |
+| calcom/cal.com/pull/14740 | 6 | 919 | 925 |
+| calcom/cal.com/pull/10967 | 6 | 960 | 966 |
+
+**T9 — the expanded matrix**
+
+
+#### T9 — expanded-gold matrix (top-6): recall/adjP/F1 against the hidden-gold union
+
+Strict = Martian benchmark (goldens only). Expanded = goldens + cross-run/cross-model
+deduplicated confirmed-bug union (see REPORT.md §3.2 for construction and caveats).
+recall_exp and F1_exp levels are conservative lower bounds; the paired deltas in T10 are
+the robust comparison.
+
+| model | fw | eff | n | recall_strict | recall_exp [CI] | adjP_exp | F1_exp [CI] | F1_strict |
+|---|---|---|---|---|---|---|---|---|
+| fable-5.1 | van | low | 6 | 0.74 | 0.006 [0.005, 0.008] | 0.82 | 0.012 [0.010, 0.016] | 0.78 |
+| fable-5.1 | van | medium | 6 | 0.69 | 0.014 [0.012, 0.016] | 0.76 | 0.028 [0.024, 0.032] | 0.62 |
+| fable-5.1 | van | high | 6 | 0.71 | 0.016 [0.013, 0.020] | 0.79 | 0.032 [0.025, 0.039] | 0.65 |
+| fable-5.1 **GAP** | CE | low | 2 | 0.60 | 0.041 [0.033, 0.047] | 0.74 | 0.078 [0.064, 0.089] | 0.38 |
+| fable-5.1 **GAP** | CE | medium | 1 | 0.86 | 0.047 [0.047, 0.047] | 0.76 | 0.088 [0.088, 0.088] | 0.52 |
+| fable-5.1 **GAP** | CE | high | 1 | 0.86 | 0.035 [0.035, 0.035] | 0.73 | 0.067 [0.067, 0.067] | 0.55 |
+| fable-5.1 **GAP** | MRV | low | 1 | 0.86 | 0.045 [0.045, 0.045] | 0.82 | 0.086 [0.086, 0.086] | 0.60 |
+| fable-5.1 **GAP** | MRV | medium | 1 | 0.86 | 0.054 [0.054, 0.054] | 0.86 | 0.101 [0.101, 0.101] | 0.63 |
+| fable-5.1 **GAP** | MRV | high | 1 | 0.86 | 0.048 [0.048, 0.048] | 0.94 | 0.091 [0.091, 0.091] | 0.80 |
+| astra | van | low | 6 | 0.40 | 0.003 [0.003, 0.004] | 1.00 | 0.007 [0.005, 0.008] | 0.58 |
+| astra | van | medium | 6 | 0.43 | 0.004 [0.003, 0.005] | 0.95 | 0.007 [0.005, 0.009] | 0.59 |
+| astra | van | high | 6 | 0.40 | 0.003 [0.002, 0.005] | 1.00 | 0.007 [0.005, 0.009] | 0.58 |
+| astra | CE | low | 6 | 0.52 | 0.009 [0.005, 0.013] | 0.81 | 0.017 [0.010, 0.025] | 0.59 |
+| astra | CE | medium | 6 | 0.62 | 0.008 [0.005, 0.013] | 0.91 | 0.017 [0.010, 0.025] | 0.72 |
+| astra | CE | high | 6 | 0.55 | 0.006 [0.004, 0.009] | 0.79 | 0.012 [0.008, 0.018] | 0.63 |
+| astra | MRV | low | 6 | 0.62 | 0.005 [0.004, 0.007] | 0.93 | 0.010 [0.007, 0.014] | 0.74 |
+| astra | MRV | medium | 6 | 0.60 | 0.008 [0.005, 0.013] | 0.91 | 0.016 [0.009, 0.025] | 0.70 |
+| astra | MRV | high | 6 | 0.60 | 0.009 [0.005, 0.013] | 0.85 | 0.018 [0.011, 0.026] | 0.67 |
+| sol | van | low | 6 | 0.62 | 0.009 [0.008, 0.011] | 1.00 | 0.019 [0.016, 0.022] | 0.76 |
+| sol | van | medium | 6 | 0.62 | 0.010 [0.008, 0.011] | 0.98 | 0.019 [0.016, 0.022] | 0.75 |
+| sol | van | high | 6 | 0.62 | 0.011 [0.009, 0.013] | 0.98 | 0.021 [0.018, 0.025] | 0.75 |
+| sol | CE | low | 6 | 0.55 | 0.015 [0.010, 0.020] | 0.83 | 0.029 [0.019, 0.038] | 0.57 |
+| sol | CE | medium | 6 | 0.62 | 0.020 [0.016, 0.024] | 0.86 | 0.039 [0.032, 0.047] | 0.61 |
+| sol | CE | high | 6 | 0.74 | 0.025 [0.021, 0.028] | 0.79 | 0.048 [0.042, 0.054] | 0.58 |
+| sol | MRV | low | 6 | 0.60 | 0.016 [0.012, 0.021] | 0.86 | 0.031 [0.024, 0.041] | 0.62 |
+| sol | MRV | medium | 6 | 0.67 | 0.020 [0.015, 0.026] | 0.82 | 0.038 [0.029, 0.051] | 0.62 |
+| sol | MRV | high | 6 | 0.62 | 0.020 [0.017, 0.024] | 0.84 | 0.039 [0.033, 0.046] | 0.60 |
+| opus-5 | van | low | 6 | 0.67 | 0.006 [0.005, 0.007] | 0.90 | 0.011 [0.009, 0.013] | 0.77 |
+| opus-5 | van | medium | 6 | 0.69 | 0.015 [0.011, 0.019] | 0.69 | 0.029 [0.022, 0.037] | 0.56 |
+| opus-5 | van | high | 6 | 0.69 | 0.006 [0.004, 0.008] | 0.94 | 0.011 [0.008, 0.015] | 0.79 |
+| opus-5 | CE | low | 6 | 0.81 | 0.033 [0.026, 0.040] | 0.79 | 0.063 [0.050, 0.075] | 0.57 |
+| opus-5 | CE | medium | 6 | 0.83 | 0.042 [0.036, 0.049] | 0.72 | 0.079 [0.068, 0.091] | 0.44 |
+| opus-5 | CE | high | 6 | 0.71 | 0.034 [0.026, 0.040] | 0.73 | 0.065 [0.050, 0.076] | 0.44 |
+| opus-5 | MRV | low | 6 | 0.83 | 0.033 [0.031, 0.035] | 0.77 | 0.064 [0.060, 0.067] | 0.55 |
+| opus-5 | MRV | medium | 6 | 0.67 | 0.035 [0.030, 0.041] | 0.81 | 0.068 [0.058, 0.078] | 0.50 |
+| opus-5 | MRV | high | 6 | 0.74 | 0.038 [0.033, 0.042] | 0.79 | 0.072 [0.064, 0.079] | 0.51 |
+| glm-vis | van | low | 6 | 0.55 | 0.011 [0.009, 0.013] | 0.88 | 0.022 [0.018, 0.026] | 0.63 |
+| glm-vis | van | medium | 6 | 0.62 | 0.015 [0.013, 0.018] | 1.00 | 0.030 [0.026, 0.035] | 0.76 |
+| glm-vis | van | high | 6 | 0.57 | 0.015 [0.013, 0.017] | 0.99 | 0.030 [0.026, 0.034] | 0.72 |
+| glm-vis | CE | low | 6 | 0.76 | 0.046 [0.040, 0.049] | 0.87 | 0.087 [0.077, 0.093] | 0.60 |
+| glm-vis | CE | medium | 6 | 0.83 | 0.074 [0.063, 0.089] | 0.95 | 0.138 [0.118, 0.162] | 0.71 |
+| glm-vis | CE | high | 6 | 0.76 | 0.069 [0.063, 0.078] | 0.98 | 0.128 [0.118, 0.144] | 0.78 |
+| glm-vis | MRV | low | 6 | 0.81 | 0.054 [0.045, 0.064] | 0.94 | 0.102 [0.085, 0.120] | 0.73 |
+| glm-vis | MRV | medium | 6 | 0.83 | 0.090 [0.079, 0.101] | 0.99 | 0.165 [0.147, 0.183] | 0.84 |
+| glm-vis | MRV | high | 6 | 0.76 | 0.100 [0.089, 0.110] | 0.99 | 0.182 [0.164, 0.198] | 0.79 |
+| terra | van | low | 6 | 0.36 | 0.006 [0.005, 0.007] | 0.97 | 0.012 [0.010, 0.014] | 0.52 |
+| terra | van | medium | 6 | 0.40 | 0.006 [0.005, 0.007] | 1.00 | 0.012 [0.010, 0.014] | 0.58 |
+| terra | van | high | 6 | 0.45 | 0.007 [0.006, 0.009] | 1.00 | 0.014 [0.011, 0.017] | 0.62 |
+| terra | CE | low | 6 | 0.48 | 0.012 [0.010, 0.014] | 0.91 | 0.024 [0.021, 0.027] | 0.59 |
+| terra | CE | medium | 6 | 0.48 | 0.012 [0.009, 0.016] | 0.85 | 0.024 [0.018, 0.031] | 0.55 |
+| terra | CE | high | 6 | 0.38 | 0.011 [0.006, 0.015] | 0.83 | 0.021 [0.012, 0.030] | 0.46 |
+| terra | MRV | low | 6 | 0.40 | 0.012 [0.008, 0.016] | 0.81 | 0.023 [0.016, 0.031] | 0.47 |
+| terra | MRV | medium | 6 | 0.52 | 0.015 [0.009, 0.022] | 0.84 | 0.029 [0.018, 0.042] | 0.56 |
+| terra | MRV | high | 6 | 0.50 | 0.014 [0.011, 0.017] | 0.82 | 0.027 [0.023, 0.033] | 0.54 |
+| sonnet-5 | van | low | 6 | 0.43 | 0.004 [0.002, 0.005] | 0.72 | 0.007 [0.004, 0.011] | 0.54 |
+| sonnet-5 | van | medium | 6 | 0.45 | 0.004 [0.002, 0.005] | 0.76 | 0.008 [0.005, 0.011] | 0.57 |
+| sonnet-5 | van | high | 6 | 0.50 | 0.004 [0.003, 0.006] | 0.95 | 0.008 [0.006, 0.011] | 0.66 |
+| sonnet-5 | CE | low | 6 | 0.19 | 0.005 [0.003, 0.007] | 0.82 | 0.009 [0.005, 0.013] | 0.29 |
+| sonnet-5 | CE | medium | 6 | 0.31 | 0.008 [0.003, 0.014] | 0.93 | 0.015 [0.007, 0.027] | 0.45 |
+| sonnet-5 | CE | high | 6 | 0.26 | 0.006 [0.004, 0.009] | 0.82 | 0.013 [0.007, 0.018] | 0.37 |
+| sonnet-5 | MRV | low | 6 | 0.43 | 0.014 [0.010, 0.019] | 0.56 | 0.028 [0.020, 0.037] | 0.31 |
+| sonnet-5 | MRV | medium | 6 | 0.48 | 0.023 [0.018, 0.029] | 0.75 | 0.045 [0.036, 0.056] | 0.40 |
+| sonnet-5 | MRV | high | 6 | 0.62 | 0.025 [0.020, 0.030] | 0.76 | 0.049 [0.038, 0.058] | 0.49 |
+| glm-flash | van | low | 6 | 0.52 | 0.011 [0.009, 0.012] | 0.96 | 0.021 [0.018, 0.024] | 0.67 |
+| glm-flash | van | medium | 6 | 0.64 | 0.013 [0.011, 0.015] | 0.90 | 0.026 [0.022, 0.030] | 0.71 |
+| glm-flash | van | high | 6 | 0.60 | 0.014 [0.011, 0.018] | 0.97 | 0.028 [0.022, 0.035] | 0.72 |
+| glm-flash | CE | low | 6 | 0.76 | 0.045 [0.036, 0.051] | 0.92 | 0.085 [0.069, 0.097] | 0.69 |
+| glm-flash | CE | medium | 6 | 0.76 | 0.057 [0.050, 0.065] | 0.94 | 0.107 [0.095, 0.121] | 0.70 |
+| glm-flash | CE | high | 6 | 0.76 | 0.060 [0.052, 0.068] | 0.98 | 0.112 [0.098, 0.127] | 0.79 |
+| glm-flash | MRV | low | 6 | 0.83 | 0.047 [0.041, 0.054] | 0.89 | 0.090 [0.077, 0.103] | 0.65 |
+| glm-flash | MRV | medium | 6 | 0.69 | 0.055 [0.046, 0.064] | 0.95 | 0.103 [0.088, 0.121] | 0.68 |
+| glm-flash | MRV | high | 6 | 0.76 | 0.081 [0.068, 0.093] | 0.99 | 0.149 [0.127, 0.170] | 0.80 |
+
+**T10 — harness vs vanilla under the expanded set (paired, same 6 PRs)**
+
+
+#### T10 — harness vs vanilla, paired on the same 6 PRs: Δrecall under the expanded set
+
+| cell (model fw effort) | Δrecall_exp [CI] |
+|---|---|
+| astra CE low | +0.005 [+0.002, +0.009] |
+| astra CE medium | +0.005 [+0.001, +0.009] |
+| astra CE high | +0.003 [+0.000, +0.006] |
+| astra MRV low | +0.002 [+0.001, +0.003] |
+| astra MRV medium | +0.005 [+0.001, +0.009] |
+| astra MRV high | +0.006 [+0.002, +0.010] |
+| sol CE low | +0.005 [+0.001, +0.009] |
+| sol CE medium | +0.011 [+0.005, +0.016] |
+| sol CE high | +0.014 [+0.010, +0.018] |
+| sol MRV low | +0.006 [+0.004, +0.010] |
+| sol MRV medium | +0.010 [+0.006, +0.016] |
+| sol MRV high | +0.009 [+0.005, +0.014] |
+| opus-5 CE low | +0.027 [+0.021, +0.034] |
+| opus-5 CE medium | +0.027 [+0.022, +0.032] |
+| opus-5 CE high | +0.028 [+0.019, +0.035] |
+| opus-5 MRV low | +0.028 [+0.026, +0.029] |
+| opus-5 MRV medium | +0.020 [+0.015, +0.028] |
+| opus-5 MRV high | +0.032 [+0.029, +0.035] |
+| glm-vis CE low | +0.034 [+0.031, +0.037] |
+| glm-vis CE medium | +0.059 [+0.049, +0.071] |
+| glm-vis CE high | +0.054 [+0.048, +0.061] |
+| glm-vis MRV low | +0.043 [+0.033, +0.053] |
+| glm-vis MRV medium | +0.075 [+0.062, +0.087] |
+| glm-vis MRV high | +0.085 [+0.073, +0.095] |
+| terra CE low | +0.006 [+0.005, +0.008] |
+| terra CE medium | +0.006 [+0.003, +0.010] |
+| terra CE high | +0.004 [-0.002, +0.008] |
+| terra MRV low | +0.006 [+0.003, +0.009] |
+| terra MRV medium | +0.008 [+0.003, +0.015] |
+| terra MRV high | +0.006 [+0.004, +0.009] |
+| sonnet-5 CE low | +0.001 [-0.002, +0.004] |
+| sonnet-5 CE medium | +0.004 [-0.000, +0.011] |
+| sonnet-5 CE high | +0.002 [-0.000, +0.004] |
+| sonnet-5 MRV low | +0.011 [+0.006, +0.016] |
+| sonnet-5 MRV medium | +0.019 [+0.014, +0.026] |
+| sonnet-5 MRV high | +0.021 [+0.016, +0.026] |
+| glm-flash CE low | +0.034 [+0.026, +0.041] |
+| glm-flash CE medium | +0.044 [+0.036, +0.051] |
+| glm-flash CE high | +0.045 [+0.038, +0.053] |
+| glm-flash MRV low | +0.037 [+0.029, +0.044] |
+| glm-flash MRV medium | +0.041 [+0.033, +0.052] |
+| glm-flash MRV high | +0.066 [+0.051, +0.080] |
+
+Resolved positive 38/42, negative 0, unresolved 4 (strict-benchmark version: 17/42 positive, 2 negative — see T4).
+
+**Reading.** The expanded numbers are our real-world results — the dashboard presents them as the primary metrics throughout (panels 1a–1f, effort ladder, sample-bias check, selection view); the strict benchmark is the artificial lens kept for comparison. Under the expanded set, the harness-vs-vanilla comparison flips decisively:
+**38/42 paired Δrecall_exp resolve positive (0 negative; 4 unresolved)**, vs 17/42
+positive / 2 negative under the strict benchmark (T4). The vanilla cells collapse
+(recall_exp 0.003–0.011 — they find the goldens but almost none of the hidden-gold
+space), while the harness cells keep meaningful coverage (0.03–0.10). The cells whose
+strict-benchmark harness-vs-vanilla deltas were unresolved (sol/terra) now resolve
+positive; sonnet-5's compound cells — the strict benchmark's one resolved *negative* —
+move to unresolved/marginal. The recommendation cell (glm-vis · MRV · low) holds and
+strengthens: recall_exp 0.054 [0.045, 0.064] — **9× fable-5.1 vanilla low (0.006)** and
+comparable to opus-5 harness cells, at the same fraction of the cost. Levels are
+conservative; the *ranking* and the *ratios* are the reportable quantities.
+
