@@ -50,10 +50,13 @@ def main():
             merged.append(d)
         else:
             d["tier"] = "D-labelled"
-            d["undemonstrated"] = UNDEMONSTRATED.get(d["id"], {
+            _u = UNDEMONSTRATED.get(d["id"])
+            if isinstance(_u, tuple):
+                _u = {"class": _u[0], "reason": _u[1]}
+            d["undemonstrated"] = _u or {
                 "class": "unresolved_in_pass",
                 "reason": "the verification pass did not converge for this defect; the DEFECT itself is not in doubt "
-                          "(it was split out of its bundle by the merge audit and its findings name the mechanism and lines)"})
+                          "(it was split out of its bundle by the merge audit and its findings name the mechanism and lines)"}
             kept.append(d)
     reg["defects"] = kept
     reg["n_defects"] = len(kept)
@@ -81,6 +84,8 @@ def main():
     for d in kept:
         if d["tier"] != "D-verified":
             u = d.get("undemonstrated") or {}
+            if isinstance(u, tuple):
+                u = {"class": u[0], "reason": u[1]}
             L.append(f"| {d['id']} | {d['bundle']} | `{u.get('class','?')}` | {str(u.get('reason',''))[:150]} |")
     L += ["", "## Merged away (same defect as their bundle's label)", "", "| defect | bundle | label |", "|---|---|---|"]
     for m in reg["merged_same_defect"]:
