@@ -71,7 +71,15 @@ matched model·effort pairs (mean **+0.107**; peak-recall ratio **1.51×** versu
 0.487 vs 0.322) — but the recall lead now costs precision, so on **F1′ the best cell is vanilla**
 (fable·van·high 0.441 vs the best harness 0.415; ΔF1′ > 0 in only 25/48 pairs, mean +0.008).
 **MRV is ahead of CE on average, not uniformly** (ΔF1′ point estimate +19/−2 over 21 matched pairs,
-mean +0.047; 8/21 resolve positive at 95%).
+mean +0.047; 8/21 resolve positive at 95%; +18/−3 on ΔF2′).
+
+**On the composite metric, read F2′, not F1′.** Our stated cost asymmetry is that a missed bug costs more
+than a false alarm (4:1) — that is β=2, i.e. F2. Reporting F1′ (β=1) contradicted that and, because adjP′
+charges nitpicks, it made the ranking volume-sensitive: a terse cell that reports 17–25 findings per PR
+registers zero nitpicks and outranks a verbose cell that finds far more real bugs. On **F2′** the best
+harness cell (glm-vis · MRV · high, 0.436 [0.396, 0.491]) leads the best vanilla cell (fable · van · high,
+0.361) by **1.21×**, and the top six cells are all harness cells. F1′ is retained only as a labelled
+equal-weight, nitpick-averse diagnostic.
 
 **Why even the best harness misses what it misses.** Three mechanisms, separated: (1) *denominator
 inflation* — paraphrase splits and golden duplicates (now fixed) made the universe look ~1.6× bigger

@@ -62,6 +62,9 @@ for k, v in M["matrix"].items():
         c["F1_sem"] = se["F1"]; c["F1_sem_lo"] = se["ci"]["F1"][1]; c["F1_sem_hi"] = se["ci"]["F1"][2]
         c["F1p_sem"] = se["F1p"]; c["F1p_sem_lo"] = se["ci"]["F1p"][1]; c["F1p_sem_hi"] = se["ci"]["F1p"][2]
         c["adjP_sem"] = se["adjP"]; c["adjPp_sem"] = se["adjPp"]
+    c["F2_sem"] = se.get("F2"); c["F2p_sem"] = se.get("F2p")
+    c["F2p_sem_lo"] = se["ci"]["F2p"][1] if se.get("ci", {}).get("F2p") else None
+    c["F2p_sem_hi"] = se["ci"]["F2p"][2] if se.get("ci", {}).get("F2p") else None
     c["TP_golden"] = v.get("TP")
     _pp = {u: {"goldens": v["goldens"], "union_sem": v["verified_defects"]}
            for u, v in M["true_gold_defects"]["per_pr"].items()}
@@ -133,7 +136,8 @@ for k, v in M["true_gold_defects"]["verified"]["cells"].items():
     expd[k] = {"recall": st["recall"], "F1": st["F1"],
                "recall_sem": v["recall"], "ci_recall_sem": list(v["ci"]["recall"]),
                "F1_sem": v["F1"], "ci_F1_sem": list(v["ci"]["F1"]),
-               "F1p_sem": v["F1p"], "adjP_sem": v["adjP"], "adjPp_sem": v["adjPp"]}
+               "F1p_sem": v["F1p"], "F2_sem": v.get("F2"), "F2p_sem": v.get("F2p"),
+               "adjP_sem": v["adjP"], "adjPp_sem": v["adjPp"]}
 
 DATA = round5({"cells": cells, "tok": tok, "sel": sel_effect, "percell": percell, "exp": expd,
                "sel_exp": M["expanded_gold"]["sel_effect_exp"], "percell_exp": M["expanded_gold"]["percell_exp"]})
@@ -297,7 +301,7 @@ const fmt = (v, n=5) => { if(v==null||isNaN(v)||!isFinite(v)) return '—'; retu
 const fmtA = (v, n=5) => { if(v==null||isNaN(v)||!isFinite(v)) return '—'; if(Math.abs(v)>0 && Math.abs(v)<0.01) return parseFloat((v*100).toFixed(n)).toString()+'¢'; return '$'+parseFloat(v.toFixed(n)).toString(); };
 // bracket takes the POINT's unit (no $/¢ mixing inside one CI)
 const fmtAB = (pt, lo, hi, n=5) => { if(Math.abs(pt)>0 && Math.abs(pt)<0.01) return fmtA(pt,n)+' ['+fmtA(lo,n)+', '+fmtA(hi,n)+']'; return '$'+fmt(pt,n)+' [$'+fmt(lo,n)+', $'+fmt(hi,n)+']'; };
-const metName = {cost_run:'$/run', usd_per_tp_sem:'$/true bug found', usd_per_real:'$/real finding', tok_run:'tokens/run', wall_run:'wall s/run', price_per_ktok:'price per k-tok', F1_sem:'F1 (true golden set)', F1p_sem:'F1\u2032 (true golden set, nitpicks charged)', recall_sem:'recall (true golden set)', adjP_sem:'adjP (claim soundness)', adjPp_sem:'adjP\u2032 (user lens)'};
+const metName = {cost_run:'$/run', usd_per_tp_sem:'$/true bug found', usd_per_real:'$/real finding', tok_run:'tokens/run', wall_run:'wall s/run', price_per_ktok:'price per k-tok', F1_sem:'F1 (true set, real-bug precision)', F1p_sem:'F1\u2032 (true set, nitpick-averse lens)', F2_sem:'F2 (true set, recall-weighted 4:1)', F2p_sem:'F2\u2032 (true set \u2014 RECOMMENDED composite)', recall_sem:'recall (true golden set)', adjP_sem:'adjP (claim soundness)', adjPp_sem:'adjP\u2032 (user lens)'};
 
 function tracesFor(xmet, ymet, showci) {
   const ts = [];
@@ -324,7 +328,7 @@ function tracesFor(xmet, ymet, showci) {
 const layoutFor = (xmet, ymet, annotate) => ({
   margin:{l:56,r:16,t:8,b:44}, paper_bgcolor:'rgba(0,0,0,0)', plot_bgcolor:'rgba(0,0,0,0)',
   xaxis:{title:{text:metName[xmet]}, type:'log', gridcolor:'#eee', zeroline:false},
-  yaxis:{title:{text:metName[ymet]}, gridcolor:'#eee', zeroline:false, range: ['F1','F2','recall','adjP','F1_sem','F1p_sem','recall_sem','adjP_sem','adjPp_sem'].includes(ymet) ? [0,1] : undefined},
+  yaxis:{title:{text:metName[ymet]}, gridcolor:'#eee', zeroline:false, range: ['F1','F2','recall','adjP','F1_sem','F1p_sem','F2_sem','F2p_sem','recall_sem','adjP_sem','adjPp_sem'].includes(ymet) ? [0,1] : undefined},
   legend:{font:{size:10}, orientation:'h', y:-0.2},
   hoverlabel:{font:{size:12}},
 });
