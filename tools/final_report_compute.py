@@ -1099,8 +1099,9 @@ for _u in TOP6:
 
 def _goldens_list(pr):
     import glob as _glob
-    for _f in _(glob.glob(f"{ROOT}/analysis/inputs/golden_comments/*.json")
-              or glob.glob(f"{ROOT}/third_party/code-review-benchmark/offline/golden_comments/*.json")):
+    _files = (_glob.glob(f"{ROOT}/analysis/inputs/golden_comments/*.json")
+              or _glob.glob(f"{ROOT}/third_party/code-review-benchmark/offline/golden_comments/*.json"))
+    for _f in _files:
         for _e in json.load(open(_f)):
             if _e["url"] == pr:
                 return [c["comment"] for c in _e["comments"]]
