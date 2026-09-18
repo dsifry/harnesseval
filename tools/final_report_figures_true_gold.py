@@ -81,7 +81,7 @@ scatter(ax, "F2p", "flo", "fhi", "recall", "rlo", "rhi")
 ax.set_xlabel("F2′  (recall-weighted 4:1, nitpick-charged precision)  →  better\n"
               "our chosen evaluator: a missed bug costs 4× a false alarm, which is what we claim to believe")
 ax.set_ylabel("recall of the true golden set  (152 = 42 goldens + 110 verified defects)  →  better")
-ax.set_title("True-gold frontier (152 true bugs): recall vs F2′, our evaluator\n"
+ax.set_title("True-gold frontier (152 true bugs): recall vs F2′, our evaluator (axis zoomed to 0.5)\n"
              "each point is one (model, framework, effort) cell; bars are cluster-bootstrap 95% CIs",
              fontsize=8.5, loc="left")
 ax.set_xlim(0, 0.5)
@@ -100,8 +100,9 @@ ax.set_xlabel("$ per TRUE bug found  (list price; log scale — each gridline ri
 ax.set_ylabel("F2′ of the true golden set  →  better")
 ax.set_ylim(0, 0.5)
 ax.set_title("What a caught real bug costs (152 true bugs)\n"
-             "the buyer's panel: up and to the left is better (F2′ axis capped at 0.5); bars are "
-             "cluster-bootstrap 95% CIs", fontsize=8.5, loc="left")
+             "the buyer's panel: up and to the left is better; the axis is zoomed to 0.5 so the spread is "
+             "visible (a display choice, not a limit on the score); bars are cluster-bootstrap 95% CIs",
+             fontsize=8.5, loc="left")
 ax.legend(loc="lower left", frameon=False, fontsize=7)
 fig.tight_layout()
 fig.savefig(f"{FIG}/fig_true_gold_efficiency.png")
