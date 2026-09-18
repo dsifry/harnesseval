@@ -1,6 +1,6 @@
 # Verified hidden gold — PR 4
 
-Candidates: 70 · verdicts: {'behavior_change_not_regression': 38, 'confirmed_regression': 3, 'inconclusive_env': 8, 'defect_present_before_pr': 10, 'unresolved_file': 10, 'not_a_bug': 1}
+Candidates: 70 · verdicts: {'behavior_change_not_regression': 38, 'confirmed_regression': 3, 'inconclusive_env': 8, 'defect_present_before_pr': 10, 'unresolved_file': 10, 'not_a_bug_unconfirmed': 1}
 
 | bug id | bug | verdict | head | base | fix | file | tarball sha256 |
 |---|---|---|---|---|---|---|---|
@@ -29,7 +29,7 @@ Candidates: 70 · verdicts: {'behavior_change_not_regression': 38, 'confirmed_re
 | 4-B41 | B41-dead-feed-modified-cache-key-means-pollfeed-always-re-do | `behavior_change_not_regression` | FAIL | ERROR:LoadError | PASS | `app/jobs/scheduled/pollfeed.rb` | `6764b15854ed…` |
 | 4-B42 | B42-topicembedrb59-port-logic-should-compare-against-uridef | `behavior_change_not_regression` | FAIL | ERROR:LoadError | PASS | `None` | `3cff243540c4…` |
 | 4-B46 | B46-poll-feed-processing-calls-stringscrub-via-stringscrub | `behavior_change_not_regression` | FAIL | ERROR:LoadError | PASS | `lib/pollfeed.rb` | `43dcf99ce48f…` |
-| 4-B48 | B48-embed-source-hash-includes-localized-footer-causing-fals | `behavior_change_not_regression` | FAIL | ERROR:LoadError | PASS | `app/models/topicembed.rb` | `4dbb72a24cee…` |
+| 4-B48 | B48-embed-source-hash-includes-localized-footer-causing-fals | `behavior_change_not_regression` | FAIL | ERROR:LoadError | PASS | `app/models/topicembed.rb` | `b659db07b180…` |
 | 4-B55 | B55-topicembed-import-uses-non-atomic-exists-create-allowing | `behavior_change_not_regression` | FAIL | ERROR:LoadError | PASS | `app/models/topic_embed.rb` | `af81677fdd8b…` |
 | 4-B56 | B56-pollfeed-job-processes-unbounded-rss-items-creating-enqu | `behavior_change_not_regression` | FAIL | ERROR:LoadError | PASS | `app/jobs/regular/poll_feed.rb` | `150eb8721ecc…` |
 | 4-B60 | B60-embedcontroller-enqueues-retrievetopic-job-but-spec-expe | `behavior_change_not_regression` | FAIL | ERROR:LoadError | PASS | `app/controllers/embedcontroller.rb` | `5e19ff99819a…` |
@@ -63,7 +63,7 @@ Candidates: 70 · verdicts: {'behavior_change_not_regression': 38, 'confirmed_re
 | 4-B63 | B63-topicembed-stores-redundant-topicid-that-can-go-stale-wh | `inconclusive_env` | FAIL | — | ERROR:NameError | `app/models/topicembed.rb` | `3cc07201cce3…` |
 | 4-B64 | B64-embedded-iframe-height-is-posted-only-on-load-causing-cl | `inconclusive_env` | FAIL | — | FAIL | `app/views/layouts/embed.html.erb` | `4f49c4224f48…` |
 | 4-B65 | B65-new--embed-best-route-is-unnamed-and-unconstrained-so-it | `inconclusive_env` | ERROR:uninitialized constant | — | — | `config/routes.rb` | `07c694c81ba5…` |
-| 4-B75 | B75-embed-controller-spec-for-missing-embedurl-is-a-false-po | `not_a_bug` | PASS | — | — | `spec/controllers/embed_controller_spec.rb` | `8ed0b97e6c40…` |
+| 4-B75 | B75-embed-controller-spec-for-missing-embedurl-is-a-false-po | `not_a_bug_unconfirmed` | PASS | — | — | `spec/controllers/embed_controller_spec.rb` | `cc486e0527a4…` |
 | 4-B19 | B19-disqusimport-regresses-to-live-http-fetch-per-thread-wit | `unresolved_file` | — | — | — | `lib/tasks/disqus.rake` | `c46f1212154e…` |
 | 4-B30 | B30-readability-import-sanitizer-preserves-javascript-urls-i | `unresolved_file` | — | — | — | `lib/import_remote/readability.rb` | `47c6d305376d…` |
 | 4-B43 | B43-falling-back-to-iid-when-link-is-blank-may-store-a-non-u | `unresolved_file` | — | — | — | `None` | `46efd7edcc35…` |

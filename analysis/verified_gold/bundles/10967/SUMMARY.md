@@ -32,6 +32,6 @@ Candidates: 31 · verdicts: {'inconclusive_env': 14, 'static_text_test': 1, 'con
 | 10967-B32 | B32-handlecancelbooking-builds-deletion-promise-array-with-und | `inconclusive_env` | FAIL | — | FAIL | `packages/features/bookings/lib/handlecancelbooking.ts` | `660c527d98cf…` |
 | 10967-B33 | B33-fallback-credential-construction-ignores-invalid-flag-and- | `inconclusive_env` | FAIL | — | ? | `packages/core/eventmanager.ts` | `89aea6b9bd04…` |
 | 10967-B34 | B34-reschedule-can-persist-in-db-even-when-some-host-calendar- | `inconclusive_env` | FAIL | — | FAIL | `packages/core/eventmanager.ts` | `c641c570ee69…` |
-| 10967-B18 | B18-calendar-interface-migration-to-destinationcalendar--cred | `not_a_bug` | PASS | — | — | `packages/types/calendar.d.ts` | `f964316e6e00…` |
+| 10967-B18 | B18-calendar-interface-migration-to-destinationcalendar--cred | `not_a_bug` | PASS | — | — | `packages/types/calendar.d.ts` | `15e220e5e76e…` |
 | 10967-B02 | B02-collective-hosts-destination-calendars-are-dropped-when-or | `static_text_test` | FAIL | PASS | PASS | `packages/features/bookings/lib/handlenewbooking.ts` | `0e3731fb220d…` |
 | 10967-B25 | B25-collective-booking-destination-calendars-skip-first-host-a | `unresolved_file` | — | — | — | `unknown (not in PR diff); search post-PR tree for `teamDestinationCalendars` and `users.slice(1)` in the collective booking calendar-routing code` | `61f86dc00c00…` |

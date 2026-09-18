@@ -29,7 +29,7 @@ Candidates: 33 · verdicts: {'inconclusive_env': 1, 'unresolved_file': 7, 'behav
 | 14740-B28 | B28-multiemail-leaf-module-imports-calcom-ui-barrel-creating-a | `defect_present_before_pr` | FAIL | FAIL | PASS | `packages/ui/form/multiemail.tsx` | `a3a5cecd465a…` |
 | 14740-B37 | B37-trpc-input-allows-non-integer-bookingid-causing-prisma-int | `defect_present_before_pr` | FAIL | FAIL | PASS | `packages/trpc/server/routers/viewer/bookings.ts` | `f0e9b4e85c2b…` |
 | 14740-B01 | B01-calendar-sync-uses-requesting-users-credentials-instead-of | `inconclusive_env` | FAIL | — | FAIL | `packages/trpc/server/routers/viewer/bookings.ts` | `56ff3d0767fb…` |
-| 14740-B11 | B11-team-member-add-guest-notification-branch-is-unreachable-b | `not_a_bug` | PASS | — | — | `packages/emails/email-manager.ts` | `6e9acba615e9…` |
+| 14740-B11 | B11-team-member-add-guest-notification-branch-is-unreachable-b | `not_a_bug` | PASS | — | — | `packages/emails/email-manager.ts` | `8284b2ad0ec3…` |
 | 14740-B02 | B02-non-atomic-guest-attendee-persistence-causes-db-calendar-d | `unresolved_file` | — | — | — | `unknown (reports did not include a file path; PR diff not provided in evidence pack)` | `7d7cf043eeb6…` |
 | 14740-B21 | B21-add-guests-mutation-silently-drops-blacklisted-already-att | `unresolved_file` | — | — | — | `unknown (not referenced in the clustered reports and not present in PR #14740 diff; likely the server-side add-guests mutation/handler for bookings/attendees)` | `7e04de7b33c2…` |
 | 14740-B34 | B34-guest-email-blacklist-is-undocumented-missing-from-envexam | `unresolved_file` | — | — | — | `apps/web/pages/api/book/[...slug].ts` | `63cadf7958c9…` |

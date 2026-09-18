@@ -1,6 +1,6 @@
 # Verified hidden gold — PR 10
 
-Candidates: 32 · verdicts: {'unresolved_file': 5, 'confirmed_regression': 2, 'behavior_change_not_regression': 15, 'defect_present_before_pr': 9, 'not_a_bug': 1}
+Candidates: 32 · verdicts: {'unresolved_file': 5, 'confirmed_regression': 2, 'behavior_change_not_regression': 15, 'defect_present_before_pr': 9, 'not_a_bug_unconfirmed': 1}
 
 | bug id | bug | verdict | head | base | fix | file | tarball sha256 |
 |---|---|---|---|---|---|---|---|
@@ -30,7 +30,7 @@ Candidates: 32 · verdicts: {'unresolved_file': 5, 'confirmed_regression': 2, 'b
 | 10-B30 | B30-delete-action-can-fire-multiple-concurrent-destroyrecord | `defect_present_before_pr` | FAIL | FAIL | PASS | `app/assets/javascripts/admin/components/embeddable-host.js.es6` | `01a859be215e…` |
 | 10-B31 | B31-unhandled-promise-rejection-when-saving-admin-embedding- | `defect_present_before_pr` | FAIL | FAIL | PASS | `app/assets/javascripts/admin/controllers/admin-embedding.js.es6` | `add22548be91…` |
 | 10-B32 | B32-embeddable-hosts-table-header-renders-even-when-list-is- | `defect_present_before_pr` | FAIL | ? | PASS | `app/assets/javascripts/admin/templates/embedding.hbs` | `e105f869dbff…` |
-| 10-B11 | B11-irreversible-destructive-data-migration-in-change-perman | `not_a_bug` | PASS | — | — | `db/migrate/20150818190757_create_embeddable_hosts.rb` | `10684a22359e…` |
+| 10-B11 | B11-irreversible-destructive-data-migration-in-change-perman | `not_a_bug_unconfirmed` | PASS | — | — | `db/migrate/20150818190757_create_embeddable_hosts.rb` | `3bab0c16a819…` |
 | 10-B00 | B00-migration-interpolates-embeddable-host-strings-into-raw- | `unresolved_file` | — | — | — | `db/post_migrate/*_backfill_embeddable_hosts.rb` | `defca4f2bff5…` |
 | 10-B08 | B08-creating-an-embeddable-host-with-no-category-overwrites- | `unresolved_file` | — | — | — | `assets/javascripts/discourse/components/embeddable-host.js` | `bc49974dcc6e…` |
 | 10-B20 | B20-pretender--fruits-id-handler-ignores-requested-id-and-al | `unresolved_file` | — | — | — | `test/javascripts/helpers/create-pretender.js.es6` | `d8bce8eed737…` |

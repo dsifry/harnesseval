@@ -3,7 +3,7 @@
 **Claim.** Calendar interface migration to destinationCalendar[] + credentialId is not enforced; unmigrated implementers still type-check
 
 **Verdict in this bundle:** `not_a_bug` ({'head': 'PASS'})
-**Fidelity:** `repo_suite`  ·  **Authoring model:** `deepseek-4.1-flash`
+**Fidelity:** `typecheck`  ·  **Authoring model:** `deepseek-4.1-flash`
 
 Everything needed to check this yourself is in this directory:
 `test.diff` (the test, applies cleanly), `fix.patch` (the minimal fix), `logs/` (raw runs),

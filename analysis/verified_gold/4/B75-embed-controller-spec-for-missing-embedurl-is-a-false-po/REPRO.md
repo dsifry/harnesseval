@@ -2,7 +2,7 @@
 
 **Claim.** Embed controller spec for missing embed_url is a false positive due to embeddable_host default failure
 
-**Verdict in this bundle:** `not_a_bug` ({'head': 'PASS'})
+**Verdict in this bundle:** `not_a_bug_unconfirmed` ({'head': 'PASS'})
 **Fidelity:** `standalone_real_code`  ·  **Authoring model:** `deepseek-4.1-flash-background`
 
 Everything needed to check this yourself is in this directory:
