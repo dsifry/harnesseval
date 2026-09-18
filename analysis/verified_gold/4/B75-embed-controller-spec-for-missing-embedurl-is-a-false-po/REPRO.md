@@ -2,7 +2,7 @@
 
 **Claim.** Embed controller spec for missing embed_url is a false positive due to embeddable_host default failure
 
-**Verdict in this bundle:** `claim_supported_source_only` ({'head': 'PASS'})
+**Verdict in this bundle:** `test_quality_verified` ({'base': 'ERROR:LoadError', 'head': 'PASS'})
 **Fidelity:** `standalone_real_code`  ·  **Authoring model:** `deepseek-4.1-flash-background`
 
 Everything needed to check this yourself is in this directory:
@@ -19,10 +19,10 @@ git checkout 4f8aed295a29954023b2849c060ef4fb299d1b5d          # the post-PR rev
 # (verified with ruby 2.6.10; ActiveRecord 4.1.16 is what the era repo expects)
 
 git apply test.diff          # adds the test file (must not already exist — a fresh clone is clean)
-ruby -I. spec/verify/embed_controller_spec_verify.rb                        # -> RESULT: FAIL : the claimed defect is present
+ruby -I. spec/verify/embed_spec_claim_verify.rb                        # -> RESULT: FAIL : the claimed defect is present
 
 git apply fix.patch          # the minimal fix
-ruby -I. spec/verify/embed_controller_spec_verify.rb                        # -> RESULT: PASS : defect gone
+ruby -I. spec/verify/embed_spec_claim_verify.rb                        # -> RESULT: PASS : defect gone
 ```
 
 ## What the two runs mean

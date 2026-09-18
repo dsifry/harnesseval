@@ -1,6 +1,6 @@
 # Verified hidden gold — PR 4
 
-Candidates: 70 · verdicts: {'behavior_change_not_regression': 38, 'confirmed_regression': 3, 'inconclusive_env': 8, 'defect_present_before_pr': 10, 'unresolved_file': 10, 'claim_supported_source_only': 1}
+Candidates: 70 · verdicts: {'behavior_change_not_regression': 38, 'confirmed_regression': 3, 'inconclusive_env': 8, 'defect_present_before_pr': 10, 'unresolved_file': 10, 'test_quality_verified': 1}
 
 | bug id | bug | verdict | head | base | fix | file | tarball sha256 |
 |---|---|---|---|---|---|---|---|
@@ -42,7 +42,6 @@ Candidates: 70 · verdicts: {'behavior_change_not_regression': 38, 'confirmed_re
 | 4-B74 | B74-embed-endpoint-trusts-spoofable-referer-embedurl-and-use | `behavior_change_not_regression` | FAIL | ERROR:LoadError | PASS | `app/controllers/embedcontroller.rb` | `ad98813f266c…` |
 | 4-B78 | B78-using--to-append-to-contents-mutates-the-callers-st | `behavior_change_not_regression` | FAIL | ERROR:LoadError | PASS | `lib/topicembed.rb` | `879ad002f024…` |
 | 4-B79 | B79-cache-miss-on-arbitrary-url-triggers-synchronous-full-rs | `behavior_change_not_regression` | FAIL | ERROR:LoadError | PASS | `topicretriever.rb` | `2ca6a4c2fd25…` |
-| 4-B75 | B75-embed-controller-spec-for-missing-embedurl-is-a-false-po | `claim_supported_source_only` | PASS | — | — | `spec/controllers/embed_controller_spec.rb` | `f765715cd96a…` |
 | 4-B04 | B04-destructive-force-true-in-createtable-migration-can-dr | `confirmed_regression` | FAIL | PASS | PASS | `db/migrate/20131223171005createtoptopics.rb` | `2d2984ff3a47…` |
 | 4-B34 | B34-gemfile-updated-with-new-gems-but-default-gemfilelock-no | `confirmed_regression` | FAIL | PASS | PASS | `Gemfile` | `813e4840d676…` |
 | 4-B51 | B51-skipvalidations-allows-saving-posts-topics-with-invalid | `confirmed_regression` | FAIL | PASS | PASS | `lib/post_revisor.rb` | `96e84151017c…` |
@@ -64,6 +63,7 @@ Candidates: 70 · verdicts: {'behavior_change_not_regression': 38, 'confirmed_re
 | 4-B63 | B63-topicembed-stores-redundant-topicid-that-can-go-stale-wh | `inconclusive_env` | FAIL | — | ERROR:NameError | `app/models/topicembed.rb` | `3cc07201cce3…` |
 | 4-B64 | B64-embedded-iframe-height-is-posted-only-on-load-causing-cl | `inconclusive_env` | FAIL | — | FAIL | `app/views/layouts/embed.html.erb` | `4f49c4224f48…` |
 | 4-B65 | B65-new--embed-best-route-is-unnamed-and-unconstrained-so-it | `inconclusive_env` | ERROR:uninitialized constant | — | — | `config/routes.rb` | `07c694c81ba5…` |
+| 4-B75 | B75-embed-controller-spec-for-missing-embedurl-is-a-false-po | `test_quality_verified` | PASS | ERROR:LoadError | — | `spec/controllers/embed_controller_spec.rb` | `06ab48a01245…` |
 | 4-B19 | B19-disqusimport-regresses-to-live-http-fetch-per-thread-wit | `unresolved_file` | — | — | — | `lib/tasks/disqus.rake` | `c46f1212154e…` |
 | 4-B30 | B30-readability-import-sanitizer-preserves-javascript-urls-i | `unresolved_file` | — | — | — | `lib/import_remote/readability.rb` | `47c6d305376d…` |
 | 4-B43 | B43-falling-back-to-iid-when-link-is-blank-may-store-a-non-u | `unresolved_file` | — | — | — | `None` | `46efd7edcc35…` |

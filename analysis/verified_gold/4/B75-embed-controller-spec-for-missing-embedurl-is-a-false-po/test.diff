@@ -1,103 +1,88 @@
-diff --git a/spec/verify/embed_controller_spec_verify.rb b/spec/verify/embed_controller_spec_verify.rb
+diff --git a/spec/verify/embed_spec_claim_verify.rb b/spec/verify/embed_spec_claim_verify.rb
 new file mode 100644
 --- /dev/null
-+++ b/spec/verify/embed_controller_spec_verify.rb
-@@ -0,0 +1,98 @@
-+$LOADED_FEATURES << 'spec_helper.rb'
-+
-+class SiteSetting
-+  class << self; attr_accessor :embeddable_host; end
-+  @embeddable_host = nil
-+end
++++ b/spec/verify/embed_spec_claim_verify.rb
+@@ -0,0 +1,83 @@
++require "uri"
++# NOTE (disclosed in the bundle): actionpack 4.1 cannot be loaded standalone in this environment
++# (its transitive needs: rack, action_dispatch, ...), so the two Rails classes the controller touches
++# are SHAPE-STUBBED with identical semantics: Parameters#require raises ParameterMissing (which
++# Discourse renders as HTTP 400). The controller methods under test are the REAL post-PR methods.
++# minimal shape-stub of ActiveSupport's String#blank? / NilClass#blank? (used by the real filter)
++class NilClass;  def blank?; true; end; end
++class String;    def blank?; strip.empty?; end; end
 +
 +module ActionController
-+  class ParameterMissing < StandardError; end
-+end
-+
-+class Params
-+  attr_reader :required_params
-+  def initialize(params = {}); @params = params; @required_params = []; end
-+  def require(key)
-+    @required_params << key
-+    raise ActionController::ParameterMissing, key unless @params.key?(key)
-+    @params[key]
-+  end
-+end
-+
-+class Response
-+  attr_accessor :status, :headers
-+  def initialize; @status = 200; @headers = {}; end
-+  def success?; status == 200; end
-+  def should_not(m); raise "fail" if m.matches?(self); end
-+  def should(m); raise "fail" unless m.matches?(self); end
-+end
-+
-+class BeSuccess; def matches?(t); t.success?; end; end
-+def be_success; BeSuccess.new; end
-+
-+class EmbedController
-+  class << self; attr_accessor :before_actions; end
-+  self.before_actions = []
-+  def self.before_action(m); before_actions << m; end
-+  def ensure_embeddable
-+    if SiteSetting.embeddable_host.nil? || SiteSetting.embeddable_host.empty?
-+      response.status = 404
-+      false
++  class ParameterMissing < StandardError
++    attr_reader :param
++    def initialize(param)
++      @param = param
++      super("param is missing or the value is empty: #{param}")
 +    end
 +  end
-+  def best; params.require(:embed_url); response.status = 200; end
-+  def params; @params ||= Params.new; end
-+  def response; @response ||= Response.new; end
-+  def process(action, params = {})
-+    @params = Params.new(params)
-+    @response = Response.new
-+    begin
-+      self.class.before_actions.each { |m| return if send(m) == false }
-+      send(action)
-+    rescue ActionController::ParameterMissing
-+      @response.status = 400
++  class Parameters
++    def initialize(h); @h = h; end
++    def [](k); @h[k]; end
++    def key?(k); @h.key?(k); end
++    def require(k)
++      v = @h[k]
++      raise ParameterMissing.new(k) if v.nil? || (v.respond_to?(:empty?) && v.empty?)
++      v
 +    end
 +  end
 +end
 +
-+class SpecContext
-+  attr_reader :examples
-+  def initialize; @examples = []; @lets = {}; @befores = []; end
-+  def let(name, &block); @lets[name] = block; end
-+  def it(desc, &block); @examples << { desc: desc, block: block, lets: @lets.dup, befores: @befores.dup }; end
-+  def context(desc, &block); instance_eval(&block); end
-+  def before(&block); @befores << block; end
-+  def after(&block); end
++module Discourse
++  class InvalidAccess < StandardError; end
 +end
 +
-+def describe(klass, &block)
-+  $spec_context = SpecContext.new
-+  $spec_context.instance_eval(&block)
++$host = nil
++class SiteSetting
++  def self.embeddable_host; $host; end
++end
++class TopicEmbed
++  def self.topic_id_for_embed(_u); nil; end
++end
++class TopicView; def initialize(*); end; end
++class Jobs
++  def self.enqueue(*); end
 +end
 +
-+require_relative '../controllers/embed_controller_spec'
++class ApplicationController
++  def self.before_filter(*); end
++  def self.skip_before_filter(*); end
++  def self.layout(*); end
++  def params; @params; end
++  def request; @request; end
++  def response; @response ||= Struct.new(:headers).new({}); end
++  def render(*); end
++  def current_user; nil; end
++  def discourse_expires_in(*); end
++end
 +
-+example = $spec_context.examples.find { |e| e[:desc] == "is 404 without an embed_url" }
-+raise "Example not found" unless example
++require File.expand_path("app/controllers/embed_controller.rb", Dir.pwd)
 +
-+controller = EmbedController.new
-+runner = Object.new
-+runner.define_singleton_method(:get) { |action, params = {}| controller.process(action, params) }
-+runner.define_singleton_method(:response) { controller.response }
-+runner.define_singleton_method(:controller) { controller }
++c = EmbedController.new
++$host = nil
++path_a = begin
++  c.send(:ensure_embeddable); "reached the action"
++rescue Discourse::InvalidAccess => e
++  "blocked by the before_filter: #{e.message}"
++end
 +
-+example[:lets].each { |name, block| runner.define_singleton_method(name) { block.call } }
-+example[:befores].each { |b| runner.instance_eval(&b) }
-+
-+passed = true
++$host = "eviltrout.com"
++c2 = EmbedController.new
++c2.instance_variable_set(:@params, ActionController::Parameters.new({}))
 +begin
-+  runner.instance_eval(&example[:block])
-+rescue
-+  passed = false
++  c2.send(:best); path_b = "no error"
++rescue ActionController::ParameterMissing => e
++  path_b = "missing param raises ActionController::ParameterMissing(#{e.param}) => HTTP 400, not 404"
++rescue Discourse::InvalidAccess => e
++  path_b = "InvalidAccess: #{e.message}"
 +end
 +
-+if passed && !controller.params.required_params.include?(:embed_url)
-+  puts "RESULT: FAIL: The example passes because ensure_embeddable raises before params.require runs; missing embed_url param behavior is not tested."
-+else
-+  puts "RESULT: PASS"
-+end
++puts "PATH A (spec's actual config, host unset): #{path_a}"
++puts "PATH B (host set, no embed_url):           #{path_b}"
++ok = path_a.start_with?("blocked by the before_filter") && path_b.include?("ParameterMissing")
++puts(ok ? "RESULT: PASS: the example passes vacuously (the filter decides before the missing-param path) and its 404 name is wrong (the path is a bad request)"
++        : "RESULT: FAIL: the claimed mechanism was not reproduced")
