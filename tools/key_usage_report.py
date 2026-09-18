@@ -5,7 +5,17 @@ wall minutes, tokens in/out/cached. Optional --hours N window (default all)."""
 import json, sys, time, collections
 from pathlib import Path
 
-path = Path(__file__).resolve().parents[1] / "logs/key_usage.jsonl"
+_root = Path(__file__).resolve().parents[1]
+# committed input first (the repo-root logs/ is gitignored scratch); fall back to the working copy
+path = _root / "analysis/inputs/key_usage.jsonl"
+if not path.exists():
+    path = _root / "logs/key_usage.jsonl"
+if not path.exists():
+    raise SystemExit(
+        "FATAL: the GLM gateway ledger (logs/key_usage.jsonl) is missing.\n"
+        "  Expected the committed copy at analysis/inputs/key_usage.jsonl or a working copy in logs/.\n"
+        "  It backs the §10 caveat that gateway-level retry calls are excluded from per-run figures."
+    )
 hours = float(sys.argv[sys.argv.index("--hours") + 1]) if "--hours" in sys.argv else None
 cutoff = time.time() - hours * 3600 if hours else 0
 KEY_NAMES = {0: "primary (HARNESS_KEYS_FILE)", 1: "extra-1"}

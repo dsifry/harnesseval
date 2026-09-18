@@ -42,7 +42,10 @@ mkdir -p ~/.config/harnesseval && chmod 700 ~/.config/harnesseval
 cat > ~/.config/harnesseval/keys.env <<'EOF'
 HARNESS_ANTHROPIC_API_KEY=sk-ant-...
 HARNESS_OPENAI_API_KEY=sk-...
-HARNESS_LUNAROUTE_API_KEY=...        # only if you run GLM/Kimi via Lunaroute
+HARNESS_LUNAROUTE_API_KEY=...        # OPTIONAL: only for the open-weight GLM/Kimi lanes, and only if you
+                                     # use a Lunaroute gateway. Any OpenAI-compatible endpoint works
+                                     # (own router, OpenRouter, vLLM, or the provider directly) - set
+                                     # LUNAROUTE_BASE_URL accordingly or call the provider API directly.
 LUNAROUTE_BASE_URL=https://gw.lunaroute.com/v1
 HARNESS_MARTIAN_API_KEY=...          # optional: Martian-proxy judge cross-check
 EOF

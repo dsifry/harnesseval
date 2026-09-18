@@ -1353,6 +1353,13 @@ python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt     # numpy + matplotlib — the published numbers need nothing else
 ```
 
+**API keys: none are needed for the published numbers.** Every step below is deterministic and offline. Only
+the model-running steps (which produced the `runs/` registry and the stored LLM artifacts) need keys: follow
+`INSTALL.md` §3 and use **your own** OpenAI / Anthropic credentials. **Lunarroute is optional** — it is merely
+the OpenAI-compatible gateway this campaign happened to use for the open-weight GLM/Kimi lanes; any router or
+direct provider works (`HARNESS_LUNAROUTE_*` in `harnesseval/keys.py`). No key material is committed: the
+harness reads keys from a file outside the repo (`~/.config/harnesseval/keys.env`, chmod 600).
+
 **All required inputs are committed** (verified by re-running the chain in a fresh clone):
 
 | input | where | size |
@@ -1362,6 +1369,7 @@ python3 -m venv .venv
 | §10b/§10c LLM artifacts (semantic clustering, overlap checks) | `analysis/exp_union_semantic_pilot_*.json`, `analysis/semantic_*.json` | 6 + 34 files |
 | **benchmark golden comments** (the 42 goldens + severity) | `analysis/inputs/golden_comments/` (5 files, vendored) | 144 KB |
 | verified hidden-gold evidence | `analysis/verified_gold/` (defects, tests, fixes, logs, tarballs) | 3.7 MB + 4.5 MB |
+| GLM gateway ledger (backs the §10 caveat) | `analysis/inputs/key_usage.jsonl` (13,475 calls, no key material) | 3.2 MB |
 
 > The benchmark's golden comments are **vendored** at `analysis/inputs/golden_comments/` because the upstream
 > checkout lives in `third_party/`, which is gitignored (and is a nested git checkout, so its files cannot be
@@ -1389,6 +1397,12 @@ python3 -m venv .venv
 .venv/bin/python tools/final_report_figures_true_gold.py  # → the true-gold charts
 .venv/bin/python tools/final_report_tables.py             # → markdown tables (writes /tmp/final_report_tables.md)
 .venv/bin/python tools/final_report_html.py               # → analysis/figures/interactive_dashboard.html
+
+# 5. the two scope/ledger checks the report cites (no keys needed)
+.venv/bin/python tools/verify_hitlist.py --verbose        # top-6 scope check (§4). NOTE: exits 1 while
+                                                          #   hitlist rows remain unrun - expected, 29/111,
+                                                          #   the disclosed fable coverage gap. Informational.
+.venv/bin/python tools/key_usage_report.py                # GLM gateway ledger (§10 caveat)
 ```
 
 **Inputs vs outputs.** These files are committed **inputs** produced by the verification campaign, not by this
