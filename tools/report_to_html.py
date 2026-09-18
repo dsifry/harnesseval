@@ -51,7 +51,9 @@ CSS = """
 * { box-sizing: border-box; }
 body { margin:0; padding:0 0 6rem; background:var(--bg); color:var(--ink);
        font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; }
-main { max-width: 62rem; margin: 0 auto; padding: 2.5rem 1.5rem; }
+main { width: min(96vw, 122rem); margin: 0 auto; padding: 2.5rem clamp(.75rem, 2.5vw, 2.5rem) 4rem; }
+/* prose keeps a readable measure; tables, figures and callouts span the full (wide) container */
+main > p, main > ul, main > ol, main > blockquote { max-width: 58rem; }
 h1,h2,h3,h4 { line-height:1.25; font-weight:700; scroll-margin-top:1rem; }
 h1 { font-size:1.9rem; margin:2.5rem 0 1rem; border-bottom:3px solid var(--accent); padding-bottom:.4rem; }
 h2 { font-size:1.45rem; margin:2.4rem 0 .8rem; border-bottom:1px solid var(--rule); padding-bottom:.3rem; }
@@ -89,8 +91,11 @@ figure.callout .fig-title { margin:0 0 .5rem; font-size:1.02rem; color:var(--ink
 .fig-badge-static { color:#5b6472; border-color:#d9dee5; background:#f4f6f8; }
 .fig-how { margin:.35rem 0 .9rem; color:var(--muted); font-style:italic; font-size:.93em; }
 .fig-body { margin:.4rem 0 .9rem; }
-.fig-body img { max-width:100%; height:auto; display:block; margin:0 auto; }
-.plotly-fig { width:100%; height:540px; }
+.fig-body img { width:100%; max-width:100%; height:auto; display:block; margin:0 auto; }
+.plotly-fig { width:100%; height:clamp(420px, 58vh, 820px); }
+.fig-controls { margin:.2rem 0 .5rem; font-size:.85em; color:var(--muted); }
+.fig-controls label { cursor:pointer; user-select:none; }
+@media (max-width: 760px) { main { width: 100%; padding: 1.5rem .9rem 3rem; } .plotly-fig { height: 420px; } }
 .fig-fallback { margin-top:.6rem; }
 .fig-fallback summary { cursor:pointer; color:var(--muted); font-size:.85em; }
 .fig-fallback img { margin-top:.6rem; }figcaption.fig-takeaway { margin-top:.4rem; padding-left:.8rem; border-left:3px solid var(--rule);
@@ -110,13 +115,13 @@ BODY_TMPL = """<!DOCTYPE html>
 </head>
 <body>
 <main>
+{body}
+{footer}
 <p class="generated">This page is a generated HTML rendering of <code>{src}</code> —
 the Markdown file is the source of truth. Generated {date} by
 <code>tools/report_to_html.py</code>{tagline}. Figures are regenerated renderings;
 the interactive charts carry the same data as the
 <a href="analysis/figures/interactive_dashboard.html">interactive dashboard</a>.</p>
-{body}
-{footer}
 </main>
 {boot}
 </body>
@@ -149,14 +154,29 @@ _BOOT_SCRIPT = """<script>
       return;
     }
     figs.forEach(function (el) {
-      var raw = document.getElementById('data-' + el.id.replace(/^fig-/, ''));
+      var base = el.id.replace(/^fig-/, '');
+      var raw = document.getElementById('data-' + base);
       if (!raw) { return; }
       try {
         var spec = JSON.parse(raw.textContent);
-        window.Plotly.newPlot(el, spec.traces, spec.layout, spec.config || {}).then(function () {
+        var ciRaw = document.getElementById('data-' + base + '-ci');
+        var ciSpec = ciRaw ? JSON.parse(ciRaw.textContent) : null;
+        var useCi = false;
+        var layout = spec.layout || {};
+        // let the chart fill the responsive container
+        delete layout.width; delete layout.height;
+        if (ciSpec && ciSpec.layout) { delete ciSpec.layout.width; delete ciSpec.layout.height; }
+        var cfg = spec.config || {}; cfg.responsive = true; cfg.displayModeBar = false;
+        var draw = function () {
+          var s2 = (useCi && ciSpec) ? ciSpec : spec;
+          return window.Plotly.react(el, s2.traces, s2.layout || {}, cfg);
+        };
+        draw().then(function () {
           var fb = fallbackFor(el);
           if (fb) { fb.open = false; }   // chart is live; fold the static copy away
         });
+        var box = document.querySelector('input.ci-toggle[data-fig="' + base + '"]');
+        if (box) { box.addEventListener('change', function () { useCi = box.checked; draw(); }); }
       } catch (e) {
         console.error('figure render failed:', el.id, e);
         el.style.display = 'none';
@@ -286,15 +306,24 @@ def render_callout(blk: list[str], inline_md: markdown.Markdown, interactive_cou
     if live:
         spec = json.loads(spec_path.read_text())
         payload = json.dumps(spec).replace("</", "<\\/")
+        ci_path = INTERACTIVE / f"{base}_ci.json"
+        ci_payload = None
+        if ci_path.exists():
+            ci_payload = json.dumps(json.loads(ci_path.read_text())).replace("</", "<\\/")
         uri = _data_uri(asset)
         interactive_count[0] += 1
         parts.append('<div class="fig-body">')
+        if ci_payload is not None:
+            parts.append('<p class="fig-controls"><label><input type="checkbox" class="ci-toggle" '
+                         f'data-fig="{base}"> show 95% CIs</label></p>')
         parts.append(f'<div class="plotly-fig" id="fig-{base}"></div>')
         parts.append('<details class="fig-fallback" open><summary>Static fallback '
                      '(used automatically when JavaScript is unavailable)</summary>'
                      f'<img alt="{alt}" src="{uri}"></details>')
         parts.append("</div>")
         parts.append(f'<script type="application/json" id="data-{base}">{payload}</script>')
+        if ci_payload is not None:
+            parts.append(f'<script type="application/json" id="data-{base}-ci">{ci_payload}</script>')
     else:
         uri = _data_uri(asset)
         parts.append(f'<div class="fig-body"><img alt="{alt}" src="{uri}"></div>')
@@ -354,7 +383,7 @@ def main(argv: list[str]) -> None:
         render(Path(argv[1]), Path(argv[2]), Path(argv[1]).stem)
         return
     render(ROOT / "REPORT.md", ROOT / "REPORT.html",
-           "Automated code review: harness vs one-shot — calibrated evaluation")
+           "Open-weight review harnesses match Opus and Sol at a fraction of the cost")
     render(ROOT / "EXECUTIVE_SUMMARY.md", ROOT / "EXECUTIVE_SUMMARY.html",
            "Automated code review — executive summary")
 

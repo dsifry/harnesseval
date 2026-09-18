@@ -1,4 +1,10 @@
-# Calibrated cost/benefit evaluation of automated code-review harnesses
+# Open-weight review harnesses match Opus and Sol at a fraction of the cost — and beat one-shot frontier models on real bugs
+
+**In one line:** harnesses running open-weight GLM models match or beat the best commercial harness cells on our
+quality metric (F2′ **0.494** vs 0.460) at **2.3×–27.6× lower cost per review**, and they beat one-shot frontier
+models on real bugs in **39/42** matched model·effort pairs. On the matched frontier-model comparison the cheap
+GLM-flash harness runs at **1/57 per blended token and 1/38 per task**. The trade is latency, not capability;
+these cells are production-capable on state-of-the-art review work.
 
 *(report revision 2026-09-18 · tag `report-2026-09-18`)*
 
@@ -32,6 +38,20 @@ set built by auditing the campaign's own discoveries into 105 individually test-
 owning an executed fail-on-head/pass-on-fix test (147 distinct bugs; a September 2026 audit withdrew
 three and merged two duplicates). Unmatched findings are adjudicated real-bug/hallucination, headline
 numbers carry PR-level cluster-bootstrap intervals, and cost, tokens and wall-clock are metered.
+
+> **Figure 1 — Value for money: what a dollar per review buys** *(interactive — toggle the legend key to isolate model families; hover cells for values)*
+>
+> How to read: each point is one complete cell (a model × framework × effort combination); the x-axis is
+> metered dollars per PR review (log scale) and the y-axis is F2′, our recall-weighted quality composite on
+> the 147-bug true golden set. Lines trace each model's effort ladder; the recommended cell is annotated.
+>
+> ![Value for money: dollars per PR review versus F2' on the true golden set](analysis/figures/dash_chart1a.png)
+>
+> **Takeaway:** the open-weight GLM harness cells sit at the top-left — the best quality per dollar. The
+> best commercial harness cell costs **$6.12 per review** for F2′ 0.460, while GLM vision/flash harness cells
+> reach equal-or-better F2′ at **$0.22–$0.63 per review (9.8×–27.6× cheaper)**. This is the chart to look at
+> first: it is the whole cost/quality story in one view.
+
 
 Harnesses beat one-shot prompting on recall in 39 of 42 matched model·effort pairs (mean Δrecall +0.135;
 peak-recall ratio 1.63×). Within harnesses, metareview is the better bet on average (ΔF2′ +17/−4 across
@@ -544,6 +564,21 @@ on which the best vanilla cell (0.482, v1 instrument) narrowly leads.
 > **Takeaway:** the harness cells occupy the top of the cloud, and the interval on any one cell is wider
 > than the gaps between the leaders — which is why the pair-level facts, not a cell ranking, carry the claim.
 
+**What each cell is actually credited with.**
+
+> **Figure 3.1c — How many real bugs does each setup actually find — and how many do we miss?** *(interactive — the dashboard's own panel; toggle the legend key to isolate components; hover bars for counts)*
+>
+> How to read: one horizontal bar per cell, showing the distinct real bugs it found out of the 147-bug true
+> set, split into original goldens (the benchmark's own 42) and hidden-gold verified defects (105 more); the
+> marker is the cell's coverage ceiling. Bars are ordered by framework within model.
+>
+> ![Distinct real bugs found per cell, split into original goldens and hidden-gold verified defects](analysis/figures/dash_chart1f.png)
+>
+> **Takeaway:** switching from the benchmark's 42 goldens to the 147-bug true set lifts what every cell is
+> credited with — the benchmark simply never scores 105 of the 147 bugs — and the best cell still reaches only
+> 88 of 147 (`opus · CE · medium`: 35 goldens + 53 verified defects). The harness cells lead; no cell is
+> close to finding everything (§3.1 above).
+
 **Why the recall levels — and therefore F2′ — look low, and why no cell finds everything.**
 The denominator is not a list of things an agent could reasonably be expected to find; it is what the whole
 campaign (2,416 healthy runs, unioned and then audited) turned up. Three facts follow:
@@ -895,15 +930,18 @@ Values < $0.01 are shown in cents (¢) to avoid leading-zero drowning; ≥ $0.01
 
 #### 3.4.3 Why one harness is cheap and another is not (token composition)
 
-> **Figure 3.4b — Where the tokens go** *(static figure)*
+> **Figure 3.4b — Where a review's token bill actually comes from** *(interactive — the dashboard's own panel; toggle the legend key to isolate components)*
 >
-> How to read: stacked token composition per review (fresh input, cached input, output) for each cell; the
-> cached-input share is what makes a frontier harness's *blended* rate look cheap.
+> How to read: stacked token composition per review (fresh input, cached read, cache write, output) for every
+> cell, at each effort level; the cached-read share is what makes a frontier harness's *blended* per-token
+> rate look cheap. Hover any bar for its component volumes.
 >
-> ![Token composition per cell, split into fresh input, cached input and output](analysis/figures/fig_token_composition.png)
+> ![Token composition per cell, split into fresh input, cached read, cache write and output](analysis/figures/dash_chart3.png)
 >
 > **Takeaway:** the frontier harnesses are input-cache machines — roughly 75–90% of their tokens are cached
-> reads at a tenth of list input price — while the GLM harnesses simply burn 10–20× fewer tokens.
+> reads at a tenth of list input price — while the GLM harnesses simply burn 10–20× fewer tokens. The full
+> <a href="analysis/figures/interactive_dashboard.html">interactive dashboard</a> remains the place to filter
+> every panel by model, framework and effort at once.
 
 The frontier harnesses are *input-cache* machines —
 opus-5 CE/MRV burn 1.7–4.4M tokens per PR, ~75–90% of them **cached reads at 10% of list input**
@@ -916,15 +954,17 @@ call is ~100k tokens — but they find the fewest real issues (T4 recall deltas)
 
 #### 3.4.4 Wall-clock
 
-> **Figure 3.4c — Wall-clock per review** *(static figure)*
+> **Figure 3.4c — Does a slower setup buy a better review?** *(interactive — the dashboard's own panel; toggle the legend key; the 95% CI checkbox sits under the chart)*
 >
-> How to read: per-cell wall-clock seconds per PR review (median with CI), at each effort level. The same
-> numbers appear in the wall column of T2.
+> How to read: wall-clock seconds per PR review (x) against F2′ (y), one point per cell; points further right
+> took longer per review. Toggling the 95% CI checkbox shows the cluster-bootstrap whiskers. The same
+> seconds appear in the wall column of T2.
 >
-> ![Median wall-clock seconds per review, per cell](analysis/figures/fig_wallclock.png)
+> ![Wall-clock seconds per review versus F2′, per cell](analysis/figures/dash_chart1b.png)
 >
-> **Takeaway:** at low effort the GLM cells are latency-competitive (`glm-vis MRV low` 95 s/run vs
-> `opus-5 CE low` 110 s); at medium and high effort the GLM lane is gateway-throughput-limited — an
+> **Takeaway:** latency does not buy quality — the highest-F2′ cells are not the slowest. At **low effort**
+> the GLM cells are latency-competitive (`glm-vis MRV low` 95 s/run vs `opus-5 CE low` 110 s); at medium and
+> high effort the GLM lane is gateway-throughput-limited (e.g. glm-vis MRV medium ~2,282 s/run) — an
 > operational difference, not a quality one (§3.5.5).
 
 At **low effort** the recommendation
@@ -983,15 +1023,15 @@ run (latency/quality; the low-effort GLM cells sit in the fast/high-F2′ corner
 **(d)** $ per true bug found vs recall (true golden set; the buyer's panel: what a caught real
 bug costs, against how many are caught).
 
-> **Figure 3.4f — What a caught real bug costs** *(static figure)*
+> **Figure 3.4f — What it costs to catch one true bug** *(interactive — the dashboard's own panel; toggle the legend key; the 95% CI checkbox sits under the chart)*
 >
-> How to read: dollars per true bug found (true golden set: 42 goldens + 105 verified defects) against
-> recall, per cell, with 95% CIs.
+> How to read: dollars per true bug found (x; true golden set = 42 goldens + 105 verified defects) against
+> F2′ (y), one point per cell, with the 95% CI checkbox showing the whiskers.
 >
-> ![Dollars per true bug found versus recall, per cell](analysis/figures/fig_true_gold_efficiency.png)
+> ![Dollars per true bug found versus F2′, per cell](analysis/figures/dash_chart1c.png)
 >
-> **Takeaway:** the harness cells' cheap end is very cheap per real bug (GLM rows), and the premium
-> frontier cells pay multiples of that for their recall — the same trade as figure 3.4d, from the
+> **Takeaway:** the harness cells' cheap end is very cheap per true bug (the GLM rows), while the premium
+> frontier cells pay multiples of that for the same quality — the same trade as figure 3.4d, seen from the
 > cost-per-bug side.
 
 **Interactive versions of all main figures** — single-file HTML, no server needed:
@@ -1288,30 +1328,45 @@ on average, model *rankings* mostly agree (Spearman 0.80 median; CE-low 0.37 the
 fable compound/metareview cells are gaps (rate-cap), opus/sonnet vanilla are top-6-only by operator
 decision, GLM partial fills were stopped at the data freeze.
 
-> **Figure 3.6a — Does the six-PR sample distort the picture?** *(interactive — toggle the key to isolate
-> cells; hover for values)*
+> **Figure 3.6a — Does the six-PR sample distort the picture?** *(interactive — the dashboard's own panel; toggle the legend key to isolate models; hover for values)*
 >
-> How to read: each point compares a cell's score on the selected six highest-severity PRs (y) with the
-> same score on the full 50-PR benchmark (x). Points above the diagonal therefore did *better* on the
-> selected six than on the full set — the opposite of a "these PRs were harder than average" reading.
+> How to read: one point per cell, showing that cell's recall on the selected six highest-severity PRs minus
+> its recall on the full 50-PR benchmark (Δ, x-axis; the vertical line is zero). A point **right** of zero did
+> *better* on the selected six than on the full set — the opposite of a "these PRs were harder than average"
+> reading. Models are grouped, so each key entry is one model's ladder of cells. (The dashboard adds an
+> F1 toggle for this panel; the embedded version shows recall.)
 >
-> ![Top-6 versus full-50 scores per cell, showing the selection effect](analysis/figures/fig_selection_effect.png)
+> ![Per-cell Δ recall (top-6 minus full-50), grouped by model](analysis/figures/dash_chart4.png)
 >
-> **Takeaway:** recall is essentially unbiased by the selection (mean gap +0.006, median +0.014), while
-> harness F1 is overstated by about +0.084 on average; model rankings mostly agree (Spearman 0.80 median).
+> **Takeaway:** recall is essentially unbiased by the selection (mean gap +0.006, median +0.014; most points
+> cluster on the zero line), while harness F1 is overstated by about +0.084 on average; model rankings mostly
+> agree (Spearman 0.80 median, CE-low 0.37 the exception).
 
+
+> **Figure 3.6b — Can you trust the six PRs this report went deep on?** *(interactive — the dashboard's own panel; toggle the legend key; hover for values)*
+>
+> How to read: one point per PR in the benchmark — x is the summed original-golden severity weight
+> (Critical = 4 … Low = 1), y is the per-PR expanded recall. The six PRs this report went deep on are
+> highlighted (with their mean), against the other 44.
+>
+> ![Per-PR golden severity weight versus expanded recall, with the six selected PRs highlighted](analysis/figures/dash_chart5.png)
+>
+> **Takeaway:** the six selected PRs are the benchmark's highest summed original-golden severity, not a
+> random draw — every top-6 number in this report is conditional on that choice. The full-50 checks above
+> back the *direction* of the conclusions, and the sampling disclosure is in `analysis/COVERAGE.md`.
 
 ### 3.7 Effort ladder and cost curves
 
 
-> **Figure 3.7a — The effort ladder: does more thinking buy more quality?** *(static figure)*
+> **Figure 3.7a — The effort ladder: does more thinking buy more quality?** *(interactive — the dashboard's own panel; toggle the legend key to isolate frameworks/models; hover for values)*
 >
-> How to read: F1 against dollars per run for each model within each framework, with CIs on both axes.
-> Movement up-and-right is buying quality with money; movement sideways is not.
+> How to read: metered dollars per run (x, log scale) against F2′ (y), one point per cell, with each model's
+> low→medium→high effort steps connected inside its framework. Movement up-and-right is buying quality with
+> money; movement sideways (or down) is not.
 >
-> ![F1 versus dollars per run, per model, within each framework](analysis/figures/fig_effort_ladder.png)
+> ![Metered dollars per run versus F2′, by effort step within framework](analysis/figures/dash_chart2.png)
 >
-> **Takeaway:** the GLM rows buy F1 with dollars at low effort and then flatten, while the frontier rows
+> **Takeaway:** the GLM rows buy F2′ with dollars at low effort and then flatten, while the frontier rows
 > start high-cost and mostly move sideways (§3.5.3) — higher thinking budgets do not reliably buy more bugs.
 > Cost per cell is figure 3.4a.
 
