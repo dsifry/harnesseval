@@ -2,7 +2,7 @@
 
 **Claim.** AddGuestsDialog error toast fallback is unreachable; users see raw error codes/undefined prefix
 
-**Verdict in this bundle:** `defect_present_before_pr` ({'base': 'FAIL', 'head': 'FAIL', 'fixed': 'PASS'})
+**Verdict in this bundle:** `base_not_comparable` ({'base': 'FAIL', 'head': 'FAIL', 'fixed': 'PASS'})
 **Fidelity:** `repo_suite_harness_config`  ·  **Authoring model:** `deepseek-4.1-flash`
 
 Everything needed to check this yourself is in this directory:

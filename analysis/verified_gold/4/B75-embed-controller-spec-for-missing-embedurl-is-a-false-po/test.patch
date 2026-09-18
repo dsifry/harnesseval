@@ -1,0 +1,98 @@
+$LOADED_FEATURES << 'spec_helper.rb'
+
+class SiteSetting
+  class << self; attr_accessor :embeddable_host; end
+  @embeddable_host = nil
+end
+
+module ActionController
+  class ParameterMissing < StandardError; end
+end
+
+class Params
+  attr_reader :required_params
+  def initialize(params = {}); @params = params; @required_params = []; end
+  def require(key)
+    @required_params << key
+    raise ActionController::ParameterMissing, key unless @params.key?(key)
+    @params[key]
+  end
+end
+
+class Response
+  attr_accessor :status, :headers
+  def initialize; @status = 200; @headers = {}; end
+  def success?; status == 200; end
+  def should_not(m); raise "fail" if m.matches?(self); end
+  def should(m); raise "fail" unless m.matches?(self); end
+end
+
+class BeSuccess; def matches?(t); t.success?; end; end
+def be_success; BeSuccess.new; end
+
+class EmbedController
+  class << self; attr_accessor :before_actions; end
+  self.before_actions = []
+  def self.before_action(m); before_actions << m; end
+  def ensure_embeddable
+    if SiteSetting.embeddable_host.nil? || SiteSetting.embeddable_host.empty?
+      response.status = 404
+      false
+    end
+  end
+  def best; params.require(:embed_url); response.status = 200; end
+  def params; @params ||= Params.new; end
+  def response; @response ||= Response.new; end
+  def process(action, params = {})
+    @params = Params.new(params)
+    @response = Response.new
+    begin
+      self.class.before_actions.each { |m| return if send(m) == false }
+      send(action)
+    rescue ActionController::ParameterMissing
+      @response.status = 400
+    end
+  end
+end
+
+class SpecContext
+  attr_reader :examples
+  def initialize; @examples = []; @lets = {}; @befores = []; end
+  def let(name, &block); @lets[name] = block; end
+  def it(desc, &block); @examples << { desc: desc, block: block, lets: @lets.dup, befores: @befores.dup }; end
+  def context(desc, &block); instance_eval(&block); end
+  def before(&block); @befores << block; end
+  def after(&block); end
+end
+
+def describe(klass, &block)
+  $spec_context = SpecContext.new
+  $spec_context.instance_eval(&block)
+end
+
+require_relative '../controllers/embed_controller_spec'
+
+example = $spec_context.examples.find { |e| e[:desc] == "is 404 without an embed_url" }
+raise "Example not found" unless example
+
+controller = EmbedController.new
+runner = Object.new
+runner.define_singleton_method(:get) { |action, params = {}| controller.process(action, params) }
+runner.define_singleton_method(:response) { controller.response }
+runner.define_singleton_method(:controller) { controller }
+
+example[:lets].each { |name, block| runner.define_singleton_method(name) { block.call } }
+example[:befores].each { |b| runner.instance_eval(&b) }
+
+passed = true
+begin
+  runner.instance_eval(&example[:block])
+rescue
+  passed = false
+end
+
+if passed && !controller.params.required_params.include?(:embed_url)
+  puts "RESULT: FAIL: The example passes because ensure_embeddable raises before params.require runs; missing embed_url param behavior is not tested."
+else
+  puts "RESULT: PASS"
+end

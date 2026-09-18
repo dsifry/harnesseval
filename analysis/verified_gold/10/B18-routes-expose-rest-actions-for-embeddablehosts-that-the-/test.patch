@@ -1,0 +1,107 @@
+# Standalone regression test for claim in config/routes.rb:
+#   resources :embeddable_hosts declares index/show/new/edit routes
+#   that Admin::EmbeddableHostsController does not implement.
+#
+# We load the real config/routes.rb with minimal stubs and inspect the
+# generated DSL calls to see whether embeddable_hosts is restricted with
+# `only: [:create, :update, :destroy]`.
+
+def require(name)
+  return false if %w[sidekiq/web logster/web].include?(name)
+  super
+end
+
+def require_dependency(*); end
+
+module Sidekiq;   class Web; end; end
+module Logster;   class Web; end; end
+module Scheduler; class Web; end; end
+
+class AdminConstraint
+  def initialize(*); end
+  def matches?(*); true; end
+end
+class StaffConstraint
+  def initialize(*); end
+  def matches?(*); true; end
+end
+class HomepageConstraint
+  def initialize(*); end
+  def matches?(*); true; end
+end
+class PermalinkConstraint
+  def initialize(*); end
+  def matches?(*); true; end
+end
+
+module Rails
+  class Env
+    def development?; false; end
+  end
+  def self.env; Env.new; end
+end
+
+class RoutesRecorder
+  attr_reader :resources_calls
+  def initialize
+    @resources_calls = []
+    @ns = []
+  end
+
+  def draw(&block); instance_eval(&block); end
+
+  def namespace(*args, &block)
+    @ns.push(args.first)
+    instance_eval(&block) if block
+    @ns.pop
+  end
+
+  def resources(*args, &block)
+    opts = args.last.is_a?(Hash) ? args.pop : {}
+    @resources_calls << { ns: @ns.dup, name: args.first, opts: opts }
+    instance_eval(&block) if block
+  end
+
+  def method_missing(_name, *args, &block)
+    instance_eval(&block) if block
+  end
+
+  def respond_to_missing?(*); true; end
+end
+
+module Discourse
+  class Application
+    def self.routes
+      @routes ||= RoutesRecorder.new
+    end
+  end
+end
+
+require_relative "../../config/routes"
+
+rec = Discourse::Application.routes
+calls = rec.resources_calls.select { |c| c[:name] == :embeddable_hosts }
+
+if calls.empty?
+  puts "RESULT: FAIL: resources :embeddable_hosts not declared in config/routes.rb"
+  exit 1
+end
+
+call = calls.first
+only = call[:opts][:only]
+
+if only.nil?
+  puts "RESULT: FAIL: resources :embeddable_hosts (ns=#{call[:ns].inspect}) is unrestricted; " \
+       "REST index/show/new/edit routes are exposed even though the controller " \
+       "implements only create/update/destroy"
+  exit 1
+end
+
+normalized = Array(only).map(&:to_sym).sort
+if normalized == [:create, :destroy, :update]
+  puts "RESULT: PASS"
+else
+  puts "RESULT: FAIL: resources :embeddable_hosts restricted to #{only.inspect}, " \
+       "expected [:create, :update, :destroy]"
+  exit 1
+end

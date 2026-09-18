@@ -1,0 +1,54 @@
+require 'tempfile'
+require 'open3'
+
+TARGET = 'app/assets/javascripts/discourse/adapters/rest.js.es6'
+
+abort('missing target file') unless File.exist?(TARGET)
+abs = File.expand_path(TARGET)
+
+src = File.read(TARGET)
+if src.include?("type.replace('_', '-')")
+  puts "real source uses single-underscore replacement: type.replace('_', '-')"
+else
+  puts 'real source does not use single-underscore replacement'
+end
+
+# Harness that loads the REAL file (only stripping the ES6 export syntax),
+# stubs the minimum globals, then drives basePath with a multi-underscore
+# model name whose dashed form we register in ADMIN_MODELS.
+harness = <<~'JS'
+  const fs = require('fs');
+  let src = fs.readFileSync(process.argv[2], 'utf8');
+  src = src.replace(/^export default /m, 'var Adapter = ');
+  src = src.replace(/^export /gm, '');
+  src += "\nglobal.__check = function(){ ADMIN_MODELS.push('foo-bar-baz'); var inst = Adapter.create(); return inst.basePath(null, 'foo_bar_baz'); };\n";
+
+  global.Discourse = { ajax: function(){} };
+  global.Ember = {
+    Object: { extend: function(o){ o.create = function(){ return o; }; return o; } },
+    String: { underscore: function(s){ return s; }, pluralize: function(s){ return s; } }
+  };
+
+  eval(src);
+  process.stdout.write(String(global.__check()));
+JS
+
+f = Tempfile.new(['rest_verify', '.js'])
+f.write(harness)
+f.close
+
+out, err, st = Open3.capture3('node', f.path, abs)
+
+unless st.success?
+  puts "node failed: #{err}"
+  abort('RESULT: FAIL: harness could not load real file')
+end
+
+result = out.strip
+puts "basePath(store, 'foo_bar_baz') => #{result.inspect} (expected '/admin/')"
+
+if result == '/admin/'
+  puts 'RESULT: PASS'
+else
+  puts "RESULT: FAIL: multi-underscore type 'foo_bar_baz' routed to #{result.inspect} instead of '/admin/' because type.replace('_','-') only replaces the first underscore"
+end

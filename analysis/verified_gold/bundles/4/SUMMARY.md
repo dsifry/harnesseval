@@ -1,6 +1,6 @@
 # Verified hidden gold — PR 4
 
-Candidates: 65 · verdicts: {'behavior_change_not_regression': 33, 'confirmed_regression': 3, 'inconclusive_env': 15, 'defect_present_before_pr': 6, 'unresolved_file': 8}
+Candidates: 70 · verdicts: {'behavior_change_not_regression': 34, 'confirmed_regression': 3, 'inconclusive_env': 15, 'defect_present_before_pr': 7, 'unresolved_file': 10, 'not_a_bug': 1}
 
 | bug id | bug | verdict | head | base | fix | file | tarball sha256 |
 |---|---|---|---|---|---|---|---|
@@ -37,6 +37,7 @@ Candidates: 65 · verdicts: {'behavior_change_not_regression': 33, 'confirmed_re
 | 4-B73 | B73-feed-item-url-fallback-uses-entryid-often-not-a-url-ca | `behavior_change_not_regression` | FAIL | ERROR:LoadError | PASS | `pollfeed.rb` | `a021944fd2f8…` |
 | 4-B74 | B74-embed-endpoint-trusts-spoofable-referer-embedurl-and-use | `behavior_change_not_regression` | FAIL | ERROR:LoadError | PASS | `app/controllers/embedcontroller.rb` | `ad98813f266c…` |
 | 4-B78 | B78-using--to-append-to-contents-mutates-the-callers-st | `behavior_change_not_regression` | FAIL | ERROR:LoadError | PASS | `lib/topicembed.rb` | `879ad002f024…` |
+| 4-B79 | B79-cache-miss-on-arbitrary-url-triggers-synchronous-full-rs | `behavior_change_not_regression` | FAIL | ERROR:LoadError | PASS | `topicretriever.rb` | `2ca6a4c2fd25…` |
 | 4-B04 | B04-destructive-force-true-in-createtable-migration-can-dr | `confirmed_regression` | FAIL | PASS | PASS | `db/migrate/20131223171005createtoptopics.rb` | `9f5abba87c9a…` |
 | 4-B34 | B34-gemfile-updated-with-new-gems-but-default-gemfilelock-no | `confirmed_regression` | FAIL | PASS | PASS | `Gemfile` | `813e4840d676…` |
 | 4-B51 | B51-skipvalidations-allows-saving-posts-topics-with-invalid | `confirmed_regression` | FAIL | PASS | PASS | `lib/post_revisor.rb` | `96e84151017c…` |
@@ -46,6 +47,7 @@ Candidates: 65 · verdicts: {'behavior_change_not_regression': 33, 'confirmed_re
 | 4-B32 | B32-embed-layout-references-standalone-embed-assets-that-are | `defect_present_before_pr` | FAIL | FAIL | PASS | `app/views/layouts/embed.html.erb` | `34fd6a5bd1b3…` |
 | 4-B57 | B57-erb-syntax-error-invalid-end-if-terminator-breaks-embed | `defect_present_before_pr` | FAIL | FAIL | PASS | `app/views/embed/best.html.erb` | `e91d7ff146ee…` |
 | 4-B62 | B62-requiredependency-nokogiri-can-raise-loaderror-in-r | `defect_present_before_pr` | FAIL | FAIL | PASS | `app/models/topicembed.rb` | `22c938f7918d…` |
+| 4-B80 | B80-embed-loading-page-auto-reloads-every-30s-amplifying-una | `defect_present_before_pr` | FAIL | ? | PASS | `app/views/embed/loading.html.erb` | `7f4b2e9c1eb1…` |
 | 4-B05 | B05-disqus-importer-silently-drops---category--c-support-and | `inconclusive_env` | FAIL | — | FAIL | `lib/tasks/disqus.thor` | `eadd658e5f08…` |
 | 4-B24 | B24-topicembed-import-mutates-caller-owned-contents-via-- | `inconclusive_env` | FAIL | — | ERROR:NoMethodError | `app/models/topicembed.rb` | `0d279e04b9a7…` |
 | 4-B31 | B31-pollfeed-specs-for-missing-url-username-are-vacuous-beca | `inconclusive_env` | FAIL | — | FAIL | `spec/jobs/pollfeedspec.rb` | `aab06f9711cf…` |
@@ -61,6 +63,7 @@ Candidates: 65 · verdicts: {'behavior_change_not_regression': 33, 'confirmed_re
 | 4-B64 | B64-embedded-iframe-height-is-posted-only-on-load-causing-cl | `inconclusive_env` | ? | — | — | `app/views/layouts/embed.html.erb` | `2e0d0ea9fd2d…` |
 | 4-B65 | B65-new--embed-best-route-is-unnamed-and-unconstrained-so-it | `inconclusive_env` | ERROR:LoadError | — | — | `config/routes.rb` | `b7612117be8e…` |
 | 4-B70 | B70-unescaped-requestreferer-interpolated-into-js-string-bre | `inconclusive_env` | ? | — | — | `app/views/layouts/embed.html.erb` | `83504a44329b…` |
+| 4-B75 | B75-embed-controller-spec-for-missing-embedurl-is-a-false-po | `not_a_bug` | PASS | — | — | `spec/controllers/embed_controller_spec.rb` | `8ed0b97e6c40…` |
 | 4-B19 | B19-disqusimport-regresses-to-live-http-fetch-per-thread-wit | `unresolved_file` | — | — | — | `lib/tasks/disqus.rake` | `c46f1212154e…` |
 | 4-B30 | B30-readability-import-sanitizer-preserves-javascript-urls-i | `unresolved_file` | — | — | — | `lib/import_remote/readability.rb` | `47c6d305376d…` |
 | 4-B43 | B43-falling-back-to-iid-when-link-is-blank-may-store-a-non-u | `unresolved_file` | — | — | — | `None` | `46efd7edcc35…` |
@@ -69,3 +72,5 @@ Candidates: 65 · verdicts: {'behavior_change_not_regression': 33, 'confirmed_re
 | 4-B54 | B54-referer-based-gating-breaks-for-referer-suppressing-clie | `unresolved_file` | — | — | — | `None` | `8d657b6d70cf…` |
 | 4-B59 | B59-migrations-add-postscookmethod-and-topicembeds-table-but | `unresolved_file` | — | — | — | `db/schema.rb` | `d60de81c7615…` |
 | 4-B66 | B66-embed-url-is-constructed-by-naive-string-concatenation-b | `unresolved_file` | — | — | — | `N/A (not referenced in the deduplicated reports; not modified in PR #4 diff)` | `c83ef1824962…` |
+| 4-B76 | B76-the-embeddablehost-setting-is-silently-config-sensitive- | `unresolved_file` | — | — | — | `None` | `219e48f528e8…` |
+| 4-B77 | B77-scheduled-and-inline-poll-can-run-concurrently-and-dupli | `unresolved_file` | — | — | — | `N/A (not referenced in reports; affected file not included in this PR diff)` | `a1d20b13bef5…` |

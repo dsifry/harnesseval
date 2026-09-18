@@ -1,0 +1,65 @@
+require 'uri'
+require_relative '../../lib/topic_retriever'
+
+# --- Minimum stubs so the real file loads and runs ---
+class SiteSetting
+  class << self
+    def embeddable_host; 'example.com'; end
+    def feed_polling_enabled?; false; end
+    def embed_by_username; 'admin'; end
+  end
+end
+
+class FakeRedis
+  def initialize; @h = {}; end
+  def setnx(k, v)
+    return false if @h.key?(k)
+    @h[k] = v
+    true
+  end
+  def expire(_k, _t); true; end
+end
+$redis = FakeRedis.new
+
+class FakeRelation
+  def initialize(v); @v = v; end
+  def exists?; @v; end
+end
+
+class TopicEmbed
+  class << self
+    attr_accessor :cache_hit, :imports
+    def where(_conds); FakeRelation.new(!!@cache_hit); end
+    def import_remote(user, url); (@imports ||= []) << [user, url]; end
+  end
+end
+TopicEmbed.cache_hit = false
+TopicEmbed.imports = []
+
+class FakeUser
+  def blank?; false; end
+end
+
+class User
+  def self.where(_h); self; end
+  def self.first; FakeUser.new; end
+end
+
+module Jobs
+  class PollFeed
+    def execute(_opts = {}); end
+  end
+end
+
+# --- Exercise the REAL TopicRetriever on a brand-new attacker-chosen URL ---
+attacker_url = 'http://example.com/arbitrary-' + rand(1_000_000).to_s
+retriever = TopicRetriever.new(attacker_url)
+retriever.retrieve
+
+imported = TopicEmbed.imports.any? { |_user, u| u == attacker_url }
+
+if imported
+  puts "RESULT: FAIL: cache miss for a brand-new URL synchronously invoked TopicEmbed.import_remote (attacker-triggerable fetch/import DoS)"
+else
+  puts "RESULT: PASS"
+end

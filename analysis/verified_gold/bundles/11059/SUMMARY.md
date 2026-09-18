@@ -1,10 +1,9 @@
 # Verified hidden gold — PR 11059
 
-Candidates: 23 · verdicts: {'behavior_change_not_regression': 14, 'defect_present_before_pr': 2, 'unresolved_file': 7}
+Candidates: 23 · verdicts: {'golden_duplicate': 1, 'behavior_change_not_regression': 13, 'defect_present_before_pr': 2, 'unresolved_file': 7}
 
 | bug id | bug | verdict | head | base | fix | file | tarball sha256 |
 |---|---|---|---|---|---|---|---|
-| 11059-B04 | B04-parseRefreshTokenResponse-strips-expiry | `behavior_change_not_regression` | FAIL - AssertionError: expected undefined to be 3600 | N/A - module absent on base (vitest: Failed to load url ./parseRefreshTokenResponse) | PASS - 1 passed (1) | `packages/app-store/_utils/oauth/parseRefreshTokenResponse.ts` | `a24212766997…` |
 | 11059-B05 | B05-webhook-secret-validation-uses-non-constant-time-string-co | `behavior_change_not_regression` | FAIL | FAIL | PASS | `apps/web/pages/api/webhook/app-credential.ts` | `81328ef99715…` |
 | 11059-B10 | B10-credential-sync-token-refresh-request-omits-shared-secret- | `behavior_change_not_regression` | FAIL | N/A_module_absent | PASS | `packages/app-store/utils/oauth/refreshoauthtokens.ts` | `3997e8ee5557…` |
 | 11059-B13 | B13-webhook-persists-decrypted-credential-keys-without-validat | `behavior_change_not_regression` | FAIL | N/A_module_absent | PASS | `apps/web/pages/api/webhook/app-credential.ts` | `dab6340bcee1…` |
@@ -20,6 +19,7 @@ Candidates: 23 · verdicts: {'behavior_change_not_regression': 14, 'defect_prese
 | 11059-B33 | B33-webhook-app-credential-sync-updates-keys-but-leaves-creden | `behavior_change_not_regression` | FAIL | N/A_module_absent | PASS | `apps/web/pages/api/webhook/app-credential.ts` | `8570ba17619b…` |
 | 11059-B12 | B12-salesforce-calendarservice-references-prisma-without-impor | `defect_present_before_pr` | FAIL | FAIL | PASS | `packages/app-store/salesforce/lib/calendarservice.ts` | `2f61518d5685…` |
 | 11059-B17 | B17-envexample-suggests-wrong-length-aes-256-encryption-key-ge | `defect_present_before_pr` | ? | ? | ? | `.env.example` | `d26e0d430757…` |
+| 11059-B04 | B04-parseRefreshTokenResponse-strips-expiry | `golden_duplicate` | FAIL - AssertionError: expected undefined to be 3600 | N/A - module absent on base (vitest: Failed to load url ./parseRefreshTokenResponse) | PASS - 1 passed (1) | `packages/app-store/_utils/oauth/parseRefreshTokenResponse.ts` | `026b19f728b0…` |
 | 11059-B20 | B20-feature-flag-constant-evaluates-to-raw-encryption-key-stri | `unresolved_file` | — | — | — | `packages/lib/constants.ts` | `dd720cd0db53…` |
 | 11059-B25 | B25-some-oauth-integrations-refresh-via-refreshoauthtokens-but | `unresolved_file` | — | — | — | `packages/app-store/lark/lib/getAccessToken.ts` | `090e767f9d09…` |
 | 11059-B27 | B27-google-oauth-refresh-persists-unvalidated-credentialkey-sc | `unresolved_file` | — | — | — | `unknown (not in PR diff); search in Google OAuth refresh/credential update code for `parseRefreshTokenResponse(` and `credential.update({ data: { key: ... } })`` | `b2229161b4cf…` |

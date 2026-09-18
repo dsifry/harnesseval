@@ -1,0 +1,110 @@
+# standalone regression test for app/models/topic_embed.rb
+# Claim: when EmbeddableHost.record_for_host returns nil (no matching host),
+#        TopicEmbed.import passes category: nil to PostCreator instead of
+#        falling back to SiteSetting.embed_category.
+require 'digest'
+require 'uri'
+
+module Kernel
+  def require_dependency(_name); nil; end
+end
+
+class Object
+  def try(method = nil, *args)
+    return nil if method.nil?
+    return nil unless respond_to?(method)
+    send(method, *args)
+  end
+end
+
+class NilClass
+  def try(*_args); nil; end
+end
+
+# Minimal Nokogiri stub (file only needs HTML.fragment -> css/at/inner_html)
+module Nokogiri
+  module HTML
+    def self.fragment(h); Frag.new(h); end
+  end
+  def self.HTML(h); HTML::Frag.new(h); end
+  class HTML::Frag
+    def initialize(h); @h = h; end
+    def css(_sel); []; end
+    def at(_sel); At.new(@h); end
+    def to_html; @h; end
+  end
+  class HTML::At
+    def initialize(h); @h = h; end
+    def inner_html
+      @h.to_s.sub(/\A<div>/, '').sub(%r{</div>\z}, '')
+    end
+  end
+end
+
+module ActiveRecord
+  class Base
+    def self.belongs_to(*_a); end
+    def self.validates_presence_of(*_a); end
+    def self.validates_uniqueness_of(*_a); end
+    def self.find_by(*_a); nil; end
+    def self.where(*_a); []; end
+    def self.pluck(*_a); []; end
+    def self.create!(*_a); end
+    def self.update_column(*_a); end
+    def self.first; nil; end
+    def self.transaction; yield; end
+  end
+end
+
+class Topic
+  def self.transaction; yield; end
+end
+
+class Post
+  def self.cook_methods; { raw_html: 1 }; end
+end
+
+class EmbeddableHost
+  # Simulates a feed-polled import whose host has no EmbeddableHost row
+  def self.record_for_host(_url); nil; end
+end
+
+module SiteSetting
+  def self.embed_truncate; false; end
+  def self.embed_category; 42; end
+  def self.embed_whitelist_selector; nil; end
+  def self.embed_blacklist_selector; nil; end
+end
+
+module I18n
+  def self.t(*_args, **_kw); "imported"; end
+end
+
+class FakePost
+  def topic_id; 42; end
+  def present?; true; end
+end
+
+class PostCreator
+  def self.last_options; @last_options; end
+  def initialize(_user, opts = {})
+    PostCreator.instance_variable_set(:@last_options, opts)
+  end
+  def create; FakePost.new; end
+end
+
+require_relative '../../app/models/topic_embed.rb'
+
+# Feed-poll style import: URL host has no EmbeddableHost row.
+user = Object.new
+TopicEmbed.import(user, 'http://example.com/article', 'Title', '<p>hello</p>')
+
+opts = PostCreator.last_options
+category = opts && opts[:category]
+expected = SiteSetting.embed_category
+
+if category == expected
+  puts 'RESULT: PASS'
+else
+  puts "RESULT: FAIL: category was #{category.inspect}; expected fallback to SiteSetting.embed_category (#{expected}) when no EmbeddableHost matches (eh.try(:category_id) yields nil and no global fallback exists)"
+end

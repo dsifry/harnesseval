@@ -1,0 +1,81 @@
+diff --git a/spec/verify/embeddable_host_verify.rb b/spec/verify/embeddable_host_verify.rb
+new file mode 100644
+--- /dev/null
++++ b/spec/verify/embeddable_host_verify.rb
+@@ -0,0 +1,76 @@
++#!/usr/bin/env ruby
++require 'uri'
++
++# Minimal ActiveSupport-ish stubs
++class NilClass
++  def present?; false; end
++end
++class Object
++  def present?; true; end
++end
++
++class StubFinder
++  def initialize(records, target); @records, @target = records, target; end
++  def first; @records.find { |r| r.host.to_s.downcase == @target }; end
++end
++
++module ActiveRecord
++  class Base
++    class << self
++      def validates_format_of(field, opts); (@_fmt ||= {})[field] = opts[:with]; end
++      def _fmt; @_fmt ||= {}; end
++      def belongs_to(*); end
++      def before_validation(&blk); (@_b4 ||= []) << blk; end
++      def _b4; @_b4 ||= []; end
++      def all; @_all ||= []; end
++      def where(_sql, *args); StubFinder.new(all, args.first.to_s.downcase); end
++    end
++
++    attr_accessor :host, :category_id
++
++    def initialize(attrs = {})
++      @host = attrs[:host]
++      @category_id = attrs[:category_id]
++      self.class.all << self
++    end
++
++    def format_valid?
++      self.class._fmt.all? { |f, re| v = send(f); v && v =~ re }
++    end
++
++    def run_before_validation!
++      self.class._b4.each { |b| instance_eval(&b) }
++    end
++  end
++end
++
++require File.expand_path('../../app/models/embeddable_host.rb', __dir__)
++
++failures = []
++
++# Control: portless host round-trips.
++plain = EmbeddableHost.new(host: 'plain.example.com')
++plain.run_before_validation!
++failures << "before_validation mangled portless host (#{plain.host.inspect})" unless plain.host == 'plain.example.com'
++failures << 'portless host failed format validation' unless plain.format_valid?
++failures << 'control: portless host did not round-trip through record_for_host' unless EmbeddableHost.record_for_host('http://plain.example.com')
++
++# Claimed defect: host with port is accepted/stored, but never matches.
++ported = EmbeddableHost.new(host: 'example.com:3000')
++ported.run_before_validation!
++failures << "before_validation mangled ported host (#{ported.host.inspect})" unless ported.host == 'example.com:3000'
++unless ported.format_valid?
++  failures << 'host with port was rejected by validation (claim assumes it is accepted)'
++end
++
++by_stored = EmbeddableHost.record_for_host('example.com:3000')
++by_url    = EmbeddableHost.record_for_host('http://example.com:3000')
++
++if !by_stored
++  failures << "record_for_host('example.com:3000') returned #{by_stored.inspect} for a record stored as #{ported.host.inspect}"
++end
++if !by_url
++  failures << "record_for_host('http://example.com:3000') returned #{by_url.inspect}: uri.host drops the port (stored host #{ported.host.inspect})"
++end
++
++puts(failures.empty? ? 'RESULT: PASS' : "RESULT: FAIL: #{failures.join('; ')}")

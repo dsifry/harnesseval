@@ -1,0 +1,110 @@
+diff --git a/spec/verify/20150818190757_create_embeddable_hosts_verify.rb b/spec/verify/20150818190757_create_embeddable_hosts_verify.rb
+new file mode 100644
+--- /dev/null
++++ b/spec/verify/20150818190757_create_embeddable_hosts_verify.rb
+@@ -0,0 +1,105 @@
++require 'fileutils'
++
++# --- Minimal framework stubs so the REAL migration loads and executes ---
++module ActiveRecord
++  class IrreversibleMigration < StandardError; end
++
++  class Result
++    def initialize(rows); @rows = rows; end
++    def [](i); @rows[i]; end
++    def cmd_tuples; @rows.size; end
++  end
++
++  class FakeColumn
++    def string(*); end
++    def integer(*); end
++    def timestamps(*); end
++  end
++
++  class Migration
++    def self.connection; @connection ||= Connection.new; end
++
++    class Connection
++      attr_reader :commands, :site_settings
++      def initialize
++        @commands = []
++        @site_settings = [
++          { 'name' => 'embed_category', 'value' => 'meta' },
++          { 'name' => 'embeddable_hosts', 'value' => "example.com\nfoo.com" },
++          { 'name' => 'uncategorized_category_id', 'value' => '1' }
++        ]
++      end
++    end
++
++    def connection; self.class.connection; end
++
++    def execute(sql)
++      conn = connection
++      conn.commands << [:execute, sql]
++      if sql =~ /DELETE FROM site_settings WHERE name IN \('embeddable_hosts', 'embed_category'\)/i
++        conn.site_settings.reject! { |s| ['embeddable_hosts', 'embed_category'].include?(s['name']) }
++      end
++      case sql
++      when /INNER JOIN site_settings.*embed_category/im
++        Result.new([{ 'id' => '1' }])
++      when /uncategorized_category_id/
++        Result.new([{ 'value' => '1' }])
++      when /SELECT value FROM site_settings WHERE name = 'embeddable_hosts'/
++        Result.new([{ 'value' => "example.com\nfoo.com" }])
++      else
++        Result.new([])
++      end
++    end
++
++    def create_table(name, opts = {}, &block)
++      connection.commands << [:create_table, name]
++      yield FakeColumn.new if block
++    end
++
++    # Simulates Rails' reversal of a `change` block: any `execute` command is
++    # impossible to invert, so the migration raises IrreversibleMigration.
++    def revert!
++      connection.commands.reverse_each do |cmd|
++        case cmd[0]
++        when :create_table then next
++        when :execute then raise IrreversibleMigration, 'execute statements cannot be reverted'
++        end
++      end
++    end
++  end
++end
++
++class String; def present?; !empty?; end; end
++class Array; def present?; !empty?; end; end
++
++# --- Load the REAL file under test ---
++require_relative '../../db/migrate/20150818190757_create_embeddable_hosts.rb'
++
++migration = CreateEmbeddableHosts.new
++migration.change
++
++conn = ActiveRecord::Migration.connection
++
++results = []
++
++# 1. The raw SQL DELETE actually removed the site settings rows.
++deleted = conn.site_settings.map { |s| s['name'] }
++results << [:settings_destroyed, !(deleted & %w(embeddable_hosts embed_category)).any?]
++
++# 2. Rollback of the `change` block raises IrreversibleMigration.
++begin
++  migration.revert!
++  rollback_raised = false
++rescue ActiveRecord::IrreversibleMigration
++  rollback_raised = true
++end
++results << [:rollback_irreversible, rollback_raised]
++
++# 3. There is no `down` method to restore the deleted rows.
++results << [:no_down_restore, !CreateEmbeddableHosts.instance_methods(false).include?(:down)]
++
++if results.all? { |_, v| v }
++  puts 'RESULT: FAIL: irreversible change block uses raw execute DELETE; rollback raises IrreversibleMigration and deleted site_settings cannot be restored'
++else
++  puts 'RESULT: PASS'
++end

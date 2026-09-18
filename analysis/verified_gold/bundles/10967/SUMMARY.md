@@ -1,6 +1,6 @@
 # Verified hidden gold — PR 10967
 
-Candidates: 28 · verdicts: {'inconclusive_env': 16, 'static_text_test': 1, 'confirmed_regression': 4, 'defect_present_before_pr': 5, 'not_a_bug': 1, 'unresolved_file': 1}
+Candidates: 31 · verdicts: {'inconclusive_env': 19, 'static_text_test': 1, 'confirmed_regression': 4, 'defect_present_before_pr': 5, 'not_a_bug': 1, 'unresolved_file': 1}
 
 | bug id | bug | verdict | head | base | fix | file | tarball sha256 |
 |---|---|---|---|---|---|---|---|
@@ -29,6 +29,9 @@ Candidates: 28 · verdicts: {'inconclusive_env': 16, 'static_text_test': 1, 'con
 | 10967-B28 | B28-crm-othercalendar-references-updated-twice-due-to-overly-b | `inconclusive_env` | FAIL | — | FAIL | `packages/core/eventmanager.ts` | `f8402b8cf38e…` |
 | 10967-B29 | B29-cancel-booking-fallback-loads-credential-without-app-slug- | `inconclusive_env` | FAIL | — | ? | `packages/features/bookings/lib/handlecancelbooking.ts` | `bd41bad7e4b1…` |
 | 10967-B30 | B30-collective-booking-webhook-payload-leaks-all-hosts-destina | `inconclusive_env` | FAIL | — | FAIL | `packages/features/bookings/lib/handlenewbooking.ts` | `ad3643b9be4a…` |
+| 10967-B32 | B32-handlecancelbooking-builds-deletion-promise-array-with-und | `inconclusive_env` | FAIL | — | FAIL | `packages/features/bookings/lib/handlecancelbooking.ts` | `03831d2aadac…` |
+| 10967-B33 | B33-fallback-credential-construction-ignores-invalid-flag-and- | `inconclusive_env` | FAIL | — | FAIL | `packages/core/eventmanager.ts` | `bec1d8fec4a2…` |
+| 10967-B34 | B34-reschedule-can-persist-in-db-even-when-some-host-calendar- | `inconclusive_env` | FAIL | — | FAIL | `packages/core/eventmanager.ts` | `fe3b4b3e0d96…` |
 | 10967-B18 | B18-calendar-interface-migration-to-destinationcalendar--cred | `not_a_bug` | PASS | — | — | `packages/types/calendar.d.ts` | `f964316e6e00…` |
 | 10967-B02 | B02-collective-hosts-destination-calendars-are-dropped-when-or | `static_text_test` | FAIL | PASS | PASS | `packages/features/bookings/lib/handlenewbooking.ts` | `0e3731fb220d…` |
 | 10967-B25 | B25-collective-booking-destination-calendars-skip-first-host-a | `unresolved_file` | — | — | — | `unknown (not in PR diff); search post-PR tree for `teamDestinationCalendars` and `users.slice(1)` in the collective booking calendar-routing code` | `61f86dc00c00…` |

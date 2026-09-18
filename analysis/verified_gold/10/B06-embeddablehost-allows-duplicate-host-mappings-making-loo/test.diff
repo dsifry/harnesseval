@@ -1,0 +1,114 @@
+diff --git a/spec/verify/embeddable_host_verify.rb b/spec/verify/embeddable_host_verify.rb
+new file mode 100644
+--- /dev/null
++++ b/spec/verify/embeddable_host_verify.rb
+@@ -0,0 +1,109 @@
++require 'uri'
++
++class Object
++  def present?; !nil?; end
++  def blank?; nil?; end
++end
++
++module ActiveRecord
++  class Base
++    @@rows_by_class = Hash.new { |h, k| h[k] = [] }
++
++    class Relation
++      def initialize(rows); @rows = rows; end
++      def first; @rows.first; end
++    end
++
++    class << self
++      def rows; @@rows_by_class[self]; end
++
++      def validates_format_of(attr, opts)
++        (@format_specs ||= {})[attr] = opts[:with]
++      end
++      def format_specs; @format_specs || {}; end
++
++      def belongs_to(name)
++        attr_accessor name
++      end
++
++      def before_validation(&blk)
++        define_method(:__before_validation, &blk)
++      end
++
++      def where(clause, value)
++        raise "unexpected clause: #{clause}" unless clause == "lower(host) = ?"
++        matched = rows.select { |r| r.host && r.host.downcase == value.downcase }
++        Relation.new(matched)
++      end
++    end
++
++    attr_accessor :host, :category, :id
++
++    def self.create!(attrs)
++      r = new
++      attrs.each { |k, v| r.public_send("#{k}=", v) }
++      r.save!
++      r
++    end
++
++    def new_record?; @id.nil?; end
++
++    def save!
++      __before_validation if respond_to?(:__before_validation)
++      self.class.format_specs.each do |attr, re|
++        val = public_send(attr)
++        raise "validation failed for #{attr}" unless val.is_a?(String) && val =~ re
++      end
++      @id ||= (self.class.rows.map(&:id).compact.max || 0) + 1
++      self.class.rows << self
++      true
++    end
++  end
++end
++
++require_relative '../../app/models/embeddable_host'
++
++failures = []
++
++# Probe 1: uniqueness validation on host
++EmbeddableHost.rows.clear
++a = EmbeddableHost.new
++ a.host = 'example.com'
++a.category = :cat_a
++a.save!
++
++begin
++  b = EmbeddableHost.new
++  b.host = 'example.com'
++  b.category = :cat_b
++  b.save!
++  failures << "duplicate host rows accepted (rows=#{EmbeddableHost.rows.size}) with no uniqueness validation"
++rescue => e
++  # rejected => defect absent for this probe
++end
++
++# Probe 2: lookup via unordered .first
++def seed(order)
++  EmbeddableHost.rows.clear
++  order.each do |cat|
++    r = EmbeddableHost.new
++    r.host = 'example.com'
++    r.category = cat
++    r.save!
++  end
++end
++
++seed([:cat_a, :cat_b])
++picked_1 = EmbeddableHost.record_for_host('http://example.com/path').category
++seed([:cat_b, :cat_a])
++picked_2 = EmbeddableHost.record_for_host('http://example.com/path').category
++
++if picked_1 != picked_2
++  failures << "record_for_host category varies with row order (#{picked_1.inspect} vs #{picked_2.inspect}) -- no ORDER BY / unique index"
++end
++
++if failures.empty?
++  puts "RESULT: PASS"
++else
++  puts "RESULT: FAIL: #{failures.join('; ')}"
++end

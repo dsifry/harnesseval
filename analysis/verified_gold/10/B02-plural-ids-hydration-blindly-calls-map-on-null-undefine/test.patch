@@ -1,0 +1,89 @@
+require 'open3'
+require 'json'
+
+ROOT = File.expand_path('../..', __dir__)
+SRC  = File.join(ROOT, 'app/assets/javascripts/discourse/models/store.js.es6')
+raise "missing #{SRC}" unless File.exist?(SRC)
+src = File.read(SRC)
+
+stub = <<~JS
+  var Ember = {
+    Object: {
+      extend: function(props) {
+        function Klass(){}
+        Klass.create = function(attrs){ var o = Object.create(Klass.prototype); if(attrs) Object.assign(o, attrs); return o; };
+        Klass.extend = function(p){
+          function Sub(){}
+          Sub.prototype = Object.create(Klass.prototype);
+          Object.assign(Sub.prototype, p);
+          Sub.extend = Klass.extend;
+          Sub.create = Klass.create;
+          return Sub;
+        };
+        Object.assign(Klass.prototype, props);
+        return Klass;
+      }
+    },
+    String: { underscore: function(s){ return String(s).replace(/([A-Z])/g,'_$1').toLowerCase().replace(/^_/,''); } },
+    RSVP: { Promise: Promise }
+  };
+  var Discourse = { ajax: function(){}, Category: { findById: function(){ return undefined; } } };
+  var RestModel = { create: function(o){ return o; }, munge: function(o){ return o; } };
+  var ResultSet = { create: function(o){ return o; } };
+JS
+
+body = src.gsub(/^\s*import\s.+$/, '')
+body = body.gsub(/^export default\s/, 'var __Store = ')
+body = body.gsub(/^export \{ flushMap \};?/, 'global.flushMap = flushMap;')
+
+harness = <<~JS
+  #{stub}
+  #{body}
+
+  var store = Object.create(__Store.prototype);
+
+  var r1 = {}; var o1 = { tag_ids: null }; var res1 = 'ok';
+  try { __Store.prototype._hydrateEmbedded.call(store, 'topic', o1, r1); }
+  catch(e) { res1 = 'THREW: ' + e.message; }
+  console.log(JSON.stringify({ nullIds: res1 }));
+
+  var r2 = {}; var o2 = { foo_ids: [1, 2] };
+  __Store.prototype._hydrateEmbedded.call(store, 'topic', o2, r2);
+  console.log(JSON.stringify({ unresolvedFoos: o2.foos }));
+
+  var r3 = {}; var o3 = { foo_ids: 5 }; var res3 = 'ok';
+  try { __Store.prototype._hydrateEmbedded.call(store, 'topic', o3, r3); }
+  catch(e) { res3 = 'THREW: ' + e.message; }
+  console.log(JSON.stringify({ scalarIds: res3 }));
+JS
+
+out, err, st = Open3.capture3('node', '-e', harness)
+unless st.success?
+  puts "RESULT: FAIL: node harness failed: #{err}"
+  exit 1
+end
+
+lines = out.strip.split("\n")
+reasons = []
+
+null_data = JSON.parse(lines[0])
+if null_data['nullIds'].to_s.start_with?('THREW')
+  reasons << "plural *_ids=null throws on .map (#{null_data['nullIds']})"
+end
+
+unresolved = JSON.parse(lines[1])
+foos = unresolved['unresolvedFoos']
+if foos.is_a?(Array) && foos.include?(nil)
+  reasons << "unresolved ids leave null entries in hydrated array (#{foos.inspect})"
+end
+
+scalar = JSON.parse(lines[2])
+if scalar['scalarIds'].to_s.start_with?('THREW')
+  reasons << "scalar *_ids value throws on .map (#{scalar['scalarIds']})"
+end
+
+if reasons.empty?
+  puts "RESULT: PASS"
+else
+  puts "RESULT: FAIL: #{reasons.join('; ')}"
+end

@@ -1,9 +1,13 @@
 # Verified hidden gold — PR 14740
 
-Candidates: 33 · verdicts: {'inconclusive_env': 6, 'unresolved_file': 7, 'behavior_change_not_regression': 14, 'defect_present_before_pr': 6}
+Candidates: 33 · verdicts: {'inconclusive_env': 6, 'unresolved_file': 7, 'behavior_change_not_regression': 14, 'base_not_comparable': 4, 'defect_present_before_pr': 2}
 
 | bug id | bug | verdict | head | base | fix | file | tarball sha256 |
 |---|---|---|---|---|---|---|---|
+| 14740-B05 | B05-addguestsdialog-leaves-stale-isinvalidemail-and-email-inp | `base_not_comparable` | FAIL | FAIL | PASS | `apps/web/components/dialogs/AddGuestsDialog.tsx` | `2716714a86a1…` |
+| 14740-B09 | B09-addguestsdialog-error-toast-fallback-is-unreachable-users- | `base_not_comparable` | FAIL | FAIL | PASS | `apps/web/components/dialog/addguestsdialog.tsx` | `7fd7827041de…` |
+| 14740-B18 | B18-multiemail-list-items-keyed-by-array-index-cause-stale-shi | `base_not_comparable` | FAIL | FAIL | PASS | `packages/ui/form/multiemail.tsx` | `4ad8ec046b66…` |
+| 14740-B30 | B30-multiemail-label-htmlfor-references-missing-input-id-break | `base_not_comparable` | FAIL | FAIL | PASS | `packages/ui/form/multiemail.tsx` | `cbd77eb8e87f…` |
 | 14740-B03 | B03-addguests-input-schema-allows-unbounded-guests-array-email | `behavior_change_not_regression` | FAIL | N/A_module_absent | PASS | `apps/web/server/routers/viewer/bookings/addGuests.schema.ts` | `9880fd9f9a0d…` |
 | 14740-B06 | B06-authorization-bypass-any-attendee-can-add-arbitrary-guests | `behavior_change_not_regression` | FAIL | N/A_module_absent | PASS | `packages/trpc/server/routers/viewer/bookings/addguests.handler.ts` | `624dd2c6e669…` |
 | 14740-B07 | B07-add-guests-handler-emails-raw-guests-list-instead-of-filte | `behavior_change_not_regression` | FAIL | N/A_module_absent | PASS | `addguests.handler.ts` | `2521a4e94421…` |
@@ -18,12 +22,8 @@ Candidates: 33 · verdicts: {'inconclusive_env': 6, 'unresolved_file': 7, 'behav
 | 14740-B31 | B31-add-guests-on-a-recurring-booking-updates-only-one-occurre | `behavior_change_not_regression` | FAIL | N/A_module_absent | PASS | `packages/trpc/server/routers/viewer/bookings/addguests.handler.ts` | `409853c3971d…` |
 | 14740-B32 | B32-concurrent-add-guests-requests-can-overwrite-calendar-atte | `behavior_change_not_regression` | FAIL | N/A_module_absent | PASS | `packages/trpc/server/routers/viewer/bookings/addguests.handler.ts` | `4e4a4b447dd7…` |
 | 14740-B33 | B33-addguests-throws-badrequest-when-all-submitted-emails-alre | `behavior_change_not_regression` | FAIL | N/A_module_absent | PASS | `packages/trpc/server/routers/viewer/bookings/addguests.handler.ts` | `eb6a653480b3…` |
-| 14740-B05 | B05-addguestsdialog-leaves-stale-isinvalidemail-and-email-inp | `defect_present_before_pr` | FAIL | FAIL | PASS | `apps/web/components/dialogs/AddGuestsDialog.tsx` | `b987c018c02b…` |
-| 14740-B09 | B09-addguestsdialog-error-toast-fallback-is-unreachable-users- | `defect_present_before_pr` | FAIL | FAIL | PASS | `apps/web/components/dialog/addguestsdialog.tsx` | `bbfaa7068aff…` |
-| 14740-B18 | B18-multiemail-list-items-keyed-by-array-index-cause-stale-shi | `defect_present_before_pr` | FAIL | FAIL | PASS | `packages/ui/form/multiemail.tsx` | `0747512a942f…` |
 | 14740-B22 | B22-remove-email-tooltip-is-hardcoded-in-english-instead-of-us | `defect_present_before_pr` | FAIL | FAIL | PASS | `packages/ui/form/multiemail.tsx` | `c246ed1ae5ca…` |
 | 14740-B26 | B26-add-guests-email-path-bypasses-hidecalendarnotes-redaction | `defect_present_before_pr` | FAIL | FAIL | PASS | `packages/emails/email-manager.ts` | `eaf09e978792…` |
-| 14740-B30 | B30-multiemail-label-htmlfor-references-missing-input-id-break | `defect_present_before_pr` | FAIL | FAIL | PASS | `packages/ui/form/multiemail.tsx` | `1accd63de1aa…` |
 | 14740-B01 | B01-calendar-sync-uses-requesting-users-credentials-instead-of | `inconclusive_env` | FAIL | — | FAIL | `packages/trpc/server/routers/viewer/bookings.ts` | `a9704e826086…` |
 | 14740-B11 | B11-team-member-add-guest-notification-branch-is-unreachable-b | `inconclusive_env` | FAIL | — | FAIL | `packages/emails/email-manager.ts` | `cc02447391f1…` |
 | 14740-B20 | B20-organizer-add-guests-email-subject-crashes-on-empty-attend | `inconclusive_env` | FAIL | — | FAIL | `packages/emails/templates/organizer-add-guests-email.ts` | `6df1ce4e6282…` |

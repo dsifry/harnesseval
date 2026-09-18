@@ -2,7 +2,7 @@
 
 **Claim.** None
 
-**Verdict in this bundle:** `behavior_change_not_regression` ({'base': 'N/A - module absent on base (vitest: Failed to load url ./parseRefreshTokenResponse)', 'head': 'FAIL - AssertionError: expected undefined to be 3600', 'fixed': 'PASS - 1 passed (1)'})
+**Verdict in this bundle:** `golden_duplicate` ({'base': 'N/A - module absent on base (vitest: Failed to load url ./parseRefreshTokenResponse)', 'head': 'FAIL - AssertionError: expected undefined to be 3600', 'fixed': 'PASS - 1 passed (1)'})
 **Fidelity:** `repo_suite`  ·  **Authoring model:** `not recorded (bundle predates model recording; cal.com bundles of this era were authored with gpt-5.2)`
 
 Everything needed to check this yourself is in this directory:

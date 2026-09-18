@@ -1,0 +1,69 @@
+require 'uri'
+
+module ActiveRecord
+  class Base
+    class << self
+      def validators; @validators ||= []; end
+      def callbacks;  @callbacks  ||= []; end
+      def validates_format_of(attr, opts)
+        validators << [attr, opts[:with]]
+      end
+      def before_validation(&blk)
+        callbacks << blk
+      end
+      def belongs_to(*); end
+    end
+
+    def initialize(attrs = {})
+      attrs.each { |k, v| public_send("#{k}=", v) }
+    end
+
+    attr_accessor :host, :category_id
+
+    def valid?
+      self.class.callbacks.each { |cb| instance_eval(&cb) }
+      self.class.validators.all? do |(attr, re)|
+        v = public_send(attr)
+        v.is_a?(String) && re.match?(v)
+      end
+    end
+
+    def errors
+      @errors ||= []
+    end
+  end
+end
+
+require_relative '../../app/models/embeddable_host.rb'
+
+failures = []
+
+# sanity: plain legacy host should be accepted by the regex
+unless EmbeddableHost.new(host: 'example.com').valid?
+  failures << 'example.com should be valid but was rejected'
+end
+
+# The claimed defect: modern long gTLDs are rejected by the {2,5} TLD cap.
+{
+  'example.photography' => 11,
+  'example.technology'  => 10,
+  'example.museum'      => 6,
+  'example.travel'      => 6
+}.each do |host, tld_len|
+  if EmbeddableHost.new(host: host).valid?
+    # good: long gTLD accepted
+  else
+    failures << "#{host} (tld length #{tld_len}) was rejected by hostname validation"
+  end
+end
+
+# Also surface the port-limit part of the claim for evidence.
+unless EmbeddableHost.new(host: 'example.com:8080').valid?
+  failures << 'example.com:8080 (valid 4-digit port) was rejected'
+end
+
+if failures.empty?
+  puts 'RESULT: PASS'
+else
+  puts "RESULT: FAIL: #{failures.join('; ')}"
+end

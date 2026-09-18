@@ -1,0 +1,78 @@
+diff --git a/spec/verify/embedding_controller_verify.rb b/spec/verify/embedding_controller_verify.rb
+new file mode 100644
+--- /dev/null
++++ b/spec/verify/embedding_controller_verify.rb
+@@ -0,0 +1,73 @@
++require 'ostruct'
++require 'json'
++
++# --- Minimum stubs so the real controller file can load and run ---
++module Admin
++  class AdminController
++    def self.before_filter(*args); end
++    def self.skip_before_filter(*args); end
++    def ensure_logged_in; end
++    def ensure_staff; end
++
++    # Mirror the real render_serialized contract loosely: record what was rendered
++    def render_serialized(object, serializer, opts = {})
++      @last_render = { object: object, serializer: serializer, opts: opts }
++      @last_render
++    end
++  end
++end
++
++# Stub EmbeddableHost as an ActiveRecord-ish class whose `.all` returns a
++# relation that supports `.order` (the previous harness returned a bare Array).
++class EmbeddableHost
++  class Relation
++    def initialize(arr); @arr = arr; end
++    def order(*_args); @arr; end
++    def to_a; @arr; end
++  end
++
++  @records = []
++  class << self
++    attr_accessor :mutations
++    def all; Relation.new(@records ||= []); end
++    def records; @records ||= []; end
++    # Mutation hooks the controller would need to call to actually persist
++    def create(*args); (@mutations ||= []) << [:create, args]; new; end
++    def destroy_all(*args); (@mutations ||= []) << [:destroy_all, args]; end
++    def destroy(*args); (@mutations ||= []) << [:destroy, args]; end
++  end
++end
++EmbeddableHost.mutations = []
++
++class EmbeddingSerializer; end
++
++# --- Load the REAL file under test (no redefinition) ---
++require_relative '../../app/controllers/admin/embedding_controller'
++
++# --- Exercise the update action ---
++controller = Admin::EmbeddingController.new
++params = { embedding: { embeddable_hosts: [{ host: 'new.example.com' }] } }
++controller.define_singleton_method(:params) { params }
++
++# Populate @embedding like the before_filter chain would have
++controller.send(:fetch_embedding)
++
++# Sanity: the before-filter built an OpenStruct embedding
++unless controller.instance_variable_get(:@embedding).is_a?(OpenStruct)
++  puts 'RESULT: FAIL: setup failed to build @embedding'
++  exit 0
++end
++
++# Track calls that would actually persist changes
++before = EmbeddableHost.mutations.dup
++
++returned = controller.update
++
++# update is expected to (a) return successfully and (b) apply the params.
++persisted = (EmbeddableHost.mutations - before)
++
++if persisted.empty?
++  puts "RESULT: FAIL: PUT /admin/customize/embedding returned #{returned.inspect} without persisting any embedding changes (silent no-op)"
++else
++  puts 'RESULT: PASS'
++end
