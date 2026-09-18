@@ -283,6 +283,15 @@ async def main():
     for d in todo:
         amap = assign.get(d["pr"], {})
         findings = [t for t in texts_by_pr[d["pr"]] if amap.get(sha(t)) == d["id"]]
+        if not findings:
+            # under-count candidates: no assignment map for a brand-new id, so seed with the container's
+            # own reports (the context the campaign already had for this code)
+            try:
+                cm = json.load(open(Path(d["evidence_dir"]) / "meta.json"))
+                findings = list((cm.get("candidate") or {}).get("reports") or [])[:5]
+            except Exception:
+                findings = []
+            findings = [f if isinstance(f, str) else json.dumps(f) for f in findings]
         did, status = await do_defect(d, findings, a.apply)
         print(f"  {did} [{d['bundle']}] -> {status}", flush=True)
         results.append({"id": did, "status": status})

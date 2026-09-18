@@ -1,13 +1,22 @@
 # Defect registry — final state (after the orthogonality experiment)
 
-**Total gold = 42 goldens + 101 defects = 143 (3.4x goldens)**  ·  **test-validated hidden gold = 100 (2.38x goldens)**
+**Total gold = 42 goldens + 113 defects = 155 (3.69x goldens)**  ·  **test-validated hidden gold = 103 (2.45x goldens)**
 
-- 16 labels were MERGED away: the sibling fix also cured them, so they were the bundle's own defect restated.
-- 1 defects are undemonstrated in this harness, each with a specific reason.
+- 17 labels were MERGED away: the sibling fix also cured them, so they were the bundle's own defect restated.
+- 10 defects are undemonstrated in this harness, each with a specific reason.
 
 | defect | bundle | class | why not demonstrated |
 |---|---|---|---|
-| 14740-D04 | 14740-B06 | `unresolved_in_pass` | the verification pass did not converge for this defect; the DEFECT itself is not in doubt (it was split out of its bundle by the merge audit and its f |
+| 4-D59 | 4-B24 | `?` |  |
+| 4-D60 | 4-B03 | `?` |  |
+| 4-D61 | 4-B26 | `?` |  |
+| 4-D62 | 4-B04 | `?` |  |
+| 8-D07 | 8-B05 | `?` |  |
+| 11059-D30 | 11059-B19 | `?` |  |
+| 11059-D31 | 11059-B19 | `?` |  |
+| 11059-D32 | 11059-B19 | `?` |  |
+| 11059-D33 | 11059-B23 | `?` |  |
+| 11059-D34 | 11059-B23 | `?` |  |
 
 ## Merged away (same defect as their bundle's label)
 
@@ -29,3 +38,4 @@
 | 4-D32 | 4-B26 | EmbedController rescues wrong URI exception for invalid referer bytes |
 | 4-D35 | 4-B33 | Nil/blank embedbyusername raises NoMethodError on downcase |
 | 4-D39 | 4-B39 | case-sensitive hostname comparison |
+| 4-D57 | 4-B39 | Case-sensitive host expand in `invalid_host?` rejects valid embed hosts |

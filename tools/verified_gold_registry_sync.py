@@ -46,8 +46,19 @@ def main():
             d.pop("undemonstrated", None)
             kept.append(d)
         elif o.get("verdict") == "duplicate_of_bundle_defect":
-            d["merged_reason"] = "the sibling fix also fixes it => same defect as the bundle's own label"
-            merged.append(d)
+            if d.get("claim_index") == 0:
+                # This defect IS the container's own claim (labels[0]), so the "sibling" fix the verifier
+                # applied was its OWN minimal fix. That is a verification, not a duplicate: keep it.
+                d["tier"] = "D-verified"
+                d["orthogonality"] = None
+                d["own_test"] = o.get("dir")
+                d["verified_note"] = ("this defect is the execution container's own claim; the container fix is "
+                                      "its own minimal fix, so the sibling check does not apply")
+                d.pop("undemonstrated", None)
+                kept.append(d)
+            else:
+                d["merged_reason"] = "the sibling fix also fixes it => same defect as the bundle's own label"
+                merged.append(d)
         else:
             d["tier"] = "D-labelled"
             _u = UNDEMONSTRATED.get(d["id"])
