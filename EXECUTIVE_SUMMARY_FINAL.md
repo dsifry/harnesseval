@@ -14,7 +14,12 @@ On the six severity-hardest benchmark PRs it matched the best frontier harness o
 0.44–0.57) and on precision (adjP 0.67 vs 0.30–0.44), and cost **7.5% [6.7–8.5] of the opus
 compound-engineering cell**: **$0.22 vs $2.95 per PR review**, **$0.04 vs $0.52 per golden defect
 found** ($0.004 vs $0.048 per real finding incl. beyond-gold), at the same latency (95 s vs 110 s
-per PR). If noise-tolerance is high and budget dominates, `glm-5.3-flash-background` at low effort
+per PR).
+
+*Lens note:* the figures just quoted are the **benchmark-defined** analysis (the 42 goldens only, scored
+as F1). On the **true golden set** — our reported lens — the same cell scores **F2′ 0.388** (best harness
+cell: glm-vis · MRV · high at 0.436; best vanilla: fable · van · high at 0.361). The recommendation does
+not change between the two lenses; only the levels do (§10d). If noise-tolerance is high and budget dominates, `glm-5.3-flash-background` at low effort
 delivers recall 0.83 [0.74–0.92] at **0.8% of the opus cost** — but with visibly lower precision
 (0.54) and far fewer real findings beyond the golden set (§"where it stops holding").
 
