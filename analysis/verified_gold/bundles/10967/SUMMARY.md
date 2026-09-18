@@ -7,7 +7,7 @@ Candidates: 31 · verdicts: {'inconclusive_env': 14, 'static_text_test': 1, 'con
 | 10967-B03 | B03-google-meet-event-creation-can-crash-when-destinationcalen | `confirmed_regression` | FAIL | PASS | PASS | `packages/core/eventmanager.ts` | `069d23fe064c…` |
 | 10967-B11 | B11-reschedule-calendar-update-errors-are-swallowed-catch-retu | `confirmed_regression` | FAIL | PASS | PASS | `packages/core/eventmanager.ts` | `33c6a129785a…` |
 | 10967-B13 | B13-booking-webhook-payload-breaks-backward-compatibility-by-c | `confirmed_regression` | FAIL | PASS | PASS | `packages/types/calendar.d.ts` | `5f4e9f9fcdfd…` |
-| 10967-B14 | B14-recurring-cancellation-delete-sweep-runs-once-per-calendar | `confirmed_regression` | FAIL | PASS | PASS | `apps/web/pages/api/bookings/[id]/cancel/handleCancelBooking.ts` | `a48c57bced38…` |
+| 10967-B14 | B14-recurring-cancellation-delete-sweep-runs-once-per-calendar | `confirmed_regression` | FAIL | PASS | PASS | `apps/web/pages/api/bookings/[id]/cancel/handleCancelBooking.ts` | `d4e169957e8f…` |
 | 10967-B20 | B20-eventmanagerupdate-swallows-errors-and-returns--when-cale | `confirmed_regression` | FAIL | PASS | PASS | `packages/core/eventmanager.ts` | `f731fae44fc9…` |
 | 10967-B05 | B05-unscoped-credential-lookup-by-id-allows-cross-tenant-calen | `defect_present_before_pr` | FAIL | FAIL | PASS | `packages/core/eventmanager.ts` | `c02e09631a3c…` |
 | 10967-B09 | B09-missing-credentialid-branch-fans-out-over-all-credentials- | `defect_present_before_pr` | FAIL | FAIL | PASS | `eventmanager.ts` | `64b4de907165…` |

@@ -1,51 +1,74 @@
 # Verified hidden gold — final results
 
 Every candidate from the hidden-gold union was executed against the real post-PR code. A candidate is
-promoted only when a runnable test FAILS on the pinned post-PR revision and PASSES with a minimal fix
-(see `README.md` for the verdict taxonomy and `REPLICATION_KIT.md` for how to re-run any of them).
+promoted only when a runnable test FAILS on the pinned post-PR revision and PASSES with a minimal fix.
 
-**99 verified hidden gold** across 6 PRs, versus a 42-comment original golden set — 2.4x as many as the goldens contain.
+**100 verified hidden gold** across 6 PRs, versus a 42-comment original golden set — 2.4x as many.
+
+Those 100 bundles contain **45 additional distinct defects** (merge audit below), so the number of
+distinct real bugs present is up to **145**, of which 100 are individually verified.
 
 ## Verification outcome by tier
 
 | tier | n | meaning |
 |---|---|---|
 | `confirmed_regression` | 10 | pre-PR PASS, post-PR FAIL, fixed PASS |
-| `behavior_change_not_regression` | 89 | new/changed code path: post-PR FAIL, fixed PASS |
+| `behavior_change_not_regression` | 90 | new code path: post-PR FAIL, fixed PASS |
 | `defect_present_before_pr` | 46 | real, demonstrable defect that pre-dates the PR |
 | `unresolved_file` | 32 | claim could not be pinned to a changed file |
-| `inconclusive_env` | 24 | test/fix authoring or environment blocked the proof |
-| `not_a_bug` | 5 | two independent tests pass on unmodified code (demotion candidates) |
-| `base_not_comparable` | 4 | base run failed for a different reason than the claim |
+| `inconclusive_env` | 24 | proof blocked, not disproven (floor on the true count) |
+| `base_not_comparable` | 4 | base failed for a different reason than the claim |
+| `not_a_bug` | 2 | confirmed demotion: two independent tests pass on unmodified code |
+| `not_a_bug_unconfirmed` | 1 | one passing test; adversarial confirmation not run |
+| `claim_supported_source_only` | 1 | source analysis supports it; runtime promotion pending |
 | `static_text_test` | 1 | invalidated: asserted on source text, not behaviour |
 | `golden_duplicate` | 1 | excluded: same defect as a golden comment |
 
-## Per PR
+## Instruments (a claim decides which evidence type can prove it)
 
-| PR | candidates | verified hidden gold | other tiers |
-|---|---|---|---|
-| 4 | 70 | **41** | defect_present_before_pr=10, inconclusive_env=8, not_a_bug=1, unresolved_file=10 |
-| 8 | 21 | **5** | defect_present_before_pr=12, inconclusive_env=1, not_a_bug=1, unresolved_file=2 |
-| 10 | 32 | **17** | defect_present_before_pr=9, not_a_bug=1, unresolved_file=5 |
-| 10967 | 31 | **5** | defect_present_before_pr=9, inconclusive_env=14, not_a_bug=1, static_text_test=1, unresolved_file=1 |
-| 11059 | 25 | **15** | defect_present_before_pr=2, golden_duplicate=1, unresolved_file=7 |
-| 14740 | 33 | **16** | base_not_comparable=4, defect_present_before_pr=4, inconclusive_env=1, not_a_bug=1, unresolved_file=7 |
+| instrument | what it proves | bundles |
+|---|---|---|
+| `repo_suite` / `repo_suite_harness_config` | the repository's own vitest, real module graph | most cal.com bundles |
+| `standalone_real_code` | real post-PR file with visible stubs (Rails 4.2 era) | most discourse bundles |
+| `db_migration` | the REAL migration run up/down against Docker Postgres with ActiveRecord 4.2 | 10-B11 |
+| `typecheck` | tsc compile-time assertions (runtime tests cannot evaluate types) | 10967-B18 |
+| `source_analysis` | reading the real code path (weakest; used only where the app cannot run) | 4-B75 |
+
+## Merge audit — how honest is the count?
+
+`tools/verified_gold_merge_audit.py` asked the judge, per promoted bundle, whether its members really
+describe ONE defect. **28 of 100 are multi-defect** (18 bundles with 2 defects, 3 with 3, 7 with 4),
+i.e. **45 extra distinct defects** are sitting inside bundles whose test verifies only one of them.
+Each affected bundle carries a `multi_defect` field naming the defects. Consequences:
+
+- the verified count **100 is a lower bound** on distinct defects (up to 145);
+- a mis-merge can also fabricate a demotion or hide a candidate — `8-B00` merged 94 pagination + 30 API-contract
+  + 13 param findings, so its single passing test demoted nothing; that demotion is voided and the pagination
+  sub-claim is a new candidate.
 
 ## How this compares to the earlier figures
 
 | figure | count | ratio to the 42 goldens |
 |---|---|---|
 | original golden set | 42 | 1.0x |
-| raw hidden-gold key-union (before verification) | 359 | 8.5x |
+| raw hidden-gold key-union | 359 | 8.5x |
 | verified candidates after merge + overlap removal | 211 | 5.0x |
-| **verified by execution (this document)** | **99** | **2.4x** |
+| **verified by execution** | **100** | **2.4x** |
+| verified + multi-defect extras (unverified) | up to 145 | 3.5x |
 
-The intermediate unions overcounted by ~2.1-3.6x: paraphrase splits, then golden overlaps, and finally
-claims that could not be demonstrated at all. The executable count is the defensible one.
+## Demotion review (all five resolved)
 
-## Integrity gates (all clean at the end)
+| candidate | outcome |
+|---|---|
+| `14740-B11` (team-notification branch unreachable) | **demotion confirmed** (two independent tests); caveat: proves the callee is reachable, not that callers populate `team` |
+| `10967-B18` (credentialId not enforced) | **demotion confirmed** with the right instrument: tsc shows the interface requires `(event, credentialId)` and rejects a legacy one-arg implementation |
+| `10-B11` (irreversible migration) | **REVERSED — it is a real bug.** Real migration vs real Postgres: up destroys the settings, rollback raises IrreversibleMigration; a `reversible` fix restores them |
+| `8-B00` (visible param flips to false) | **demotion voided** — merged artefact (see merge audit); split recorded, pagination sub-claim now a candidate |
+| `4-B75` (spec false positive) | **demotion withdrawn** — source analysis supports the claim (`ensure_embeddable` rejects before `params.require`); needs the Rails spec env to promote |
 
-- golden-distinctness gate: 0 duplicates among the 99 promoted (judge gpt-5.2; one earlier case excluded)
+## Integrity gates
+
+- golden-distinctness gate: 0 duplicates among the promoted set
 - base-verdict audit: 0 reclassifications
-- no duplicate bug ids; LLM-authored tests that assert on source text are rejected, and demotions require an adversarial second test
+- duplicate bug ids: none; source-text tests rejected; demotions require an adversarial second test
 

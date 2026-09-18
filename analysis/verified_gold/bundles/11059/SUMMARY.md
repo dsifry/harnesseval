@@ -4,16 +4,16 @@ Candidates: 25 · verdicts: {'golden_duplicate': 1, 'behavior_change_not_regress
 
 | bug id | bug | verdict | head | base | fix | file | tarball sha256 |
 |---|---|---|---|---|---|---|---|
-| 11059-B05 | B05-webhook-secret-validation-uses-non-constant-time-string-co | `behavior_change_not_regression` | FAIL | FAIL | PASS | `apps/web/pages/api/webhook/app-credential.ts` | `81328ef99715…` |
+| 11059-B05 | B05-webhook-secret-validation-uses-non-constant-time-string-co | `behavior_change_not_regression` | FAIL | FAIL | PASS | `apps/web/pages/api/webhook/app-credential.ts` | `6a71e1b702cf…` |
 | 11059-B07 | B07-non-atomic-findfirst-then-create-in-webhook-can-create-dup | `behavior_change_not_regression` | FAIL | N/A_module_absent | PASS | `apps/web/pages/api/webhook/app-credential.ts` | `70e06d7f9d3c…` |
-| 11059-B09 | B09-webhook-api-handler-performs-credential-create-update-with | `behavior_change_not_regression` | FAIL | N/A_module_absent | PASS | `apps/web/pages/api/webhooks/app-credential.ts` | `7109d08e4509…` |
-| 11059-B10 | B10-credential-sync-token-refresh-request-omits-shared-secret- | `behavior_change_not_regression` | FAIL | N/A_module_absent | PASS | `packages/app-store/utils/oauth/refreshoauthtokens.ts` | `3997e8ee5557…` |
+| 11059-B09 | B09-webhook-api-handler-performs-credential-create-update-with | `behavior_change_not_regression` | FAIL | N/A_module_absent | PASS | `apps/web/pages/api/webhooks/app-credential.ts` | `0f7a6645c445…` |
+| 11059-B10 | B10-credential-sync-token-refresh-request-omits-shared-secret- | `behavior_change_not_regression` | FAIL | N/A_module_absent | PASS | `packages/app-store/utils/oauth/refreshoauthtokens.ts` | `fa18b5763d67…` |
 | 11059-B13 | B13-webhook-persists-decrypted-credential-keys-without-validat | `behavior_change_not_regression` | FAIL | N/A_module_absent | PASS | `apps/web/pages/api/webhook/app-credential.ts` | `dab6340bcee1…` |
-| 11059-B14 | B14-webhook-updates-an-arbitrary-credential-when-user-has-mult | `behavior_change_not_regression` | FAIL | N/A_module_absent | PASS | `apps/web/pages/api/webhook/app-credential.ts` | `1be2341e0608…` |
-| 11059-B19 | B19-webhook-secret-header-lookup-uses-raw-env-header-name-brea | `behavior_change_not_regression` | FAIL | N/A_module_absent | PASS | `apps/web/pages/api/webhooks/app-credential.ts` | `f8abffe97c23…` |
+| 11059-B14 | B14-webhook-updates-an-arbitrary-credential-when-user-has-mult | `behavior_change_not_regression` | FAIL | N/A_module_absent | PASS | `apps/web/pages/api/webhook/app-credential.ts` | `b8607569d968…` |
+| 11059-B19 | B19-webhook-secret-header-lookup-uses-raw-env-header-name-brea | `behavior_change_not_regression` | FAIL | N/A_module_absent | PASS | `apps/web/pages/api/webhooks/app-credential.ts` | `203ef79216c9…` |
 | 11059-B21 | B21-webhook-auth-fails-open-when-calcomwebhooksecret-is-unset- | `behavior_change_not_regression` | FAIL | N/A_module_absent | PASS | `apps/web/pages/api/webhook/app-credential.ts` | `08980ecac900…` |
-| 11059-B22 | B22-instance-wide-shared-webhook-secret-allows-overwriting-any | `behavior_change_not_regression` | FAIL | N/A_module_absent | PASS | `apps/web/pages/api/webhook/app-credential.ts` | `1cbad9000b7a…` |
-| 11059-B23 | B23-parserefreshtokenresponse-throws-on-schema-mismatch-and-ca | `behavior_change_not_regression` | FAIL | N/A_module_absent | PASS | `packages/app-store/utils/oauth/parseRefreshTokenResponse.ts` | `265173c8986c…` |
+| 11059-B22 | B22-instance-wide-shared-webhook-secret-allows-overwriting-any | `behavior_change_not_regression` | FAIL | N/A_module_absent | PASS | `apps/web/pages/api/webhook/app-credential.ts` | `969e9541af4b…` |
+| 11059-B23 | B23-parserefreshtokenresponse-throws-on-schema-mismatch-and-ca | `behavior_change_not_regression` | FAIL | N/A_module_absent | PASS | `packages/app-store/utils/oauth/parseRefreshTokenResponse.ts` | `9feebae3922e…` |
 | 11059-B24 | B24-webhook-credential-sync-updates-key-but-does-not-clear-pre | `behavior_change_not_regression` | FAIL | N/A_module_absent | PASS | `apps/web/pages/api/webhook/app-credential.ts` | `9961492c3cd9…` |
 | 11059-B26 | B26-parserefreshtokenresponse-now-throws-on-zod-safeparse-fail | `behavior_change_not_regression` | FAIL | N/A_module_absent | PASS | `packages/lib/integrations/oauth/parseRefreshTokenResponse.ts` | `0241c0b57089…` |
 | 11059-B31 | B31-api-route-default-imports-zod-making-z-undefined-and-cras | `behavior_change_not_regression` | FAIL | N/A_module_absent | PASS | `apps/web/pages/api/webhook/app-credential.ts` | `0574c6601804…` |

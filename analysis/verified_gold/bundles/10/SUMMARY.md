@@ -4,8 +4,8 @@ Candidates: 32 · verdicts: {'unresolved_file': 5, 'confirmed_regression': 2, 'b
 
 | bug id | bug | verdict | head | base | fix | file | tarball sha256 |
 |---|---|---|---|---|---|---|---|
-| 10-B03 | B03-embeddable-hosts-saved-with-a-port-never-match-because-l | `behavior_change_not_regression` | FAIL | ERROR:LoadError | PASS | `app/models/embeddablehost.rb` | `2165c2676e25…` |
-| 10-B05 | B05-embeddablehost-hostname-validation-regex-rejects-valid-h | `behavior_change_not_regression` | FAIL | ERROR:LoadError | PASS | `app/models/embeddablehost.rb` | `2734c3cc205e…` |
+| 10-B03 | B03-embeddable-hosts-saved-with-a-port-never-match-because-l | `behavior_change_not_regression` | FAIL | ERROR:LoadError | PASS | `app/models/embeddablehost.rb` | `a843b13a48f9…` |
+| 10-B05 | B05-embeddablehost-hostname-validation-regex-rejects-valid-h | `behavior_change_not_regression` | FAIL | ERROR:LoadError | PASS | `app/models/embeddablehost.rb` | `91debf232b99…` |
 | 10-B06 | B06-embeddablehost-allows-duplicate-host-mappings-making-loo | `behavior_change_not_regression` | FAIL | ERROR:LoadError | PASS | `app/models/embeddable_host.rb` | `01fbf288d3dc…` |
 | 10-B09 | B09-embeddablehost-persists-arbitrary-categoryid-without-ver | `behavior_change_not_regression` | FAIL | ERROR:LoadError | PASS | `app/controllers/admin/embeddablehostscontroller.rb` | `8b086b48f431…` |
 | 10-B11 | B11-irreversible-destructive-data-migration-in-change-perman | `behavior_change_not_regression` | RESULT: FAIL | N/A (migration file is new in this PR) | RESULT: PASS | `db/migrate/20150818190757_create_embeddable_hosts.rb` | `b7aba09a2576…` |
