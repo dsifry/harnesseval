@@ -11,22 +11,6 @@ state-of-the-art review work, and for a small reduction of recall, even GLM-5.3-
 low reasoning effort level provides much faster results and even more cost savings at just a small
 reduction of overall capability.
 
-*(report revision 2026-09-18 · tag `report-2026-09-18`)*
-
-**Campaign:** `20260910-mrv0120-manifold` (+ vanilla reuse batches, era rule in §2.3.2) · **Data freeze:**
-2026-09-16 09:35 (verified: no data-generating lanes alive at 09:45; every number below is
-computed from `runs/*/summary.json` as of the freeze — re-run the commands in §5 and you will get
-these numbers) · **This report supersedes** `archive/report-2026-08-26-batch083.md`,
-`archive/report2-2026-08-26-batch083.md`, `docs/FRAMEWORK_COMPARISON.md`.
-
-Companion documents: **`EXECUTIVE_SUMMARY.md`** (1–2 pages, decision-first),
-**`analysis/COVERAGE.md`** (coverage table + sampling disclosure), figures in
-`analysis/figures/` (embedded in the HTML rendering), machine-readable numbers in
-`analysis/final_report_metrics.json` / `analysis/final_report_dataset.json`.
-
-> **Note on naming:** this file was `REPORT_FINAL.md`; the `FINAL` name was dropped because the
-> report is a living revision, not a final artifact. The historical August-2026 reports live in `archive/`.
-
 ## Abstract
 
 Agentic code-review harnesses — orchestrators that dispatch several model passes and synthesise the
@@ -1919,3 +1903,22 @@ strengthens: recall_exp 0.054 [0.045, 0.064] — **9× fable-5.1 vanilla low (0.
 comparable to opus-5 harness cells, at the same fraction of the cost. Levels are
 conservative; the *ranking* and the *ratios* are the reportable quantities.
 
+---
+
+## About this revision
+
+*(report revision 2026-09-18 · tag `report-2026-09-18`)*
+
+**Campaign:** `20260910-mrv0120-manifold` (+ vanilla reuse batches, era rule in §2.3.2) · **Data freeze:**
+2026-09-16 09:35 (verified: no data-generating lanes alive at 09:45; every number below is
+computed from `runs/*/summary.json` as of the freeze — re-run the commands in §5 and you will get
+these numbers) · **This report supersedes** `archive/report-2026-08-26-batch083.md`,
+`archive/report2-2026-08-26-batch083.md`, `docs/FRAMEWORK_COMPARISON.md`.
+
+Companion documents: **`EXECUTIVE_SUMMARY.md`** (1–2 pages, decision-first),
+**`analysis/COVERAGE.md`** (coverage table + sampling disclosure), figures in
+`analysis/figures/` (embedded in the HTML rendering), machine-readable numbers in
+`analysis/final_report_metrics.json` / `analysis/final_report_dataset.json`.
+
+> **Note on naming:** this file was `REPORT_FINAL.md`; the `FINAL` name was dropped because the
+> report is a living revision, not a final artifact. The historical August-2026 reports live in `archive/`.
