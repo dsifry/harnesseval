@@ -1,0 +1,107 @@
+require 'uri'
+
+# Minimal stubs so the real model file can load and run standalone
+class Object
+  def present?
+    !nil? && !(respond_to?(:empty?) && empty?)
+  end
+end
+
+module ActiveRecord
+  class Base
+    class << self
+      def validates_format_of(*args); end
+      def belongs_to(*args); end
+      def before_validation(&block)
+        (@before_validation_callbacks ||= []) << block
+      end
+      def before_validation_callbacks
+        @before_validation_callbacks ||= []
+      end
+      def records; @records ||= []; end
+      def records=(v); @records = v; end
+      def where(*args)
+        FakeRelation.new(self, args)
+      end
+    end
+
+    attr_accessor :host, :category_id
+
+    def run_before_validation
+      self.class.before_validation_callbacks.each { |cb| instance_eval(&cb) }
+    end
+  end
+end
+
+class FakeRelation
+  def initialize(klass, args)
+    @klass = klass
+    @args = args
+  end
+  def first
+    host = @args[1]
+    @klass.records.find { |r| r.host && r.host.downcase == host.downcase }
+  end
+end
+
+# Load the REAL file under test
+require_relative '../../app/models/embeddable_host'
+
+failures = []
+
+# Test 1: before_validation strips scheme and path on a valid host string
+begin
+  rec = EmbeddableHost.new
+  rec.host = "http://example.com/path"
+  rec.run_before_validation
+  unless rec.host == "example.com"
+    failures << "before_validation did not normalize host: got #{rec.host.inspect}"
+  end
+rescue => e
+  failures << "before_validation raised for valid host: #{e.class}: #{e.message}"
+end
+
+# Test 2: record_for_host finds a matching record (case-insensitive)
+begin
+  EmbeddableHost.records = []
+  stored = EmbeddableHost.new
+  stored.host = "example.com"
+  EmbeddableHost.records << stored
+  found = EmbeddableHost.record_for_host("http://example.com")
+  unless found.equal?(stored)
+    failures << "record_for_host did not find stored record"
+  end
+  unless EmbeddableHost.host_allowed?("http://example.com")
+    failures << "host_allowed? returned false for stored host"
+  end
+rescue => e
+  failures << "record_for_host/host_allowed? raised: #{e.class}: #{e.message}"
+end
+
+# Test 3: before_validation with nil host must not crash (mutating endpoint safety)
+begin
+  rec = EmbeddableHost.new
+  rec.host = nil
+  rec.run_before_validation
+  # If we get here, no crash — acceptable (validation would reject later)
+rescue NoMethodError => e
+  failures << "mutating endpoint (create/update) crashes when host is nil: #{e.class}: #{e.message}"
+rescue => e
+  failures << "unexpected error with nil host: #{e.class}: #{e.message}"
+end
+
+# Test 4: record_for_host fallback for malformed URI should return false, not raise
+begin
+  result = EmbeddableHost.record_for_host("not a uri at all :::")
+  unless result == false || result.nil?
+    failures << "record_for_host on malformed input returned #{result.inspect}"
+  end
+rescue => e
+  failures << "record_for_host fallback raised: #{e.class}: #{e.message}"
+end
+
+if failures.empty?
+  puts "RESULT: PASS"
+else
+  puts "RESULT: FAIL: #{failures.join('; ')}"
+end

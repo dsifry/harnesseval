@@ -1,0 +1,78 @@
+require 'uri'
+
+module ActiveRecord
+  class Base
+    def self.validates_format_of(*args); end
+    def self.belongs_to(*args); end
+    def self.before_validation(&block); end
+
+    def self.stub_records
+      @stub_records ||= []
+    end
+
+    def self.stub_records=(records)
+      @stub_records = records
+    end
+
+    def self.where(sql, arg)
+      # Emulate the SQL from record_for_host: SELECT * FROM embeddable_hosts WHERE lower(host) = 'arg'
+      rows = stub_records.select do |rec|
+        rec.respond_to?(:host) && !rec.host.nil? && rec.host.to_s.downcase == arg
+      end
+      FakeRelation.new(rows)
+    end
+  end
+
+  class FakeRelation
+    def initialize(rows)
+      @rows = rows
+    end
+    def first
+      @rows.first
+    end
+  end
+
+  class FakeRecord
+    attr_accessor :host
+    def initialize(host)
+      @host = host
+    end
+  end
+end
+
+class Object
+  def present?
+    true
+  end
+end
+class NilClass
+  def present?
+    false
+  end
+end
+class String
+  def present?
+    !empty?
+  end
+end
+
+require_relative '../../app/models/embeddable_host.rb'
+
+# Store a lowercase host exactly as an admin would typically enter it.
+EmbeddableHost.stub_records = [ActiveRecord::FakeRecord.new('eviltrout.com')]
+
+# Sanity check: an all-lowercase referer must be allowed even with the defect.
+lowercase_record = EmbeddableHost.record_for_host('http://eviltrout.com/some/path')
+
+# The claimed defect: mixed-case referer host is not downcased before the
+# lower(host) comparison, so it fails to match the stored lowercase host.
+mixed_case_record = EmbeddableHost.record_for_host('http://EvilTrout.com/some/path')
+mixed_case_allowed = EmbeddableHost.host_allowed?('http://EvilTrout.com/some/path')
+
+if lowercase_record.nil?
+  puts "RESULT: FAIL: sanity check failed - lowercase referer 'http://eviltrout.com/some/path' not found"
+elsif mixed_case_record.nil? || !mixed_case_allowed
+  puts "RESULT: FAIL: record_for_host rejected mixed-case referer 'http://EvilTrout.com/some/path' against stored host 'eviltrout.com'; lower(host) was compared to a non-downcased uri.host"
+else
+  puts "RESULT: PASS"
+end

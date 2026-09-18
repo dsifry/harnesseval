@@ -1,0 +1,92 @@
+# Standalone regression test for app/models/embeddable_host.rb
+#
+# Claim: migrated legacy rows (localhost, IP literals, IP:port, long TLDs)
+# bypass validation on load but can never be re-saved, because the new
+# validates_format_of regex requires a dotted domain with a short alpha TLD.
+require 'uri'
+
+module ActiveRecord
+  class Base
+    def initialize(attrs = {})
+      @attributes = {}
+      attrs.each { |k, v| @attributes[k.to_s] = v }
+    end
+
+    def [](key); @attributes[key.to_s]; end
+    def []=(key, val); @attributes[key.to_s] = val; end
+
+    class << self
+      def validates_format_of(field, opts)
+        (@_validations ||= []) << [field.to_s, opts]
+      end
+
+      def _validations
+        defined?(@_validations) ? @_validations : []
+      end
+
+      def belongs_to(*_args); end
+
+      def before_validation(&blk)
+        (@_before_validation ||= []) << blk
+      end
+
+      def _before_validation
+        defined?(@_before_validation) ? @_before_validation : []
+      end
+    end
+
+    def valid?
+      self.class._before_validation.each { |b| instance_exec(&b) }
+      self.class._validations.each do |field, opts|
+        val = self[field]
+        return false unless val.is_a?(String) && opts[:with].match?(val)
+      end
+      true
+    end
+
+    def host; self['host']; end
+    def host=(v); self['host'] = v; end
+  end
+end
+
+require_relative '../../app/models/embeddable_host'
+
+failures = []
+
+# Case 1: legacy single-label host that the pre-PR matcher accepted
+begin
+  row = EmbeddableHost.new('host' => +'localhost')
+  failures << "single-label host 'localhost' rejected" unless row.valid?
+rescue => e
+  failures << "single-label host 'localhost' raised #{e.class}: #{e.message}"
+end
+
+# Case 2: legacy IPv4 literal
+begin
+  row = EmbeddableHost.new('host' => +'127.0.0.1')
+  failures << "IP literal host '127.0.0.1' rejected" unless row.valid?
+rescue => e
+  failures << "IP literal host '127.0.0.1' raised #{e.class}: #{e.message}"
+end
+
+# Case 3: legacy IP with port
+begin
+  row = EmbeddableHost.new('host' => +'192.168.1.1:3000')
+  failures << "IP:port host '192.168.1.1:3000' rejected" unless row.valid?
+rescue => e
+  failures << "IP:port host '192.168.1.1:3000' raised #{e.class}: #{e.message}"
+end
+
+# Case 4: alphabetic TLD longer than 5 chars
+begin
+  row = EmbeddableHost.new('host' => +'example.technology')
+  failures << "long-tld host 'example.technology' rejected" unless row.valid?
+rescue => e
+  failures << "long-tld host 'example.technology' raised #{e.class}: #{e.message}"
+end
+
+if failures.empty?
+  puts 'RESULT: PASS'
+else
+  puts "RESULT: FAIL: #{failures.join('; ')}"
+end

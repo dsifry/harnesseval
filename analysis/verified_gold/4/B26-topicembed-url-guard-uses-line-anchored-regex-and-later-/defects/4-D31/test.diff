@@ -1,0 +1,66 @@
+# Standalone regression evidence for app/models/topic_embed.rb (2015-era Rails).
+# Claim: TopicEmbed.absolutize_urls calls URI(url) with no rescue. import() only
+# gates on /^https?:\/\//, so a malformed link that passes that guard raises
+# URI::InvalidURIError and aborts the import loop.
+require 'uri'
+require 'digest'
+
+# --- minimum stubs so the real model file loads without Rails/host app ---
+module Nokogiri
+  module HTML
+    FragmentStub = Struct.new(:html) do
+      def css(_selector); []; end
+      def to_html; html; end
+    end
+    def self.fragment(html); FragmentStub.new(html); end
+  end
+end
+
+def require_dependency(*_args); true; end
+
+module ActiveRecord
+  class Base
+    def self.belongs_to(*_args); end
+    def self.validates_presence_of(*_args); end
+    def self.where(*_args); self; end
+    def self.pluck(*_args); []; end
+    def self.first; nil; end
+    def self.create!(*_args); nil; end
+  end
+end
+
+module I18n
+  def self.t(*_args); ''; end
+end
+
+# The REAL file under test.
+require_relative '../../app/models/topic_embed'
+
+GUARD = /^https?:\/\//
+
+malformed = ['http://', 'http:// bad', 'http://example.com/a b']
+results = []
+
+malformed.each do |url|
+  passes_guard = !!(url =~ GUARD)   # import()'s only pre-check before absolutize_urls
+  err = nil
+  if passes_guard
+    begin
+      TopicEmbed.absolutize_urls(url, '<p>embedded</p>')
+    rescue URI::InvalidURIError => e
+      err = "URI::InvalidURIError: #{e.message}"
+    rescue => e
+      err = "#{e.class}: #{e.message}"
+    end
+  end
+  results << [url, passes_guard, err]
+end
+
+crashes = results.select { |_u, _g, err| err }
+
+if crashes.any?
+  url, _g, err = crashes.first
+  puts "RESULT: FAIL: TopicEmbed.absolutize_urls(#{url.inspect}) raises #{err} for a URL that already passed the ^https?:// guard, so the RSS import loop aborts (defect present)"
+else
+  puts 'RESULT: PASS'
+end

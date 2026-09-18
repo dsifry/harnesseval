@@ -47,6 +47,7 @@ def main():
     tier = {}
     for d in reg["defects"]:
         tier[d["id"]] = d["tier"]
+    valid_ids = set(tier)
 
     sel = {(r["model"], r["framework"], r["effort"], r["url"]): r for r in D["selected_runs"]}
     MODELS = M["mods"] if "mods" in M else sorted({r["model"] for r in D["selected_runs"]})
@@ -60,7 +61,7 @@ def main():
         own = set()
         for t in (r.get("bugtexts") or []):
             did = amap.get(sha(t))
-            if not did:
+            if not did or did not in valid_ids:      # merged-away defects no longer count
                 continue
             if variant == "verified" and tier.get(did) != "D-verified":
                 continue
