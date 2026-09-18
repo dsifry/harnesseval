@@ -182,7 +182,11 @@ HTML = """<!DOCTYPE html>
     transition: width .3s cubic-bezier(.2,.75,.3,1), transform .3s cubic-bezier(.2,.75,.3,1),
                 margin .3s cubic-bezier(.2,.75,.3,1), box-shadow .3s ease; }
   #filterWrap .panel { transition: padding .3s ease, box-shadow .3s ease, border-radius .3s ease; }
-  #filterWrap.docked { width:340px; margin-left:auto; transform:scale(.88); transform-origin:top right; }
+  /* dock to the LEFT, and when the viewport is wider than the content column, slide into the left
+     whitespace so the box sits beside the chart instead of over it. The translate is the available
+     gutter, clamped at 0 (narrow windows simply dock at the column edge). */
+  #filterWrap.docked { width:340px; margin-left:0; margin-right:auto; transform-origin:top left;
+    transform: translateX(calc(-1 * max(0px, (100vw - 1180px) / 2 - 4px))) scale(.88); }
   #filterWrap.docked .panel { padding:11px 13px 9px; border-radius:12px;
     box-shadow:0 10px 30px rgba(0,0,0,.16), 0 2px 6px rgba(0,0,0,.08); background:rgba(255,255,255,.985);
     max-height:calc(100vh - 26px); overflow:auto; }
@@ -209,7 +213,7 @@ HTML = """<!DOCTYPE html>
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><b style="font-size:12px;min-width:104px;display:inline-block">effort levels</b> <label style="display:inline-flex;align-items:center;gap:3px"><input type="checkbox" class="fe" value="low" checked> low</label> <label style="display:inline-flex;align-items:center;gap:3px"><input type="checkbox" class="fe" value="medium" checked> medium</label> <label style="display:inline-flex;align-items:center;gap:3px"><input type="checkbox" class="fe" value="high" checked> high</label></div>
     </div>
     <div class="note">Untick to hide; every chart, ladder, bar, and dumbbell below redraws instantly. Default: all on.
-      This box sticks to the top as you scroll and shrinks to the right (it slides back when you scroll up).</div>
+      This box sticks to the top as you scroll, shrinks, and slides to the LEFT into the page margin when there is room (it slides back when you scroll up).</div>
   </div>
   </div>
 
