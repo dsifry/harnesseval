@@ -175,20 +175,42 @@ HTML = """<!DOCTYPE html>
   footer { color:var(--muted); font-size:12px; margin-top:26px; }
   a { color:#4C72B0; text-decoration:none; } a:hover { text-decoration:underline; }
   @media (max-width:900px){ .layout{grid-template-columns:1fr} }
+
+  /* ---- filter dock: sticky; shrinks to the side when the checkbox area scrolls off, reverses on scroll up ---- */
+  #filtersSentinel { height:1px; margin:0; padding:0; }
+  #filterWrap { position:sticky; top:10px; z-index:60; will-change:transform;
+    transition: width .3s cubic-bezier(.2,.75,.3,1), transform .3s cubic-bezier(.2,.75,.3,1),
+                margin .3s cubic-bezier(.2,.75,.3,1), box-shadow .3s ease; }
+  #filterWrap .panel { transition: padding .3s ease, box-shadow .3s ease, border-radius .3s ease; }
+  #filterWrap.docked { width:340px; margin-left:auto; transform:scale(.88); transform-origin:top right; }
+  #filterWrap.docked .panel { padding:11px 13px 9px; border-radius:12px;
+    box-shadow:0 10px 30px rgba(0,0,0,.16), 0 2px 6px rgba(0,0,0,.08); background:rgba(255,255,255,.985);
+    max-height:calc(100vh - 26px); overflow:auto; }
+  #filterWrap.docked .panel h2 { font-size:12.5px; margin-bottom:4px; }
+  #filterWrap.docked .panel .note { display:none; }
+  #filterWrap.docked .controls { gap:3px 7px; margin-bottom:2px; }
+  #filterWrap.docked .controls > div { gap:6px !important; }
+  #filterWrap.docked .controls b { font-size:10.5px !important; min-width:66px !important; }
+  #filterWrap.docked label { font-size:11px; }
+  #filterWrap.docked input[type=checkbox] { transform:scale(.92); }
 </style>
 </head>
 <body>
 <div class="wrap">
   <h1>Automated code review — final campaign explorer</h1>
   <div class="sub">8 models × 3 harnesses × 3 effort levels on the six severity-hardest Martian-benchmark PRs · 66 complete cells · data freeze 2026-09-16 09:35 · quality panels use the <b>true golden set</b> (42 goldens + 110 individually test-validated defects — REPORT_FINAL §10d; catalogue: GOLD_DEFECT_CATALOG.md)</div>
-  <div class="panel">
+  <div id="filtersSentinel"></div>
+  <div id="filterWrap">
+  <div class="panel" id="filtersPanel">
     <h2>Filters — one key area, applies to every panel below</h2>
     <div class="controls" style="flex-direction:column;align-items:flex-start;gap:7px">
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><b style="font-size:12px;min-width:104px;display:inline-block">models</b> <label style="display:inline-flex;align-items:center;gap:3px"><input type="checkbox" class="fm" value="claude-fable-5-1" checked> fable-5.1</label> <label style="display:inline-flex;align-items:center;gap:3px"><input type="checkbox" class="fm" value="gpt-6-astra" checked> astra</label> <label style="display:inline-flex;align-items:center;gap:3px"><input type="checkbox" class="fm" value="gpt-5.6-sol" checked> sol</label> <label style="display:inline-flex;align-items:center;gap:3px"><input type="checkbox" class="fm" value="claude-opus-5" checked> opus-5</label> <label style="display:inline-flex;align-items:center;gap:3px"><input type="checkbox" class="fm" value="glm-5.3-vision-background" checked> glm-vis</label> <label style="display:inline-flex;align-items:center;gap:3px"><input type="checkbox" class="fm" value="gpt-5.6-terra" checked> terra</label> <label style="display:inline-flex;align-items:center;gap:3px"><input type="checkbox" class="fm" value="claude-sonnet-5" checked> sonnet-5</label> <label style="display:inline-flex;align-items:center;gap:3px"><input type="checkbox" class="fm" value="glm-5.3-flash-background" checked> glm-flash</label></div>
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><b style="font-size:12px;min-width:104px;display:inline-block">harnesses</b> <label style="display:inline-flex;align-items:center;gap:3px"><input type="checkbox" class="ff" value="vanilla-engineered" checked> vanilla-engineered (van)</label> <label style="display:inline-flex;align-items:center;gap:3px"><input type="checkbox" class="ff" value="compound-realistic" checked> Compound Engineering (ce)</label> <label style="display:inline-flex;align-items:center;gap:3px"><input type="checkbox" class="ff" value="metareview-realistic" checked> metareview (mrv)</label></div>
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><b style="font-size:12px;min-width:104px;display:inline-block">effort levels</b> <label style="display:inline-flex;align-items:center;gap:3px"><input type="checkbox" class="fe" value="low" checked> low</label> <label style="display:inline-flex;align-items:center;gap:3px"><input type="checkbox" class="fe" value="medium" checked> medium</label> <label style="display:inline-flex;align-items:center;gap:3px"><input type="checkbox" class="fe" value="high" checked> high</label></div>
     </div>
-    <div class="note">Untick to hide; every chart, ladder, bar, and dumbbell below redraws instantly. Default: all on.</div>
+    <div class="note">Untick to hide; every chart, ladder, bar, and dumbbell below redraws instantly. Default: all on.
+      This box sticks to the top as you scroll and shrinks to the right (it slides back when you scroll up).</div>
+  </div>
   </div>
 
   <div class="caveat">Every point is one (model × framework × effort) cell, one selected healthy scored run per PR (n=6). Bars/whiskers are 95% cluster-bootstrap CIs over PRs. <b>Hover</b> for detail; <b>click</b> a point for the full cell card (right); <b>double-click</b> a legend entry to isolate a model; single-click to toggle. Full report: <a href="../../REPORT_FINAL.md">REPORT_FINAL.md</a> · coverage: <a href="../COVERAGE_FINAL.md">COVERAGE_FINAL.md</a>.</div>
@@ -294,6 +316,24 @@ function redrawAll(){
   VIEWS.forEach(v => safe(drawView, v));
   safe(draw2); safe(draw3); safe(draw4); safe(refreshCellsel); safe(draw5); safe(draw6);
 }
+(function dockFilters(){
+  const wrap = document.getElementById('filterWrap');
+  const sentinel = document.getElementById('filtersSentinel');
+  if (!wrap || !sentinel) return;
+  // the sentinel sits immediately ABOVE the filter box: once it has scrolled past the top, the box is
+  // pinned -> dock it (shrink + slide right). Scrolling back up re-intersects the sentinel -> undock.
+  if ('IntersectionObserver' in window) {
+    const io = new IntersectionObserver(es => wrap.classList.toggle('docked', !es[0].isIntersecting),
+      { rootMargin: '-4px 0px 0px 0px', threshold: 0 });
+    io.observe(sentinel);
+  } else {
+    const onScroll = () => {
+      const r = sentinel.getBoundingClientRect();
+      wrap.classList.toggle('docked', r.bottom < 4);
+    };
+    window.addEventListener('scroll', onScroll, {passive:true}); onScroll();
+  }
+})();
 document.querySelectorAll('.fm').forEach(cb=>cb.onchange=()=>{ cb.checked?fModels.add(cb.value):fModels.delete(cb.value); redrawAll(); });
 document.querySelectorAll('.ff').forEach(cb=>cb.onchange=()=>{ cb.checked?fFws.add(cb.value):fFws.delete(cb.value); redrawAll(); });
 document.querySelectorAll('.fe').forEach(cb=>cb.onchange=()=>{ cb.checked?fEffs.add(cb.value):fEffs.delete(cb.value); redrawAll(); });
