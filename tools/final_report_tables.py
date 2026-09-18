@@ -270,5 +270,40 @@ w(f"Total: {T['goldens']} goldens + {T['n_verified_additional']} verified additi
 w("Per-bug verification cards (location, why-real, replication, found-by): `analysis/TRUE_GOLDEN_EVIDENCE.md`.")
 w()
 
+# ---- T16/T17: the TRUE golden set (§10d, PRIMARY) --------------------------------
+TG = M.get("true_gold_defects", {})
+if TG:
+    w("### T16 — TRUE-gold defect-level matrix (§10d PRIMARY): per-cell metrics with 95% cluster-bootstrap CIs")
+    w("| cell | n PRs | TP | den | recall [CI] | adjP | adjP' | F1 [CI] | F1' [CI] |")
+    w("|---|---|---|---|---|---|---|---|---|")
+    for k, c in sorted(TG["verified"]["cells"].items(), key=lambda kv: -kv[1]["F1p"]):
+        m, fw, e = k.split("|")
+        ci = c["ci"]
+        w(f"| {m} · {fw} · {e} | {c['n_pr']} | {c['TP']} | {c['den']} | "
+          f"{c['recall']:.3f} [{ci['recall'][1]:.3f}, {ci['recall'][2]:.3f}] | {c['adjP']:.3f} | {c['adjPp']:.3f} | "
+          f"{c['F1']:.3f} [{ci['F1'][1]:.3f}, {ci['F1'][2]:.3f}] | {c['F1p']:.3f} [{ci['F1p'][1]:.3f}, {ci['F1p'][2]:.3f}] |")
+    h = TG["verified"]["headline"]
+    w("")
+    w(f"Best harness recall: `{h['harness']['best_recall']['cell']}` "
+      f"{h['harness']['best_recall']['recall']:.3f}; best harness F1': `{h['harness']['best_f1p']['cell']}` "
+      f"{h['harness']['best_f1p']['F1p']:.3f}; best vanilla: `{h['vanilla']['best_f1p']['cell']}` "
+      f"{h['vanilla']['best_f1p']['recall']:.3f} recall / {h['vanilla']['best_f1p']['F1p']:.3f} F1'. "
+      f"Peak-recall ratio harness/vanilla {h['peak_recall_ratio_harness_over_vanilla']:.2f}x; "
+      f"best-F1' ratio {h['best_f1p_ratio_harness_over_vanilla']:.2f}x. "
+      f"MRV-vs-CE: {sum(1 for v in TG['verified']['pairs'].values() if v['dF1p'][0] > 0)}/"
+      f"{len(TG['verified']['pairs'])} pairs positive on the point estimate, "
+      f"{sum(1 for v in TG['verified']['pairs'].values() if v['dF1p'][1] > 0)}/{len(TG['verified']['pairs'])} resolve at 95%.")
+    w("")
+    w("### T17 — TRUE-gold per PR (§10d): goldens + individually test-validated defects")
+    w("| PR | goldens | verified defects | universe |")
+    w("|---|---|---|---|")
+    for u, v in TG["per_pr"].items():
+        slug = u.rstrip("/").split("/")[-1]
+        g = v["goldens"] or 0
+        w(f"| {u} | {g} | **{v['verified_defects']}** | {g + v['verified_defects']} |")
+    w("")
+    w("Canonical list: `analysis/verified_gold/GOLD_DEFECT_CATALOG.md` (one entry per defect, with its own test, fix and logs).")
+    w("")
+
 open("/tmp/final_report_tables.md", "w").write("\n".join(out))
 print("wrote /tmp/final_report_tables.md", len(out), "lines")
