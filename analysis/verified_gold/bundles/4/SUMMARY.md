@@ -1,6 +1,6 @@
 # Verified hidden gold — PR 4
 
-Candidates: 70 · verdicts: {'behavior_change_not_regression': 34, 'confirmed_regression': 3, 'inconclusive_env': 8, 'defect_present_before_pr': 10, 'unresolved_file': 10, 'duplicate_of': 4, 'test_quality_verified': 1}
+Candidates: 70 · verdicts: {'behavior_change_not_regression': 32, 'confirmed_regression': 3, 'inconclusive_env': 8, 'defect_present_before_pr': 10, 'unresolved_file': 10, 'duplicate_of': 6, 'test_quality_verified': 1}
 
 | bug id | bug | verdict | head | base | fix | file | tarball sha256 |
 |---|---|---|---|---|---|---|---|
@@ -32,12 +32,10 @@ Candidates: 70 · verdicts: {'behavior_change_not_regression': 34, 'confirmed_re
 | 4-B56 | B56-pollfeed-job-processes-unbounded-rss-items-creating-enqu | `behavior_change_not_regression` | FAIL | ERROR:LoadError | PASS | `app/jobs/regular/poll_feed.rb` | `150eb8721ecc…` |
 | 4-B60 | B60-embedcontroller-enqueues-retrievetopic-job-but-spec-expe | `behavior_change_not_regression` | FAIL | ERROR:LoadError | PASS | `app/controllers/embedcontroller.rb` | `5e19ff99819a…` |
 | 4-B61 | B61-retrievetopic-job-unnecessarily-eager-loads-mail-stack-v | `behavior_change_not_regression` | FAIL | ERROR:LoadError | PASS | `app/jobs/regular/retrievetopic.rb` | `d9c5dca57da1…` |
-| 4-B67 | B67-missing-presence-check-before-calling-downcase-on-sites | `behavior_change_not_regression` | FAIL | ERROR:LoadError | PASS | `lib/discourse_graphite/topic_retriever.rb` | `5d8cb782eb0c…` |
 | 4-B69 | B69-embedurl-param-not-type-checked-allows-non-string-causin | `behavior_change_not_regression` | FAIL | ERROR:LoadError | PASS | `app/controllers/embed_controller.rb` | `a26469c49b14…` |
 | 4-B71 | B71-invalid-or-wrong-host-embed-urls-are-treated-as-successf | `behavior_change_not_regression` | FAIL | ERROR:LoadError | PASS | `lib/topicretriever.rb` | `473dabeff7ce…` |
 | 4-B72 | B72-openuri-follows-redirects-bypassing-host-allowlist-when- | `behavior_change_not_regression` | FAIL | ERROR:LoadError | PASS | `lib/topicembed.rb` | `37aae558b8df…` |
 | 4-B73 | B73-feed-item-url-fallback-uses-entryid-often-not-a-url-ca | `behavior_change_not_regression` | FAIL | ERROR:LoadError | PASS | `pollfeed.rb` | `a021944fd2f8…` |
-| 4-B74 | B74-embed-endpoint-trusts-spoofable-referer-embedurl-and-use | `behavior_change_not_regression` | FAIL | ERROR:LoadError | PASS | `app/controllers/embedcontroller.rb` | `ad98813f266c…` |
 | 4-B04 | B04-destructive-force-true-in-createtable-migration-can-dr | `confirmed_regression` | FAIL | PASS | PASS | `db/migrate/20131223171005createtoptopics.rb` | `2d2984ff3a47…` |
 | 4-B34 | B34-gemfile-updated-with-new-gems-but-default-gemfilelock-no | `confirmed_regression` | FAIL | PASS | PASS | `Gemfile` | `813e4840d676…` |
 | 4-B51 | B51-skipvalidations-allows-saving-posts-topics-with-invalid | `confirmed_regression` | FAIL | PASS | PASS | `lib/post_revisor.rb` | `96e84151017c…` |
@@ -53,6 +51,8 @@ Candidates: 70 · verdicts: {'behavior_change_not_regression': 34, 'confirmed_re
 | 4-B80 | B80-embed-loading-page-auto-reloads-every-30s-amplifying-una | `defect_present_before_pr` | FAIL | ? | PASS | `app/views/embed/loading.html.erb` | `7f4b2e9c1eb1…` |
 | 4-B35 | B35-redis-throttle-key-is-set-before-retrieval-succeeds-supp | `duplicate_of` | FAIL | ERROR:LoadError | PASS | `lib/topicretriever.rb` | `730b4a5cddbd…` |
 | 4-B55 | B55-topicembed-import-uses-non-atomic-exists-create-allowing | `duplicate_of` | FAIL | ERROR:LoadError | PASS | `app/models/topic_embed.rb` | `399ff9e21dd0…` |
+| 4-B67 | B67-missing-presence-check-before-calling-downcase-on-sites | `duplicate_of` | FAIL | ERROR:LoadError | PASS | `lib/discourse_graphite/topic_retriever.rb` | `a113857bb461…` |
+| 4-B74 | B74-embed-endpoint-trusts-spoofable-referer-embedurl-and-use | `duplicate_of` | FAIL | ERROR:LoadError | PASS | `app/controllers/embedcontroller.rb` | `6ece25fa80aa…` |
 | 4-B78 | B78-using--to-append-to-contents-mutates-the-callers-st | `duplicate_of` | FAIL | ERROR:LoadError | PASS | `lib/topicembed.rb` | `4a138b2a4999…` |
 | 4-B79 | B79-cache-miss-on-arbitrary-url-triggers-synchronous-full-rs | `duplicate_of` | FAIL | ERROR:LoadError | PASS | `topicretriever.rb` | `5ff26c43055d…` |
 | 4-B05 | B05-disqus-importer-silently-drops---category--c-support-and | `inconclusive_env` | FAIL | — | FAIL | `lib/tasks/disqus.thor` | `35bc405cbcbd…` |

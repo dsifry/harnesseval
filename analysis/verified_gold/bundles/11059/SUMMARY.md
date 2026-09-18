@@ -1,6 +1,6 @@
 # Verified hidden gold — PR 11059
 
-Candidates: 25 · verdicts: {'golden_duplicate': 1, 'behavior_change_not_regression': 14, 'defect_present_before_pr': 2, 'unresolved_file': 7, 'duplicate_of': 1}
+Candidates: 25 · verdicts: {'golden_duplicate': 1, 'behavior_change_not_regression': 13, 'defect_present_before_pr': 2, 'duplicate_of': 2, 'unresolved_file': 7}
 
 | bug id | bug | verdict | head | base | fix | file | tarball sha256 |
 |---|---|---|---|---|---|---|---|
@@ -10,7 +10,6 @@ Candidates: 25 · verdicts: {'golden_duplicate': 1, 'behavior_change_not_regress
 | 11059-B10 | B10-credential-sync-token-refresh-request-omits-shared-secret- | `behavior_change_not_regression` | FAIL | N/A_module_absent | PASS | `packages/app-store/utils/oauth/refreshoauthtokens.ts` | `fa18b5763d67…` |
 | 11059-B13 | B13-webhook-persists-decrypted-credential-keys-without-validat | `behavior_change_not_regression` | FAIL | N/A_module_absent | PASS | `apps/web/pages/api/webhook/app-credential.ts` | `dab6340bcee1…` |
 | 11059-B14 | B14-webhook-updates-an-arbitrary-credential-when-user-has-mult | `behavior_change_not_regression` | FAIL | N/A_module_absent | PASS | `apps/web/pages/api/webhook/app-credential.ts` | `b8607569d968…` |
-| 11059-B19 | B19-webhook-secret-header-lookup-uses-raw-env-header-name-brea | `behavior_change_not_regression` | FAIL | N/A_module_absent | PASS | `apps/web/pages/api/webhooks/app-credential.ts` | `203ef79216c9…` |
 | 11059-B21 | B21-webhook-auth-fails-open-when-calcomwebhooksecret-is-unset- | `behavior_change_not_regression` | FAIL | N/A_module_absent | PASS | `apps/web/pages/api/webhook/app-credential.ts` | `08980ecac900…` |
 | 11059-B22 | B22-instance-wide-shared-webhook-secret-allows-overwriting-any | `behavior_change_not_regression` | FAIL | N/A_module_absent | PASS | `apps/web/pages/api/webhook/app-credential.ts` | `969e9541af4b…` |
 | 11059-B23 | B23-parserefreshtokenresponse-throws-on-schema-mismatch-and-ca | `behavior_change_not_regression` | FAIL | N/A_module_absent | PASS | `packages/app-store/utils/oauth/parseRefreshTokenResponse.ts` | `9feebae3922e…` |
@@ -20,6 +19,7 @@ Candidates: 25 · verdicts: {'golden_duplicate': 1, 'behavior_change_not_regress
 | 11059-B32 | B32-webhook-secret-check-has-no-rate-limiting-enabling-unlimit | `behavior_change_not_regression` | FAIL | N/A_module_absent | PASS | `apps/web/pages/api/webhook/app-credential.ts` | `4e821f1ca226…` |
 | 11059-B12 | B12-salesforce-calendarservice-references-prisma-without-impor | `defect_present_before_pr` | FAIL | FAIL | PASS | `packages/app-store/salesforce/lib/calendarservice.ts` | `2f61518d5685…` |
 | 11059-B17 | B17-envexample-suggests-wrong-length-aes-256-encryption-key-ge | `defect_present_before_pr` | ? | ? | ? | `.env.example` | `d26e0d430757…` |
+| 11059-B19 | B19-webhook-secret-header-lookup-uses-raw-env-header-name-brea | `duplicate_of` | FAIL | N/A_module_absent | PASS | `apps/web/pages/api/webhooks/app-credential.ts` | `1659d4645e1a…` |
 | 11059-B33 | B33-webhook-app-credential-sync-updates-keys-but-leaves-creden | `duplicate_of` | FAIL | N/A_module_absent | PASS | `apps/web/pages/api/webhook/app-credential.ts` | `c8e53b59200b…` |
 | 11059-B04 | B04-parseRefreshTokenResponse-strips-expiry | `golden_duplicate` | FAIL - AssertionError: expected undefined to be 3600 | N/A - module absent on base (vitest: Failed to load url ./parseRefreshTokenResponse) | PASS - 1 passed (1) | `packages/app-store/_utils/oauth/parseRefreshTokenResponse.ts` | `026b19f728b0…` |
 | 11059-B20 | B20-feature-flag-constant-evaluates-to-raw-encryption-key-stri | `unresolved_file` | — | — | — | `packages/lib/constants.ts` | `dd720cd0db53…` |

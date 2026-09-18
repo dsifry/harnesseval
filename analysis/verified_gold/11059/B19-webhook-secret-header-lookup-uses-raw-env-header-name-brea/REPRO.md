@@ -2,7 +2,7 @@
 
 **Claim.** Webhook secret header lookup uses raw env header name, breaking auth due to lowercased req.headers keys
 
-**Verdict in this bundle:** `behavior_change_not_regression` ({'base': 'N/A_module_absent', 'head': 'FAIL', 'fixed': 'PASS'})
+**Verdict in this bundle:** `duplicate_of` ({'base': 'N/A_module_absent', 'head': 'FAIL', 'fixed': 'PASS'})
 **Fidelity:** `repo_suite`  ·  **Authoring model:** `not recorded (bundle predates model recording; cal.com bundles of this era were authored with gpt-5.2)`
 
 Everything needed to check this yourself is in this directory:

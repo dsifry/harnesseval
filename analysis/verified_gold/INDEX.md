@@ -10,7 +10,7 @@ Each bug has a browsable directory and an attachable tarball, per PR:
 Every attempted candidate produces a bundle whatever the verdict; `not_a_bug` and
 `inconclusive_env` are the demotion-review queue (`DEMOTION_REVIEW.md`).
 
-Generated 2026-09-18T05:01:48Z · verdicts: {'unresolved_file': 32, 'confirmed_regression': 10, 'behavior_change_not_regression': 84, 'defect_present_before_pr': 46, 'inconclusive_env': 24, 'static_text_test': 1, 'not_a_bug': 2, 'duplicate_of': 7, 'golden_duplicate': 1, 'base_not_comparable': 4, 'test_quality_verified': 1}
+Generated 2026-09-18T05:12:16Z · verdicts: {'unresolved_file': 32, 'confirmed_regression': 10, 'behavior_change_not_regression': 81, 'defect_present_before_pr': 46, 'inconclusive_env': 24, 'static_text_test': 1, 'not_a_bug': 2, 'duplicate_of': 10, 'golden_duplicate': 1, 'base_not_comparable': 4, 'test_quality_verified': 1}
 
 ## PR 10 — 32 candidates · {'unresolved_file': 5, 'confirmed_regression': 2, 'behavior_change_not_regression': 16, 'defect_present_before_pr': 9}
 - per-bug tarballs: `bundles/10/`
@@ -22,9 +22,9 @@ Generated 2026-09-18T05:01:48Z · verdicts: {'unresolved_file': 32, 'confirmed_r
 - PR bundle: `bundles/verified_gold_10967.tar.gz` · sha256 `69901f248a9e4956…` · 173 KiB
 - table: `bundles/10967/SUMMARY.md` · machine index: `bundles/10967/MANIFEST.json`
 
-## PR 11059 — 25 candidates · {'golden_duplicate': 1, 'behavior_change_not_regression': 14, 'defect_present_before_pr': 2, 'unresolved_file': 7, 'duplicate_of': 1}
+## PR 11059 — 25 candidates · {'golden_duplicate': 1, 'behavior_change_not_regression': 13, 'defect_present_before_pr': 2, 'duplicate_of': 2, 'unresolved_file': 7}
 - per-bug tarballs: `bundles/11059/`
-- PR bundle: `bundles/verified_gold_11059.tar.gz` · sha256 `7522e1ff730e18be…` · 117 KiB
+- PR bundle: `bundles/verified_gold_11059.tar.gz` · sha256 `444110c79ade5f83…` · 117 KiB
 - table: `bundles/11059/SUMMARY.md` · machine index: `bundles/11059/MANIFEST.json`
 
 ## PR 14740 — 33 candidates · {'inconclusive_env': 1, 'unresolved_file': 7, 'behavior_change_not_regression': 16, 'base_not_comparable': 4, 'not_a_bug': 1, 'defect_present_before_pr': 4}
@@ -32,9 +32,9 @@ Generated 2026-09-18T05:01:48Z · verdicts: {'unresolved_file': 32, 'confirmed_r
 - PR bundle: `bundles/verified_gold_14740.tar.gz` · sha256 `776e5b5ff93ffa22…` · 156 KiB
 - table: `bundles/14740/SUMMARY.md` · machine index: `bundles/14740/MANIFEST.json`
 
-## PR 4 — 70 candidates · {'behavior_change_not_regression': 34, 'confirmed_regression': 3, 'inconclusive_env': 8, 'defect_present_before_pr': 10, 'unresolved_file': 10, 'duplicate_of': 4, 'test_quality_verified': 1}
+## PR 4 — 70 candidates · {'behavior_change_not_regression': 32, 'confirmed_regression': 3, 'inconclusive_env': 8, 'defect_present_before_pr': 10, 'unresolved_file': 10, 'duplicate_of': 6, 'test_quality_verified': 1}
 - per-bug tarballs: `bundles/4/`
-- PR bundle: `bundles/verified_gold_4.tar.gz` · sha256 `5c675478632aa6a9…` · 289 KiB
+- PR bundle: `bundles/verified_gold_4.tar.gz` · sha256 `7f273176fbeb2c8e…` · 289 KiB
 - table: `bundles/4/SUMMARY.md` · machine index: `bundles/4/MANIFEST.json`
 
 ## PR 8 — 21 candidates · {'confirmed_regression': 1, 'defect_present_before_pr': 12, 'behavior_change_not_regression': 4, 'duplicate_of': 1, 'unresolved_file': 2, 'inconclusive_env': 1}
@@ -43,5 +43,5 @@ Generated 2026-09-18T05:01:48Z · verdicts: {'unresolved_file': 32, 'confirmed_r
 - table: `bundles/8/SUMMARY.md` · machine index: `bundles/8/MANIFEST.json`
 
 ## Roll-up
-- `bundles/verified_gold_all.tar.gz` · sha256 `9e0e2f0c0df8d22e…` · 959 KiB
+- `bundles/verified_gold_all.tar.gz` · sha256 `8cb531a56f59393b…` · 959 KiB
 
