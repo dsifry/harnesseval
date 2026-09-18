@@ -210,6 +210,7 @@ HTML = """<!DOCTYPE html>
     <div class="controls" style="flex-direction:column;align-items:flex-start;gap:7px">
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><b style="font-size:12px;min-width:104px;display:inline-block">models</b> <label style="display:inline-flex;align-items:center;gap:3px"><input type="checkbox" class="fm" value="claude-fable-5-1" checked> fable-5.1</label> <label style="display:inline-flex;align-items:center;gap:3px"><input type="checkbox" class="fm" value="gpt-6-astra" checked> astra</label> <label style="display:inline-flex;align-items:center;gap:3px"><input type="checkbox" class="fm" value="gpt-5.6-sol" checked> sol</label> <label style="display:inline-flex;align-items:center;gap:3px"><input type="checkbox" class="fm" value="claude-opus-5" checked> opus-5</label> <label style="display:inline-flex;align-items:center;gap:3px"><input type="checkbox" class="fm" value="glm-5.3-vision-background" checked> glm-vis</label> <label style="display:inline-flex;align-items:center;gap:3px"><input type="checkbox" class="fm" value="gpt-5.6-terra" checked> terra</label> <label style="display:inline-flex;align-items:center;gap:3px"><input type="checkbox" class="fm" value="claude-sonnet-5" checked> sonnet-5</label> <label style="display:inline-flex;align-items:center;gap:3px"><input type="checkbox" class="fm" value="glm-5.3-flash-background" checked> glm-flash</label></div>
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><b style="font-size:12px;min-width:104px;display:inline-block">harnesses</b> <label style="display:inline-flex;align-items:center;gap:3px"><input type="checkbox" class="ff" value="vanilla-engineered" checked> vanilla-engineered (van)</label> <label style="display:inline-flex;align-items:center;gap:3px"><input type="checkbox" class="ff" value="compound-realistic" checked> Compound Engineering (ce)</label> <label style="display:inline-flex;align-items:center;gap:3px"><input type="checkbox" class="ff" value="metareview-realistic" checked> metareview (mrv)</label></div>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><b style="font-size:12px;min-width:104px;display:inline-block">connections</b> <label style="display:inline-flex;align-items:center;gap:3px"><input type="checkbox" id="showlines" checked> connect effort steps (low &rarr; medium &rarr; high) on charts 1a&ndash;1e, one line per model &times; harness</label></div>
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><b style="font-size:12px;min-width:104px;display:inline-block">effort levels</b> <label style="display:inline-flex;align-items:center;gap:3px"><input type="checkbox" class="fe" value="low" checked> low</label> <label style="display:inline-flex;align-items:center;gap:3px"><input type="checkbox" class="fe" value="medium" checked> medium</label> <label style="display:inline-flex;align-items:center;gap:3px"><input type="checkbox" class="fe" value="high" checked> high</label></div>
     </div>
     <div class="note">Untick to hide; every chart, ladder, bar, and dumbbell below redraws instantly. Default: all on.
@@ -222,7 +223,7 @@ HTML = """<!DOCTYPE html>
   <div class="panel">
   <div class="panel">
     <h2>1a · Price/performance — how much F1 does a dollar per PR review buy?</h2>
-    <div class="note">x = metered $ per PR review (log); y = F1. x and y as titled (x log). One point per cell (66 complete top-6 cells). Color = model; shape = framework (○ van, □ CE, △ MRV). <b>Hover</b> for the value + CI; <b>click</b> a point for the full cell card below; <b>double-click</b> a legend entry to isolate a model. CIs off by default.</div>
+    <div class="note">x = metered $ per PR review (log); y = F1. x and y as titled (x log). One point per cell (66 complete top-6 cells). Color = model; shape = harness (○ van, □ CE, △ MRV). <b>Hover</b> for the value + CI; <b>click</b> a point for the full cell card below; <b>double-click</b> a legend entry to isolate a model. CIs off by default.</div>
     <div class="controls"><label><input type="checkbox" id="showci1a"> show 95% CIs</label></div>
     <div id="chart1a" style="height:430px"></div>
     <div class="takeaway" style="margin-top:10px;padding:10px 14px;border-left:4px solid #B07AA1;background:#faf7fa;font-size:13.5px;border-radius:0 8px 8px 0"><b>Takeaway (true golden set):</b> the GLM harness rows dominate the F1\u2032-per-dollar frontier \u2014 glm-vis \u00b7 MRV \u00b7 low delivers F1\u2032 0.377 at $0.22/run (7.5% of opus CE-low's $2.95, F1\u2032 0.309); glm-flash \u00b7 MRV \u00b7 low delivers F1\u2032 0.349 at $0.02/run. fable-5.1 vanilla holds the best F1\u2032 (0.441) \u2014 but it finds 49 real bugs (19 of them hidden-gold defects) where glm-vis \u00b7 MRV \u00b7 high finds 69 (37). F1\u2032 is volume-sensitive: a terse run registers zero nitpicks; see the note under panel 1f.</div>
@@ -231,7 +232,7 @@ HTML = """<!DOCTYPE html>
 
   <div class="panel">
     <h2>1b · Latency/quality — does the cheap lane pay in wait time?</h2>
-    <div class="note">x = wall seconds per run (log); y = F1. x and y as titled (x log). One point per cell (66 complete top-6 cells). Color = model; shape = framework (○ van, □ CE, △ MRV). <b>Hover</b> for the value + CI; <b>click</b> a point for the full cell card below; <b>double-click</b> a legend entry to isolate a model. CIs off by default.</div>
+    <div class="note">x = wall seconds per run (log); y = F1. x and y as titled (x log). One point per cell (66 complete top-6 cells). Color = model; shape = harness (○ van, □ CE, △ MRV). <b>Hover</b> for the value + CI; <b>click</b> a point for the full cell card below; <b>double-click</b> a legend entry to isolate a model. CIs off by default.</div>
     <div class="controls"><label><input type="checkbox" id="showci1b"> show 95% CIs</label></div>
     <div id="chart1b" style="height:430px"></div>
     <div class="takeaway" style="margin-top:10px;padding:10px 14px;border-left:4px solid #B07AA1;background:#faf7fa;font-size:13.5px;border-radius:0 8px 8px 0"><b>Takeaway:</b> at low effort the GLM cells are latency-competitive with everything (79–95 s vs opus 100–110 s); at medium/high effort the GLM lane is 12–30× slower (gateway throughput, not quality) — this is a low-effort recommendation. sonnet-5's compound cells are the slowest overall.</div>
@@ -240,7 +241,7 @@ HTML = """<!DOCTYPE html>
 
   <div class="panel">
     <h2>1c · Cost per golden defect — what does one caught golden bug cost?</h2>
-    <div class="note">x = metered $ per golden true-positive (log); y = golden recall. x and y as titled (x log). One point per cell (66 complete top-6 cells). Color = model; shape = framework (○ van, □ CE, △ MRV). <b>Hover</b> for the value + CI; <b>click</b> a point for the full cell card below; <b>double-click</b> a legend entry to isolate a model. CIs off by default.</div>
+    <div class="note">x = metered $ per golden true-positive (log); y = golden recall. x and y as titled (x log). One point per cell (66 complete top-6 cells). Color = model; shape = harness (○ van, □ CE, △ MRV). <b>Hover</b> for the value + CI; <b>click</b> a point for the full cell card below; <b>double-click</b> a legend entry to isolate a model. CIs off by default.</div>
     <div class="controls"><label><input type="checkbox" id="showci1c"> show 95% CIs</label></div>
     <div id="chart1c" style="height:430px"></div>
     <div class="takeaway" style="margin-top:10px;padding:10px 14px;border-left:4px solid #B07AA1;background:#faf7fa;font-size:13.5px;border-radius:0 8px 8px 0"><b>Takeaway (true golden set):</b> per true bug found, the GLM harness cells pay far less than the frontier models: glm-flash · MRV · low $0.0022/bug, glm-vis · MRV · low $0.0222/bug, glm-vis · MRV · high $0.2249/bug, versus opus · CE · low $0.3049/bug and fable · vanilla · high $0.1587/bug — and fable finds 49 real bugs to glm-vis MRV high's 69.</div>
@@ -249,7 +250,7 @@ HTML = """<!DOCTYPE html>
 
   <div class="panel">
     <h2>1d · Cost per real finding — what does one real finding cost?</h2>
-    <div class="note">x = metered $ per real finding (TP + beyond-gold real, log); y = F1. x and y as titled (x log). One point per cell (66 complete top-6 cells). Color = model; shape = framework (○ van, □ CE, △ MRV). <b>Hover</b> for the value + CI; <b>click</b> a point for the full cell card below; <b>double-click</b> a legend entry to isolate a model. CIs off by default.</div>
+    <div class="note">x = metered $ per real finding (TP + beyond-gold real, log); y = F1. x and y as titled (x log). One point per cell (66 complete top-6 cells). Color = model; shape = harness (○ van, □ CE, △ MRV). <b>Hover</b> for the value + CI; <b>click</b> a point for the full cell card below; <b>double-click</b> a legend entry to isolate a model. CIs off by default.</div>
     <div class="controls"><label><input type="checkbox" id="showci1d"> show 95% CIs</label></div>
     <div id="chart1d" style="height:430px"></div>
     <div class="takeaway" style="margin-top:10px;padding:10px 14px;border-left:4px solid #B07AA1;background:#faf7fa;font-size:13.5px;border-radius:0 8px 8px 0"><b>Takeaway:</b> counting everything the adjudicator confirms (golden + beyond-gold), across all cells on the true set, $ per true bug runs $0.0006–$1.41 — the GLM harness cells sit at the cheap end and the high-effort frontier-model cells at the expensive end. The Pareto frontier (fig_pareto_frontier.png) is entirely GLM cells.</div>
@@ -258,7 +259,7 @@ HTML = """<!DOCTYPE html>
 
   <div class="panel">
     <h2>1e · Token volume — why is one harness cheap and another expensive?</h2>
-    <div class="note">x = tokens per run incl. cached reads and cache writes (log); y = F1. x and y as titled (x log). One point per cell (66 complete top-6 cells). Color = model; shape = framework (○ van, □ CE, △ MRV). <b>Hover</b> for the value + CI; <b>click</b> a point for the full cell card below; <b>double-click</b> a legend entry to isolate a model. CIs off by default.</div>
+    <div class="note">x = tokens per run incl. cached reads and cache writes (log); y = F1. x and y as titled (x log). One point per cell (66 complete top-6 cells). Color = model; shape = harness (○ van, □ CE, △ MRV). <b>Hover</b> for the value + CI; <b>click</b> a point for the full cell card below; <b>double-click</b> a legend entry to isolate a model. CIs off by default.</div>
     <div class="controls"><label><input type="checkbox" id="showci1e"> show 95% CIs</label></div>
     <div id="chart1e" style="height:430px"></div>
     <div class="takeaway" style="margin-top:10px;padding:10px 14px;border-left:4px solid #B07AA1;background:#faf7fa;font-size:13.5px;border-radius:0 8px 8px 0"><b>Takeaway:</b> harness cells burn 10–20× the tokens of vanilla; the frontier harnesses are 75–90% cached reads at 10% of list input (why their blended rate drops to $0.14–0.18/ktok), while the GLM harnesses use 100–570k tokens/run at list input rates — both arrive cheap per token, ~13× apart in $ per task.</div>
@@ -338,6 +339,8 @@ function redrawAll(){
     window.addEventListener('scroll', onScroll, {passive:true}); onScroll();
   }
 })();
+const _showlines = document.getElementById('showlines');
+if (_showlines) _showlines.onchange = () => redrawAll();
 document.querySelectorAll('.fm').forEach(cb=>cb.onchange=()=>{ cb.checked?fModels.add(cb.value):fModels.delete(cb.value); redrawAll(); });
 document.querySelectorAll('.ff').forEach(cb=>cb.onchange=()=>{ cb.checked?fFws.add(cb.value):fFws.delete(cb.value); redrawAll(); });
 document.querySelectorAll('.fe').forEach(cb=>cb.onchange=()=>{ cb.checked?fEffs.add(cb.value):fEffs.delete(cb.value); redrawAll(); });
@@ -354,6 +357,10 @@ const metName = {cost_run:'$/run', usd_per_tp_sem:'$/true bug found', usd_per_re
 
 function tracesFor(xmet, ymet, showci) {
   const ts = [];
+  const EFF_ORDER = ['low','medium','high'];
+  const DASH = {'vanilla-engineered':'solid','compound-realistic':'dash','metareview-realistic':'dot'};
+  const _sl = document.getElementById('showlines');
+  const linesOn = !_sl || _sl.checked;
   for (const m in mcol) {
     const pts = DATA.cells.filter(c => c.model === m && vis(c));
     if (!pts.length) continue;                    // nothing visible for this model: nothing to draw
@@ -373,6 +380,24 @@ function tracesFor(xmet, ymet, showci) {
       if (hasYCI) t.error_y = { type:'data', symmetric:false, array: pts.map(c => Math.max(0,c[ymet+'_hi']-c[ymet])), arrayminus: pts.map(c => Math.max(0,c[ymet]-c[ymet+'_lo'])), thickness:.6, width:2, color:'#555', opacity:.5 };
     }
     ts.push(t);
+    if (linesOn) {
+      // one connector per model x harness: the effort trajectory low -> medium -> high in the model's colour,
+      // dash matching the marker symbol. A filtered-out effort level becomes a null gap, so the line is
+      // BROKEN rather than bridging a point the user has hidden.
+      for (const fw of ['vanilla-engineered','compound-realistic','metareview-realistic']) {
+        const byEff = {};
+        pts.forEach(c => { if (c.fw === fw) byEff[c.eff] = c; });
+        if (Object.keys(byEff).length < 2) continue;     // nothing to connect
+        const xs = [], ys = [];
+        EFF_ORDER.forEach(e => {
+          const c = byEff[e];
+          if (c) { xs.push(c[xmet]); ys.push(c[ymet]); }
+          else { xs.push(null); ys.push(null); }
+        });
+        ts.push({ x: xs, y: ys, mode: 'lines', showlegend: false, hoverinfo: 'skip',
+                  line: { color: mcol[m], width: 1.3, dash: DASH[fw] } });
+      }
+    }
   }
   return ts;
 }
