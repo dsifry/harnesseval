@@ -118,3 +118,20 @@ carries `_final` (goldens 42, defects 110, total gold 152).
 | coverage ceiling | — | a cell's reachable maximum (goldens + defects in the PRs it covered); **not** the same as `reachable` |
 | reachable denominator | — | 42 + the 97 defects some run actually reported (139), used only as a disclosed sensitivity variant |
 
+## What is committed here vs what is scratch
+
+This directory **is** the report's evidence and is committed by default — including the execution logs,
+which is why `.gitignore` carries an explicit negation for `analysis/verified_gold/**/logs/` (the generic
+`logs/` rule exists to keep the repo-root scratch logs out; without the negation, future evidence files
+would be silently invisible to `git status`).
+
+| committed (evidence; relative paths are stored in `DEFECT_REGISTRY.json` / `GOLD_DEFECT_CATALOG.json`) | kept out (scratch) |
+|---|---|
+| `defects/<id>/{test.diff,fix.patch,logs/,meta.json}` for every defect | repo-root `logs/` — superseded run output (~47 MB: anchor_matcher v1–v3, `a3*` experiments, launch markers, symlinked `.eval` inspect logs) |
+| `<pr>/<container>/` (candidate, `test.patch`, `fix.patch`, `logs/`, `REPRO.md`, `meta.json`) | `.cache/` repo checkouts (~250 MB) |
+| `bundles/<pr>/*.tar.gz` + `.sha256` (219 per-bug tarballs) | `results/`, `third_party/`, `.venv/`, `__pycache__/` |
+| catalogues, registries, metrics, `_work/` audit provenance | |
+
+Because those relative paths are part of the evidence record, **do not move this directory** without
+rewriting the ~620 stored paths (550 in the two JSON catalogues, 70 in generated `meta.json`/`MANIFEST.json`)
+and rebuilding the 219 tarballs that embed their own manifests.
