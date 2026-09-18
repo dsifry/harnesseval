@@ -161,6 +161,7 @@ HTML = """<!DOCTYPE html>
   .panel { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:18px 18px 8px; margin-bottom:30px; box-shadow:0 1px 2px rgba(0,0,0,.04); }
   .panel h2 { font-size:17px; margin:0 0 2px; }
   .panel .note { color:var(--muted); font-size:12.5px; margin:0 0 12px; }
+  .panel .note .mech { margin-top:7px; padding-top:7px; border-top:1px solid var(--line); font-size:11.5px; }
   .controls { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:10px; font-size:13px; }
   .controls select { font:inherit; padding:4px 8px; border:1px solid #ccc; border-radius:6px; background:#fff; }
   .controls label { display:flex; align-items:center; gap:4px; color:var(--muted); }
@@ -223,18 +224,7 @@ HTML = """<!DOCTYPE html>
   <div class="panel">
   <div class="panel">
     <h2>1a · Value for money — how many real bugs does a dollar per PR review buy?</h2>
-    <div class="note"><b>How to read the y-axis — F2′, our overall quality score.</b> It rewards a setup for
-      <b>finding real bugs</b> and penalises it for <b>noise</b>. "Real bugs" = the true golden set: 42 Martian
-      goldens + 110 defects we verified by hand (152 total). "Noise" = claims the adjudicator rejected, plus
-      nitpicks. A <b>missed bug counts 4× as much as a false alarm</b>, which is why the score is <b>F2′</b> and
-      not the more familiar F1. <b>Higher is better, and the chart is zoomed in so you can actually see the differences.</b> The y-axis
-      stops at 0.5 so the points spread out, instead of being squashed into the bottom third of a 0-to-1 scale —
-      it is a zoom level, not a limit on the score. A 1.0 would mean catching all 152 real bugs and raising no
-      noise at all; the best setup here reaches 0.44, which is the best of a deliberately hard field (the 152
-      come from every bug the whole campaign found, not from what one review could be expected to catch).
-      Plain-language definition: REPORT_FINAL §10d.<br>
-      x = metered $ per PR review (log) — how much a single review costs. One point per cell (66 complete top-6
-      cells). Color = model; shape = harness (○ van, □ CE, △ MRV). <b>Hover</b> for the value + CI; <b>click</b> a point for the full cell card below; <b>double-click</b> a legend entry to isolate a model. CIs off by default.</div>
+    <div class="note"><div><b>How to read the y-axis — F2′, our overall quality score.</b> It rewards a setup for <b>finding real bugs</b> and penalises it for <b>noise</b>. "Real bugs" = the true golden set: 42 Martian goldens + 110 defects we verified by hand (152 total). "Noise" = claims the adjudicator rejected, plus nitpicks. A <b>missed bug counts 4× as much as a false alarm</b>, which is why the score is <b>F2′</b> and not the more familiar F1. <b>Higher is better, and the chart is zoomed in so you can actually see the differences</b> — the axis stopping at 0.5 is a zoom level, not a limit on the score: 1.0 would mean catching all 152 real bugs with no noise, and the best setup here reaches 0.44, the best of a deliberately hard field. <i>Full definition: REPORT_FINAL §10d.</i></div><div class="mech">x = metered $ per PR review (log) — what a single review costs. One point per cell (66 complete top-6 cells). <b>Color</b> = model; <b>shape</b> = harness (○ van, □ CE, △ MRV); <b>connecting lines</b> follow one model × harness across effort levels (solid vanilla, dashed CE, dotted MRV). <b>Hover</b> for the value + CI; <b>click</b> a point for its card below; <b>double-click</b> a legend entry to isolate a model. CIs are off by default.</div></div>
     <div class="controls"><label><input type="checkbox" id="showci1a"> show 95% CIs</label></div>
     <div id="chart1a" style="height:430px"></div>
     <div class="takeaway" style="margin-top:10px;padding:10px 14px;border-left:4px solid #B07AA1;background:#faf7fa;font-size:13.5px;border-radius:0 8px 8px 0"><b>Takeaway (true golden set):</b> the GLM harness rows dominate the F1\u2032-per-dollar frontier \u2014 glm-vis \u00b7 MRV \u00b7 low delivers F1\u2032 0.377 at $0.22/run (7.5% of opus CE-low's $2.95, F1\u2032 0.309); glm-flash \u00b7 MRV \u00b7 low delivers F1\u2032 0.349 at $0.02/run. fable-5.1 vanilla holds the best F1\u2032 (0.441) \u2014 but it finds 49 real bugs (19 of them hidden-gold defects) where glm-vis \u00b7 MRV \u00b7 high finds 69 (37). F1\u2032 is volume-sensitive: a terse run registers zero nitpicks; see the note under panel 1f.</div>
@@ -243,7 +233,7 @@ HTML = """<!DOCTYPE html>
 
   <div class="panel">
     <h2>1b · Does the cheap lane pay for itself in wait time?</h2>
-    <div class="note">x = wall seconds per run (log); y = <b>F2′</b> — our overall quality score: how many real bugs a setup finds, penalised for noise, with a missed bug counted 4× worse than a false alarm (see 1a for the plain-language definition). x and y as titled (x log). One point per cell (66 complete top-6 cells). Color = model; shape = harness (○ van, □ CE, △ MRV). <b>Hover</b> for the value + CI; <b>click</b> a point for the full cell card below; <b>double-click</b> a legend entry to isolate a model. CIs off by default.</div>
+    <div class="note"><div>x = wall seconds per run (log); y = <b>F2′</b> — our overall quality score: how many real bugs a setup finds, penalised for noise, with a missed bug counted 4× worse than a false alarm. <i>Full definition under 1a / REPORT_FINAL §10d.</i></div><div class="mech">One point per cell (66 complete top-6 cells). <b>Color</b> = model; <b>shape</b> = harness (○ van, □ CE, △ MRV); <b>connecting lines</b> follow one model × harness across effort levels (solid vanilla, dashed CE, dotted MRV). <b>Hover</b> for the value + CI; <b>click</b> a point for its card below; <b>double-click</b> a legend entry to isolate a model. CIs are off by default.</div></div>
     <div class="controls"><label><input type="checkbox" id="showci1b"> show 95% CIs</label></div>
     <div id="chart1b" style="height:430px"></div>
     <div class="takeaway" style="margin-top:10px;padding:10px 14px;border-left:4px solid #B07AA1;background:#faf7fa;font-size:13.5px;border-radius:0 8px 8px 0"><b>Takeaway:</b> at low effort the GLM cells are latency-competitive with everything (79–95 s vs opus 100–110 s); at medium/high effort the GLM lane is 12–30× slower (gateway throughput, not quality) — this is a low-effort recommendation. sonnet-5's compound cells are the slowest overall.</div>
@@ -252,7 +242,7 @@ HTML = """<!DOCTYPE html>
 
   <div class="panel">
     <h2>1c · What does one caught golden bug cost?</h2>
-    <div class="note">x = metered $ per golden true-positive (log); y = <b>F2′</b>, our overall quality score — how many real bugs a setup finds, penalised for noise, with a missed bug counted 4× worse than a false alarm (see 1a for the plain-language definition). x and y as titled (x log). One point per cell (66 complete top-6 cells). Color = model; shape = harness (○ van, □ CE, △ MRV). <b>Hover</b> for the value + CI; <b>click</b> a point for the full cell card below; <b>double-click</b> a legend entry to isolate a model. CIs off by default.</div>
+    <div class="note"><div>x = metered $ per golden true-positive (log); y = <b>F2′</b> — our overall quality score: how many real bugs a setup finds, penalised for noise, with a missed bug counted 4× worse than a false alarm. <i>Full definition under 1a / REPORT_FINAL §10d.</i></div><div class="mech">One point per cell (66 complete top-6 cells). <b>Color</b> = model; <b>shape</b> = harness (○ van, □ CE, △ MRV); <b>connecting lines</b> follow one model × harness across effort levels (solid vanilla, dashed CE, dotted MRV). <b>Hover</b> for the value + CI; <b>click</b> a point for its card below; <b>double-click</b> a legend entry to isolate a model. CIs are off by default.</div></div>
     <div class="controls"><label><input type="checkbox" id="showci1c"> show 95% CIs</label></div>
     <div id="chart1c" style="height:430px"></div>
     <div class="takeaway" style="margin-top:10px;padding:10px 14px;border-left:4px solid #B07AA1;background:#faf7fa;font-size:13.5px;border-radius:0 8px 8px 0"><b>Takeaway (true golden set):</b> per true bug found, the GLM harness cells pay far less than the frontier models: glm-flash · MRV · low $0.0022/bug, glm-vis · MRV · low $0.0222/bug, glm-vis · MRV · high $0.2249/bug, versus opus · CE · low $0.3049/bug and fable · vanilla · high $0.1587/bug — and fable finds 49 real bugs to glm-vis MRV high's 69.</div>
@@ -261,7 +251,7 @@ HTML = """<!DOCTYPE html>
 
   <div class="panel">
     <h2>1d · What does one real finding cost?</h2>
-    <div class="note">x = metered $ per real finding (true bugs found + real findings beyond the golden set, log); y = <b>F2′</b>, our overall quality score — how many real bugs a setup finds, penalised for noise, with a missed bug counted 4× worse than a false alarm (see 1a for the plain-language definition). x and y as titled (x log). One point per cell (66 complete top-6 cells). Color = model; shape = harness (○ van, □ CE, △ MRV). <b>Hover</b> for the value + CI; <b>click</b> a point for the full cell card below; <b>double-click</b> a legend entry to isolate a model. CIs off by default.</div>
+    <div class="note"><div>x = metered $ per real finding (true bugs found + real findings beyond the golden set, log); y = <b>F2′</b> — our overall quality score: how many real bugs a setup finds, penalised for noise, with a missed bug counted 4× worse than a false alarm. <i>Full definition under 1a / REPORT_FINAL §10d.</i></div><div class="mech">One point per cell (66 complete top-6 cells). <b>Color</b> = model; <b>shape</b> = harness (○ van, □ CE, △ MRV); <b>connecting lines</b> follow one model × harness across effort levels (solid vanilla, dashed CE, dotted MRV). <b>Hover</b> for the value + CI; <b>click</b> a point for its card below; <b>double-click</b> a legend entry to isolate a model. CIs are off by default.</div></div>
     <div class="controls"><label><input type="checkbox" id="showci1d"> show 95% CIs</label></div>
     <div id="chart1d" style="height:430px"></div>
     <div class="takeaway" style="margin-top:10px;padding:10px 14px;border-left:4px solid #B07AA1;background:#faf7fa;font-size:13.5px;border-radius:0 8px 8px 0"><b>Takeaway:</b> counting everything the adjudicator confirms (golden + beyond-gold), across all cells on the true set, $ per true bug runs $0.0006–$1.41 — the GLM harness cells sit at the cheap end and the high-effort frontier-model cells at the expensive end. The Pareto frontier (fig_pareto_frontier.png) is entirely GLM cells.</div>
@@ -270,7 +260,7 @@ HTML = """<!DOCTYPE html>
 
   <div class="panel">
     <h2>1e · Why is one harness cheap and another expensive?</h2>
-    <div class="note">x = tokens per run incl. cached reads and cache writes (log); y = <b>F2′</b>, our overall quality score — how many real bugs a setup finds, penalised for noise, with a missed bug counted 4× worse than a false alarm (see 1a for the plain-language definition). x and y as titled (x log). One point per cell (66 complete top-6 cells). Color = model; shape = harness (○ van, □ CE, △ MRV). <b>Hover</b> for the value + CI; <b>click</b> a point for the full cell card below; <b>double-click</b> a legend entry to isolate a model. CIs off by default.</div>
+    <div class="note"><div>x = tokens per run incl. cached reads and cache writes (log); y = <b>F2′</b> — our overall quality score: how many real bugs a setup finds, penalised for noise, with a missed bug counted 4× worse than a false alarm. <i>Full definition under 1a / REPORT_FINAL §10d.</i></div><div class="mech">One point per cell (66 complete top-6 cells). <b>Color</b> = model; <b>shape</b> = harness (○ van, □ CE, △ MRV); <b>connecting lines</b> follow one model × harness across effort levels (solid vanilla, dashed CE, dotted MRV). <b>Hover</b> for the value + CI; <b>click</b> a point for its card below; <b>double-click</b> a legend entry to isolate a model. CIs are off by default.</div></div>
     <div class="controls"><label><input type="checkbox" id="showci1e"> show 95% CIs</label></div>
     <div id="chart1e" style="height:430px"></div>
     <div class="takeaway" style="margin-top:10px;padding:10px 14px;border-left:4px solid #B07AA1;background:#faf7fa;font-size:13.5px;border-radius:0 8px 8px 0"><b>Takeaway:</b> harness cells burn 10–20× the tokens of vanilla; the frontier harnesses are 75–90% cached reads at 10% of list input (why their blended rate drops to $0.14–0.18/ktok), while the GLM harnesses use 100–570k tokens/run at list input rates — both arrive cheap per token, ~13× apart in $ per task.</div>
