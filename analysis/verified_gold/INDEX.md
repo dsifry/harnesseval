@@ -10,7 +10,7 @@ Each bug has a browsable directory and an attachable tarball, per PR:
 Every attempted candidate produces a bundle whatever the verdict; `not_a_bug` and
 `inconclusive_env` are the demotion-review queue (`DEMOTION_REVIEW.md`).
 
-Generated 2026-09-18T01:02:17Z · verdicts: {'unresolved_file': 32, 'confirmed_regression': 8, 'behavior_change_not_regression': 78, 'inconclusive_env': 50, 'defect_present_before_pr': 32, 'not_a_bug': 4, 'static_text_test': 1, 'golden_duplicate': 1, 'base_not_comparable': 4}
+Generated 2026-09-18T01:05:43Z · verdicts: {'unresolved_file': 32, 'confirmed_regression': 8, 'behavior_change_not_regression': 80, 'inconclusive_env': 50, 'defect_present_before_pr': 32, 'not_a_bug': 4, 'static_text_test': 1, 'golden_duplicate': 1, 'base_not_comparable': 4}
 
 ## PR 10 — 32 candidates · {'unresolved_file': 5, 'confirmed_regression': 1, 'behavior_change_not_regression': 12, 'inconclusive_env': 6, 'defect_present_before_pr': 7, 'not_a_bug': 1}
 - per-bug tarballs: `bundles/10/`
@@ -22,9 +22,9 @@ Generated 2026-09-18T01:02:17Z · verdicts: {'unresolved_file': 32, 'confirmed_r
 - PR bundle: `bundles/verified_gold_10967.tar.gz` · sha256 `ed4aef48c02fa3a6…` · 162 KiB
 - table: `bundles/10967/SUMMARY.md` · machine index: `bundles/10967/MANIFEST.json`
 
-## PR 11059 — 23 candidates · {'golden_duplicate': 1, 'behavior_change_not_regression': 13, 'defect_present_before_pr': 2, 'unresolved_file': 7}
+## PR 11059 — 25 candidates · {'golden_duplicate': 1, 'behavior_change_not_regression': 15, 'defect_present_before_pr': 2, 'unresolved_file': 7}
 - per-bug tarballs: `bundles/11059/`
-- PR bundle: `bundles/verified_gold_11059.tar.gz` · sha256 `6e47fb9a721e5604…` · 107 KiB
+- PR bundle: `bundles/verified_gold_11059.tar.gz` · sha256 `6c2210aed2326137…` · 115 KiB
 - table: `bundles/11059/SUMMARY.md` · machine index: `bundles/11059/MANIFEST.json`
 
 ## PR 14740 — 33 candidates · {'inconclusive_env': 6, 'unresolved_file': 7, 'behavior_change_not_regression': 14, 'base_not_comparable': 4, 'defect_present_before_pr': 2}
@@ -43,5 +43,5 @@ Generated 2026-09-18T01:02:17Z · verdicts: {'unresolved_file': 32, 'confirmed_r
 - table: `bundles/8/SUMMARY.md` · machine index: `bundles/8/MANIFEST.json`
 
 ## Roll-up
-- `bundles/verified_gold_all.tar.gz` · sha256 `e9dee558104c05be…` · 922 KiB
+- `bundles/verified_gold_all.tar.gz` · sha256 `c840fbf2e572e735…` · 928 KiB
 

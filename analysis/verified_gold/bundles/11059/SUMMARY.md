@@ -1,10 +1,12 @@
 # Verified hidden gold — PR 11059
 
-Candidates: 23 · verdicts: {'golden_duplicate': 1, 'behavior_change_not_regression': 13, 'defect_present_before_pr': 2, 'unresolved_file': 7}
+Candidates: 25 · verdicts: {'golden_duplicate': 1, 'behavior_change_not_regression': 15, 'defect_present_before_pr': 2, 'unresolved_file': 7}
 
 | bug id | bug | verdict | head | base | fix | file | tarball sha256 |
 |---|---|---|---|---|---|---|---|
 | 11059-B05 | B05-webhook-secret-validation-uses-non-constant-time-string-co | `behavior_change_not_regression` | FAIL | FAIL | PASS | `apps/web/pages/api/webhook/app-credential.ts` | `81328ef99715…` |
+| 11059-B07 | B07-non-atomic-findfirst-then-create-in-webhook-can-create-dup | `behavior_change_not_regression` | FAIL | N/A_module_absent | PASS | `apps/web/pages/api/webhook/app-credential.ts` | `70e06d7f9d3c…` |
+| 11059-B09 | B09-webhook-api-handler-performs-credential-create-update-with | `behavior_change_not_regression` | FAIL | N/A_module_absent | PASS | `apps/web/pages/api/webhooks/app-credential.ts` | `7109d08e4509…` |
 | 11059-B10 | B10-credential-sync-token-refresh-request-omits-shared-secret- | `behavior_change_not_regression` | FAIL | N/A_module_absent | PASS | `packages/app-store/utils/oauth/refreshoauthtokens.ts` | `3997e8ee5557…` |
 | 11059-B13 | B13-webhook-persists-decrypted-credential-keys-without-validat | `behavior_change_not_regression` | FAIL | N/A_module_absent | PASS | `apps/web/pages/api/webhook/app-credential.ts` | `dab6340bcee1…` |
 | 11059-B14 | B14-webhook-updates-an-arbitrary-credential-when-user-has-mult | `behavior_change_not_regression` | FAIL | N/A_module_absent | PASS | `apps/web/pages/api/webhook/app-credential.ts` | `1be2341e0608…` |

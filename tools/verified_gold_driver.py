@@ -327,8 +327,17 @@ async def author_refute(model, cand, file, content, test_code, head_log, supplie
 
 
 async def author_fix(model, cand, file, content, test_code, head_log, original_content):
+    defs = defining_files(cand)
+    blocks = []
+    for f in defs:
+        try:
+            blocks.append(f"--- {f} ---\n" + (REPO / f).read_text()[:4000])
+        except Exception:
+            pass
+    symbol_files = "\n\n".join(blocks) or "(grep found no defining file)"
     prompt = FIX_PROMPT.format(title=cand.get("title") or "", file=file, test_code=test_code[:6000],
-                               content=content, head_log=head_log[-2500:])
+                               content=content, head_log=head_log[-2500:],
+                               symbol_files=symbol_files)
     parsed, tin, tout, _ = await call_model_json_bounded(model, SYSTEM, prompt, effort="low", max_tokens=8000)
     return (parsed if isinstance(parsed, dict) else {}), tin, tout
 
