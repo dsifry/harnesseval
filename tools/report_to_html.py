@@ -49,12 +49,16 @@ PLOTLY_JS = FIGDIR / "vendor_plotly.min.js"
 CSS = """
 :root { color-scheme: light; --ink:#1b1f24; --muted:#5b6472; --accent:#0b5cad; --rule:#d9dee5; --bg:#fcfcfd; }
 * { box-sizing: border-box; }
+/* Type scales with the viewport (on html, so rem-based headings/measures scale too). */
+html { font-size: clamp(16px, 0.40vw + 11.5px, 21px); }
 body { margin:0; padding:0 0 6rem; background:var(--bg); color:var(--ink);
-       font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; }
-main { width: min(96vw, 122rem); margin: 0 auto; padding: 2.5rem clamp(.75rem, 2.5vw, 2.5rem) 4rem; }
-/* Prose, headings and tables keep a responsive measure (scales with the viewport, centred inside the
-   wide container); figures and callout cards span the full container width. */
-:root { --measure: min(100%, clamp(38rem, 54vw, 74rem)); }
+       font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+       font-size:1rem; line-height:1.65; }
+/* The container and the text measure BOTH track the viewport, so text and charts scale together:
+   charts/tables fill the container, prose fills ~92% of it. */
+main { width: min(96vw, 2840px); margin: 0 auto; padding: 2.5rem clamp(.75rem, 2.5vw, 3rem) 4rem; }
+:root { --measure: min(100%, 92vw, 2600px); }
+@media (max-width: 760px) { main { width: 100%; padding: 1.5rem .9rem 3rem; } }
 main > p, main > ul, main > ol, main > blockquote, main > h1, main > h2, main > h3, main > h4,
 main > table, main > details, main > hr { max-width: var(--measure); margin-left: auto; margin-right: auto; }
 figure.callout .fig-how, figure.callout figcaption.fig-takeaway, figure.callout .fig-controls {
