@@ -676,6 +676,7 @@ PR 10967's single style golden on this PR set). adjP = TP/(TP+hallucinations), k
 n = PRs with a selected healthy scored run (1 run/PR). Judge: gpt-5.2 for fable/opus/sonnet/glm rows,
 claude-opus-4-5-20251101 for sol/terra/astra rows.
 
+<!-- collapsible: Show the full matrix — all 72 cells (66 complete + 6 partial), 12 columns, 95% CIs -->
 | model | fw | eff | n | recall [CI] | adjP [CI] | F1 [CI] | F2 [CI] | beyond-gold/PR | inst |
 |---|---|---|---|---|---|---|---|---|---|
 | fable-5.1 | van | low | 6 | 0.74 [0.67, 0.81] | 0.82 [0.74, 0.89] | 0.78 [0.72, 0.81] | 0.75 [0.70, 0.81] | 12.3 | rj3 |
@@ -750,6 +751,7 @@ claude-opus-4-5-20251101 for sol/terra/astra rows.
 | glm-flash | MRV | low | 6 | 0.83 [0.74, 0.92] | 0.54 [0.49, 0.59] | 0.65 [0.62, 0.69] | 0.75 [0.70, 0.80] | 54.7 | v2 |
 | glm-flash | MRV | medium | 6 | 0.69 [0.51, 0.84] | 0.67 [0.52, 0.82] | 0.68 [0.53, 0.81] | 0.69 [0.52, 0.83] | 57.5 | v2 |
 | glm-flash | MRV | high | 6 | 0.76 [0.56, 0.93] | 0.84 [0.73, 0.93] | 0.80 [0.63, 0.92] | 0.78 [0.59, 0.93] | 83.0 | v2 |
+<!-- /collapsible -->
 
 **Reading the matrix.** (a) *Harnesses raise recall where the base model is weak or mid-tier and
 leave it unchanged or worse at the top of the frontier*: +0.14…+0.31 recall for opus-5/glm rows

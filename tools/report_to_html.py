@@ -83,6 +83,15 @@ tr:nth-child(even) td { background:#f7f9fb; }
 blockquote { margin:1rem 0; padding:.6rem 1rem; border-left:4px solid var(--accent);
              color:var(--muted); background:#f2f6fa; border-radius:0 6px 6px 0; }
 hr { border:none; border-top:1px solid var(--rule); margin:2rem 0; }
+details.fold { margin:1rem 0; border:1px solid var(--rule); border-radius:10px; background:#fff; }
+details.fold > summary { cursor:pointer; padding:.6rem .9rem; font-weight:600; color:var(--accent);
+  list-style:none; user-select:none; }
+details.fold > summary::-webkit-details-marker { display:none; }
+details.fold > summary::before { content:"▸ "; color:var(--muted); }
+details.fold[open] > summary::before { content:"▾ "; }
+details.fold[open] > summary { border-bottom:1px solid var(--rule); }
+details.fold .fold-body { padding:.4rem .9rem .9rem; }
+details.fold table { margin:.4rem 0; }
 .generated { color:var(--muted); font-size:.85em; border:1px solid var(--rule);
              border-radius:8px; padding:.5rem .9rem; background:#f4f6f8; }
 .toc a { color:var(--ink); }
@@ -209,6 +218,39 @@ _BOOT_SCRIPT = """<script>
   }
 })();
 </script>"""
+
+
+# --------------------------------------------------------------------------- collapsibles
+
+COLLAPSE_OPEN = re.compile(r"^<!--\s*collapsible:\s*(?P<summary>.*?)\s*-->\s*$")
+COLLAPSE_CLOSE = re.compile(r"^<!--\s*/collapsible\s*-->\s*$")
+
+
+def split_collapsibles(text: str) -> tuple[str, list[tuple[str, str]]]:
+    """Replace each <!-- collapsible: X --> … <!-- /collapsible --> block with a placeholder.
+
+    The block renders markdown normally (so the table is visible on GitHub); in the HTML the
+    wrapped content becomes a <details> closed by default, with X as its summary.
+    """
+    out: list[str] = []
+    blocks: list[tuple[str, str]] = []
+    lines = text.split("\n")
+    i = 0
+    while i < len(lines):
+        m = COLLAPSE_OPEN.match(lines[i])
+        if not m:
+            out.append(lines[i]); i += 1; continue
+        summary = m.group("summary")
+        inner: list[str] = []
+        i += 1
+        while i < len(lines) and not COLLAPSE_CLOSE.match(lines[i]):
+            inner.append(lines[i]); i += 1
+        i += 1  # skip the close marker
+        blocks.append((summary, "\n".join(inner).strip("\n")))
+        out.append("")
+        out.append(f"@@COLLAPSEBLOCK_{len(blocks) - 1}@@")
+        out.append("")
+    return "\n".join(out), blocks
 
 
 # --------------------------------------------------------------------------- callouts
@@ -361,6 +403,7 @@ def render_callout(blk: list[str], inline_md: markdown.Markdown, interactive_cou
 def render(md_path: Path, html_path: Path, title: str) -> None:
     text = md_path.read_text()
     text, callouts = split_callouts(text)
+    text, folds = split_collapsibles(text)
 
     md = markdown.Markdown(
         extensions=["tables", "fenced_code", "toc", "sane_lists", "smarty"],
@@ -378,6 +421,20 @@ def render(md_path: Path, html_path: Path, title: str) -> None:
                 break
         else:
             raise ValueError(f"callout placeholder {i} not found after markdown conversion")
+
+    for i, (summary, inner_md) in enumerate(folds):
+        inner_html = markdown.Markdown(
+            extensions=["tables", "fenced_code", "sane_lists", "smarty"]).convert(inner_md)
+        block_html = (
+            f'<details class="fold"><summary>{_strip_p(_inline(inline_md, summary))}</summary>\n'
+            f'<div class="fold-body">{inner_html}</div></details>'
+        )
+        for token in (f"<p>@@COLLAPSEBLOCK_{i}@@</p>", f"@@COLLAPSEBLOCK_{i}@@"):
+            if token in body:
+                body = body.replace(token, block_html)
+                break
+        else:
+            raise ValueError(f"collapsible placeholder {i} not found after markdown conversion")
 
     plotly = ""
     boot = ""
