@@ -1578,10 +1578,11 @@ reproduction test; the corrected edition’s checks and changed artifact hashes 
 3. Input resolvers + loud failure: the eight tools that read the golden comments now prefer
    `analysis/inputs/golden_comments/`; `final_report_extract.py` and `final_report_compute.py` abort instead of
    writing a degenerate dataset when the golden set is empty.
-4. `tools/final_report_figures.py` and `tools/final_report_figures_true_gold.py` — every SVG `savefig` call
-   now passes `metadata={'Date': None}`, omitting matplotlib's `<dc:date>` creation timestamp. Chart data,
-   layout and all other SVG content are unchanged; only the embedded wall-clock date is gone, so
-   same-environment regeneration is byte-identical.
+4. `tools/final_report_figures.py` and `tools/final_report_figures_true_gold.py` — two determinism fixes for the
+   SVG twins: every SVG `savefig` call now passes `metadata={'Date': None}` (omitting matplotlib's `<dc:date>`
+   creation timestamp), and `svg.hashsalt` is pinned to a fixed string (matplotlib otherwise derives SVG element
+   IDs from a per-session random salt). Chart data, layout and all other SVG content are unchanged; same-
+   environment regeneration is now byte-identical.
 
 `harnesseval/judge.py`, `readjudicate3.py` semantics, and the golden dataset were **not** modified.
 

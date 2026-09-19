@@ -42,6 +42,9 @@ M_SHORT = {"claude-fable-5-1": "fable", "gpt-6-astra": "astra", "gpt-5.6-sol": "
            "glm-5.3-flash-background": "glm-flash"}
 CMAP = plt.get_cmap("tab10")
 MCOL = {m: CMAP(i) for i, m in enumerate(MODELS)}
+# Fixed SVG hash salt: matplotlib otherwise derives element IDs from a per-session random
+# salt, making SVG bytes differ between runs even with identical data.
+plt.rcParams["svg.hashsalt"] = "harnesseval"
 plt.rcParams.update({"figure.dpi": 150, "font.size": 8, "axes.grid": True,
                      "grid.alpha": 0.25, "axes.axisbelow": True})
 

@@ -27,6 +27,9 @@ M_SHORT = {"claude-fable-5-1": "fable", "gpt-6-astra": "astra", "gpt-5.6-sol": "
            "gpt-5.6-terra": "terra", "claude-sonnet-5": "sonnet",
            "glm-5.3-flash-background": "glm-flash"}
 FWCOL = {"vanilla-engineered": "#8c8c8c", "compound-realistic": "#1f6feb", "metareview-realistic": "#d1495b"}
+# Fixed SVG hash salt: matplotlib otherwise derives element IDs from a per-session random
+# salt, making SVG bytes differ between runs even with identical data.
+plt.rcParams["svg.hashsalt"] = "harnesseval"
 plt.rcParams.update({"figure.dpi": 150, "font.size": 8, "axes.grid": True,
                      "grid.alpha": 0.22, "axes.axisbelow": True, "axes.spines.top": False,
                      "axes.spines.right": False})
