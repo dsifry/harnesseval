@@ -522,18 +522,26 @@ defined and justified in §2.6, and its instrument caveat applies to every nitpi
 
 | | cell | recall | adjP (real-bug precision) | **F2′ — our evaluator** | F1′ (diagnostic only) |
 |---|---|---|---|---|---|
-| best harness recall | `claude-opus-5 · CE · medium` | **0.599** | 0.518 | 0.460 | 0.342 |
-| **best harness F2′** | `glm-vis · CE · medium` | 0.544 [0.477, 0.691] | 0.792 | **0.494** [0.443, 0.593] | 0.435 |
-| best vanilla | `claude-fable-5-1 · van · medium` † | 0.367 [0.269, 0.484] | 0.701 | 0.406 | 0.482 |
+| best harness *cell*, recall | `claude-opus-5 · CE · medium` | **0.599** | 0.518 | 0.460 | 0.342 |
+| **best harness *cell*, F2′** | `glm-vis · CE · medium` | 0.544 [0.477, 0.691] | 0.792 | **0.494** [0.443, 0.593] | 0.435 |
+| best *cell* overall, vanilla | `claude-fable-5-1 · van · medium` † | 0.367 [0.269, 0.484] | 0.701 | 0.406 | 0.482 |
 
 † v1 binary adjudicator: the nitpick (important_non_bug) category is **structurally unmeasured** for this
 cell — see the instrument caveat in §2.6; its adjP′ = adjP by construction.
 
 **Top by F2′ (our evaluator, complete cells only):** glm-vis·CE·medium 0.494 [0.443, 0.593], glm-vis·MRV·medium 0.491,
 glm-vis·MRV·high 0.488, glm-vis·MRV·low 0.470, glm-flash·MRV·high 0.463, opus·CE·medium 0.460 — the top six
-are all harness cells; the best vanilla cell is fable·van·medium at 0.406 (14th; v1 instrument — see §2.6). The ordering within the top three is inside the mutual CIs (glm-vis·CE·medium vs
-glm-vis·MRV·medium: Δ −0.004, CI [−0.052, +0.052]) — a cell-level crown is not established; the
-pair-level facts (39/42 Δrecall; MRV +17/−4 on ΔF2′) are the load-bearing ones.
+are all harness cells; the best vanilla cell is fable·van·medium at 0.406 (14th; v1 instrument — see §2.6).
+
+**Read the single-cell ranking and the framework ranking separately — they answer different questions.**
+The *best single cell* on F2′ is a compound-engineering cell (glm-vis·CE·medium) by **0.004** over the best
+metareview cell (glm-vis·MRV·medium, Δ −0.004, CI [−0.052, +0.052]) — inside the mutual CIs, so no cell-level
+crown is established. The *best harness overall* is **metareview**: it holds **three of the top four cells**,
+it has the higher mean F2′ across all complete cells (**0.373 vs 0.332** for CE and 0.269 for vanilla), it
+wins **17 of 21** matched MRV-vs-CE pairs on ΔF2′ (7 resolving at 95%; §3.5), and its cells carry far lower
+noise (adjP 0.91–0.93 at the top vs 0.52–0.79 for the leading CE cells — which is also why the highest-recall
+harness cell, opus·CE·medium at recall 0.599, sits only sixth on F2′). The pair-level facts (39/42 Δrecall
+harness-vs-vanilla; MRV +17/−4 over CE) are the load-bearing ones.
 
 The raw counts behind the F2′ ranking:
 
