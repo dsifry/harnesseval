@@ -1522,6 +1522,14 @@ configuration. The common-pass prompt adds the explicit staff advisory criteria 
 historical rj3 defaults. The selected report policy credits A ≥0.70 and penalizes H ≥0.80, inclusive. Reused semantic evidence, grouping decisions and raw responses are archived
 separately, making the changed instrument explicit.
 
+The from-scratch call path was verified in a fresh clone with independent key configuration
+(2026-09-19): `tools/pilot_report_advisories.py` — the bounded, isolated trial — completed all 16
+fresh calls (7 classification controls + 1 grouping, repeated at concurrency 4 and 6) against the
+user's own gateway credentials; every classification verdict gated into the F2′ categories
+(bug / hallucination / important_non_bug / unresolved) and the grouping mapping passed
+`validate_group_mapping`. Repeated calls reproduced identical gated verdicts for only 4/8
+requests — the measured, expected nondeterminism that is exactly why these steps are mode (iii).
+
 ### 5.3 What reproduces exactly, and what does not (measured, not asserted)
 
 **Expected output checksums** (sha256; verify with `shasum -a 256 -c analysis/verified_gold/OUTPUT_SHA256SUMS`
