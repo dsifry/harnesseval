@@ -1488,9 +1488,14 @@ message if a required input is missing, rather than writing a degenerate artifac
 **Common advisory instrument inputs.** The separate model-judgment archive is
 `analysis/verified_gold/advisory_readjudication/`: the selected pass manifest records configuration
 and hashes; `active_pass.json` identifies the active archive rather than making old passes current.
-`prompts.json` and `diffs/` retain prompts and full cached PR diffs. The `clusters/`, `verdicts/`,
-`runs/` and `attempts/` directories retain cluster plans, judgments, per-run records and model attempts;
-`progress.json` records current-pass progress. These preserve decisions and provenance. Original run judgments and verified bug assignments are preserved.
+`prompts.json` and `diffs/` retain prompts and full cached PR diffs. The `clusters/`, `verdicts/`
+and `runs/` directories retain cluster plans, judgments and the frozen per-run adjudication
+records the offline chain consumes; `progress.json` records current-pass progress. These preserve
+decisions and provenance. Raw per-call payloads (`pair_calls/`, `pair_attempts/`, `group_calls/`,
+`grouping_calls/`, `grouping_attempts/`, scoring-policy `attempts/`) are excluded from the
+repository by `.gitignore`: they are mode-(iii) artifacts reproducible only by new model calls,
+and the identity decisions they fed are frozen in the hash-bound `groups/` and `audit/`
+artifacts instead. Original run judgments and verified bug assignments are preserved.
 These saved judgments are inputs to offline metric regeneration, not outputs an offline command can invent.
 The raw pass is `passes/glm_base_claim_v3/`; the selected policy is
 `scoring_policies/advisory070_penalty080_v1/`, selected by `active_scoring_policy.json`. Its `policy.json`
