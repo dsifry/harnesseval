@@ -270,7 +270,9 @@ def main():
                   f"On ΔF2' (our evaluator): {_p2}/{len(_p)}. Point estimates: "
                   f"{sum(1 for v in _p.values() if v['dF1p'][0] > 0)}/{len(_p)} positive on ΔF1', "
                   f"{sum(1 for v in _p.values() if v['dF2p'][0] > 0)}/{len(_p)} on ΔF2'.", ""]
-    (VG / "DEFECT_METRICS.md").write_text("\n".join(L) + "\n")
+    (VG / "DEFECT_METRICS.md").write_text("\n".join(L) + "\n\n---\n\n**Disclosure:** the author maintains "
+        "**metareview** (MRV), one of the harnesses evaluated in this report — open source, MIT licensed, "
+        "free at <https://github.com/dsifry/metareview>.\n")
     for variant in ("verified", "reachable", "full"):
         top = sorted(out[variant]["cells"].items(), key=lambda kv: -kv[1]["F1p"])[:5]
         print(f"[{variant}] top cells by F1':")

@@ -142,3 +142,9 @@ excluded from per-review costs. Fable's full harness grid was omitted for budget
 coverage is top-six-only, and GLM full-set fills stopped at the freeze. These gaps and the two-codebase
 primary sample limit adoption claims. The evidence supports testing the two low-effort MRV options on
 your own reviews and measuring developer triage time before choosing between them.
+
+---
+
+**Disclosure:** the author maintains **metareview** (MRV), one of the harnesses evaluated in this
+report. It is open source, MIT licensed, and available free of charge at
+<https://github.com/dsifry/metareview>.

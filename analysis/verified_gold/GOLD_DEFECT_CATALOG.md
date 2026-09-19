@@ -750,3 +750,8 @@ Merged duplicates and restored/renamed entries carry a provenance note.
 - **test**: `analysis/verified_gold/14740/B40-missing-i18n-key-causes-add-guests-permission-error-to-dis/defects/14740-D19/test.diff`
 - **fix**: `analysis/verified_gold/14740/B40-missing-i18n-key-causes-add-guests-permission-error-to-dis/defects/14740-D19/fix.patch`  ·  **logs**: `analysis/verified_gold/14740/B40-missing-i18n-key-causes-add-guests-permission-error-to-dis/defects/14740-D19/logs`
 - **finding**: packages/trpc/server/routers/viewer/bookings/addguests.handler.ts:55 — [p3 confidence=100] throw new trpcerror({ code: "forbidden", message: "youdonothavepermission" }); when this permission path executes, the absent com
+
+
+---
+
+**Disclosure:** the author maintains **metareview** (MRV), one of the harnesses evaluated in this report — open source, MIT licensed, free at <https://github.com/dsifry/metareview>.

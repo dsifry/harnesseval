@@ -239,3 +239,7 @@ MRV-vs-CE on ΔF1': 6/21 pairs resolve positive (CI lower bound > 0). On ΔF2' (
 
 MRV-vs-CE on ΔF1': 6/21 pairs resolve positive (CI lower bound > 0). On ΔF2' (our evaluator): 7/21. Point estimates: 17/21 positive on ΔF1', 18/21 on ΔF2'.
 
+
+---
+
+**Disclosure:** the author maintains **metareview** (MRV), one of the harnesses evaluated in this report — open source, MIT licensed, free at <https://github.com/dsifry/metareview>.

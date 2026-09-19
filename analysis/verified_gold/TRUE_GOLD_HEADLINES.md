@@ -15,3 +15,8 @@ Denominator (the true golden set): **147** = 42 Martian goldens + 105 verified h
 
 **Partial-coverage cells** (1–2 PRs only; drawn with open markers in the figures and never cited as a best cell):
 `fable CE high` (1 PR), `fable CE low` (2 PR), `fable CE medium` (1 PR), `fable MRV high` (1 PR), `fable MRV low` (1 PR), `fable MRV medium` (1 PR).
+
+
+---
+
+**Disclosure:** the author maintains **metareview** (MRV), one of the harnesses evaluated in this report — open source, MIT licensed, free at <https://github.com/dsifry/metareview>.

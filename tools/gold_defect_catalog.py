@@ -206,7 +206,9 @@ def main():
                 if r.get(note):
                     L.append(f"- **{note}**: {r[note] if isinstance(r[note], str) else ', '.join(r[note])}")
             L.append("")
-    (VG / "GOLD_DEFECT_CATALOG.md").write_text("\n".join(L))
+    (VG / "GOLD_DEFECT_CATALOG.md").write_text("\n".join(L) + "\n\n---\n\n**Disclosure:** the author maintains "
+        "**metareview** (MRV), one of the harnesses evaluated in this report — open source, MIT licensed, "
+        "free at <https://github.com/dsifry/metareview>.\n")
 
     with open(VG / "GOLD_DEFECT_CATALOG.csv", "w", newline="") as f:
         w = csv.DictWriter(f, lineterminator="\n", fieldnames=["id", "pr", "label", "tier", "evidence_level",

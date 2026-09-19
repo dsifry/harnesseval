@@ -158,7 +158,10 @@ partial = sorted([r for r in R if r["n"] < 6], key=lambda r: r["key"])
 L += ["**Partial-coverage cells** (1–2 PRs only; drawn with open markers in the figures and never cited as a best cell):",
       (", ".join(f"`{M_SHORT.get(r['m'], r['m'])} {FW_SHORT[r['fw']]} {r['e']}` ({r['n']} PR)" for r in partial)
        if partial else "none") + ".", ""]
-open(f"{ROOT}/analysis/verified_gold/TRUE_GOLD_HEADLINES.md", "w").write("\n".join(L))
+DISCLOSURE = ("\n\n---\n\n**Disclosure:** the author maintains **metareview** (MRV), one of the "
+              "harnesses evaluated in this report — open source, MIT licensed, free at "
+              "<https://github.com/dsifry/metareview>.\n")
+open(f"{ROOT}/analysis/verified_gold/TRUE_GOLD_HEADLINES.md", "w").write("\n".join(L) + DISCLOSURE)
 print("\n".join(L))
 
 # ---- fig 3: hidden-gold defects found vs F1' rank (the "F1' misleads" chart) ----
