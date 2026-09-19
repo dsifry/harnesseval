@@ -1539,6 +1539,15 @@ Figures may still differ in bytes across matplotlib versions, which the pins nar
 | `analysis/verified_gold/DEFECT_ASSIGN.json` | `67dca6a64ee5779fd86e24f95a82f531fef85f677cecca7b5aa7d7db97bb772d` |
 | `analysis/verified_gold/GOLD_DEFECT_CATALOG.json` | `67474d09d4e1dcd1b42a06e606464b8c769a0974a25dc0a5630c2c6fa622e0a8` |
 
+**Corrected-edition verification (2026-09-19).** This edition was re-verified the same way: fresh clone,
+every chain output deleted, §5.2 re-run in order. All five manifest artifacts matched
+`OUTPUT_SHA256SUMS`, and every regenerated figure (PNG and SVG), interactive fragment, dashboard,
+table and HTML rendering was byte-identical to the committed artifacts (a clean `git status`). SVGs
+previously embedded matplotlib's creation date; the figure tools now suppress it (§5.4 item 4),
+which is what makes the SVG twins and the inlined-SVG `REPORT.html` byte-reproducible. The test
+also caught two evidence gaps — the frozen per-run adjudication records (`passes/*/runs/`) and the
+audit-referenced checkpoint payloads — which are now tracked (see §5.2).
+
 For the **pre-correction edition**, the chain was re-run in a fresh clone with every chain output deleted first (so a match cannot be a
 stale file matching itself) and compared byte-for-byte. Full record, including the eight problems the test
 found and fixed: `analysis/REPLICATION_TEST_2026-09-18.md`. The historical results below describe that
@@ -1569,6 +1578,10 @@ reproduction test; the corrected edition’s checks and changed artifact hashes 
 3. Input resolvers + loud failure: the eight tools that read the golden comments now prefer
    `analysis/inputs/golden_comments/`; `final_report_extract.py` and `final_report_compute.py` abort instead of
    writing a degenerate dataset when the golden set is empty.
+4. `tools/final_report_figures.py` and `tools/final_report_figures_true_gold.py` — every SVG `savefig` call
+   now passes `metadata={'Date': None}`, omitting matplotlib's `<dc:date>` creation timestamp. Chart data,
+   layout and all other SVG content are unchanged; only the embedded wall-clock date is gone, so
+   same-environment regeneration is byte-identical.
 
 `harnesseval/judge.py`, `readjudicate3.py` semantics, and the golden dataset were **not** modified.
 

@@ -117,7 +117,7 @@ ax.axhline(v.get("F2p", 0), color=FWCOL["vanilla-engineered"], lw=0.7, ls=":", a
 ax.text(ax.get_xlim()[0], v.get("F2p", 0), " best vanilla F2′", fontsize=6, color="#555", va="bottom")
 ax.legend(loc="lower right", frameon=False, fontsize=7)
 fig.tight_layout()
-fig.savefig(f"{FIG}/fig_true_gold_pareto.png"); fig.savefig(f"{FIG}/fig_true_gold_pareto.svg")   # vector twin, same basename
+fig.savefig(f"{FIG}/fig_true_gold_pareto.png"); fig.savefig(f"{FIG}/fig_true_gold_pareto.svg", metadata={'Date': None})   # vector twin, same basename
 plt.close(fig)
 
 # ---- fig 2: $ per true bug vs recall -------------------------------------------
@@ -132,7 +132,7 @@ ax.set_title(f"What a caught real bug costs ({GOLD} true bugs)\n"
              fontsize=8.5, loc="left")
 ax.legend(loc="lower left", frameon=False, fontsize=7)
 fig.tight_layout()
-fig.savefig(f"{FIG}/fig_true_gold_efficiency.png"); fig.savefig(f"{FIG}/fig_true_gold_efficiency.svg")   # vector twin, same basename
+fig.savefig(f"{FIG}/fig_true_gold_efficiency.png"); fig.savefig(f"{FIG}/fig_true_gold_efficiency.svg", metadata={'Date': None})   # vector twin, same basename
 plt.close(fig)
 
 # ---- markdown headline block ---------------------------------------------------
@@ -225,6 +225,6 @@ for fw in ("vanilla-engineered", "compound-realistic", "metareview-realistic"):
                 label={"vanilla-engineered": "vanilla", "compound-realistic": "Compound Engineering (CE)",
                        "metareview-realistic": "metareview (MRV)"}[fw])
 ax.legend(loc="lower right", frameon=False, fontsize=7)
-fig.tight_layout(); fig.savefig(f"{FIG}/fig_true_gold_defects_found.png"); fig.savefig(f"{FIG}/fig_true_gold_defects_found.svg")   # vector twin, same basename
+fig.tight_layout(); fig.savefig(f"{FIG}/fig_true_gold_defects_found.png"); fig.savefig(f"{FIG}/fig_true_gold_defects_found.svg", metadata={'Date': None})   # vector twin, same basename
 plt.close(fig)
 print("wrote fig_true_gold_defects_found.png")
