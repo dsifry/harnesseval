@@ -303,18 +303,37 @@ def cluster_texts(texts: list[str], threshold: float = CLUSTER_THRESHOLD) -> lis
     unable to flip: one cluster, one adjudication, one inherited verdict.
     """
     reps: list[str] = []
+    matchers: list[difflib.SequenceMatcher] = []
     out: list[int] = []
     for t in texts:
         norm = normalize_for_cluster(t)
         best, best_r = -1, 0.0
         for i, r in enumerate(reps):
-            ratio = 1.0 if norm == r else difflib.SequenceMatcher(None, norm, r).ratio()
+            if norm == r:
+                # The original loop chooses the first maximum; 1 cannot be beaten.
+                best, best_r = i, 1.0
+                break
+            # seq2 stays the representative, exactly as in the original call.
+            # Reusing its index/count caches does not change matching semantics.
+            matcher = matchers[i]
+            matcher.set_seq1(norm)
+            # Both quick ratios are upper bounds on ratio(). Skipping a candidate
+            # below the acceptance threshold or unable to beat the current best
+            # preserves the original greedy partition and its first-match ties.
+            upper = matcher.real_quick_ratio()
+            if upper < threshold or upper <= best_r:
+                continue
+            upper = matcher.quick_ratio()
+            if upper < threshold or upper <= best_r:
+                continue
+            ratio = matcher.ratio()
             if ratio > best_r:
                 best, best_r = i, ratio
         if best >= 0 and best_r >= threshold:
             out.append(best)
         else:
             reps.append(norm)
+            matchers.append(difflib.SequenceMatcher(None, "", norm))
             out.append(len(reps) - 1)
     return out
 
