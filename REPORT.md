@@ -529,19 +529,27 @@ defined and justified in §2.6, and its instrument caveat applies to every nitpi
 † v1 binary adjudicator: the nitpick (important_non_bug) category is **structurally unmeasured** for this
 cell — see the instrument caveat in §2.6; its adjP′ = adjP by construction.
 
+**How to read those three rows — and why the best *cell* is not the best *harness*.** Each row answers a
+different question. The first is the highest *recall* of any cell; the second is the highest *F2′* of any cell;
+the third is the best one-shot cell. None of them is "the best harness" — that is a framework-level question,
+and on the full evidence **metareview (MRV) is the stronger harness overall**, while the single highest-scoring
+*cell* happens to be a compound-engineering cell by a statistically meaningless margin:
+
+- **Best harness (framework): MRV.** It holds **three of the top four cells** (MRV-medium 0.491, MRV-high
+  0.488, MRV-low 0.470), has the higher mean F2′ across all complete cells (**0.373 vs 0.332** for CE, 0.269
+  for vanilla), wins **17 of 21** matched MRV-vs-CE pairs on ΔF2′ (7 resolving at 95%; §3.5), and its leading
+  cells carry much less noise (adjP 0.91–0.93 vs 0.52–0.79 for the leading CE cells).
+- **Best single cell on F2′: glm-vis · CE · medium, by 0.004** over glm-vis · MRV · medium (Δ −0.004,
+  CI [−0.052, +0.052]) — inside the mutual confidence intervals, so **we do not claim a cell-level winner**.
+- **Why opus · CE · medium has the best *recall* (0.599) yet ranks only sixth on F2′:** it buys that recall
+  with a lot of noise (adjP 0.518), and F2′ charges for noise. Recall and F2′ are different preferences, both
+  reported (§2.6).
+
 **Top by F2′ (our evaluator, complete cells only):** glm-vis·CE·medium 0.494 [0.443, 0.593], glm-vis·MRV·medium 0.491,
 glm-vis·MRV·high 0.488, glm-vis·MRV·low 0.470, glm-flash·MRV·high 0.463, opus·CE·medium 0.460 — the top six
 are all harness cells; the best vanilla cell is fable·van·medium at 0.406 (14th; v1 instrument — see §2.6).
 
-**Read the single-cell ranking and the framework ranking separately — they answer different questions.**
-The *best single cell* on F2′ is a compound-engineering cell (glm-vis·CE·medium) by **0.004** over the best
-metareview cell (glm-vis·MRV·medium, Δ −0.004, CI [−0.052, +0.052]) — inside the mutual CIs, so no cell-level
-crown is established. The *best harness overall* is **metareview**: it holds **three of the top four cells**,
-it has the higher mean F2′ across all complete cells (**0.373 vs 0.332** for CE and 0.269 for vanilla), it
-wins **17 of 21** matched MRV-vs-CE pairs on ΔF2′ (7 resolving at 95%; §3.5), and its cells carry far lower
-noise (adjP 0.91–0.93 at the top vs 0.52–0.79 for the leading CE cells — which is also why the highest-recall
-harness cell, opus·CE·medium at recall 0.599, sits only sixth on F2′). The pair-level facts (39/42 Δrecall
-harness-vs-vanilla; MRV +17/−4 over CE) are the load-bearing ones.
+The pair-level facts (39/42 Δrecall harness-vs-vanilla; MRV +17/−4 over CE) are the load-bearing ones.
 
 The raw counts behind the F2′ ranking:
 
