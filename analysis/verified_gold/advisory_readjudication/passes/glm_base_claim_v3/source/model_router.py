@@ -1,0 +1,487 @@
+"""Provider-agnostic model client router.
+
+Routes a model id to the right provider client + call signature, so adapters/reviewers can
+treat any model uniformly. Handles:
+  - Anthropic native (claude-*)  -> Anthropic client, messages.create, thinking for effort
+  - OpenAI native (gpt-*)        -> OpenAI client, chat.completions, reasoning_effort
+  - Lunaroute (glm-*/kimi-*)      -> OpenAI-compat client at LUNAROUTE_BASE_URL, reasoning_effort
+
+Returns (text, input_tokens, output_tokens) per call. Keeps keys via harnesseval.keys
+(HARNESS_-prefixed, no env pollution).
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+import time
+
+from harnesseval import keys
+from harnesseval.effort import anthropic_effort_body, openai_effort_kwargs, is_anthropic, is_openai_compat
+from harnesseval.anthropic_util import text_content
+
+
+def _strip_fences(s: str) -> str:
+    if s.startswith("```"):
+        s = s.split("```")[1]
+        if s.startswith("json"):
+            s = s[4:]
+    return s.strip()
+
+
+async def call_model(model: str, system: str, user: str, *, effort: str = "medium",
+                     max_tokens: int = 2048, temperature: float = 0.0,
+                     execution_mode: str = "api") -> tuple[str, int, int, dict]:
+    """Call any supported model. Returns (text, input_tokens, output_tokens, per_model_usage).
+
+    `per_model_usage` is the apples-to-apples cost unit (usage.py, SPEC §10/gotcha #2): a
+    {model_id: {input_tokens, cache_read_input_tokens, cache_creation_input_tokens, output_tokens,
+    reasoning_output_tokens, total_tokens, cost_usd}} dict. For cli (OAuth) it carries the
+    ~15k scaffolding tax in cache_creation/cache_read (NOT input_tokens); for api it is the
+    single under-test model. Callers SHOULD store it on ReviewRun.per_model_usage.
+
+    execution_mode: "api" (paid, clean token counts, concurrent) | "cli" (OAuth, free,
+      ~15k scaffolding tax, serial). Per SPEC §7, record mode with every measurement and
+      never compare api vs cli numbers head-to-head. The REVIEWER arm may use cli (free);
+      the JUDGE arm must use api (calibrated trio + no scaffolding tax on judge calls).
+    """
+    from harnesseval.usage import grand_total
+    if execution_mode == "cli":
+        text, per_model = await _call_cli(model, system, user, effort)
+        gt = grand_total(per_model)
+        return text, gt["total_tokens"] - sum(u.get("output_tokens", 0) for u in per_model.values()), \
+               sum(u.get("output_tokens", 0) for u in per_model.values()), per_model
+    if is_anthropic(model):
+        return await _call_anthropic(model, system, user, effort, max_tokens, temperature)
+    elif is_openai_compat(model):
+        return await _call_openai_compat(model, system, user, effort, max_tokens, temperature)
+    raise ValueError(f"unknown model provider for: {model}")
+
+
+# model id -> (host, alias/slug) for CLI execution
+_CLAUDE_ALIASES = {
+    "claude-opus-4-5-20251101": "opus", "claude-opus-4-8": "opus", "claude-opus-5": "opus",
+    "claude-fable-5": "fable", "claude-fable-5-1": "fable", "claude-sonnet-4-5-20250929": "sonnet", "claude-sonnet-5": "sonnet",
+}
+_CODEX_SLUGS = {
+    # map API model ids -> valid Codex CLI slugs. gpt-5.2 is API-only (not a Codex slug);
+    # a user running `codex` uses the current default. Map to gpt-5.6-sol for realistic CLI.
+    "gpt-5.2": "gpt-5.6-sol", "gpt-5.6-sol": "gpt-5.6-sol", "gpt-5.6-terra": "gpt-5.6-terra", "gpt-5": "gpt-5.6-sol",
+    "gpt-6-astra": "gpt-6-astra",
+}
+
+
+async def _call_cli(model: str, system: str, user: str, effort: str) -> tuple[str, dict]:
+    """Dispatch to claude/codex OAuth CLI. Returns (text, per_model_usage). GLM/Kimi have no CLI -> fall back to API."""
+    from harnesseval.cli_backends import _claude_cli, _codex_cli
+    ml = model.lower()
+    # map full ids to aliases/slugs
+    alias = None
+    for mid, al in _CLAUDE_ALIASES.items():
+        if ml == mid.lower() or ml.startswith(al) and "claude" in ml:
+            alias = al; break
+    if alias or "claude" in ml or "opus" in ml or "sonnet" in ml or "fable" in ml:
+        # resolve alias
+        if not alias:
+            for al in ("opus", "sonnet", "fable", "haiku"):
+                if al in ml: alias = al; break
+        alias = alias or "sonnet"
+        text, usage, _ = await _claude_cli(alias, effort, user, system=system)
+        return text, usage  # usage is already the per-model dict from from_claude_cli
+    slug = None
+    for mid, sl in _CODEX_SLUGS.items():
+        if ml == mid.lower(): slug = sl; break
+    if slug or "gpt" in ml:
+        slug = slug or "gpt-5.6-sol"
+        text, usage, _ = await _codex_cli(slug, effort, user, system=system)
+        return text, usage  # usage is already the per-model dict from from_codex_cli
+    # GLM/Kimi: no OAuth CLI; fall back to API (Lunaroute, flat-fee). Capture the text properly
+    # (the earlier `_, _, _, per_model` unpack discarded the text into `_` and returned `_` = per_model).
+    text, _, _, per_model = await _call_openai_compat(model, system, user, effort, 2048, 0.0)
+    return text, per_model
+
+
+async def _call_anthropic(model, system, user, effort, max_tokens, temperature) -> tuple[str, int, int, dict]:
+    from harnesseval.usage import from_anthropic_api, grand_total
+    client = keys.anthropic_client()
+    body = anthropic_effort_body(effort, max_tokens=max_tokens)
+    thinking_enabled = body.get("thinking", {}).get("type") == "enabled"
+    mt = max_tokens + (body.get("thinking", {}).get("budget_tokens", 0) if body else 0)
+    extra = {"thinking": body["thinking"]} if body else {}
+    if thinking_enabled:
+        # thinking requires temperature=1 (gotcha #5)
+        extra["temperature"] = 1
+    else:
+        # thinking disabled: older Anthropic models (opus-4.5/sonnet-4.5) accept temperature=0
+        # for determinism, but newer models (opus-5+) reject it ("temperature is deprecated for
+        # this model"). Only pass it for the calibrated older trio; let newer models use the API
+        # default. Detect by snapshot id; the under-test set (opus-5, opus-4.8, fable, sonnet-5)
+        # all reject temperature, the judge trio (opus-4.5, sonnet-4.5) accepts it.
+        if any(old in model.lower() for old in ("opus-4-5", "sonnet-4-5")):
+            extra["temperature"] = temperature
+    resp = await asyncio.to_thread(
+        client.messages.create, model=model, max_tokens=mt, system=system,
+        messages=[{"role": "user", "content": user}], extra_body=extra,
+    )
+    per_model = from_anthropic_api(resp, model)
+    gt = grand_total(per_model)
+    return text_content(resp), gt["total_tokens"] - sum(u.get("output_tokens", 0) for u in per_model.values()), \
+           sum(u.get("output_tokens", 0) for u in per_model.values()), per_model
+
+
+_KEY_INFLIGHT: dict[int, int] = {}  # live requests per key-pool index (least-loaded selection)
+import contextvars as _cv
+_KEY_SESSION: _cv.ContextVar = _cv.ContextVar("key_pool_session", default=None)
+_KEY_STICKY: dict[str, int] = {}    # session -> key index (cache affinity: a review run's
+                                    # ~10 lens calls share long prefixes; keeping them on one
+                                    # key maximizes prompt-cache hits on that key's account)
+# per-key campaign budgets: HARNESS_KEY_BUDGETS="12,6" -> key0 may use 12 concurrent calls,
+# key1 only 6 (the interactive key reserves a lane for interactive use). Selection is by
+# LOAD FACTOR (in-flight/budget): key0 fills to its full budget before key1 takes overflow.
+_KEY_BUDGETS: list[int] = [int(x) for x in
+                           os.environ.get("HARNESS_KEY_BUDGETS", "").replace(",", " ").split() if x]
+
+def _budget(i: int) -> int:
+    return _KEY_BUDGETS[i] if i < len(_KEY_BUDGETS) else 12
+
+
+def set_session(session_id: str) -> None:
+    """Tag all model calls made in this context (and child tasks) as one cache session."""
+    _KEY_SESSION.set(session_id)
+
+
+# Streaming for lunaroute chat calls (2026-09-15). WHY: a non-streaming request makes the
+# gateway buffer the ENTIRE response server-side (150-300KB here) before sending a single byte,
+# which is the suspected trigger for the aggregate-concurrency wedges (6 concurrent x 65k cap).
+# Streaming keeps bytes flowing, keeps the connection observably active, and exposes reasoning
+# deltas (live thinking-token visibility). The assembled text is byte-identical to the
+# non-streaming path, so frozen instruments are unaffected: transport only.
+# Escape hatch: HARNESS_LUNAROUTE_STREAM=0 restores the plain blocking call.
+_STREAM_LUNAROUTE = os.environ.get("HARNESS_LUNAROUTE_STREAM", "1") != "0"
+
+
+class _ReassembledResponse:
+    """Stand-in for a chat.completions response (only .usage + .choices[0].message are read)."""
+
+    def __init__(self, content, reasoning, finish_reason, usage):
+        class _Msg:
+            pass
+
+        class _Choice:
+            pass
+
+        m = _Msg()
+        m.content = content
+        m.reasoning_content = reasoning
+        c = _Choice()
+        c.message = m
+        c.finish_reason = finish_reason
+        self.choices = [c]
+        self.usage = usage
+
+
+def _streamed_chat(client, call_kwargs):
+    """Blocking streaming call, reassembled to the non-streaming response shape."""
+    kw = dict(call_kwargs)
+    kw["stream"] = True
+    kw.setdefault("stream_options", {"include_usage": True})
+    parts, rparts = [], []
+    finish = None
+    usage = None
+    for chunk in client.chat.completions.create(**kw):
+        u = getattr(chunk, "usage", None)
+        if u is not None:
+            usage = u
+        choices = getattr(chunk, "choices", None) or []
+        if not choices:
+            continue
+        ch = choices[0]
+        if getattr(ch, "finish_reason", None):
+            finish = ch.finish_reason
+        d = getattr(ch, "delta", None)
+        if d is None:
+            continue
+        c = getattr(d, "content", None)
+        if c:
+            parts.append(c)
+        rc = getattr(d, "reasoning_content", None)
+        if rc:
+            rparts.append(rc)
+    return _ReassembledResponse("".join(parts), "".join(rparts), finish, usage)
+
+
+def _do_chat_call(client, call_kwargs):
+    """Lunaroute chat call: streaming (default) or the plain blocking call."""
+    if _STREAM_LUNAROUTE:
+        return _streamed_chat(client, call_kwargs)
+    return client.chat.completions.create(**call_kwargs)
+
+
+def _log_key_usage(idx: int, model: str, seconds: float, resp, ok: bool, ev: str = "end") -> None:
+    """Append one utilization record per key-pool attempt to the key-usage ledger (JSONL).
+
+    The ledger is what makes key utilization observable from OUTSIDE the runner processes:
+    per key — which model, how long, tokens in/out/cached. The campaign dashboard and
+    tools/key_usage_report.py aggregate it. Logging must never break the call path.
+    """
+    try:
+        import json as _json
+        path = os.environ.get("HARNESS_KEY_USAGE_FILE", "logs/key_usage.jsonl")
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        u = getattr(resp, "usage", None) if resp is not None else None
+        rec = {"ts": time.time(), "ev": ev, "key": idx, "model": model, "s": round(seconds, 1),
+               "ok": ok, "sess": _KEY_SESSION.get()}
+        if u is not None:
+            rec["in"] = getattr(u, "prompt_tokens", 0) or 0
+            rec["out"] = getattr(u, "completion_tokens", 0) or 0
+            det = getattr(u, "prompt_tokens_details", None)
+            rec["cached"] = (getattr(det, "cached_tokens", 0) or 0) if det else 0
+            extra = getattr(u, "model_extra", None) or {}
+            if not rec["cached"]:
+                rec["cached"] = extra.get("cached_tokens", 0) or extra.get("prompt_cache_hit_tokens", 0) or 0
+        with open(path, "a") as f:
+            f.write(_json.dumps(rec) + "\n")
+    except Exception:
+        pass
+
+
+async def _call_openai_compat(model, system, user, effort, max_tokens, temperature) -> tuple[str, int, int, dict]:
+    from harnesseval.usage import from_openai_api, grand_total
+    # Lunaroute (glm/kimi/deepseek/…) or native OpenAI (gpt) — both OpenAI-compat
+    from harnesseval.effort import is_lunaroute as _is_lr
+    is_lunaroute = _is_lr(model)
+    if is_lunaroute:
+        clients = keys.lunaroute_clients()  # key pool: least-in-flight + failover (see below)
+    else:
+        clients = [keys.openai_client()]
+    kwargs = openai_effort_kwargs(effort, model=model)
+    # OpenAI reasoning models need max_completion_tokens, not max_tokens.
+    # Lunaroute GLM/Kimi (reasoning models) return EMPTY content (finish_reason=length,
+    # message.content="") when max_completion_tokens is too low: they spend ~5k+ tokens on hidden
+    # reasoning before emitting visible content, so a 1024/2048/4096/8192 cap is hit mid-reasoning
+    # -> empty string. Verified 2026-08-23: GLM+Kimi both need 16384 to reach finish_reason=stop and
+    # produce content on the real review prompts. Without this floor, every GLM/Kimi cell scored
+    # 0.00 (review prose produced at 2048 but the extract step at 1024 returned empty -> 0 findings).
+    # RAISED 16384 -> 65536 (2026-09-15, spy-lane wire evidence): on the v0.12 lens prompts at
+    # effort=high the vision model needs ~31k completion tokens (hidden reasoning), so the 16384
+    # first attempt ALWAYS truncated (finish_reason=length, completion_tokens==cap) and the
+    # empty-content ladder then burned 16384 (80s) + 32768 (204s) before the 131072 retry finally
+    # completed (260s, finish=stop, tok=31148). That is ~544s per lens instead of ~260s, which is
+    # what pushed every vision run past its timeout and produced the multi-hour "storm"/hang
+    # profile. A 65536 floor lets the FIRST call complete: no truncation, no escalation, no storm.
+    # Cap, not target -- models that finish early still stop early (observed: finish=stop at 31148
+    # under a 131072 cap), so small extract/judge calls are unaffected in cost.
+    if is_lunaroute:
+        max_tokens = max(max_tokens, 65536)
+    call_kwargs = dict(model=model, messages=[{"role": "system", "content": system},
+                                              {"role": "user", "content": user}],
+                       max_completion_tokens=max_tokens, temperature=temperature if not kwargs else 1)
+    call_kwargs.update(kwargs)
+    from openai import APITimeoutError
+    # Lunaroute GLM/Kimi: retry once on APITimeoutError (the gateway intermittently stalls/queues
+    # a call past the per-request timeout — a flat-fee plan's concurrency limit). One retry,
+    # bounded. Native OpenAI (gpt) doesn't stall this way (no concurrency-queue), so only Lunaroute.
+    if is_lunaroute and len(clients) > 1:
+        # key multiplexer: least in-flight first; fail over to the next key on transport-class
+        # errors (429 CONCURRENT_REQUEST_LIMIT, 5xx, timeout, connection). Real request errors
+        # (4xx) fail loud — they mean the call itself is bad, not the key.
+        from openai import APIConnectionError, APIStatusError, RateLimitError
+        resp = None
+        last_exc: Exception | None = None
+        tried: set[int] = set()
+        sess = _KEY_SESSION.get()
+        # admission control: never exceed a key's budget. If every key is saturated, WAIT
+        # for a slot instead of overflowing into 429s (the peak-40-over-budget-24 lesson).
+        if all(_KEY_INFLIGHT.get(i, 0) >= _budget(i) for i in range(len(clients))):
+            _waited = 0.0
+            while all(_KEY_INFLIGHT.get(i, 0) >= _budget(i) for i in range(len(clients))):
+                await asyncio.sleep(0.05)
+                _waited += 0.05
+                if _waited > 600:
+                    break  # fail loud via the normal path rather than wait forever
+        for _attempt in range(len(clients)):
+            if sess is not None and sess in _KEY_STICKY and _KEY_STICKY[sess] not in tried:
+                # cache affinity: a session's later calls stay on the key that warmed its prefix
+                idx = _KEY_STICKY[sess]
+            else:
+                idx = min((i for i in range(len(clients)) if i not in tried),
+                          key=lambda i: _KEY_INFLIGHT.get(i, 0) / _budget(i))
+            if sess is not None and len(_KEY_STICKY) > 512:
+                for _old in list(_KEY_STICKY)[: len(_KEY_STICKY) - 512]:
+                    _KEY_STICKY.pop(_old, None)
+            if sess is not None:
+                _KEY_STICKY[sess] = idx
+            tried.add(idx)
+            _KEY_INFLIGHT[idx] = _KEY_INFLIGHT.get(idx, 0) + 1
+            t0 = time.time()
+            ok = False
+            _log_key_usage(idx, model, 0.0, None, None, ev="start")
+            try:
+                resp = await asyncio.to_thread(_do_chat_call, clients[idx], call_kwargs)
+                ok = True
+                break
+            except (APITimeoutError, APIConnectionError, RateLimitError) as e:
+                last_exc = e
+            except APIStatusError as e:
+                if e.status_code is not None and (e.status_code >= 500 or e.status_code == 429):
+                    last_exc = e
+                else:
+                    _KEY_INFLIGHT[idx] = max(0, _KEY_INFLIGHT.get(idx, 1) - 1)
+                    raise
+            finally:
+                _KEY_INFLIGHT[idx] = max(0, _KEY_INFLIGHT.get(idx, 1) - 1)
+                _log_key_usage(idx, model, time.time() - t0, resp, ok)
+        if resp is None:
+            assert last_exc is not None
+            raise last_exc
+    elif is_lunaroute:
+        t0 = time.time()
+        try:
+            resp = await asyncio.to_thread(_do_chat_call, clients[0], call_kwargs)
+            _log_key_usage(0, model, time.time() - t0, resp, True)
+        except APITimeoutError:
+            _log_key_usage(0, model, time.time() - t0, None, False)
+            resp = await asyncio.to_thread(_do_chat_call, clients[0], call_kwargs)
+            _log_key_usage(0, model, time.time() - t0, resp, True)
+    else:
+        resp = await asyncio.to_thread(clients[0].chat.completions.create, **call_kwargs)
+    text = resp.choices[0].message.content or ""
+    # Lunaroute GLM/Kimi can also non-deterministically return empty content even at the 16384
+    # floor (reasoning finished but content not emitted, or a transient finish=length). Retry
+    # once — empty content means 0 findings downstream. Native OpenAI doesn't hit this
+    # (separately-budgeted reasoning), so retry only for Lunaroute.
+    if is_lunaroute and not text.strip():
+        # Empty content at the 16384 floor is the SILENT twin of the output-cap 400: at
+        # medium/high effort the hidden reasoning can exceed the floor, finish_reason=length
+        # fires mid-thinking, and no visible content is emitted. Retrying at the same cap
+        # reproduces it (observed: vision-medium cells consuming 723k tokens over 74 min
+        # with zero findings). Retry with a DOUBLED cap, up to two raises — same contract
+        # as the output-cap ladder: transport headroom only, the prompt is untouched.
+        for _raise in range(2):
+            # Cap the escalation at 131072 (2026-09-15): with the lens semaphore at 3,
+            # 3x131072=393k stays under the gateway's ~400k aggregate-output limit; the old
+            # uncapped rung (262144 -> 786k at 3-wide, 1.5M at 6-wide) is exactly the
+            # configuration measured to hang every call in the batch.
+            call_kwargs["max_completion_tokens"] = min(
+                max(call_kwargs["max_completion_tokens"], 16384) * (2 ** (_raise + 1)), 131072)
+            # go through the key pool's least-in-flight pick — a stale `client` reference
+            # here (pre-multiplexer name) crashed every empty-content retry with
+            # NameError: name 'client' is not defined, killing whole cells (2026-09-11)
+            _ki = min(range(len(clients)), key=lambda i: _KEY_INFLIGHT.get(i, 0))
+            _KEY_INFLIGHT[_ki] = _KEY_INFLIGHT.get(_ki, 0) + 1
+            try:
+                resp = await asyncio.to_thread(_do_chat_call, clients[_ki], call_kwargs)
+            finally:
+                _KEY_INFLIGHT[_ki] = max(0, _KEY_INFLIGHT.get(_ki, 1) - 1)
+            _log_key_usage(_ki, model, 0.0, resp, True)
+            text = resp.choices[0].message.content or ""
+            if text.strip():
+                break
+    per_model = from_openai_api(resp, model)
+    gt = grand_total(per_model)
+    return text, gt["total_tokens"] - sum(u.get("output_tokens", 0) for u in per_model.values()), \
+           sum(u.get("output_tokens", 0) for u in per_model.values()), per_model
+
+
+async def call_model_json(model: str, system: str, user: str, *, effort: str = "medium",
+                          max_tokens: int = 1024, execution_mode: str = "api") -> tuple[dict, int, int, dict]:
+    """Call any model and parse JSON output. Returns (parsed, in_tokens, out_tokens, per_model_usage).
+
+    For Lunaroute reasoning models (GLM/Kimi), retry once if the first call returns empty content
+    OR unparseable text — under concurrent load they intermittently emit empty/prose instead of
+    JSON, which silently yields 0 findings downstream. The retry is cheap insurance against a
+    0-recall cell. Native OpenAI/Anthropic don't hit this.
+
+    Output-cap 400s ("Could not finish the message because max_tokens or model output limit was
+    reached") are retried once at 4x the cap: Lunaroute 400s instead of truncating, and an
+    unhandled raise here poisons whole cells (observed: judge.py's max_tokens=256 matcher calls
+    crashing PR-7 cells and discarding all findings). This is transport headroom only — completed
+    calls are byte-identical, so frozen instruments (official matcher, rj3 adjudicator) are
+    unaffected; only would-be crashes become measurements.
+    """
+    import asyncio as _aio
+    text = tin = tout = per_model = None
+    for _attempt in range(3):
+        try:
+            text, tin, tout, per_model = await call_model(model, system, user, effort=effort, max_tokens=max_tokens, execution_mode=execution_mode)
+            break
+        except Exception as e:
+            es = str(e)
+            if "max_tokens or model output limit" in es:
+                text, tin, tout, per_model = await call_model(model, system, user, effort=effort,
+                                                              max_tokens=max(8192, max_tokens * 4),
+                                                              execution_mode=execution_mode)
+                break
+            if ("429" in es or "CONCURRENT_REQUEST_LIMIT" in es or "rate limit" in es.lower()) and _attempt < 2:
+                # concurrency-cap / rate-limit: back off and retry (the serving recovers
+                # between windows; the 429 class was unreachable before — it propagated
+                # and poisoned whole cells during the vision refills)
+                await _aio.sleep(min(20 * (_attempt + 1), 60))
+                continue
+            # timeout / connection / 503-class on the FIRST attempt (2026-09-14 root cause #2):
+            # the retry ladder below only fired when call_model RETURNED empty/unparseable text;
+            # a first-attempt APITimeoutError or connection drop raised straight out of this
+            # loop and failed the WHOLE cell (observed: a 20-min run with 20 good calls died to
+            # one dead 900s connection, error="lenses: Request timed out.", with no ledger trace
+            # because the raise path skips _log_key_usage). Mirror the later ladder's transient
+            # set here so those retries actually fire.
+            esl = (type(e).__name__ + " " + es).lower()
+            transient = ("timeout" in esl or "timed out" in esl or "connection" in esl
+                         or "503" in esl or "upstream" in esl or "backend unavailable" in esl
+                         or "overloaded" in esl)
+            if transient and _attempt < 2:
+                await _aio.sleep(min(5 * (_attempt + 1), 15))
+                continue
+            raise
+    def _try_parse(t):
+        try:
+            return json.loads(_strip_fences(t))
+        except Exception:
+            return None
+    parsed = _try_parse(text)
+    from harnesseval.effort import is_lunaroute as _is_lr2
+    is_lunaroute = _is_lr2(model)
+    if is_lunaroute and not parsed:
+        # empty or unparseable under load -> retry once. Also retry once if the first call
+        # raised APITimeoutError (a Lunaroute concurrency-queue stall); _call_openai_compat
+        # already retries once internally, but a double-timeout would otherwise propagate and
+        # fail the whole cell, so catch it here and give it one more attempt.
+        # Flap-window deepening (2026-09-10): during gateway flaps a single retry is not
+        # enough — two consecutive hangs were poisoning whole cells (each call hangs to the
+        # 600s transport timeout, ~30 min/cell wasted). Retry up to 3 total attempts on
+        # timeout-class failures; non-timeout errors keep the single retry.
+        import asyncio as _aio
+        for attempt in range(2, 4):
+            try:
+                # empty-content escalation (2026-09-14, spy-lane + probe validated): GLM vision
+                # lens calls at the 16384 floor return finish_reason=length with content="" (whole
+                # budget consumed by reasoning_content). Probe at 32768: vision lands real findings
+                # JSON, finish_reason=stop, 351s — under the gateway's 600s stream wall. Also fixes
+                # the retry storm (6 lenses -> 28 requests) that overflowed the key budget into
+                # the gateway's header-wait queue (the multi-hour 'hangs'). Retry-path only:
+                # healthy first calls, banked cells, and frozen instruments unaffected.
+                text2, tin2, tout2, per_model2 = await call_model(model, system, user, effort=effort, max_tokens=max(32768, max_tokens * 4), execution_mode=execution_mode)
+            except Exception as e2:
+                # retryable-transient: timeouts AND 503-class gateway unavailability
+                # (UPSTREAM_ERROR / "backend unavailable") — both are provider-side and
+                # both were poisoning cells during flap windows (harnesseval, 2026-09-10)
+                es = (type(e2).__name__ + " " + str(e2)).lower()
+                # connection-class added 2026-09-14: a mid-stream disconnect (gateway flap)
+                # was treated as permanent and killed a whole 59-min run, discarding a landed
+                # lens (error="lenses: Connection error.", 5224194d273d). Connection resets
+                # are exactly as transient as timeouts — retry them on the same ladder.
+                transient = ("timeout" in es or "timed out" in es or "503" in es
+                             or "upstream" in es or "backend unavailable" in es
+                             or "overloaded" in es or "connection" in es)
+                if not (transient and attempt < 3):
+                    break  # permanent error, or retries exhausted — the poison guard catches it
+                await _aio.sleep(min(5 * (attempt - 1), 15))
+                continue
+            tin += tin2; tout += tout2
+            from harnesseval.usage import merge
+            per_model = merge(per_model, per_model2)
+            parsed = _try_parse(text2) or {}
+            if parsed:
+                break
+    return parsed or {}, tin, tout, per_model
