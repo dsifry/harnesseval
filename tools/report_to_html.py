@@ -252,43 +252,51 @@ _BOOT_SCRIPT = """<script>
     return idx;
   }
 
-  /* Hide the points the key says to hide: null them out (keeps the legend and the rest of the trace). */
+  /* Hide the points the key says to hide.
+     Removed points are DROPPED from the array, not nulled: a line then connects its remaining
+     neighbours, so unticking "medium" leaves a low-to-high line (and if low or high goes too, the
+     line simply shrinks or disappears). Traces with no cell information at all are left untouched. */
   function maskedTraces(traces, st) {
     var idx = buildCoordIndex(traces);
     return traces.map(function (t) {
-      var xsrc = t.x || [], cd = t.customdata || [];
+      var xsrc = t.x || [], cd = t.customdata || [], ysrc = t.y || [];
+      var hasCd = cd.length > 0, hasText = Array.isArray(t.text);
+      var hasEx = !!(t.error_x && t.error_x.array), hasExm = !!(t.error_x && t.error_x.arrayminus);
+      var hasEy = !!(t.error_y && t.error_y.array), hasEym = !!(t.error_y && t.error_y.arrayminus);
       var out = copy(t), any = false, kept = 0;
-      var xs = [], ys = (t.y || []).slice();
-      var ex = t.error_x && t.error_x.array ? t.error_x.array.slice() : null;
-      var exm = t.error_x && t.error_x.arrayminus ? t.error_x.arrayminus.slice() : null;
-      var ey = t.error_y && t.error_y.array ? t.error_y.array.slice() : null;
-      var eym = t.error_y && t.error_y.arrayminus ? t.error_y.arrayminus.slice() : null;
+      var xs = [], ys = [], cds = [], txs = [], ex = [], exm = [], ey = [], eym = [];
       for (var i = 0; i < xsrc.length; i++) {
-        var c = cellOf(cd.length ? cd[i] : null, xsrc[i]);
+        var c = cellOf(hasCd ? cd[i] : null, xsrc[i]);
         var pass = true;
         if (c) {
           any = true;
           pass = passes(c, st);
-        } else if (t.x && t.y) {
+        } else if (ysrc.length) {
           // no metadata on this point (e.g. a connecting line): resolve it by coordinates
-          var hit = idx[coordKey(xsrc[i], ys[i])];
+          var hit = idx[coordKey(xsrc[i], ysrc[i])];
           if (hit && hit.length) { any = true; pass = hit.some(function (h) { return passes(h, st); }); }
         }
-        if (pass) { kept++; xs.push(xsrc[i]); }
-        else {
-          xs.push(null);
-          if (ys.length) ys[i] = null;
-          if (ex) ex[i] = null; if (exm) exm[i] = null;
-          if (ey) ey[i] = null; if (eym) eym[i] = null;
-        }
+        if (!pass) { continue; }
+        kept++;
+        xs.push(xsrc[i]);
+        if (ysrc.length) ys.push(ysrc[i]);
+        if (hasCd) cds.push(cd[i]);
+        if (hasText) txs.push(t.text[i]);
+        if (hasEx) ex.push(t.error_x.array[i]);
+        if (hasExm) exm.push(t.error_x.arrayminus[i]);
+        if (hasEy) ey.push(t.error_y.array[i]);
+        if (hasEym) eym.push(t.error_y.arrayminus[i]);
       }
+      if (!any) { return out; }               // no cell information: leave the trace alone
       out.x = xs;
-      if (t.y) out.y = ys;
-      if (ex) out.error_x.array = ex;
-      if (exm) out.error_x.arrayminus = exm;
-      if (ey) out.error_y.array = ey;
-      if (eym) out.error_y.arrayminus = eym;
-      if (any && kept === 0) out.visible = false;
+      if (ysrc.length) out.y = ys;
+      if (hasCd) out.customdata = cds;
+      if (hasText) out.text = txs;
+      if (hasEx) out.error_x.array = ex;
+      if (hasExm) out.error_x.arrayminus = exm;
+      if (hasEy) out.error_y.array = ey;
+      if (hasEym) out.error_y.arrayminus = eym;
+      if (kept === 0) out.visible = false;
       return out;
     });
   }
