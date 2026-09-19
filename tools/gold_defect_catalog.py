@@ -6,7 +6,7 @@ location (file:lines recovered from the assigned findings), and its provenance (
 
 Evidence levels:
   own_executed    - the defect has its own defects/<id>/ dir: its own test (test.diff) FAILED on the PR head,
-                    its own fix (fix.patch) made it PASS, and the bundle's fix left it red (orthogonality).
+                    its own fix (fix.patch) made it PASS. Orthogonality is reported separately when recorded.
   bundle_executed - the defect is demonstrated by its bundle's executed test/fix/logs. For a bundle PRIMARY
                     claim the bundle's test IS the exact test for this defect; for an "extra" facet split out
                     by the merge audit the bundle test exercises the bundle's claim, and the facet is
@@ -37,9 +37,9 @@ def resolve_pr_file(pr: str, frag: str) -> str:
 
 
 def main():
-    reg = json.load(open(VG / "DEFECT_REGISTRY.json"))
-    assign = json.load(open(VG / "DEFECT_ASSIGN.json")) if (VG / "DEFECT_ASSIGN.json").exists() else {}
-    ds = json.load(open(ROOT / "analysis/final_report_dataset.json"))
+    reg = json.loads((VG / "DEFECT_REGISTRY.json").read_text())
+    assign = json.loads((VG / "DEFECT_ASSIGN.json").read_text()) if (VG / "DEFECT_ASSIGN.json").exists() else {}
+    ds = json.loads((ROOT / "analysis/final_report_dataset.json").read_text())
     texts = defaultdict(list)  # (pr, hash) -> [texts]
     for url in ds["pr_golden"]:
         pr = url.rstrip("/").split("/")[-1]
@@ -69,7 +69,7 @@ def main():
         pr, did = d["pr"], d["id"]
         bd = bundle_dir(d, pr, d["bundle"])
         dd = find_defect_dir(did)
-        bmeta = json.load(open(bd / "meta.json")) if bd and (bd / "meta.json").exists() else {}
+        bmeta = json.loads((bd / "meta.json").read_text()) if bd and (bd / "meta.json").exists() else {}
         # assigned findings + recovered anchors
         amap = assign.get(pr, {})
         findings = [t for (p, h), ts in texts.items() if p == pr and amap.get(h) == did for t in ts]
@@ -80,10 +80,9 @@ def main():
                 anchors[f"{f}:{a}" + (f"-{b}" if b else "")] += 1
         anchor = anchors.most_common(1)[0][0] if anchors else (d.get("anchor_file") or "")
         own = dd is not None and (dd / "test.diff").exists()
-        dmeta0 = json.load(open(dd / "meta.json")) if own and (dd / "meta.json").exists() else {}
-        origin = (dmeta0.get("test_origin") or dmeta0.get("evidence_provenance")
-                  or "defect-authored (verifier wrote a test for this defect alone)")
-        dmeta = json.load(open(dd / "meta.json")) if own and (dd / "meta.json").exists() else {}
+        dmeta = json.loads((dd / "meta.json").read_text()) if own and (dd / "meta.json").exists() else {}
+        origin = (dmeta.get("test_origin") or dmeta.get("evidence_provenance")
+                  or "test origin not recorded in metadata")
         labels = (bmeta.get("multi_defect") or {}).get("labels") or []
 
         def toks(x):
@@ -93,33 +92,49 @@ def main():
         else:
             sims = [len(toks(d["label"]) & toks(l)) / max(1, len(toks(d["label"]) | toks(l))) for l in labels]
             primary = sims and max(sims) == sims[0] and max(sims) >= 0.15
+        withdrawn = d.get("withdrawn") or d.get("tier") == "D-withdrawn"
+        head_fail_fixed_pass = False if withdrawn else dmeta.get("own_fix_makes_test_pass")
+        orthogonality = dmeta.get("sibling_fix_leaves_test_red")
+        if withdrawn:
+            exact_test = "withdrawn - recorded test does not demonstrate the claim"
+        elif not own:
+            exact_test = "no own test - bundle evidence only"
+        else:
+            exact_test = ("yes - container test (see test_origin)" if "container" in origin.lower()
+                          else "yes - defect-specific test")
+            exact_test += (", orthogonality proven" if orthogonality is True
+                           else ", orthogonality not established")
         mismatch = None
-        if d.get("label_corrected"):
+        if withdrawn:
+            mismatch = "WITHDRAWN: " + (d.get("withdrawn_reason") or "test does not demonstrate the claim")
+        elif d.get("tier") == "D-duplicate":
+            mismatch = "DUPLICATE: " + (d.get("dup_reason") or "not an independent verified defect")
+        elif d.get("label_corrected"):
             mismatch = "CORRECTED: " + d["label_corrected"][:160]
         elif d.get("label_vs_test_check"):
             mismatch = d["label_vs_test_check"]
-        else:
+        elif head_fail_fixed_pass is True:
             # The reliable signal is behavioural, not textual: the defect's own test FAILED on the PR head
             # and PASSED once a minimal fix authored for this label was applied. (A comment-resemblance
             # heuristic was tried and abandoned: most tests contain no literal CLAIM comment, so it flagged
             # 21 defects that had in fact been assertion-read and confirmed.)
             mismatch = ("verified: own test fails on the PR head and passes with a fix authored for this label"
                         + (" (container test authored for exactly this claim)" if "container" in origin else ""))
+        else:
+            mismatch = "unverified: execution metadata does not establish the labelled claim"
         rec = {
             "id": did, "pr": pr, "label": d["label"], "tier": d.get("tier"),
             "evidence_level": "own_executed" if own else "bundle_executed",
             "defect_is_bundle_primary_claim": primary,
             "test_origin": origin,
-            "exact_test": ("yes - defect-specific test, orthogonality proven" if own and not dmeta0.get("test_origin")
-                           else ("yes - container test authored for exactly this claim" if own
-                                 else "no own test (should not occur: every defect owns a directory)")),
+            "exact_test": exact_test,
             "anchor": anchor,
             "bundle": d["bundle"], "bundle_dir": str(bd.relative_to(ROOT)) if bd else None,
             "bundle_verdict": d.get("bundle_verdict"),
             "test": str((dd / "test.diff").relative_to(ROOT)) if own else (str((bd / "test.patch").relative_to(ROOT)) if bd and (bd / "test.patch").exists() else None),
             "fix": str((dd / "fix.patch").relative_to(ROOT)) if own else (str((bd / "fix.patch").relative_to(ROOT)) if bd and (bd / "fix.patch").exists() else None),
             "logs": str((dd / "logs").relative_to(ROOT)) if own else (str((bd / "logs").relative_to(ROOT)) if bd and (bd / "logs").exists() else None),
-            "head_fail_fixed_pass": True,
+            "head_fail_fixed_pass": head_fail_fixed_pass,
             "sibling_fix_leaves_red": dmeta.get("sibling_fix_leaves_test_red") if own else None,
             "n_assigned_findings": len(findings),
             "example_finding": (min(findings, key=len)[:300] if findings else None),
@@ -135,8 +150,9 @@ def main():
         }
         recs.append(rec)
 
-    json.dump({"n": len(recs), "levels": dict(Counter(r["evidence_level"] for r in recs)),
-               "defects": recs}, open(VG / "GOLD_DEFECT_CATALOG.json", "w"), indent=1)
+    (VG / "GOLD_DEFECT_CATALOG.json").write_text(json.dumps(
+        {"n": len(recs), "levels": dict(Counter(r["evidence_level"] for r in recs)),
+         "defects": recs}, indent=1))
 
     # markdown
     nv = sum(1 for r in recs if r["tier"] == "D-verified")
@@ -148,10 +164,10 @@ def main():
          (f"{nw} defects are WITHDRAWN (their tests do not demonstrate the claim) and {nd} are merged as DUPLICATES "
           "(2026-09-18 audit — see WITHDRAWALS_AND_DEDUP_2026-09-18.md). They are retained below, marked, but no longer count as verified.")
           if (nw or nd) else "",
-         "**Every defect is an independent unit**: it owns `defects/<id>/{test.diff,fix.patch,logs/,meta.json}`.",
-         "No defect shares a test with another. `test_origin` records whether the test was written by the verifier",
-         "for this defect alone (with a sibling-fix orthogonality check) or copied from the original execution",
-         "container where it had been authored for exactly this claim.",
+         "Defect directories retain `test.diff`, `fix.patch`, logs, and metadata as evidence artifacts.",
+         "`test_origin` records verifier-authored tests or provenance copied from the execution container.",
+         "Orthogonality is established only when `sibling_fix_leaves_red` is explicitly true;",
+         "a null or false value does not establish independence. Withdrawn tests do not verify their claims.",
          "", "Merged duplicates and restored/renamed entries carry a provenance note.", "",
          "## Known open items (do not treat this catalogue as exhaustive)", "",
          "- `label_vs_test_mismatch`: where a defect's own test declares a claim that does not match the",
@@ -193,7 +209,7 @@ def main():
     (VG / "GOLD_DEFECT_CATALOG.md").write_text("\n".join(L))
 
     with open(VG / "GOLD_DEFECT_CATALOG.csv", "w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=["id", "pr", "label", "tier", "evidence_level",
+        w = csv.DictWriter(f, lineterminator="\n", fieldnames=["id", "pr", "label", "tier", "evidence_level",
                                           "defect_is_bundle_primary_claim", "exact_test", "anchor", "bundle", "bundle_verdict",
                                           "test", "fix", "logs", "sibling_fix_leaves_red",
                                           "n_assigned_findings", "merged_in_from", "restored", "withdrawn", "duplicate_of"])

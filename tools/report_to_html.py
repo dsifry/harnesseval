@@ -173,7 +173,7 @@ the interactive charts carry the same data as the
 """
 
 FOOTER = (
-    "Automated code review evaluation — report revision <code>report-2026-09-18</code>. "
+    "Automated code review evaluation — corrected September 2026 report. "
     'Charts: <a href="analysis/figures/interactive_dashboard.html">interactive dashboard</a> · '
     'PNGs in <a href="analysis/figures/">analysis/figures/</a> · '
     '<a href="EXECUTIVE_SUMMARY.html">executive summary (HTML)</a> / '
@@ -756,8 +756,7 @@ def render(md_path: Path, html_path: Path, title: str) -> None:
         boot = _BOOT_SCRIPT
 
     today = datetime.date.today().isoformat()
-    tagline = (" at repo tag <code>report-2026-09-18</code>"
-               if md_path.name.startswith("REPORT") else "")
+    tagline = " from the checked-out Markdown and figure artifacts"
     html = BODY_TMPL.format(
         title=title, css=CSS, src=md_path.name, date=today, tagline=tagline,
         body=body, footer=FOOTER, plotly=plotly, boot=boot,
@@ -773,7 +772,7 @@ def main(argv: list[str]) -> None:
         render(Path(argv[1]), Path(argv[2]), Path(argv[1]).stem)
         return
     render(ROOT / "REPORT.md", ROOT / "REPORT.html",
-           "September 2026: Open-weight code-review harnesses match Opus and Sol in quality at a fraction of the cost")
+           html.escape((ROOT / "REPORT.md").read_text().splitlines()[0].removeprefix("# ")))
     render(ROOT / "EXECUTIVE_SUMMARY.md", ROOT / "EXECUTIVE_SUMMARY.html",
            "Automated code review — executive summary")
 

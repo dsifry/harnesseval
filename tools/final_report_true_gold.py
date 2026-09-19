@@ -9,6 +9,8 @@ aborts rather than write if any frozen key changes.
 """
 from __future__ import annotations
 import json, sys
+import numpy as np
+from report_quality import advisory_f2, SENSITIVITY_WEIGHTS
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -18,7 +20,7 @@ HARNESS = ("compound-realistic", "metareview-realistic")
 
 
 def headline(block):
-    cells = block["cells"]
+    cells = {k:v for k,v in block["cells"].items() if v["n_pr"] == 6}
 
     def cls(k):
         return k.split("|")[1]
@@ -30,7 +32,7 @@ def headline(block):
             continue
         brk, brv = max(grp.items(), key=lambda kv: kv[1]["recall"])
         bfk, bfv = max(grp.items(), key=lambda kv: kv[1]["F1p"])
-        b2k, b2v = max(grp.items(), key=lambda kv: kv[1].get("F2p", 0))
+        b2k, b2v = max(((k,v) for k,v in grp.items() if v.get("advisory_measured")), key=lambda kv: kv[1].get("F2p", 0))
         out[name] = {
             "best_recall": {"cell": brk, "F2p": brv.get("F2p"), **{k: brv[k] for k in ("recall", "F1p", "adjP", "TP", "den")}},
             "best_f1p": {"cell": bfk, "F2p": bfv.get("F2p"), **{k: bfv[k] for k in ("recall", "F1p", "adjP", "TP", "den")}},
@@ -46,6 +48,36 @@ def headline(block):
         out["best_f2p_ratio_harness_over_vanilla"] = h2 / v2 if v2 else None
     return out
 
+
+def matched_framework_means(cells):
+    frameworks = ("vanilla-engineered", "compound-realistic", "metareview-realistic")
+    groups = {fw: {(k.split("|")[0], k.split("|")[2]): v for k, v in cells.items()
+                   if k.split("|")[1] == fw} for fw in frameworks}
+    shared = set.intersection(*(set(group) for group in groups.values()))
+    return {fw: {"n": len(shared), "mean_F2p": sum(group[key]["F2p"] for key in sorted(shared)) / len(shared)}
+            for fw, group in groups.items()} if shared else {}
+
+
+def advisory_summary(block):
+    cells = {k:v for k,v in block["cells"].items() if v["n_pr"]==6 and v["advisory_measured"]}
+    rng = np.random.default_rng(20260919)
+    def compare(ak,bk):
+        a,b=cells[ak],cells[bk]
+        ar={r["url"]:r["counts"] for r in a["per_pr"]};br={r["url"]:r["counts"] for r in b["per_pr"]}
+        urls=sorted(set(ar)&set(br));A=np.array([ar[u] for u in urls]);B=np.array([br[u] for u in urls])
+        ix=rng.integers(0,len(urls),size=(10000,len(urls)))
+        aa=A[ix].sum(axis=1);bb=B[ix].sum(axis=1)
+        da=advisory_f2(aa[:,0],aa[:,1],aa[:,4],aa[:,5]);db=advisory_f2(bb[:,0],bb[:,1],bb[:,4],bb[:,5])
+        diff=db-da;ratio=np.divide(db,da,out=np.zeros_like(db),where=da>0)
+        return {"a":ak,"b":bk,"delta":[b["F2p"]-a["F2p"],float(np.percentile(diff,2.5)),float(np.percentile(diff,97.5))],"ratio":[b["F2p"]/a["F2p"],float(np.percentile(ratio,2.5)),float(np.percentile(ratio,97.5))]}
+    framework=matched_framework_means(cells)
+    ranking=sorted(cells,key=lambda k:-cells[k]["F2p"])
+    h=block["headline"];pairs={"best_harness_vs_vanilla":compare(h["vanilla"]["best_f2p"]["cell"],h["harness"]["best_f2p"]["cell"])}
+    for model in ("glm-5.3-vision-background","glm-5.3-flash-background"):
+        for effort in ("low","medium","high"):
+            a=f"{model}|compound-realistic|{effort}";b=f"{model}|metareview-realistic|{effort}"
+            if a in cells and b in cells:pairs[model+"|"+effort]=compare(a,b)
+    return {"definition":"F2prime_advisory_v1: (5T+alpha*A)/(4D+T+alpha*A+H), alpha=1; complete, advisory-measured cells only for rankings", "n_eligible":len(cells),"excluded":[k for k,v in block["cells"].items() if v["n_pr"]==6 and not v["advisory_measured"]],"ranking":ranking,"framework_means":framework,"comparisons":pairs,"sensitivity_rankings":{str(w):sorted(cells,key=lambda k:-cells[k]["F2p_sensitivity"][str(w)][0]) for w in SENSITIVITY_WEIGHTS}}
 
 
 def derived_numbers(dm_var, M, ROOT):
@@ -151,14 +183,17 @@ def main():
         if variant not in dm:
             continue
         dm[variant]["headline"] = headline(dm[variant])
+        dm[variant]["advisory_summary"] = advisory_summary(dm[variant])
         dm[variant]["derived"] = derived_numbers(dm[variant], met, ROOT)
         dm[variant]["definition"] = {
             "denominator": "42 Martian goldens + every verified hidden-gold defect in this set",
             "recall": "TP / denominator (cluster/PR-level bootstrap CI)",
             "F1p": "F1 with the nitpick-charged precision (adjP') - an EQUAL-weight, nitpick-averse lens; "
                    "it is volume-sensitive and can rank a terse cell above a higher-recall cell",
-            "F2p": "F_beta with beta=2 (recall weighted 4:1) using adjP' - matches the campaign's declared cost "
-                   "asymmetry (a missed bug costs more than a false alarm) and is the recommended composite",
+            "F2p": "Advisory-augmented F2: (5T+A)/(4D+T+A+H). T verified bugs; D bug denominator; "
+                   "A accepted saved useful advisories, full-channel merge; H effective unsupported claims including style/vague. "
+                   "Advisory weight 1 is a declared preference (sensitivity 0.5/2); not measured developer utility. "
+                   "F2p_legacy preserves former non-bug penalty. Incomplete advisory measurement excluded from rankings.",
             "adjP": "adjusted precision after adjudication (a reported finding counts only if the adjudicator "
                     "accepted it as a real defect)",
         }

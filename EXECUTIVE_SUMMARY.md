@@ -1,183 +1,144 @@
-# EXECUTIVE SUMMARY — automated code review: what to run, what it costs, and how sure we are
+# EXECUTIVE SUMMARY — automated code review: findings, cost and uncertainty
 
-**For:** engineering leadership deciding on automated code review · **Data:** 2026-09-16 freeze of
-the manifold campaign (50-PR Martian offline benchmark, 8 models × 3 frameworks × 3 efforts;
-66 of 72 cells complete on the six highest-severity PRs) · **Full report:** `REPORT.md` ·
-**Coverage:** `analysis/COVERAGE.md`
+**For:** engineering leadership choosing a code-review pilot · **Data:** 2026-09-16 campaign freeze,
+2026-09-18 evidence audit and 2026-09-19 advisory policy · **Full report:** `REPORT.md` · **Coverage:** `analysis/COVERAGE.md`
 
-## Background
+## What we evaluated
 
-Engineering organisations are being asked to fund AI code review, and almost everywhere the advice is
-vibe-driven: a setup that worked for someone, a vendor's chosen example, a resonant blog post — anecdotes
-with no controlled comparison behind them. The specific claim on offer is that an *agentic harness* —
-an orchestrator that dispatches several model passes and synthesises them — finds materially more real
-bugs than prompting a model once, and is worth its extra cost. Rather than add another anecdote, this
-evaluation applies the scientific method to one important, difficult, yet fungible workflow — code review —
-with repeatable methods built to be checked: executable hidden-gold ground truth, headline numbers with
-intervals, and costs metered at published list prices.
+We measured whether extra model passes find more defects, how much review noise they add, and what they
+cost. Eight models × three frameworks × three effort settings produced 2,416 healthy runs across a public
+50-PR benchmark spanning five codebases. The primary analysis covers **six severity-selected PRs from two
+codebases**, with 66 of 72 configurations complete. It does not establish production readiness or quality
+equivalence on other repositories.
 
-## How we evaluated
-
-Eight models (three Claude-family, three OpenAI-family, two open-weight GLM) × three frameworks (an
-engineered single prompt and two agentic harnesses) × three reasoning-effort levels were run on a public
-50-PR benchmark spanning five codebases: 2,416 healthy runs, with 66 of 72 cells complete on the six
-highest-severity PRs that carry the headline numbers. Quality is reported under two lenses — the
-benchmark's 42 human-verified golden comments, and our primary true golden set of 42 goldens plus 105
-individually test-validated hidden defects (147 distinct bugs), audited on 2026-09-18 when three defects
-were withdrawn and two merged. Headline numbers carry PR-level cluster-bootstrap intervals; cost, token
-and latency figures are metered at list prices; and the design is one run per cell per PR, so the
-intervals cover PR variation, not run-to-run variance.
+Our primary ground truth contains **147 distinct bugs: 42 benchmark goldens plus 105 verified hidden defects
+with archived reproduction/fix-test evidence**. The 2026-09-18 audit withdrew three unsupported defect claims and merged
+two duplicates. The benchmark's original 42-golden analysis is retained as a separately labelled lens.
 
 ## The recommendation
 
-**Run the metareview harness on `glm-5.3-vision-background` at low reasoning effort.**
+**Pilot the low-effort MRV options, GLM vision and GLM flash, on your own reviews.** Flash is the
+lower-API-cost choice; accepted advisory usefulness and unsupported output must be assessed separately.
+Vision has the lower scored unsupported count; developer time saved is unmeasured.
 
-On the six severity-hardest benchmark PRs it matched the best frontier harness on golden recall —
-**0.81 [CI 0.74–0.86] vs opus-5 harness 0.81–0.83** — beat it on F1 (0.73 [0.67–0.80] vs
-0.44–0.57) and on precision (adjP 0.67 vs 0.30–0.44), and cost **7.5% [6.7–8.5] of the opus
-compound-engineering cell**: **$0.22 vs $2.95 per PR review**, **$0.04 vs $0.52 per golden defect
-found** ($0.004 vs $0.048 per real finding incl. beyond-gold), at the same latency (95 s vs 110 s
-per PR).
+| MRV low-effort model | bugs / 147 | accepted A | unsupported H | below cutoff | F2′ | $/review | seconds/review |
+|---|---|---|---|---|---|---|---|
+| vision | 72 | 40 | 5 | 139 | 0.567 | $0.222 | 95 |
+| flash | 71 | 50 | 19 | 148 | 0.556 | $0.024 | 79 |
 
-*Lens note:* the figures just quoted are the **benchmark-defined** analysis (the 42 goldens only, scored as
-F1). On the **true golden set** — our reported lens — the recommended cell scores **F2′ 0.470 [0.40–0.55]**,
-ahead of `glm-flash · MRV · low` (**0.436 [0.39–0.51]**), which costs about a ninth as much per review
-(**$0.024 vs $0.222**); the best-scoring cell overall is `glm-vis · CE · medium` (**0.494**) — but
-that sits inside the statistical error range of the best MRV cells (glm-vis · MRV · medium 0.491,
-glm-vis · MRV · high 0.488), so no single-cell winner is claimed; the framework guidance below is
-what carries. Effort-matched claim
-soundness agrees at low effort (adjP **0.809 vs 0.703**, vision ahead); at high effort flash is
-nominally ahead (0.924 vs 0.916). So the two lenses agree on the harness family and, at low effort, both favor vision
-on quality — while flash remains the pick where API budget dominates, and the evidence does not establish
-that vision's extra cost buys net developer savings (developer time is unmeasured). §3.1. If
-noise-tolerance is high and budget dominates, `glm-5.3-flash-background` at low effort delivers recall
-0.83 [0.74–0.92] at **0.8% of the opus cost** — but with visibly lower precision (0.54) and fewer real
-findings beyond the golden set where that drop is demonstrated (§"where it stops holding").
+Vision costs about **9.4×** as much and finds one additional distinct bug, with **14 fewer scored
+unsupported findings**; flash receives **10 more accepted advisories**. Vision’s F2′ interval is
+0.567 [0.490, 0.673], versus 0.556 [0.462, 0.712] for flash. These marginal intervals alone
+cannot resolve a paired difference or establish equivalence. Medium/high GLM effort can be much slower;
+this pilot recommendation is specifically for low effort.
 
-| option | recall (CI) | F1 (CI) | $/PR | $/golden-defect | s/PR |
+## What the primary results support
+
+- **Harnesses improve recall in 39/42 own-model comparisons** (mean Δrecall +0.135): seven models ×
+  two harnesses × three efforts, excluding Fable for incomplete harness coverage.
+- **MRV usually scores higher than CE:** 18/21 positive F2′ point differences;
+  95% paired intervals favor MRV in 8 cases and CE in 3; 10 include zero. This is not a uniform win.
+- **The highest F2′ point estimate is Opus · CE · medium (0.641)**. The best eligible vanilla cell
+  is Fable · vanilla · medium (0.427). Their paired difference is 0.214 [0.116, 0.275]; the
+  ratio is 1.502 [1.215, 1.819]×. Selecting both after observing the results makes the comparison optimistic.
+- **The score rewards useful advisories, not just bug discovery.** Report §3.1 gives α = 0.5/1/2
+  sensitivity and separate T/A/H/below-cutoff counts. Historical F1′ and adjP′ are burden-based metrics,
+  so their rankings answer a different question.
+- **Configurations complement one another.** The highest-recall cell finds 88/147 and misses 59.
+  Other complete configurations recover 52 of those misses; the union covers 140/147. Repeat-run
+  variance was not measured.
+
+## The separate 42-golden benchmark lens
+
+These figures use **only the original 42 goldens**, not the primary 147-bug universe:
+
+| option | golden recall (95% CI) | F1 (95% CI) | $/PR | $/golden defect | seconds/PR |
 |---|---|---|---|---|---|
-| **glm-5.3-vision @ mrv, low** *(recommended)* | **0.81 [0.74, 0.86]** | **0.73 [0.67, 0.80]** | **$0.22** | **$0.039** | 95 |
-| glm-5.3-flash @ mrv, low *(budget)* | 0.83 [0.74, 0.92] | 0.65 [0.62, 0.69] | $0.02 | $0.004 | 79 |
-| opus-5 @ CE, low *(frontier ref)* | 0.81 [0.72, 0.87] | 0.57 [0.47, 0.71] | $2.95 | $0.52 | 110 |
-| fable-5.1 @ vanilla, low *(premium single-pass)* | 0.74 [0.67, 0.81] | 0.78 [0.72, 0.81] | $0.90 | $0.17 | 57 |
+| vision · MRV · low | 0.81 [0.74, 0.86] | 0.73 [0.67, 0.80] | $0.22 | $0.039 | 95 |
+| flash · MRV · low | 0.83 [0.74, 0.92] | 0.65 [0.62, 0.69] | $0.024 | $0.004 | 79 |
+| opus · CE · low | 0.81 [0.72, 0.87] | 0.57 [0.47, 0.71] | $2.95 | $0.52 | 110 |
+| fable · vanilla · low | 0.74 [0.67, 0.81] | 0.78 [0.72, 0.81] | $0.90 | $0.17 | 57 |
 
-All CIs are 95% cluster-bootstrap over PRs; quality is All-profile recall/F1 with k=1
-adjudication, judge gpt-5.2 for the Anthropic/GLM rows.
+Vision MRV-low costs 7.5% [6.7–8.5%] of opus CE-low, with a golden-recall ratio of
+1.00 [0.91, 1.09]. The interval does not prove parity. Under this benchmark lens, **17/22**
+high-versus-medium effort comparisons have unresolved F1 differences, four improve and one worsens.
+High effort costs 0.96×–4.2× as much; those results do not directly describe true-gold F2′.
 
-## What we can and cannot claim (the honest version)
+The full-50 selection check is also **benchmark-golden-only**: across 33 cells with ≥40 PRs,
+mean top-six minus full-set recall is +0.006, while harness F1 is higher by +0.084 on average.
+Rankings mostly agree, with CE-low a notable exception. This is an observed selection check, not evidence
+that the six-PR true-gold results generalize to all 50 PRs or to production.
 
-- **Supported, measured:** the cost ratios above (list prices retrieved 2026-09-16, retrieval-dated
-  table in the report); recall parity with frontier harness cells on the hardest PRs; the **F2′** Pareto
-  frontier of $-per-real-finding vs quality is entirely GLM cells (the *recall* frontier's expensive end is
-  opus · CE · medium — a premium-model cell still buys recall no GLM cell reaches); harnesses raise recall for weak/mid
-  models (median +0.12, 17/42 pairs resolved) but add 10× tokens median; **high vs medium effort
-  buys nothing measurable in 18/22 model×framework comparisons** while costing 0.96×–4.2× — buy
-  effort only where a resolved gain exists (our table lists them).
-- **Not supported — do not repeat:** the operator's "~1/200th per token, ~1/10th per task".
-  Measured: flash is **1/57 per blended token and 1/38 per task** vs fable-5.1 vanilla; vs opus-5
-  vanilla it is 1/26 per token and 1/17 per task. Vision tier is only ~1/3 of opus per token.
-  Cheap per-token rates are partly eaten by the harness's 10–20× token overhead — always quote
-  both ratios.
-- **Where it stops holding:** (1) at medium/high effort the GLM lane ran 4–12× slower than same-effort frontier cells (up to ~30× against
-the fastest frontier low-effort cell)
-  (gateway-throughput-limited) — this is a **low-effort** recommendation, and the Sep-14/15
-  provider incident showed the cheap lane's capacity limits (an operational issue, not quality,
-  but it is your operational issue if you adopt it); (2) every headline GLM cell predates the
-  Sep-15 gateway/SDK fixes — quality direction unknown, likely operational; (3) the beyond-gold
-  breadth drop is flash's where it is demonstrated: −39 [−62, −16] (CE low), −104 [−179, −45]
-  (CE medium), −201 [−266, −141] (MRV medium) per cell — but at the recommended MRV-low cell
-  the delta is +3 [−56, +64], i.e. **no demonstrated drop there** (§3.5.4, T6); prefer vision for
-  breadth on the cells where the drop is shown, not as a blanket rule; (4) the numbers
-  are for the six *hardest* PRs — recall generalises to the full 50 (mean gap +0.006, model
-  rankings mostly preserved) but harness F1 on the top-6 overstates full-set F1 by ~+0.08
-  (e.g. glm-vis mrv-low F1: 0.73 top-6 vs 0.57 full-50; the *ranking* survives, the level does
-  not); (5) n = 1 run per cell×PR — CIs cover PR-sampling noise, not run-to-run noise.
+## Costs, evidence and limits
 
-## Our results are the expanded (real-world) numbers; the strict benchmark is the artificial lens kept for comparison
+Metered costs use published list prices retrieved 2026-09-16, including cache pricing; the campaign
+itself used a flat-fee gateway. Flash MRV-low costs **1/57 per blended token and 1/38 per task** versus
+Fable vanilla-low, and **1/26 per token and 1/17 per task** versus Opus vanilla-low. The proposed
+“1/200th per token, 1/10th per task” shorthand is unsupported. Against commercial harnesses, flash's
+savings come from both lower token volume and lower per-token prices. Vision MRV-low is also cheaper
+than the low-effort vanilla references: about 25% of Fable, 55% of Opus and 54% of Astra cost.
 
-We report the **verified true-golden-set analysis** (REPORT.md §3.1) as our results throughout; the strict benchmark (goldens only) and the earlier unions (§3.2, Appendix A) are kept for provenance.
+The hidden-defect evidence includes fail-on-head/pass-on-fix tests, duplicate audits and finding-to-defect
+assignments (`analysis/verified_gold/GOLD_DEFECT_CATALOG.md`). The universe was discovered largely from
+this campaign's own findings and then audited, so it is not an independent, exhaustive bug census.
 
-The benchmark's golden set is a floor, not a ceiling. We rebuilt the hidden-gold set from every
-confirmed-bug finding across all 2,416 healthy runs (hallucinations and nitpicks excluded at the
-adjudication gate), then **executed** it: for every candidate, a test that fails on the PR head, a
-minimal fix that makes it pass, and — where a sibling defect shares the site — an orthogonality
-check that the bundle's fix leaves it red. Independent duplicate passes (six reviewers, then a
-fix-location adjudication) removed 23 restatements and container folding removed 17 more, while a
-walk of the audits' own label lists surfaced 13 candidate claims that had been dropped, of which 10 turned
-out to be distinct defects (3 merged into the container's claim). A **2026-09-18 post-publication audit**
-(triggered by external review; `analysis/verified_gold/WITHDRAWALS_AND_DEDUP_2026-09-18.md`) re-read every
-defect's failure logs, **withdrew 3** whose tests did not demonstrate the claim (mock-manufactured or
-stub-artifact failures), and **merged 2 duplicates** (including one already described by the original
-golden). The verified universe is **42 goldens + 105 individually test-validated defects = 147 distinct
-bugs**, every one owning its own test, fix and logs (`analysis/verified_gold/GOLD_DEFECT_CATALOG.md`).
+Quality metrics pool PR-level counts into ratios; they are not means of the six PR scores. The 95%
+cluster-bootstrap intervals resample observed PRs and recompute metrics. They are not prediction
+intervals for new PR sets, do not remove selection bias, and omit run-to-run model variation and
+unmeasured judge error. Overlap of marginal intervals is not a paired test.
 
-Under those honest denominators, the load-bearing findings are **pair-level, not single-cell**:
+The revised F2′ rewards **accepted useful advisories** rather than treating every important non-bug
+as noise: **(5T + αA)/(4D + T + αA + H)**, with D = 147 and α = 1. T counts distinct verified bugs,
+A counts accepted useful advisories and H counts unsupported findings. False claims, style-only comments
+and vague speculation carry the same unit penalty. α = 0.5 and 2 provide preference sensitivity;
+none of these weights measures developer time or economic value. Bug-only F2 and recall are unchanged.
+F1′, adjP′ and `F2p_legacy` retain the historical non-bug-burden definitions.
 
-- **Harnesses substantially outperform one-shot prompting** — the headline result. Δrecall > 0 in
-  **39/42** matched model·effort pairs (mean **+0.135**; peak-recall ratio **1.63×** versus the best
-  vanilla cell, 0.599 vs 0.367), and every cell in the F2′ top six is a harness cell.
-- **The winners are harnesses running open-weight models.** The best commercial harness cell
-  (opus·CE·medium) reaches F2′ 0.460 at **$6.12/review**; GLM-vision harness cells reach
-  equal-or-better F2′ at **$0.22–$0.63/review — 10× to 28× cheaper** (glm-vis·CE·medium 0.494 at
-  $0.63; glm-vis·MRV·low 0.470 at $0.22 beats the best commercial cell's F2′ at 1/28th of its price).
-  The trade is latency, not tokens: GLM harness medians run ~1,500 s vs ~190 s per review (partly
-  gateway-throughput-limited), while consuming ~7× fewer tokens than the opus harness cells.
-- **Within the harness family, MRV remains the better bet on average, not uniformly** (ΔF2′ point
-  estimate **+17/−4** over 21 matched pairs, 7/21 resolving at 95%). The best single cell happens to be a
-  CE cell, but it is statistically indistinguishable from its MRV counterparts — cell choice inside the
-  GLM-vision family is not resolved by this experiment.
-- On **F2′** the best harness cell leads the best vanilla cell **0.494 to 0.406 (1.22×)** — a **point
-  estimate, not an established win**: the paired 95% CI (−0.007 to +0.169) **crosses zero**, and selecting
-  the best configurations after observing their results is a disclosed, favorable caveat. The equal-weight
-  **F1′** lens ranks a vanilla cell first (0.482 vs 0.472); it is reported as a **legitimate alternative
-  preference**, not an artifact, for the volume-sensitivity and instrument reasons set out below.
+**Revised F2′ has no penalty merely for reporting a non-bug.** A useful advisory classified at
+confidence ≥0.70 earns credit; one below 0.70 receives neither credit nor a penalty. Penalties apply
+only to the current classifier's `hallucination` category at confidence ≥0.80, which includes false
+claims, style-only nitpicks and vague, non-actionable speculation. Such findings below 0.80 are also
+unscored. These are model-reported confidence judgments, not calibrated probabilities. Frozen
+verified-bug assignments take precedence, and below-threshold findings retain their classifications.
 
-**Our evaluator is F2′, on the full 147-bug true golden set.** The choice is deliberate — a stated
-*preference*, not a measurement. Recall alone is half a metric (a tool that comments on everything would
-score 1.0 and be useless), so it must be paired with a noise term — and the only free parameter is β, the
-ratio at which a missed bug is charged against a false alarm. We *choose* β=2 to weight recall 4:1
-because missed bugs matter more to us than false alarms; that is not a measured developer cost, and the
-report (§3.1) shows a literal 4×FN+noise utility can favor either cell depending on the pair — no economic
-claim is safe without an explicit utility model. F1′ (β=1) is a legitimate alternative preference, not an
-artifact to be "fixed"; it is reported alongside because adjP′-charged rankings are volume-sensitive — and
-comparable only among cells whose adjudicator *measures* nitpicks: the fable vanilla cells run the older
-binary instrument, which structurally cannot classify important-non-bugs, so their adjP′ is uncharged and
-inflated (the report flags those cells with an instrument caveat; this bias favors vanilla, so the 1.22×
-canvas is conservative). On the full true golden set (42 goldens + all 105 verified defects = 147 — we keep
-the full set, so the metric leaves room for better agents) the best harness cell (glm-vis · CE · medium)
-scores **F2′ 0.494 [0.443, 0.593]** against **0.406** for the best vanilla cell (fable · van · medium) — a
-**1.22× point-estimate edge whose paired 95% CI crosses zero** (−0.007 to +0.169). The previously-
-published pair (glm-vis · MRV · high 0.488 vs fable · van · high 0.386) resolves at 95% under the repaired
-data (Δ +0.102, CI +0.003 to +0.168). `adjP` is reported alongside F2′ so the noise story stays visible,
-and F1′ appears as a labelled alternative.
+The selected common pass is **`glm-5.3-background`, low effort, k=1, initially four concurrent calls**, processing
+the six PRs one at a time. All six PRs and **403 reviews** have validated base and selected-policy outputs; **1,501 eligible
+advisory claims form 888 validated identities**, and all 66 complete cells are eligible for F2′. New judgments
+earn advisory credit at **confidence ≥0.70** or an unsupported/style penalty at **confidence ≥0.80**.
+An advisory at 0.75 earns credit; an unsupported finding at 0.75 receives no penalty. Classified findings
+below their category’s cutoff remain unscored, with raw categories and responses retained. The frozen
+0.80 base export is preserved; the selected scoring policy uses completed advisory duplicate checks. On identical advisory identities, raising
+the A cutoff to 0.80 changes matched-cohort mean F2′ from 0.4436 to 0.4316 (MRV), 0.3991 to 0.3860
+(CE), and 0.2654 to 0.2627 (vanilla); H remains fixed. These are descriptive sensitivities. Exact cleaned claims preserve case and receive separate judgments;
+semantic duplicate counting does not transfer one claim's verdict to another. Admitted verified-defect
+identities reuse audited truth per member without another model call or fabricated confidence.
+A recorded six-call duplicate-validation trial completed 100 comparisons/minute versus 168 at four
+in separate five-minute windows. The model, prompts and scoring rules were unchanged; the comparison
+is observational and six recovered late in its window. Four remains the selected default.
+Policy-specific deduplication now bounds each router call to 120 seconds, with at most three
+attempts and saved-checkpoint reuse. Timeouts are processing failures, never finding classifications;
+the separate execution extension preserves model, prompts, thinking and scoring rules.
 
-**Why even the best harness misses what it misses.** Three mechanisms, separated: (1) *denominator
-inflation* — paraphrase splits and golden duplicates made the universe look ~1.6× bigger than it is:
-359 raw pre-merge clusters → 253 after the strict re-merge → 152 candidates → **147** true bugs after the
-2026-09-18 audit (3 tests withdrawn, 2 duplicates merged); (2) *configuration complementarity, not
-blindness* — the best single cell finds **88 of 147**, and of the 52 it missed that any cell found, **all 52**
-were found by a *different configuration* (a different model/framework/effort); the union of all 66
-complete cells reaches **140/147 (95%)** (derived block, `final_report_metrics.json`). Repeat-run variance
-is **not** measured by this experiment (n = 1 run per cell per PR) — the evidence says configurations
-complement each other, not that re-running the same one recovers the misses; (3) a *genuine blind tail of 7
-true bugs no complete cell found* (6 defects — three of them in PR 10 — plus 1 golden). The pre-audit class
-analysis of the unfound set (`TRUE_GOLDEN_EVIDENCE.md`) found it overwhelmingly outside the correctness/
-security brief the lenses are built for (performance/N+1/eager-loading, test-quality gaps, framework
-idioms, migration-lock semantics). A scope explanation was tested and rejected: anchored findings are 227
-in-diff vs 1 out-of-diff.
+Old semantic groups and votes are candidate evidence. Validated files/intervals prioritize comparison;
+full mechanism, trigger and consequence must agree in a separate pair check, uncertain claims stay
+separate, and counting groups are split by effective classification. The common prompt explicitly uses
+the staff advisory bar and concrete maintainer benefit. Matched pilots are documented in
+`analysis/verified_gold/advisory_readjudication/MODEL_PILOT_COMPARISON.md`; they do not establish
+calibrated confidence or equivalent intelligence. Earlier Vision-classifier passes are not the current
+instrument. The selected policy and its ≥0.80 advisory sensitivity use the same ≥0.70 identities.
 
-## Gaps we will not paper over
+This is model adjudication, not human validation; same-family judging may favor GLM outputs, and
+confidence is not a calibrated correctness probability. Unassigned classifier `bug` groups receive no
+new bug/advisory credit or penalty and are counted separately, so false claims can still be under-penalized.
+The two low-effort options also have 139/148 below-cutoff groups and 82/81 uncredited bug groups
+(vision/flash); these receive no credit or penalty. Uncredited bug groups are outside the extreme
+below-cutoff sensitivity bounds. The reference advisory set covers only two of six PRs, so advisory recall is unmeasured. Original verified
+bug credit remains unchanged. Relative to legacy scores, both the formula and judging/deduplication
+instrument change; the entire score movement is not an advisory-bonus effect. See `REPORT.md` §2.6.
 
-Fable 5.1's harness cells were not run across the primary sample — **our budget decision, not a measurement**: a full Fable 5.1 harness grid (a harness run is many model calls, and Fable is frontier-priced) was more than this campaign could fund, so only 1–2-PR partial runs exist and they are gaps, not results. We will amend the report with updated data if a sponsor funds the runs or someone runs them per §2 and sends us the data (details in §2.2);
-opus/sonnet vanilla cells are top-6-only by operator decision; some metareview cells needed era-rule re-runs; GLM
-full-50 fills were stopped at the data freeze (~40% of the planned fills done, resumable); sonnet-5's compound cells
-*lose* recall because Claude-Code-style routing sends reviewer subagents to haiku — a harness is
-only as good as the models it actually calls.
-
-**Bottom line:** near-frontier defect-finding quality on the hardest PRs at ~1/13 the golden-defect
-cost of the frontier harness, same latency at low effort — adopt at low effort on the vision tier for
-lower-noise review, keep flash as the low-API-cost candidate where budget dominates (its low-effort
-quality gap is a point estimate that our CIs do not resolve into a win for either), don't pay for high
-effort without a measured gain, and treat the
-GLM numbers as carrying a disclosed provider-infrastructure caveat until a post-fix replication
-lands.
+All headline GLM harness cells contain runs preceding the September 15 gateway/SDK fixes. Medium/high
+effort ran 4–12× slower than same-effort commercial cells in this campaign; failed gateway calls are
+excluded from per-review costs. Fable's full harness grid was omitted for budget, Opus/Sonnet vanilla
+coverage is top-six-only, and GLM full-set fills stopped at the freeze. These gaps and the two-codebase
+primary sample limit adoption claims. The evidence supports testing the two low-effort MRV options on
+your own reviews and measuring developer triage time before choosing between them.

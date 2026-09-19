@@ -14,12 +14,12 @@ import matplotlib.pyplot as plt
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 D = json.load(open(f"{ROOT}/analysis/final_report_dataset.json"))
 M = json.load(open(f"{ROOT}/analysis/final_report_metrics.json"))
-# TRUE golden set (§10d, PRIMARY): 42 goldens + the deduplicated, individually test-validated defects.
+# TRUE golden set (§10d, PRIMARY): 42 goldens + the deduplicated, verified defects with archived reproduction/fix-test evidence.
 # Compatibility view: the figure code reads TP_sem / recall_sem / F1 / F1p + CIs, so map the defect-level
 # cells onto those names. (Previously this pointed at expanded_gold_verified.matrix_sem, the superseded
 # LLM-merged §10c keyset.)
 SEM = {k: {"TP_sem": c["TP"], "recall_sem": c["recall"], "F1": c["F1"], "F1p": c["F1p"],
-           "F2": c["F2"], "F2p": c["F2p"],
+           "F2": c["F2"], "F2p": c["F2p"], "advisory_measured": c.get("advisory_measured", False),
            "adjP": c["adjP"], "adjPp": c["adjPp"],
            "ci": {"recall_sem": c["ci"]["recall"], "F1": c["ci"]["F1"], "F1p": c["ci"]["F1p"],
                   "F2": c["ci"]["F2"], "F2p": c["ci"]["F2p"]}}
@@ -57,17 +57,23 @@ TG_DEN = int(TGDER["den"])                       # true-bug universe size (147)
 def err(ci):
     return [[ci[0] - ci[1]], [ci[2] - ci[0]]]
 
+def fit_quality_axis(ax):
+    """Include the error-bar endpoints collected by Matplotlib, with headroom."""
+    ax.set_ylim(0, max(0.1, float(ax.dataLim.ymax) * 1.08))
+    if "F2" in ax.get_ylabel() or "F2" in ax.get_xlabel():
+        ax.text(0.01, 0.01, "Unmeasured advisory cells omitted", transform=ax.transAxes, fontsize=6)
+
 # ---------------------------------------------------------------- 1. Pareto
-fig, axes = plt.subplots(1, 2, figsize=(12, 5), sharey=True)
+fig, axes = plt.subplots(1, 2, figsize=(12, 6.5), sharey=False)
 for ax, met, xlab in ((axes[0], "recall_sem", "recall, true golden set (CI)"),
-                      (axes[1], "F2p_sem", "F2\u2032 (our evaluator) - true golden set, CIs")):
+                      (axes[1], "F2p_sem", "F2′ (bug quality + advisory credit) - true golden set, CIs")):
     pts = []
     for k, v in M["matrix"].items():
         if v["n_pr"] < 6:
             continue
         m, fw, e = k.split("|")
         sc = sem_cell(m, fw, e)
-        if not sc:
+        if not sc or (met == "F2p_sem" and not sc["advisory_measured"]):
             continue
         yci = sc["ci"]["recall_sem" if met == "recall_sem" else "F2p"]
         pts.append((v["ci"]["usd_per_real"][0], yci[0], m, fw, e,
@@ -87,18 +93,24 @@ for ax, met, xlab in ((axes[0], "recall_sem", "recall, true golden set (CI)"),
         ax.errorbar(x, y, xerr=[[x - p[5][1]], [p[5][2] - x]], yerr=[[y - p[6][1]], [p[6][2] - y]],
                     fmt="o", ms=3, color=col, alpha=0.75, lw=0.8, capsize=1)
         if (x, y) in zip(fx, fy):
-            ax.annotate(f"{M_SHORT[m]}·{FW_SHORT[fw]}·{e[:3]}", (x, y), fontsize=5.5,
-                        xytext=(3, 3), textcoords="offset points")
+            index = front.index(p)
+            ax.annotate(str(index + 1), (x, y), fontsize=7, weight="bold",
+                        xytext=(4, 8 if index % 2 == 0 else -12), textcoords="offset points",
+                        arrowprops=dict(arrowstyle="-", lw=0.5),
+                        bbox=dict(facecolor="white", edgecolor="none", pad=0.5))
     ax.step(fx, fy, where="post", color="k", lw=0.8, alpha=0.4, label="Pareto frontier")
     ax.set_xscale("log")
-    ax.set_xlabel("metered $ per real finding (TP + beyond-gold real), log scale — CI")
+    ax.set_xlabel("metered $ per campaign model-adjudicated finding (legacy; repeats included), log — CI")
     ax.set_ylabel(xlab)
-    ax.set_ylim(0.0, 0.5)
+    fit_quality_axis(ax)
+    key = "\n".join(f"{i + 1}. {M_SHORT[p[2]]}·{FW_SHORT[p[3]]}·{p[4]}" for i, p in enumerate(front))
+    ax.text(0, -0.26, key, transform=ax.transAxes, va="top", fontsize=7, linespacing=1.3)
     if met == "recall_sem":
         ax.legend(fontsize=6)
 fig.suptitle(textwrap.fill(
     f"Cost/quality frontier, verified true golden set ({TG_GOLDENS} goldens + {TG_DEFECTS} additional bugs "
-    f"= {TG_DEN} true bugs) — top-6 cells", width=80), fontsize=9)
+    f"= {TG_DEN} true bugs) — top-6 cells. x: original campaign judgments, including repeated reports; "
+    "y: recall or revised F2′, not legacy finding counts", width=80), fontsize=9)
 fig.tight_layout()
 fig.savefig(f"{FIG}/fig_pareto_frontier.png"); fig.savefig(f"{FIG}/fig_pareto_frontier.svg")   # vector twin, same basename
 plt.close(fig)
@@ -174,7 +186,7 @@ for ax, fw in zip(axes, FRAMEWORKS):
         for e in EFFORTS:
             v = cell(m, fw, e)
             sc = sem_cell(m, fw, e)
-            if v is None or not sc or v["n_pr"] < 6:   # partial-coverage cells excluded (1–2 PRs)
+            if v is None or not sc or not sc["advisory_measured"] or v["n_pr"] < 6:   # partial-coverage cells excluded (1–2 PRs)
                 continue
             yci = sc["ci"]["F2p"]
             xs.append(v["ci"]["cost_run"][0]); ys.append(yci[0])
@@ -188,12 +200,12 @@ for ax, fw in zip(axes, FRAMEWORKS):
                         color=MCOL[m], lw=0.7, capsize=1, alpha=0.6)
     ax.set_xscale("log")
     ax.set_xlabel("metered $ / run (log)")
-    ax.set_ylabel("F2\u2032 (our evaluator, true golden set)"); ax.set_ylim(0, 0.5)
+    ax.set_ylabel("F2′ (bug quality + advisory credit)"); fit_quality_axis(ax)
     ax.set_title(fw, fontsize=8)
     ax.legend(fontsize=5.5, ncol=2)
 fig.suptitle(textwrap.fill(
     "Effort ladder: real-world quality vs cost as effort rises (low → medium → high), CIs shown — "
-    "complete 6-PR cells only (partial-coverage cells with 1–2 PRs are excluded)", width=86), fontsize=9)
+    "complete 6-PR cells with measured advisory credit only", width=86), fontsize=9)
 fig.tight_layout()
 fig.savefig(f"{FIG}/fig_effort_ladder.png"); fig.savefig(f"{FIG}/fig_effort_ladder.svg")   # vector twin, same basename
 plt.close(fig)
@@ -313,19 +325,19 @@ def cluster_hull(ax, pts, color, label):
 ax = axes[0][0]
 for m, fw, e, v in pts:
     sc = sem_cell(m, fw, e)
-    if not sc:
+    if not sc or not sc["advisory_measured"]:
         continue
     c, f = v["ci"]["cost_run"], sc["ci"]["F2p"]
     scatter_ci(ax, c[0], c[1], c[2], f[0], f[1], f[2], m, fw, e)
 clusters = {}
 for m, fw, e, v in pts:
     sc = sem_cell(m, fw, e)
-    if not sc:
+    if not sc or not sc["advisory_measured"]:
         continue
     clusters.setdefault(m, []).append((v["ci"]["cost_run"][0], sc["F2p"]))
 for m, cpts in clusters.items():
     cluster_hull(ax, cpts, MCOL[m], M_SHORT[m])
-ax.set_xlabel("metered $ / run (log)"); ax.set_ylabel("F2\u2032 (our evaluator) [CI]"); ax.set_ylim(0, 0.5)
+ax.set_xlabel("metered $ / run (log)"); ax.set_ylabel("F2′ (bug quality + advisory credit) [CI]"); fit_quality_axis(ax)
 ax.set_title("(a) price/performance: $ per PR review vs F2\u2032 — model clusters shaded", fontsize=9)
 
 # (b) F1' per dollar (true golden set; approx CI = F1' CI / cost point)
@@ -333,7 +345,7 @@ ax = axes[0][1]
 rows = []
 for m, fw, e, v in pts:
     sc = sem_cell(m, fw, e)
-    if not sc:
+    if not sc or not sc["advisory_measured"]:
         continue
     rows.append((m, fw, e, sc["F2p"] / v["ci"]["cost_run"][0], sc["ci"]["F2p"], v["ci"]["cost_run"][0]))
 rows.sort(key=lambda r: -r[3])
@@ -354,19 +366,19 @@ ax.set_title("(b) F2\u2032 per dollar (top 20 cells)", fontsize=9)
 ax = axes[1][0]
 for m, fw, e, v in pts:
     sc = sem_cell(m, fw, e)
-    if not sc:
+    if not sc or not sc["advisory_measured"]:
         continue
     w, f = v["ci"]["wall_run"], sc["ci"]["F2p"]
     scatter_ci(ax, w[0], w[1], w[2], f[0], f[1], f[2], m, fw, e)
 clusters = {}
 for m, fw, e, v in pts:
     sc = sem_cell(m, fw, e)
-    if not sc:
+    if not sc or not sc["advisory_measured"]:
         continue
     clusters.setdefault(m, []).append((v["ci"]["wall_run"][0], sc["F2p"]))
 for m, cpts in clusters.items():
     cluster_hull(ax, cpts, MCOL[m], M_SHORT[m])
-ax.set_xlabel("wall seconds / run (log)"); ax.set_ylabel("F2\u2032 (our evaluator) [CI]"); ax.set_ylim(0, 0.5)
+ax.set_xlabel("wall seconds / run (log)"); ax.set_ylabel("F2′ (bug quality + advisory credit) [CI]"); fit_quality_axis(ax)
 ax.set_title("(c) F2\u2032 vs wall-clock per run — model clusters shaded", fontsize=9)
 for m, c in MCOL.items():
     ax.scatter([], [], color=c, s=6, label=M_SHORT[m])
@@ -376,13 +388,13 @@ ax.legend(fontsize=5, ncol=2, loc="lower right")
 ax = axes[1][1]
 for m, fw, e, v in pts:
     sc = sem_cell(m, fw, e)
-    if not sc or not sc["TP_sem"]:
+    if not sc or not sc["advisory_measured"] or not sc["TP_sem"]:
         continue
     x = v["ci"]["cost_run"][0] * v["n_pr"] / sc["TP_sem"]
     r = sc["ci"]["F2p"]
     scatter_ci(ax, x, x * 0.98, x * 1.02, r[0], r[1], r[2], m, fw, e)
-ax.set_xlabel("metered $ per true bug found (log)"); ax.set_ylabel("F2\u2032 (our evaluator) [CI]")
-ax.set_ylim(0, 0.5)
+ax.set_xlabel("metered $ per true bug found (log)"); ax.set_ylabel("F2′ (bug quality + advisory credit) [CI]")
+fit_quality_axis(ax)
 ax.set_title(f"(d) cost per true bug vs F2\u2032 ({TG_DEN} true bugs)", fontsize=9)
 
 fig.suptitle("Efficiency 2×2, verified true golden set — top-6 cells, 95% cluster-bootstrap CIs", fontsize=10)

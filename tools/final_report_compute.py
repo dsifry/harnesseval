@@ -516,18 +516,18 @@ def blended(cell, urls=None):
     return s
 
 ratio3 = {}
-for glm_m, front_m, fw_g, fw_f, eff in [
-    ("glm-5.3-flash-background", "claude-fable-5-1", "metareview-realistic", "vanilla-engineered", "low"),
-    ("glm-5.3-vision-background", "claude-fable-5-1", "metareview-realistic", "vanilla-engineered", "low"),
-    ("glm-5.3-flash-background", "claude-opus-5", "metareview-realistic", "vanilla-engineered", "low"),
-    ("glm-5.3-vision-background", "claude-opus-5", "metareview-realistic", "vanilla-engineered", "low"),
-    ("glm-5.3-flash-background", "gpt-6-astra", "metareview-realistic", "vanilla-engineered", "low"),
-    ("glm-5.3-vision-background", "gpt-6-astra", "metareview-realistic", "vanilla-engineered", "low"),
-    ("glm-5.3-flash-background", "claude-fable-5-1", "compound-realistic", "compound-realistic", "low"),
-    ("glm-5.3-vision-background", "claude-fable-5-1", "compound-realistic", "compound-realistic", "low"),
-    ("glm-5.3-vision-background", "claude-opus-5", "metareview-realistic", "metareview-realistic", "medium"),
+for glm_m, front_m, fw_g, fw_f, eff_g, eff_f in [
+    ("glm-5.3-flash-background", "claude-fable-5-1", "metareview-realistic", "vanilla-engineered", "low", "low"),
+    ("glm-5.3-vision-background", "claude-fable-5-1", "metareview-realistic", "vanilla-engineered", "low", "low"),
+    ("glm-5.3-flash-background", "claude-opus-5", "metareview-realistic", "vanilla-engineered", "low", "low"),
+    ("glm-5.3-vision-background", "claude-opus-5", "metareview-realistic", "vanilla-engineered", "low", "low"),
+    ("glm-5.3-flash-background", "gpt-6-astra", "metareview-realistic", "vanilla-engineered", "low", "low"),
+    ("glm-5.3-vision-background", "gpt-6-astra", "metareview-realistic", "vanilla-engineered", "low", "low"),
+    ("glm-5.3-flash-background", "claude-fable-5-1", "compound-realistic", "compound-realistic", "low", "low"),
+    ("glm-5.3-vision-background", "claude-fable-5-1", "compound-realistic", "compound-realistic", "low", "low"),
+    ("glm-5.3-vision-background", "claude-opus-5", "metareview-realistic", "metareview-realistic", "low", "medium"),
 ]:
-    A = (glm_m, fw_g, eff); F = (front_m, fw_f, eff)
+    A = (glm_m, fw_g, eff_g); F = (front_m, fw_f, eff_f)
     urls = [u for u in TOP6 if u in sel[A] and u in sel[F]]
     if len(urls) < 6:
         continue
@@ -544,7 +544,7 @@ for glm_m, front_m, fw_g, fw_f, eff in [
     cf = MF[idx].sum(axis=1)[:, kcol["cost"]] / 6
     pa = 1000 * ca / np.maximum(ta, 1)
     pf = 1000 * cf / np.maximum(tf, 1)
-    ratio3[f"{glm_m}|{fw_g}|low vs {front_m}|{fw_f}|{eff}"] = {
+    ratio3[f"{glm_m}|{fw_g}|{eff_g} vs {front_m}|{fw_f}|{eff_f}"] = {
         "ptok_ratio": (float((sa['cost'] / sa['tok']) / (sf['cost'] / sf['tok'])),
                        float(np.percentile(pa / pf, 2.5)), float(np.percentile(pa / pf, 97.5))),
         "toktask_ratio": (float(sa['tok'] / sf['tok']),
@@ -965,8 +965,8 @@ for m in MODELS:
         A, Mv = _sem_rows(cCE, urls), _sem_rows(cMRV, urls)
         n = len(urls)
         def _mets(X, ix):
-            t = X[ix][:, 0].sum(axis=1); d = X[ix][:, 1].sum(axis=1)
-            h = X[ix][:, 2].sum(axis=1); im = X[ix][:, 3].sum(axis=1)
+            t = X[ix][:, :, 0].sum(axis=1); d = X[ix][:, :, 1].sum(axis=1)
+            h = X[ix][:, :, 2].sum(axis=1); im = X[ix][:, :, 3].sum(axis=1)
             r = np.where(d > 0, t / np.where(d > 0, d, 1), 0)
             a = np.where(t + h > 0, t / np.where(t + h > 0, t + h, 1), 0)
             ap = np.where(t + h + im > 0, t / np.where(t + h + im > 0, t + h + im, 1), 0)
@@ -1005,8 +1005,8 @@ for m in MODELS:
             n = len(urls)
             idx = rng4.integers(0, n, size=(B, n))
             SA, SV = XA[idx], XV[idx]
-            rA = np.where(SA[:, :, 1] > 0, SA[:, :, 0] / np.where(SA[:, :, 1] > 0, SA[:, :, 1], 1), 0).sum(axis=1) / n
-            rV = np.where(SV[:, :, 1] > 0, SV[:, :, 0] / np.where(SV[:, :, 1] > 0, SV[:, :, 1], 1), 0).sum(axis=1) / n
+            rA = np.divide(SA[:, :, 0].sum(axis=1), SA[:, :, 1].sum(axis=1), out=np.zeros(B), where=SA[:, :, 1].sum(axis=1) > 0)
+            rV = np.divide(SV[:, :, 0].sum(axis=1), SV[:, :, 1].sum(axis=1), out=np.zeros(B), where=SV[:, :, 1].sum(axis=1) > 0)
             pA = XA[:, 0].sum() / XA[:, 1].sum() if XA[:, 1].sum() else 0
             pV = XV[:, 0].sum() / XV[:, 1].sum() if XV[:, 1].sum() else 0
             _hv_sem[f"{m}|{fw}|{e}"] = {
@@ -1217,8 +1217,8 @@ if _VERIFIED_OK:
             n = len(urls)
             idx = rng5.integers(0, n, size=(B, n))
             def _m(X, ix):
-                t = X[ix][:, 0].sum(axis=1); d = X[ix][:, 1].sum(axis=1)
-                h = X[ix][:, 2].sum(axis=1); im = X[ix][:, 3].sum(axis=1)
+                t = X[ix][:, :, 0].sum(axis=1); d = X[ix][:, :, 1].sum(axis=1)
+                h = X[ix][:, :, 2].sum(axis=1); im = X[ix][:, :, 3].sum(axis=1)
                 r = np.where(d > 0, t / np.where(d > 0, d, 1), 0)
                 a = np.where(t + h > 0, t / np.where(t + h > 0, t + h, 1), 0)
                 ap = np.where(t + h + im > 0, t / np.where(t + h + im > 0, t + h + im, 1), 0)
@@ -1247,8 +1247,8 @@ if _VERIFIED_OK:
                 n = len(urls)
                 idx = rng5.integers(0, n, size=(B, n))
                 SA, SV = XA[idx], XV[idx]
-                rA = np.where(SA[:, :, 1] > 0, SA[:, :, 0] / np.where(SA[:, :, 1] > 0, SA[:, :, 1], 1), 0).mean(axis=1)
-                rV = np.where(SV[:, :, 1] > 0, SV[:, :, 0] / np.where(SV[:, :, 1] > 0, SV[:, :, 1], 1), 0).mean(axis=1)
+                rA = np.divide(SA[:, :, 0].sum(axis=1), SA[:, :, 1].sum(axis=1), out=np.zeros(B), where=SA[:, :, 1].sum(axis=1) > 0)
+                rV = np.divide(SV[:, :, 0].sum(axis=1), SV[:, :, 1].sum(axis=1), out=np.zeros(B), where=SV[:, :, 1].sum(axis=1) > 0)
                 pA = XA[:, 0].sum() / XA[:, 1].sum() if XA[:, 1].sum() else 0
                 pV = XV[:, 0].sum() / XV[:, 1].sum() if XV[:, 1].sum() else 0
                 _vhv[f"{m}|{fw}|{e}"] = {"n_pr": n,

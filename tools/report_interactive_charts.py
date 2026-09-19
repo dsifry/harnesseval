@@ -125,6 +125,15 @@ def cell_rows(complete_only: bool = True):
             "F2p": c["F2p"], "flo": (ci.get("F2p") or [0, 0, 0])[1], "fhi": (ci.get("F2p") or [0, 0, 0])[2],
             "TP": c.get("TP"), "den": c.get("den"),
             "inst": ",".join(c.get("instruments") or []) or "?",
+            "advisory_measured": c.get("advisory_measured", False),
+            "advisory_status": (
+                ("advisory credit measured" if c.get("advisory_measured", False) else
+                 "advisory credit incomplete; observed bonus only, not fully comparable")
+                + "<br>F2′ advisory instrument: " + (", ".join(c.get("advisory_instruments") or []) or "not recorded")
+                + "<br>classified findings below scoring threshold: " + str(c.get("advisory_below_threshold", c.get("advisory_unresolved", 0)))
+                + ("<br>F2′ classification-sensitivity bounds (not CI; all penalties → all advisories): "
+                   + " → ".join(f"{x:.3f}" for x in c["F2p_unresolved_bounds"])
+                   if c.get("F2p_unresolved_bounds") is not None else "")),
             "usd": (mx.get("ci", {}).get("usd_per_real") or [mx.get("usd_per_real")])[0],
             "usdlo": (mx.get("ci", {}).get("usd_per_real") or [None, None, None])[1],
             "usdhi": (mx.get("ci", {}).get("usd_per_real") or [None, None, None])[2],
@@ -135,7 +144,7 @@ def cell_rows(complete_only: bool = True):
 # =====================================================================  1. defects found
 def chart_defects_found() -> None:
     """Per-cell decomposition of reported findings into goldens / hidden-gold defects / hallucinations /
-    nitpick-class, with the nitpick category shown as n/a on v1-instrument cells."""
+    useful advisory, with the advisory credit shown as n/a on v1-instrument cells."""
     import hashlib as _h
     SEL = {(r["model"], r["framework"], r["effort"], r["url"]): r for r in D["selected_runs"]}
     SLUG = {u: u.rstrip("/").split("/")[-1] for u in M["expanded_gold"]["per_pr"]}
@@ -144,7 +153,7 @@ def chart_defects_found() -> None:
         return _h.sha1(t.encode()).hexdigest()[:16]
 
     def per_pr(m, fw, e):
-        """[goldens, defects, hallucinations, nitpicks] contributed per PR (6 values each)."""
+        """[goldens, defects, hallucinations, useful advisories] contributed per PR (6 values each)."""
         G, Dp, H, I = [], [], [], []
         for u, pr in SLUG.items():
             r = SEL.get((m, fw, e, u))
@@ -175,8 +184,10 @@ def chart_defects_found() -> None:
         if pp is None:
             continue
         inst = c.get("instruments") or []
-        v1_only = set(inst) == {"v1"}
+        v1_only = not c.get("advisory_measured", "v1" not in inst)
         g, d, h, i = (float(x.sum()) for x in pp)
+        h = c.get("penalty_count", h)
+        i = c.get("advisory_count", i)
         lo, hi = boot_total_ci(pp[0], pp[1])
         rows.append({"key": k, "m": m, "fw": fw, "e": e, "gold": g, "def": d, "hal": h,
                      "nit": i, "v1": v1_only, "real": g + d, "lo": lo, "hi": hi,
@@ -188,8 +199,8 @@ def chart_defects_found() -> None:
     # stacked components, one trace per (component, framework family) so the key can isolate both
     components = [("gold", "Martian goldens found", "#c9c9c9"),
                   ("def", "hidden-gold defects found", "family"),
-                  ("hal", "hallucinations", "#b03060"),
-                  ("nit", "nitpick-class findings", "#f0a202")]
+                  ("hal", "unsupported / style-only / vague findings", "#b03060"),
+                  ("nit", "useful advisory findings", "#2a9d6f")]
     for comp, name, colour in components:
         for fw in FW:
             ys, hovers = [], []
@@ -197,9 +208,9 @@ def chart_defects_found() -> None:
                 if r["fw"] != fw:
                     ys.append(None); hovers.append(None); continue
                 if comp == "nit" and r["v1"]:
-                    ys.append(0.0)
-                    hovers.append(f"nitpick-class: <b>n/a (v1 instrument)</b><br>"
-                                  f"{r['label']} · reported findings {int(r['gold'] + r['def'] + r['hal'])}")
+                    ys.append(r[comp])
+                    hovers.append(f"useful advisories: <b>{int(r[comp])} observed; advisory adjudication incomplete</b><br>"
+                                  f"{r['label']} · lower credit, not fully comparable")
                     continue
                 ys.append(r[comp])
                 hovers.append(f"{r['label']} · {name}: <b>{int(r[comp])}</b>")
@@ -227,27 +238,32 @@ def chart_defects_found() -> None:
 
     fig.update_layout(
         barmode="stack", bargap=0.25,
-        title=dict(text=(f"Findings per cell, decomposed — true golden set ({GOLD} true bugs = "
+        title=dict(text=(f"Credited units per cell, decomposed — true golden set ({GOLD} true bugs = "
                          f"{GOLDDEN} goldens + {NDEF} verified defects)<br>"
                          "<sup>toggle legend entries to isolate families/components · "
-                         "† = v1 binary instrument, nitpick category not measurable</sup>"), font=dict(size=13)),
+                         "† = incomplete advisory adjudication: observed credit only, not fully comparable<br>Credited units = distinct bugs + adjudicated finding counts; totals are not raw reported findings</sup>"), font=dict(size=13)),
         xaxis=dict(title="cell (sorted by real bugs found)", tickangle=-90, tickfont=dict(size=9),
                    categoryorder="array", categoryarray=xs),
-        yaxis=dict(title="findings (sum over the 6 PRs)", rangemode="tozero"),
+        yaxis=dict(title="credited units (distinct bugs + adjudicated finding counts)", rangemode="tozero"),
         legend=dict(itemclick="toggle", itemdoubleclick="toggleothers", font=dict(size=9),
                     orientation="v", x=1.02, y=1, bordercolor="#d9dee5", borderwidth=1),
         margin=dict(l=60, r=210, t=110, b=120), font=FONT, plot_bgcolor="white",
     )
     save(fig, "fig_true_gold_defects_found",
-         "Findings per cell, decomposed (goldens / hidden-gold defects / hallucinations / nitpicks)",
+         "Credited units per cell, decomposed (goldens / hidden-gold defects / unsupported findings / useful advisories)",
          "interactive build of analysis/figures/fig_true_gold_defects_found.png; "
          "counts from final_report_dataset.json + DEFECT_ASSIGN.json; CI = cluster bootstrap (B=10,000)")
 
 
 # =====================================================================  2. true-gold pareto
+def quality_range(rows, point, upper):
+    """Use the same CI-inclusive scale in both checkbox states."""
+    return [0, max(0.1, max(max(r[point], r[upper]) for r in rows) * 1.08)]
+
+
 def chart_true_gold_pareto() -> None:
-    comp = cell_rows(complete_only=True)
-    part = cell_rows(complete_only=False)
+    comp = [r for r in cell_rows(complete_only=True) if r["advisory_measured"]]
+    part = [r for r in cell_rows(complete_only=False) if r["advisory_measured"]]
     part = [r for r in part if r["n"] < 6]
     fig = go.Figure()
     err_idx = []
@@ -269,10 +285,10 @@ def chart_true_gold_pareto() -> None:
                              array=[r["fhi"] - r["F2p"] for r in g],
                              arrayminus=[r["F2p"] - r["flo"] for r in g],
                              color=FWCOL[fw], thickness=1, width=3),
-                customdata=[[r["key"], r["TP"], r["den"], r["inst"]] for r in g],
-                hovertemplate=("<b>%{customdata[0]}</b><br>recall %{x:.3f} · F2′ %{y:.3f}<br>"
+                customdata=[[r["key"], r["TP"], r["den"], r["inst"], r["advisory_status"]] for r in g],
+                hovertemplate=("<b>%{customdata[0]}</b><br>recall %{x:.3f} · F2′ (bug quality + advisory credit) %{y:.3f}<br>"
                                "TP %{customdata[1]} of %{customdata[2]} true bugs · "
-                               "adjudicator: %{customdata[3]}<extra></extra>"),
+                               "legacy bug-matching instrument: %{customdata[3]}<br>%{customdata[4]}<extra></extra>"),
             ))
             err_idx.append(len(fig.data) - 1)
     # partial-coverage cells: open markers, dimmed, in the key so they can be toggled
@@ -285,22 +301,22 @@ def chart_true_gold_pareto() -> None:
             name=f"{FW_NAME[fw]} · partial coverage (open)", legendgroup=fw,
             marker=dict(color=FWCOL[fw], size=12, symbol="circle-open", opacity=0.6,
                         line=dict(width=2)),
-            customdata=[[r["key"], r["n"]] for r in g],
+            customdata=[[r["key"], r["n"], r["advisory_status"]] for r in g],
             hovertemplate=("<b>%{customdata[0]}</b> (<b>%{customdata[1]} PR</b> — partial coverage, "
-                           "not comparable)<br>recall %{x:.3f} · F2′ %{y:.3f}<extra></extra>"),
+                           "not comparable)<br>recall %{x:.3f} · F2′ (bug quality + advisory credit) %{y:.3f}<br>%{customdata[2]}<extra></extra>"),
         ))
     v = HEAD.get("vanilla", {}).get("best_f2p", {})
     if v.get("F2p"):
-        fig.add_vline(x=v["F2p"], line=dict(color=FWCOL["vanilla-engineered"], width=1, dash="dot"),
+        fig.add_hline(y=v["F2p"], line=dict(color=FWCOL["vanilla-engineered"], width=1, dash="dot"),
                       annotation_text=f"best vanilla F2′ {v['F2p']:.3f}",
                       annotation_position="bottom right", annotation_font_size=10)
     fig.update_layout(
         title=dict(text=(f"Recall vs F2′ — true golden set ({GOLD} true bugs: {GOLDDEN} goldens + "
                          f"{NDEF} verified defects)<br>"
                          "<sup>each point is one complete cell; whiskers are 95% cluster-bootstrap CIs · "
-                         "open markers = partial coverage (1–2 PRs)</sup>"), font=dict(size=13)),
-        xaxis=dict(title="recall (true golden set)", range=[0, 0.72]),
-        yaxis=dict(title="F2′ (recall-weighted 4:1, nitpick-charged precision)", range=[0, 0.62]),
+                         f"open markers = partial coverage; {len(comp)} eligible complete cells; unmeasured advisory cells omitted</sup>"), font=dict(size=13)),
+        xaxis=dict(title="recall (true golden set)", range=quality_range(comp + part, "recall", "rhi")),
+        yaxis=dict(title="F2′ (bug quality + advisory credit)", range=quality_range(comp + part, "F2p", "fhi")),
         legend=dict(itemclick="toggle", itemdoubleclick="toggleothers", font=dict(size=10),
                     x=1.02, y=1, bordercolor="#d9dee5", borderwidth=1),
         margin=dict(l=70, r=240, t=100, b=70), font=FONT, plot_bgcolor="white",
@@ -320,8 +336,8 @@ def chart_pareto_frontier() -> None:
     err_idx = []
     for col, (ykey, ylo, yhi, ylab) in enumerate(
             (("recall", "rlo", "rhi", "recall (true golden set)"),
-             ("F2p", "flo", "fhi", "F2′ (our evaluator)")), start=1):
-        pts = sorted(comp, key=lambda r: r["usd"])
+             ("F2p", "flo", "fhi", "F2′ (bug quality + advisory credit)")), start=1):
+        pts = sorted([r for r in comp if ykey != "F2p" or r["advisory_measured"]], key=lambda r: r["usd"])
         front, best = [], -1.0
         for p in pts:                                   # same algorithm as the static figure
             if p[ykey] > best:
@@ -343,9 +359,9 @@ def chart_pareto_frontier() -> None:
                              array=[r[yhi] - r[ykey] for r in g],
                              arrayminus=[r[ykey] - r[ylo] for r in g],
                              color=FWCOL[fw], thickness=1, width=3),
-                customdata=[[r["key"], r["usd"], r["n"]] for r in g],
-                hovertemplate=("<b>%{customdata[0]}</b><br>$%{x:.4f} per real finding · "
-                               + ylab + " %{y:.3f}<br>n=%{customdata[2]} PRs<extra></extra>"),
+                customdata=[[r["key"], r["usd"], r["n"], r["advisory_status"]] for r in g],
+                hovertemplate=("<b>%{customdata[0]}</b><br>$%{x:.4f} per campaign model-adjudicated finding (legacy; repeats included) · "
+                               + ylab + " %{y:.3f}<br>n=%{customdata[2]} PRs<br>%{customdata[3]}<extra></extra>"),
             ), row=1, col=col)
             err_idx.append(len(fig.data) - 1)
         # frontier envelope + labelled frontier cells
@@ -355,22 +371,29 @@ def chart_pareto_frontier() -> None:
                                  marker=dict(color="black", size=12, symbol="circle-open", line=dict(width=2)),
                                  hovertemplate="frontier point<br>$%{x:.4f} · %{y:.3f}<extra></extra>"),
                       row=1, col=col)
-        for p in front:
-            fig.add_annotation(x=p["usd"], y=p[ykey], text=f"{M_SHORT[p['m']]}·{FW_SHORT[p['fw']]}·{p['e'][:3]}",
+        for i, p in enumerate(front):
+            # Plotly annotations on log axes take log10 coordinates (traces take raw values).
+            fig.add_annotation(x=float(np.log10(p["usd"])), y=p[ykey], text=str(i + 1),
                                showarrow=True, arrowhead=0, arrowwidth=0.6, arrowcolor="#888",
-                               ax=14, ay=-12, font=dict(size=9, color="#333"), row=1, col=col)
-        fig.update_xaxes(type="log", title_text="metered $ per real finding (log scale)", row=1, col=col)
-        fig.update_yaxes(title_text=ylab, range=[0, 0.62], row=1, col=col)
+                               ax=8, ay=-18 if i % 2 == 0 else 18,
+                               bgcolor="white", font=dict(size=10, color="#333"), row=1, col=col)
+        key = "<br>".join(f"{i + 1}. {M_SHORT[p['m']]}·{FW_SHORT[p['fw']]}·{p['e']}"
+                             for i, p in enumerate(front))
+        fig.add_annotation(x=0, y=-0.23, xref=f"x{'' if col == 1 else col} domain",
+                           yref="paper", text=key, showarrow=False, xanchor="left", yanchor="top",
+                           align="left", font=dict(size=10))
+        fig.update_xaxes(type="log", title_text="metered $ per campaign model-adjudicated finding (legacy; log)", row=1, col=col)
+        fig.update_yaxes(title_text=ylab, range=quality_range(pts, ykey, yhi), row=1, col=col)
     fig.update_layout(
         title=dict(text=("Cost/quality frontier — complete cells only<br>"
-                         "<sup>upper-left is better · the F2′ frontier is entirely open-weight (GLM) cells, the "
-                         "recall frontier ends at the premium opus·CE·medium cell</sup>"), font=dict(size=13)),
+                         "<sup>x: original campaign model judgments, including repeated reports; y: recall or revised F2′<br>"
+                         "unmeasured advisory cells are omitted from F2′ panels</sup>"), font=dict(size=13)),
         legend=dict(itemclick="toggle", itemdoubleclick="toggleothers", font=dict(size=10),
                     x=1.02, y=1, bordercolor="#d9dee5", borderwidth=1),
-        margin=dict(l=70, r=200, t=110, b=70), font=FONT, plot_bgcolor="white",
+        margin=dict(l=70, r=200, t=110, b=185), height=680, font=FONT, plot_bgcolor="white",
     )
     save(fig, "fig_pareto_frontier",
-         "Cost/quality frontier: dollars per real finding vs recall and vs F2′, with the Pareto envelope",
+         "Cost/quality frontier: dollars per original campaign model-adjudicated finding (including repeats) vs recall and revised F2′",
          "interactive build of analysis/figures/fig_pareto_frontier.png; matrix ci.usd_per_real + "
          "true_gold_defects.verified.cells")
 

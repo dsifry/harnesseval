@@ -39,6 +39,8 @@ NDEFECTS = GOLD - GOLDDEN                                      # verified distin
 def rows():
     out = []
     for key, c in CELLS.items():
+        if not c.get("advisory_measured", False):
+            continue
         m, fw, e = key.split("|")
         ci = (c.get("ci") or {})
         r = ci.get("recall") or [c["recall"], c["recall"], c["recall"]]
@@ -101,18 +103,18 @@ def scatter(ax, xk, xlo, xhi, yk, ylo, yhi, xlog=False):
 
 # ---- fig 1: recall vs F1' -------------------------------------------------------
 fig, ax = plt.subplots(figsize=(7.2, 5.0))
-scatter(ax, "F2p", "flo", "fhi", "recall", "rlo", "rhi")
-ax.set_xlabel("F2′  (recall-weighted 4:1, nitpick-charged precision)  →  better\n"
-              "our chosen evaluator: a missed bug costs 4× a false alarm, which is what we claim to believe")
-ax.set_ylabel(f"recall of the true golden set  ({GOLD} = {GOLDDEN} goldens + {NDEFECTS} verified defects)  →  better")
-ax.set_title(f"True-gold frontier ({GOLD} true bugs): recall vs F2′, our evaluator (axis zoomed to 0.5)\n"
-             "each point is one (model, framework, effort) cell; open markers = partial coverage (1–2 PRs, not comparable); "
-             "bars are cluster-bootstrap 95% CIs",
+scatter(ax, "recall", "rlo", "rhi", "F2p", "flo", "fhi")
+ax.set_ylabel("F2′ (bug quality + advisory credit)")
+ax.set_xlabel(f"recall of the true golden set ({GOLD} true bugs)")
+ax.set_title(f"True-gold frontier ({GOLD} true bugs): recall vs F2′, our evaluator\n"
+             "each point is one (model, framework, effort) cell; bars are cluster-bootstrap 95% CIs\n"
+             "open markers = partial coverage; unmeasured advisory cells omitted",
              fontsize=8.5, loc="left")
-ax.set_xlim(0, 0.5)
+ax.set_xlim(0, max(0.1, float(ax.dataLim.xmax) * 1.08))
+ax.set_ylim(0, max(0.1, float(ax.dataLim.ymax) * 1.08))
 v = HEAD.get("vanilla", {}).get("best_f2p", {})
-ax.axvline(v.get("F2p", 0), color=FWCOL["vanilla-engineered"], lw=0.7, ls=":", alpha=0.7)
-ax.text(v.get("F2p", 0), ax.get_ylim()[0], " best vanilla F2′", fontsize=6, color="#555", va="bottom")
+ax.axhline(v.get("F2p", 0), color=FWCOL["vanilla-engineered"], lw=0.7, ls=":", alpha=0.7)
+ax.text(ax.get_xlim()[0], v.get("F2p", 0), " best vanilla F2′", fontsize=6, color="#555", va="bottom")
 ax.legend(loc="lower right", frameon=False, fontsize=7)
 fig.tight_layout()
 fig.savefig(f"{FIG}/fig_true_gold_pareto.png"); fig.savefig(f"{FIG}/fig_true_gold_pareto.svg")   # vector twin, same basename
@@ -122,11 +124,11 @@ plt.close(fig)
 fig, ax = plt.subplots(figsize=(7.2, 5.0))
 scatter(ax, "per_true", "per_true", "per_true", "F2p", "flo", "fhi", xlog=True)
 ax.set_xlabel("$ per TRUE bug found  (list price; log scale — each gridline right is ~10× more)")
-ax.set_ylabel("F2′ of the true golden set  →  better")
-ax.set_ylim(0, 0.5)
+ax.set_ylabel("F2′ (bug quality + advisory credit)")
+ax.set_ylim(0, max(0.1, float(ax.dataLim.ymax) * 1.08))
 ax.set_title(f"What a caught real bug costs ({GOLD} true bugs)\n"
-             "the buyer's panel: up and to the left is better; open markers = partial coverage (1–2 PRs); the axis is zoomed\n"
-             "to 0.5 so the spread is visible (a display choice, not a limit on the score); bars are cluster-bootstrap 95% CIs",
+             "the buyer's panel: up and to the left is better; open markers = partial coverage (1–2 PRs); the axis fits all points\n"
+             "and their confidence intervals; unmeasured advisory cells omitted",
              fontsize=8.5, loc="left")
 ax.legend(loc="lower left", frameon=False, fontsize=7)
 fig.tight_layout()
@@ -140,7 +142,7 @@ L = ["## True-gold headline (deduplicated verified hidden-gold set)", "",
      f"{BLOCK['totals']['den']}) sums findings across cells and is not the gold-set ratio.", "",
      "| | cell | recall | **F2′** | adjusted precision (adjP) |", "|---|---|---|---|---|"]
 rows_md = [("best harness recall", HEAD["harness"]["best_recall"]),
-           ("**best harness F2′ (our evaluator)**", HEAD["harness"]["best_f2p"]),
+           ("**best harness F2′ (bug quality + advisory credit)**", HEAD["harness"]["best_f2p"]),
            ("best vanilla recall", HEAD["vanilla"]["best_recall"]),
            ("best vanilla F2′", HEAD["vanilla"]["best_f2p"])]
 for lab, hh in rows_md:
@@ -193,25 +195,28 @@ for k, c in CELLS.items():
     if not f or c["n_pr"] != 6:
         continue
     G, Dp, H, I = f
+    H = c.get("penalty_count", H)
+    I = c.get("advisory_count", I)
+    measured = c.get("advisory_measured", "v1" not in c.get("instruments", []))
     bars.append({"k": k, "label": f"{M_SHORT.get(m, m)} {FW_SHORT[fw]} {e[:1]}", "fw": fw,
                  "gold": G, "def": Dp, "F2p": c["F2p"], "F1p": c["F1p"], "recall": c["recall"],
-                 "nit": I / max(1, G + Dp + H + I)})
+                 "advisory": I / max(1, G + Dp + H + I), "measured": measured})
 bars.sort(key=lambda b: -(b["gold"] + b["def"]))
 fig, ax = plt.subplots(figsize=(9.5, 6.4))
 ys = list(range(len(bars)))[::-1]
 for i, b in zip(ys, bars):
     ax.barh(i, b["gold"], color="#c9c9c9", height=0.7)
     ax.barh(i, b["def"], left=b["gold"], color=FWCOL[b["fw"]], height=0.7)
-    ax.text(b["gold"] + b["def"] + 1.0, i, f"F2′ rank {sorted(bars, key=lambda x: -x['F2p']).index(b)+1:<2d} "
-            f"· F2′ {b['F2p']:.3f} · nitpick-share(adj) {b['nit']:.0%}", fontsize=5.6, va="center", color="#444")
+    ax.text(b["gold"] + b["def"] + 1.0, i, (f"F2′ rank {sorted([x for x in bars if x['measured']], key=lambda x: -x['F2p']).index(b)+1:<2d} " if b["measured"] else "unranked ") +
+            f"· F2′ {b['F2p']:.3f} · advisory share {b['advisory']:.0%}"
+            + ("" if b["measured"] else " †"), fontsize=5.6, va="center", color="#444")
 ax.set_yticks(ys); ax.set_yticklabels([b["label"] for b in bars], fontsize=5.6)
 ax.set_xlabel("real bugs found on the true golden set  ·  gray = Martian goldens, "
               "color = hidden-gold defects the benchmark never scores")
-ax.set_title("Real bugs found, with each cell's F2′ (our evaluator) for comparison — complete 6-PR cells only\n"
-             "cells sorted by real bugs found; F2′ (recall-weighted 4:1) tracks bugs found far better than "
-             "the equal-weight F1′ did, though the nitpick share still moves it\n"
-             "nitpick-share(adj) = nitpicks / (goldens + distinct defects + hallucinations + nitpicks) — a DIFFERENT "
-             "measure from the report's nitpick-% of reported findings",
+ax.set_title("Real bugs found, with each cell's F2′ (bug quality + advisory credit) for comparison — complete 6-PR cells only\n"
+             "cells sorted by real bugs found; F2′ rewards accepted useful advisories and penalises unsupported findings\n"
+             "advisory share = A / (goldens + distinct defects + H + A); credited units mix distinct bugs and adjudicated finding counts\n"
+             "This is not advisory-% of reported findings. † advisory adjudication incomplete: observed credit only, unranked",
              fontsize=9, loc="left")
 ax.set_xlim(0, max(b["gold"] + b["def"] for b in bars) * 1.30)
 for fw in ("vanilla-engineered", "compound-realistic", "metareview-realistic"):

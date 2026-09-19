@@ -141,9 +141,9 @@ w()
 w("| glm cell vs frontier cell | per-token (glm/frontier) [CI] | tokens/task [CI] | cost/task [CI] |")
 w("|---|---|---|---|")
 for k, d in M["cost_structure_ratios"].items():
-    a, b = k.split(" vs ")
+    a, b = (part.replace("|", " · ") for part in k.split(" vs "))
     w(f"| {a} vs {b} | {fnum(d['ptok_ratio'][0])} [{fnum(d['ptok_ratio'][1])}, {fnum(d['ptok_ratio'][2])}] | "
-      f"{d['toktask_ratio'][0]:.1f}× [{d['toktask_ratio'][1]:.1f}, {d['toktask_ratio'][2]:.1f}] | "
+      f"{fnum(d['toktask_ratio'][0], 4)}× [{fnum(d['toktask_ratio'][1], 4)}, {fnum(d['toktask_ratio'][2], 4)}] | "
       f"{fnum(d['costtask_ratio'][0])} [{fnum(d['costtask_ratio'][1])}, {fnum(d['costtask_ratio'][2])}] |")
 w()
 # ---- T8 recommendation
@@ -152,7 +152,7 @@ w()
 w("| glm cell (A) vs frontier cell (F) | recall A/F [CI] | F1 A/F [CI] | cost A/F [CI] |")
 w("|---|---|---|---|")
 for k, d in M["recommendation_ratios"].items():
-    a, b = k.split(" vs ")
+    a, b = (part.replace("|", " · ") for part in k.split(" vs "))
     w(f"| {a} vs {b} | {fnum(d['recall_ratio'][0])} [{fnum(d['recall_ratio'][1])}, {fnum(d['recall_ratio'][2])}] | "
       f"{fnum(d['F1_ratio'][0])} [{fnum(d['F1_ratio'][1])}, {fnum(d['F1_ratio'][2])}] | "
       f"{fnum(d['cost_ratio_A_over_F'][0])} [{fnum(d['cost_ratio_A_over_F'][1])}, {fnum(d['cost_ratio_A_over_F'][2])}] |")
@@ -239,8 +239,12 @@ w()
 w(f"Pairs-level aggregate: mean ΔF1 {ps['mean']['dF1']:+.3f} [{ps['ci_mean']['dF1'][1]:+.3f}, {ps['ci_mean']['dF1'][2]:+.3f}], "
   f"mean ΔF1\' {ps['mean']['dF1p']:+.3f} [{ps['ci_mean']['dF1p'][1]:+.3f}, {ps['ci_mean']['dF1p'][2]:+.3f}] — "
   f"**resolves positive**. Signs: ΔF1 {ps['signs']['dF1']['pos']}+/{ps['signs']['dF1']['neg']}−/{ps['signs']['dF1']['zero']}0; "
-  f"ΔF1\' {ps['signs']['dF1p']['pos']}+/{ps['signs']['dF1p']['neg']}−. No single pair\'s CI excludes zero (6 PRs each); "
-  f"the aggregate over {ps['n_pairs']} matched pairs is the reportable quantity.")
+  f"ΔF1\' {ps['signs']['dF1p']['pos']}+/{ps['signs']['dF1p']['neg']}−.")
+for metric, label in (("dRecall_sem", "Δrecall"), ("dF1", "ΔF1"), ("dF1p", "ΔF1′")):
+    pairs = SEM["ce_vs_mrv"].values()
+    pos = sum(v[metric][1] > 0 for v in pairs)
+    neg = sum(v[metric][2] < 0 for v in pairs)
+    w(f"{label}: {pos} positive, {neg} negative, {len(SEM['ce_vs_mrv']) - pos - neg} unresolved paired intervals (95%).")
 w()
 w("### T14 — harness vs vanilla, paired Δrecall_sem (semantic union)")
 w()
@@ -274,14 +278,15 @@ w()
 TG = M.get("true_gold_defects", {})
 if TG:
     w("### T16 — TRUE-gold defect-level matrix (§10d PRIMARY): per-cell metrics with 95% cluster-bootstrap CIs")
-    w("Evaluator: **F2\u2032** (recall weighted 4:1, nitpick-charged precision), on the full 152-bug true golden set.")
+    w(f"Evaluator: **F2\u2032** (bug quality + useful-advisory credit, weight 1; incomplete advisory coverage is unranked), on the full {TG['verified']['derived']['coverage']['den']}-bug true golden set.")
+    w()
     w("| cell | n PRs | TP | den | recall [CI] | adjP | **F2\u2032 [CI]** | F1 [CI] | F1\u2032 [CI] |")
     w("|---|---|---|---|---|---|---|---|---|")
-    for k, c in sorted(TG["verified"]["cells"].items(), key=lambda kv: -kv[1]["F1p"]):
+    for k, c in sorted(TG["verified"]["cells"].items(), key=lambda kv: -kv[1]["F2p"]):
         m, fw, e = k.split("|")
         ci = c["ci"]
-        w(f"| {m} · {fw} · {e} | {c['n_pr']} | {c['TP']} | {c['den']} | "
-          f"{c['recall']:.3f} [{ci['recall'][1]:.3f}, {ci['recall'][2]:.3f}] | {c['adjP']:.3f} | {c['adjPp']:.3f} | "
+        w(f"| {m} · {fw} · {e}{' † unranked' if not c.get('advisory_measured', False) else ''} | {c['n_pr']} | {c['TP']} | {c['den']} | "
+          f"{c['recall']:.3f} [{ci['recall'][1]:.3f}, {ci['recall'][2]:.3f}] | {c['adjP']:.3f} | {c['F2p']:.3f} [{ci['F2p'][1]:.3f}, {ci['F2p'][2]:.3f}] | "
           f"{c['F1']:.3f} [{ci['F1'][1]:.3f}, {ci['F1'][2]:.3f}] | {c['F1p']:.3f} [{ci['F1p'][1]:.3f}, {ci['F1p'][2]:.3f}] |")
     h = TG["verified"]["headline"]
     w("")
@@ -294,9 +299,10 @@ if TG:
       f"{h['vanilla']['best_f1p']['recall']:.3f} recall / {h['vanilla']['best_f1p']['F1p']:.3f} F1'. "
       f"Peak-recall ratio harness/vanilla {h['peak_recall_ratio_harness_over_vanilla']:.2f}x; "
       f"best-F1' ratio {h['best_f1p_ratio_harness_over_vanilla']:.2f}x. "
-      f"MRV-vs-CE: {sum(1 for v in TG['verified']['pairs'].values() if v['dF1p'][0] > 0)}/"
+      f"MRV-vs-CE F2′: {sum(1 for v in TG['verified']['pairs'].values() if v['dF2p'][0] > 0)}/"
       f"{len(TG['verified']['pairs'])} pairs positive on the point estimate, "
-      f"{sum(1 for v in TG['verified']['pairs'].values() if v['dF1p'][1] > 0)}/{len(TG['verified']['pairs'])} resolve at 95%.")
+      f"{sum(1 for v in TG['verified']['pairs'].values() if v['dF2p'][1] > 0)}/{len(TG['verified']['pairs'])} favor MRV and "
+      f"{sum(1 for v in TG['verified']['pairs'].values() if v['dF2p'][2] < 0)}/{len(TG['verified']['pairs'])} favor CE at 95%.")
     w("")
     w("### T17 — TRUE-gold per PR (§10d): goldens + individually test-validated defects")
     w("| PR | goldens | verified defects | universe |")

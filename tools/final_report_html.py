@@ -59,7 +59,7 @@ for k, v in M["matrix"].items():
     if ex:
         c["TP_exp"] = ex["TP_exp"]
         c["usd_per_tp_exp"] = (v["ci"]["cost_run"][0] * v["n_pr"] / ex["TP_exp"]) if ex["TP_exp"] else None
-    # TRUE golden set (§10d): 42 goldens + the deduplicated, individually test-validated defects
+    # TRUE golden set (§10d): 42 goldens + the deduplicated, verified defects with archived reproduction/fix-test evidence
     se = M["true_gold_defects"]["verified"]["cells"].get(kx)
     if se:
         c["TP_sem"] = se["TP"]
@@ -68,6 +68,13 @@ for k, v in M["matrix"].items():
         c["F1_sem"] = se["F1"]; c["F1_sem_lo"] = se["ci"]["F1"][1]; c["F1_sem_hi"] = se["ci"]["F1"][2]
         c["F1p_sem"] = se["F1p"]; c["F1p_sem_lo"] = se["ci"]["F1p"][1]; c["F1p_sem_hi"] = se["ci"]["F1p"][2]
         c["adjP_sem"] = se["adjP"]; c["adjPp_sem"] = se["adjPp"]
+        c["advisory_measured"] = se.get("advisory_measured", False)
+        c["advisory_count"] = se.get("advisory_count", 0)
+        c["advisory_instruments"] = "/".join(se.get("advisory_instruments") or []) or "not recorded"
+        c["advisory_unresolved"] = se.get("advisory_below_threshold", se.get("advisory_unresolved", 0))
+        c["F2p_unresolved_bounds"] = se.get("F2p_unresolved_bounds")
+        c["advisory_status"] = ("measured" if se.get("advisory_measured", False) else
+                                "partly or wholly unmeasured; observed credit only, not fully comparable")
     c["F2_sem"] = se.get("F2"); c["F2p_sem"] = se.get("F2p")
     c["F2p_sem_lo"] = se["ci"]["F2p"][1] if se.get("ci", {}).get("F2p") else None
     c["F2p_sem_hi"] = se["ci"]["F2p"][2] if se.get("ci", {}).get("F2p") else None
@@ -145,8 +152,27 @@ for k, v in M["true_gold_defects"]["verified"]["cells"].items():
                "F1p_sem": v["F1p"], "F2_sem": v.get("F2"), "F2p_sem": v.get("F2p"),
                "adjP_sem": v["adjP"], "adjPp_sem": v["adjPp"]}
 
-DATA = round5({"cells": cells, "tok": tok, "sel": sel_effect, "percell": percell, "exp": expd,
-               "sel_exp": M["expanded_gold"]["sel_effect_exp"], "percell_exp": M["expanded_gold"]["percell_exp"]})
+# Compare identical complete model/effort cohorts across all three frameworks.
+verified = M["true_gold_defects"]["verified"]
+complete = {f"{c['model']}|{c['eff']}" for c in cells if c["advisory_measured"]}
+matched = sorted(me for me in complete if all(
+    any(c["model"] + "|" + c["eff"] == me and c["fw"] == fw and c["advisory_measured"]
+        for c in cells) for fw in FWS))
+means = {fw: sum(verified["cells"][f"{me.rsplit('|', 1)[0]}|{fw}|{me.rsplit('|', 1)[1]}"]["F2p"]
+                 for me in matched) / len(matched) for fw in FWS}
+paired = [verified["pairs"][me]["dF2p"] for me in matched]
+positive = sum(ci[1] > 0 for ci in paired)
+negative = sum(ci[2] < 0 for ci in paired)
+framework_summary = (
+    f"<b>Matched framework comparison:</b> across {len(matched)} identical model/effort cohorts, "
+    f"mean F2′ is <b>MRV {means['metareview-realistic']:.3f}</b>, "
+    f"CE {means['compound-realistic']:.3f}, and vanilla {means['vanilla-engineered']:.3f}. "
+    f"MRV leads CE in {sum(ci[0] > 0 for ci in paired)}/{len(paired)} point comparisons; "
+    f"paired 95% intervals favor MRV in {positive}, CE in {negative}, and include zero in "
+    f"{len(paired) - positive - negative}. These averages differ from the individual configurations plotted below."
+)
+
+DATA = round5({"cells": cells, "tok": tok, "sel": sel_effect, "percell": percell, "exp": expd})
 
 HTML = """<!DOCTYPE html>
 <html lang="en">
@@ -209,7 +235,7 @@ HTML = """<!DOCTYPE html>
 <body>
 <div class="wrap">
   <h1>Automated code review — final campaign explorer</h1>
-  <div class="sub">8 models × 3 harnesses × 3 effort levels on the six severity-hardest Martian-benchmark PRs · 66 complete cells · data freeze 2026-09-16 09:35 · quality panels use the <b>true golden set</b> (__TGGOLD__ goldens + __TGDEF__ individually test-validated defects = __TGDEN__ true bugs — REPORT.md §3.1; catalogue: GOLD_DEFECT_CATALOG.md)</div>
+  <div class="sub">8 models × 3 harnesses × 3 effort levels on the six severity-hardest Martian-benchmark PRs · 66 complete cells · data freeze 2026-09-16 09:35 · quality panels use the <b>true golden set</b> (__TGGOLD__ goldens + __TGDEF__ verified defects with archived reproduction/fix-test evidence = __TGDEN__ true bugs — REPORT.md §3.1; catalogue: GOLD_DEFECT_CATALOG.md)</div>
   <div id="filtersSentinel"></div>
   <div id="filterWrap">
   <div class="panel" id="filtersPanel">
@@ -225,30 +251,31 @@ HTML = """<!DOCTYPE html>
   </div>
   </div>
 
-  <div class="caveat">Quality panels score <b>F2′</b>: real bugs found on the true golden set (__TGGOLD__ goldens + __TGDEF__ hand-verified defects), penalised for wrong claims and nitpicks, with a missed bug counted 4× worse than a false alarm — so a lower-scoring setup missed more than it made up for in precision. Every point is one (model × harness × effort level) cell, one selected healthy scored run per PR (n=6). Bars/whiskers are 95% cluster-bootstrap CIs over PRs. <b>Hover</b> for detail; <b>click</b> a point for the full cell card (right); <b>double-click</b> a legend entry to isolate a model; single-click to toggle. Full report: <a href="../../REPORT.md">REPORT.md</a> · coverage: <a href="../COVERAGE.md">COVERAGE.md</a>.</div>
+  <div class="caveat">__FRAMEWORK_SUMMARY__</div>
+  <div class="caveat">Quality panels score <b>F2′</b>: real bugs found on the true golden set (__TGGOLD__ goldens + __TGDEF__ verified defects), with credit for accepted useful advisories and penalties for unsupported claims, style-only findings, and vague concerns. F2′ = (5T + A) / (4D + T + A + H), where T = distinct true bugs found, D = true-set size, A = accepted useful advisories, and H = effective unsupported findings. All 403 selected reviews have completed adjudication. Advisory credit requires classifier confidence ≥0.70; unsupported-finding penalties require ≥0.80. Findings below the applicable cutoff remain classified but unscored. Confidence is model-reported, not a calibrated probability. Rankings require complete six-PR coverage. The F2′ advisory instrument is recorded separately from legacy bug-matching judges. Verified bug assignments fix bug credit and prevent those findings from receiving advisory credit or unsupported penalties. Every point is one (model × harness × effort level) cell, one selected healthy scored run per PR (n=6). Bars/whiskers are 95% cluster-bootstrap CIs over PRs. <b>Hover</b> for detail; <b>click</b> a point for the full cell card (right); <b>double-click</b> a legend entry to isolate a model; single-click to toggle. Full report: <a href="../../REPORT.md">REPORT.md</a> · coverage: <a href="../COVERAGE.md">COVERAGE.md</a>.</div>
 
   <div class="panel">
   <div class="panel">
     <h2>1a · Value for money — how many real bugs does a dollar per PR review buy?</h2>
-    <div class="note"><div><b>How to read the y-axis — F2′, our overall quality score.</b> It rewards a setup for <b>finding real bugs</b> and penalises it for <b>noise</b>. "Real bugs" = the true golden set: __TGGOLD__ Martian goldens + __TGDEF__ defects we verified by hand (__TGDEN__ total). "Noise" = claims the adjudicator rejected, plus nitpicks. A <b>missed bug counts 4× as much as a false alarm</b>, which is why the score is <b>F2′</b> and not the more familiar F1. <b>Higher is better, and the chart is zoomed in so you can actually see the differences</b> — the axis stopping at 0.5 is a zoom level, not a limit on the score: 1.0 would mean catching all __TGDEN__ real bugs with no noise, and the best setup here reaches 0.49, the best of a deliberately hard field. <i>Full definition: REPORT.md §3.1.</i></div><div class="mech">x = metered $ per PR review (log) — what a single review costs. One point per cell (66 complete top-6 cells). <b>Color</b> = model; <b>shape</b> = harness (○ van, □ CE, △ MRV); <b>connecting lines</b> follow one model × harness across effort levels (solid vanilla, dashed CE, dotted MRV). <b>Hover</b> for the value + CI; <b>click</b> a point for its card below; <b>double-click</b> a legend entry to isolate a model. CIs are off by default.</div></div>
+    <div class="note"><div><b>How to read the y-axis — F2′, our overall quality score.</b> It rewards <b>finding real bugs</b> and gives additional credit for <b>accepted useful advisories</b>. The true golden set contains __TGGOLD__ Martian goldens + __TGDEF__ verified defects (__TGDEN__ total). <b>F2′ = (5T + A) / (4D + T + A + H)</b>: T is distinct true bugs found, D is true-set size, A is accepted important non-bug advisories from the merged full review, and H is effective unsupported findings (including false claims, style-only findings, and vague concerns). Advisories add credit without changing bug recall. Legacy F1′ and adjP′ retain their burden-based definitions. All selected reviews are adjudicated. Only useful advisories at confidence ≥0.70 receive credit; unsupported findings at ≥0.80 receive penalties. Lower-confidence findings are classified but unscored. F2′ is a custom score, not measured developer utility. Higher is better; the axis fits the observed scores and confidence intervals. <i>Full definition: REPORT.md §3.1.</i></div><div class="mech">x = metered $ per PR review (log) — what a single review costs. One point per complete six-PR cell; all selected reviews are adjudicated. <b>Color</b> = model; <b>shape</b> = harness (○ van, □ CE, △ MRV); <b>connecting lines</b> follow one model × harness across effort levels (solid vanilla, dashed CE, dotted MRV). <b>Hover</b> for the value + CI; <b>click</b> a point for its card below; <b>double-click</b> a legend entry to isolate a model. CIs are off by default.</div></div>
     <div class="controls"><label><input type="checkbox" id="showci1a"> show 95% CIs</label></div>
     <div id="chart1a" style="height:430px"></div>
-    <div class="takeaway" style="margin-top:10px;padding:10px 14px;border-left:4px solid #B07AA1;background:#faf7fa;font-size:13.5px;border-radius:0 8px 8px 0"><b>Takeaway:</b> the GLM harness rows dominate the value frontier — glm-vis · MRV · low delivers F2′ 0.470 at $0.22/run (7.5% of opus CE-low's $2.95, F2′ 0.397), and glm-flash · MRV · low delivers F2′ 0.436 at $0.02/run — about 1/125 of opus CE-low's price per review. fable-5.1 vanilla's best 6-PR cell scores F2′ 0.406 — below the GLM harness cells above — and it finds 54 real bugs where glm-vis · MRV · high finds 76 (the overall best cell, glm-vis · CE · medium, finds 80). So on value per dollar the cheap harness lane is not a compromise.</div>
+    <div class="takeaway" style="margin-top:10px;padding:10px 14px;border-left:4px solid #B07AA1;background:#faf7fa;font-size:13.5px;border-radius:0 8px 8px 0"><b>Takeaway:</b> compare the upper-left cells for strong bug quality plus advisory credit at lower cost. Use the cell cards for observed advisory counts and uncertainty; these panels compare complete six-PR cells.</div>
     <div id="details1a" style="margin-top:10px;border:1px solid var(--line);border-radius:8px;padding:14px;font-size:13px;background:#fbfbfb"><h3 style="margin:0 0 6px;font-size:14px">Cell details</h3><div style="color:#888">Click a point.</div></div>
   </div>
 
   <div class="panel">
     <h2>1b · Does a slower setup buy a better review?</h2>
-    <div class="note"><div><b>A setup that makes you wait longer is only worth it if it reviews better.</b> Every point is one setup; the further left, the less time you spend waiting for the review. When two setups sit at the same height they deliver the same review quality — the one further left gives you that quality for less waiting, which is free speed. <b>The target is up and to the left.</b> A point that is high but far right is thorough at the cost of wall-clock rather than dollars — and for a person waiting on a PR, minutes often matter more than cents. y = <b>F2′</b>, our overall quality score — how many real bugs a setup finds, penalised for noise, with a missed bug counted 4× worse than a false alarm. <i>Full definition under 1a.</i></div><div class="mech">One point per cell (66 complete top-6 cells). <b>Color</b> = model; <b>shape</b> = harness (○ van, □ CE, △ MRV); <b>connecting lines</b> follow one model × harness across effort levels (solid vanilla, dashed CE, dotted MRV). <b>Hover</b> for the value + CI; <b>click</b> a point for its card below; <b>double-click</b> a legend entry to isolate a model. CIs are off by default.</div></div>
+    <div class="note"><div><b>A setup that makes you wait longer is only worth it if it reviews better.</b> Every point is one setup; the further left, the less time you spend waiting for the review. When two setups sit at the same height they have the same observed F2′ point estimate; the one further left has lower measured latency. Compare their confidence intervals, then pilot the candidates and measure developer triage time. <b>The target is up and to the left.</b> A point that is high but far right is thorough at the cost of wall-clock rather than dollars — and for a person waiting on a PR, minutes often matter more than cents. y = <b>F2′</b>, our overall quality score — bug quality plus accepted advisory credit, penalised for unsupported findings. <i>Full definition under 1a.</i></div><div class="mech">One point per complete six-PR cell; all selected reviews are adjudicated. <b>Color</b> = model; <b>shape</b> = harness (○ van, □ CE, △ MRV); <b>connecting lines</b> follow one model × harness across effort levels (solid vanilla, dashed CE, dotted MRV). <b>Hover</b> for the value + CI; <b>click</b> a point for its card below; <b>double-click</b> a legend entry to isolate a model. CIs are off by default.</div></div>
     <div class="controls"><label><input type="checkbox" id="showci1b"> show 95% CIs</label></div>
     <div id="chart1b" style="height:430px"></div>
-    <div class="takeaway" style="margin-top:10px;padding:10px 14px;border-left:4px solid #B07AA1;background:#faf7fa;font-size:13.5px;border-radius:0 8px 8px 0"><b>Takeaway:</b> at low effort the GLM cells are latency-competitive with everything (79–95 s vs opus 100–110 s); at medium/high effort the GLM lane runs 4–12× slower than frontier cells at the <i>same</i> effort (up to ~30× against the fastest frontier low-effort cell) — gateway throughput, not quality — which is why this is a low-effort recommendation. Among frontier cells, sonnet-5's are the slowest; the GLM high-effort cells are slower still.</div>
+    <div class="takeaway" style="margin-top:10px;padding:10px 14px;border-left:4px solid #B07AA1;background:#faf7fa;font-size:13.5px;border-radius:0 8px 8px 0"><b>Takeaway:</b> GLM Flash and Vision MRV at low effort take about 79 and 95 seconds per review, versus about 100 seconds for Opus MRV low. Several frontier one-shot cells are faster still. GLM medium/high-effort cells can take much longer; compare the individual configurations and their uncertainty. These are measured end-to-end latencies, and this experiment does not isolate the cause of the differences.</div>
     <div id="details1b" style="margin-top:10px;border:1px solid var(--line);border-radius:8px;padding:14px;font-size:13px;background:#fbfbfb"><h3 style="margin:0 0 6px;font-size:14px">Cell details</h3><div style="color:#888">Click a point.</div></div>
   </div>
 
   <div class="panel">
     <h2>1c · What does it cost to catch one true bug?</h2>
-    <div class="note"><div><b>This is the price per true bug</b> — one of the __TGDEN__ real bugs in our golden set (__TGGOLD__ Martian goldens plus __TGDEF__ we verified by hand) — plotted against overall review quality. Cheap and high is the win. A setup far to the left but low is buying cheap catches while missing a lot; one far right and high is thorough but you pay for it. Compare it with 1d, and mind the denominators: <b>1c counts each distinct true bug once</b> (a bug is credited once no matter how many times it was reported), while <b>1d divides by every adjudicated real finding</b> — the same bug reported repeatedly counts each time, and beyond-gold findings count too — so 1d's dollars are always lower and never comparable to 1c's. A wide 1c↔1d gap means many confirmed findings per distinct credited bug. y = <b>F2′</b>, our overall quality score — how many real bugs a setup finds, penalised for noise, with a missed bug counted 4× worse than a false alarm. <i>Full definition under 1a.</i></div><div class="mech">One point per cell (66 complete top-6 cells). <b>Color</b> = model; <b>shape</b> = harness (○ van, □ CE, △ MRV); <b>connecting lines</b> follow one model × harness across effort levels (solid vanilla, dashed CE, dotted MRV). <b>Hover</b> for the value + CI; <b>click</b> a point for its card below; <b>double-click</b> a legend entry to isolate a model. CIs are off by default.</div></div>
+    <div class="note"><div><b>This is the price per true bug</b> — one of the __TGDEN__ real bugs in our golden set (__TGGOLD__ Martian goldens plus __TGDEF__ verified against archived evidence) — plotted against overall review quality. Cheap and high is the win. A setup far to the left but low is buying cheap catches while missing a lot; one far right and high is thorough but you pay for it. Compare it with 1d, and mind the denominators: <b>1c counts each distinct true bug once</b> (a bug is credited once no matter how many times it was reported), while <b>1d divides by findings labelled real by the original campaign model adjudicators</b> — the same bug reported repeatedly counts each time, and beyond-gold findings count too — so the two cost measures use different judgments and denominators. A wide 1c↔1d gap means many campaign model-adjudicated findings per distinct credited bug. y = <b>F2′</b>, our overall quality score — bug quality plus accepted advisory credit, penalised for unsupported findings. <i>Full definition under 1a.</i></div><div class="mech">One point per complete six-PR cell; all selected reviews are adjudicated. <b>Color</b> = model; <b>shape</b> = harness (○ van, □ CE, △ MRV); <b>connecting lines</b> follow one model × harness across effort levels (solid vanilla, dashed CE, dotted MRV). <b>Hover</b> for the value + CI; <b>click</b> a point for its card below; <b>double-click</b> a legend entry to isolate a model. CIs are off by default.</div></div>
     <div class="controls"><label><input type="checkbox" id="showci1c"> show 95% CIs</label></div>
     <div id="chart1c" style="height:430px"></div>
     <div class="takeaway" style="margin-top:10px;padding:10px 14px;border-left:4px solid #B07AA1;background:#faf7fa;font-size:13.5px;border-radius:0 8px 8px 0"><b>Takeaway (true golden set):</b> per distinct true bug found, the GLM harness cells pay far less than the frontier models: glm-flash · MRV · low $0.0020/bug, glm-vis · MRV · low $0.0185/bug, glm-vis · MRV · high $0.204/bug, versus opus · CE · low $0.272/bug and fable · vanilla · high $0.152/bug — and fable finds 51 real bugs to glm-vis MRV high's 76.</div>
@@ -256,17 +283,17 @@ HTML = """<!DOCTYPE html>
   </div>
 
   <div class="panel">
-    <h2>1d · What does a review deliver per dollar?</h2>
-    <div class="note"><div><b>This is the value question: what you actually get for the money.</b> <b>Read the x-axis carefully — it is $ per ADJUDICATED REAL FINDING, not $ per distinct true bug.</b> It divides the run's cost by every finding the adjudicator confirmed as real — golden hits plus beyond-gold real findings, counted with multiplicity: if a setup reports the same bug three times, it counts three times. That is a different denominator from panel 1c, which prices each of the __TGDEN__ distinct true bugs (__TGGOLD__ goldens + __TGDEF__ verified hidden-gold) once. For glm-vis · MRV · low the same run is $0.0037 per adjudicated finding (360 findings) but $0.019 per distinct true bug (72 credited) — the two numbers are ~6× apart and answer different questions: 1d asks 'what does a delivered finding cost', 1c asks 'what does a distinct bug cost'. <b>Cheap and high is best.</b> A wide 1c↔1d gap means many confirmed findings per distinct bug — including duplicates and beyond-gold items the true-set score does not credit. y = <b>F2′</b>, our overall quality score — how many real bugs a setup finds, penalised for noise, with a missed bug counted 4× worse than a false alarm. <i>Full definition under 1a.</i></div><div class="mech">One point per cell (66 complete top-6 cells). <b>Color</b> = model; <b>shape</b> = harness (○ van, □ CE, △ MRV); <b>connecting lines</b> follow one model × harness across effort levels (solid vanilla, dashed CE, dotted MRV). <b>Hover</b> for the value + CI; <b>click</b> a point for its card below; <b>double-click</b> a legend entry to isolate a model. CIs are off by default.</div></div>
+    <h2>1d · Cost per campaign model-adjudicated finding</h2>
+    <div class="note"><div><b>This panel retains the original campaign’s finding-cost accounting.</b> <b>x uses original campaign model judgments and includes repeated reports; y uses revised F2′.</b> The x-axis divides the run's cost by every finding the original campaign model adjudicators labelled real — golden hits plus beyond-gold real findings, counted with multiplicity: if a setup reports the same bug three times, it counts three times. That is a different denominator from panel 1c, which prices each of the __TGDEN__ distinct true bugs (__TGGOLD__ goldens + __TGDEF__ verified hidden-gold) once. For glm-vis · MRV · low the same run is $0.0037 per campaign model-adjudicated finding (360 reports, including repeats) but $0.019 per distinct true bug (72 credited) — the two numbers are 5× apart and answer different questions: 1d asks 'what does a campaign model-adjudicated finding cost', 1c asks 'what does a distinct bug cost'. <b>Cheap and high is best.</b> A wide 1c↔1d gap means many campaign model-adjudicated findings per distinct bug — including duplicates and beyond-gold items the true-set score does not credit. This legacy denominator is not the revised deduplicated T + A. y = <b>F2′</b>, our overall quality score — bug quality plus accepted advisory credit, penalised for unsupported findings. <i>Full definition under 1a.</i></div><div class="mech">One point per complete six-PR cell; all selected reviews are adjudicated. <b>Color</b> = model; <b>shape</b> = harness (○ van, □ CE, △ MRV); <b>connecting lines</b> follow one model × harness across effort levels (solid vanilla, dashed CE, dotted MRV). <b>Hover</b> for the value + CI; <b>click</b> a point for its card below; <b>double-click</b> a legend entry to isolate a model. CIs are off by default.</div></div>
     <div class="controls"><label><input type="checkbox" id="showci1d"> show 95% CIs</label></div>
     <div id="chart1d" style="height:430px"></div>
-    <div class="takeaway" style="margin-top:10px;padding:10px 14px;border-left:4px solid #B07AA1;background:#faf7fa;font-size:13.5px;border-radius:0 8px 8px 0"><b>Takeaway:</b> counting every adjudicated real finding (golden + beyond-gold, with multiplicity), $ per confirmed finding runs $0.0002–$0.37 across cells — the GLM harness cells sit at the cheap end and the high-effort frontier-model cells at the expensive end. Do not read this as the price of a distinct true bug — that is panel 1c, ~6× higher for the recommended cell. In fig_pareto_frontier.png the F2′-panel frontier is entirely GLM cells; the recall-panel frontier ends at opus · CE · medium, the recall leader.</div>
+    <div class="takeaway" style="margin-top:10px;padding:10px 14px;border-left:4px solid #B07AA1;background:#faf7fa;font-size:13.5px;border-radius:0 8px 8px 0"><b>Takeaway:</b> counting findings labelled real by the original campaign model adjudicators (golden + beyond-gold, with multiplicity), $ per campaign model-adjudicated finding runs $0.0002–$0.37 across cells — the GLM harness cells sit at the cheap end and the high-effort frontier-model cells at the expensive end. Do not read this as the price of a distinct true bug — that is panel 1c, 5× higher for the recommended cell. The frontier panels show which cells offer the strongest observed quality at each price; six-PR scope and classifier uncertainty apply.</div>
     <div id="details1d" style="margin-top:10px;border:1px solid var(--line);border-radius:8px;padding:14px;font-size:13px;background:#fbfbfb"><h3 style="margin:0 0 6px;font-size:14px">Cell details</h3><div style="color:#888">Click a point.</div></div>
   </div>
 
   <div class="panel">
     <h2>1e · Do extra tokens buy a better review?</h2>
-    <div class="note"><div><b>More tokens should mean a better review, or they are just a bigger bill.</b> Every point is one setup; the further left, the fewer tokens a review consumes (cached reads and writes included). If a cheap setup sits as high as an expensive one, the extra tokens bought nothing. <b>Up and to the left is best.</b> This is where harness design shows itself: the same model wrapped in a harness usually spends several times the tokens of a single pass, and this panel shows whether that spend converted into a better review or only into more talking. y = <b>F2′</b>, our overall quality score — how many real bugs a setup finds, penalised for noise, with a missed bug counted 4× worse than a false alarm. <i>Full definition under 1a.</i></div><div class="mech">One point per cell (66 complete top-6 cells). <b>Color</b> = model; <b>shape</b> = harness (○ van, □ CE, △ MRV); <b>connecting lines</b> follow one model × harness across effort levels (solid vanilla, dashed CE, dotted MRV). <b>Hover</b> for the value + CI; <b>click</b> a point for its card below; <b>double-click</b> a legend entry to isolate a model. CIs are off by default.</div></div>
+    <div class="note"><div><b>More tokens should mean a better review, or they are just a bigger bill.</b> Every point is one setup; the further left, the fewer tokens a review consumes (cached reads and writes included). If a setup using fewer tokens sits as high as one using more, their observed F2′ point estimates match; this alone does not establish equivalent review quality. Compare confidence intervals and validate developer triage time in a pilot. <b>Up and to the left is best.</b> This is where harness design shows itself: the same model wrapped in a harness usually spends several times the tokens of a single pass, and this panel shows how token use varies alongside observed F2′; a pilot can test whether those differences improve developer outcomes. y = <b>F2′</b>, our overall quality score — bug quality plus accepted advisory credit, penalised for unsupported findings. <i>Full definition under 1a.</i></div><div class="mech">One point per complete six-PR cell; all selected reviews are adjudicated. <b>Color</b> = model; <b>shape</b> = harness (○ van, □ CE, △ MRV); <b>connecting lines</b> follow one model × harness across effort levels (solid vanilla, dashed CE, dotted MRV). <b>Hover</b> for the value + CI; <b>click</b> a point for its card below; <b>double-click</b> a legend entry to isolate a model. CIs are off by default.</div></div>
     <div class="controls"><label><input type="checkbox" id="showci1e"> show 95% CIs</label></div>
     <div id="chart1e" style="height:430px"></div>
     <div class="takeaway" style="margin-top:10px;padding:10px 14px;border-left:4px solid #B07AA1;background:#faf7fa;font-size:13.5px;border-radius:0 8px 8px 0"><b>Takeaway:</b> harness cells burn a median of ~10× the tokens of a vanilla single pass (matched pairs range from ~1× to ~76×); the frontier harnesses are 75–90% cached reads at 10% of list input (why their blended rate drops to 0.14–0.18 ¢ per k-token), while the GLM harnesses use 100–570k tokens/run at list input rates — both arrive cheap per token, ~13× apart in $ per task.</div>
@@ -277,36 +304,36 @@ HTML = """<!DOCTYPE html>
 
   <div class="panel">
     <h2>1f · How many real bugs does each setup actually find — and how many does the benchmark ignore?</h2>
-    <div class="note"><div><b>This is the &ldquo;how much does it actually find&rdquo; panel — with the benchmark&rsquo;s blind spot exposed.</b> Each bar is one setup. The grey part is bugs the strict benchmark knows about and scores; the coloured part is <b>real bugs the benchmark never scores</b> — defects we verified by hand, each with its own test that fails before the fix and passes after. A long coloured section means the setup found genuine problems that a benchmark-based score simply cannot see. <b>Read this ranked by bugs found, not by F2′</b>: a setup can lead here and still sit mid-table on quality, because F2′ also charges for noise — a terse setup registers no nitpicks while a verbose one is charged for every real-but-minor item it raises. The two panels answer different questions: 1f asks &ldquo;how much did it find?&rdquo;, the quality panels ask &ldquo;how good is what it found?&rdquo;</div><div class="mech">One bar per setup, sorted by total real bugs found. <b>Grey</b> = Martian goldens (the only thing the strict benchmark scores); <b>coloured</b> = hidden-gold defects it never scores. The dashed line at <b>__TGDEN__</b> is every true bug on the six PRs (__TGGOLD__ goldens + __TGDEF__ verified defects); the small grey tick on a row is that setup&rsquo;s <i>coverage ceiling</i> — some setups cover fewer than the six PRs and cannot reach __TGDEN__. <b>Hover</b> for details.</div></div>
+    <div class="note"><div><b>This is the &ldquo;how much does it actually find&rdquo; panel — with the benchmark&rsquo;s blind spot exposed.</b> Each bar is one setup. The grey part is bugs the strict benchmark knows about and scores; the coloured part is <b>real bugs the benchmark never scores</b> — defects verified against archived reproduction and fix-test evidence; some catalogue entries share a test or container-level evidence. A long coloured section means the setup found genuine problems that a benchmark-based score simply cannot see. <b>Read this ranked by bugs found, not by F2′</b>: a setup can lead here and still sit mid-table on quality, because F2′ also rewards accepted useful advisories and penalises unsupported findings. Advisory completeness is tracked separately from the original bug-matching instrument. The two panels answer different questions: 1f asks &ldquo;how much did it find?&rdquo;, the quality panels ask &ldquo;how good is what it found?&rdquo;</div><div class="mech">One bar per setup, sorted by total real bugs found. <b>Grey</b> = Martian goldens (the only thing the strict benchmark scores); <b>coloured</b> = hidden-gold defects it never scores. The dashed line at <b>__TGDEN__</b> is the observed reference set on the six PRs (__TGGOLD__ goldens + __TGDEF__ verified defects); the small grey tick on a row is that setup&rsquo;s <i>coverage ceiling</i> — some setups cover fewer than the six PRs and cannot reach __TGDEN__. <b>Hover</b> for details.</div></div>
     <div id="chart1f" style="height:920px"></div>
     <div id="takeaway1f" style="margin-top:10px;padding:10px 14px;border-left:4px solid #B07AA1;background:#faf7fa;font-size:13.5px;border-radius:0 8px 8px 0"></div>
   </div>
 
   <div class="panel">
     <h2>2 · Does more effort buy a better review — and where does it stop paying off?</h2>
-    <div class="note"><div><b>Every line follows one model and harness as you turn its effort setting up</b> (low → medium → high). If the line climbs, the extra effort bought a better review; if it flattens, you are paying more for the same quality; if it turns back down, the higher setting actively hurt. <b>The point just before it flattens is the setting to buy.</b> Compare lines against each other to see whether a cheap model at high effort beats an expensive one at low effort — which is the question most people actually have.</div><div class="mech">One line per model × harness with points at low → medium → high (left to right). x = metered $ per run (log) — each gridline to the right costs roughly 10× more; y = <b>F2′</b>, our overall quality score (defined under 1a). Colour = model; marker shape = harness (○ vanilla, □ CE, △ MRV). The harness dropdown isolates one harness at a time. The y-axis is zoomed to 0.5 so the differences are visible — a zoom, not a limit on the score. Hover a point for its value and CI.</div></div>
+    <div class="note"><div><b>Every line follows one model and harness as you turn its effort setting up</b> (low → medium → high). If the line climbs, the higher effort has a higher observed F2′; if it flattens or falls, the extra effort has not improved that point estimate. <b>Compare paired uncertainty and pilot developer outcomes before choosing a setting.</b> These six-PR observations do not establish a causal benefit or harm from effort. Compare lines against each other to see whether a cheap model at high effort beats an expensive one at low effort — which is the question most people actually have.</div><div class="mech">One line per model × harness with points at low → medium → high (left to right). x = metered $ per run (log) — each gridline to the right costs roughly 10× more; y = <b>F2′</b>, our overall quality score (defined under 1a). Colour = model; marker shape = harness (○ vanilla, □ CE, △ MRV). The harness dropdown isolates one harness at a time. The y-axis fits the observed scores and their confidence intervals so the differences remain visible. Hover a point for its value and CI.</div></div>
     <div class="controls"><label>harness <select id="fwsel"></select></label></div>
     <div id="chart2"></div>
   </div>
 
   <div class="panel">
     <h2>3 · Where does a review's token bill actually come from?</h2>
-    <div class="note"><div><b>Two setups can deliver similar review quality at very different cost, and this panel shows where the money went.</b> Each bar breaks a review's tokens into the four things you pay for: input read for the first time, input re-read from cached context, cache writes paid to store that context, and the model's own output including its reasoning. A setup that is expensive because of output is doing a lot of thinking; one that is expensive because of cache writes is paying to remember things it may never reuse. <b>Read this when you want to change a cost, not just compare it</b> — it tells you which lever to pull.</div><div class="mech">One stacked bar per cell = mean k-tokens per PR across the six PRs, split into fresh input, cached read, cache write and output (incl. reasoning). Label = model · harness · effort level. Default sort: total tokens, descending. Use the effort dropdown to compare like with like, and the sort dropdown to group rows by model or by harness. The global effort filter above also applies here: the panel shows the intersection of the global filter and the local dropdown selection.</div></div>
+    <div class="note"><div><b>Two setups can deliver similar review quality at very different cost, and this panel shows where the money went.</b> Each bar breaks a review's tokens into the four things you pay for: input read for the first time, input re-read from cached context, cache writes paid to store that context, and the model's own output including its reasoning. A setup that is expensive because of output is doing a lot of thinking; one that is expensive because of cache writes is paying to remember things it may never reuse. <b>Read this when you want to change a cost, not just compare it</b> — it tells you which lever to pull.</div><div class="mech">The report export shows <b>low effort</b>; use this dashboard’s effort dropdown for medium or high. One stacked bar per cell = mean k-tokens per PR across the six PRs, split into fresh input, cached read, cache write and output (incl. reasoning). Label = model · harness · effort level. Default sort: total tokens, descending. Use the effort dropdown to compare like with like, and the sort dropdown to group rows by model or by harness. The global effort filter above also applies here: the panel shows the intersection of the global filter and the local dropdown selection.</div></div>
     <div class="controls"><label>effort <select id="effsel"></select></label><label>sort <select id="sortsel"><option value="tokens_desc">by total tokens (desc)</option><option value="tokens_asc">by total tokens (asc)</option><option value="model_fw">by model, then harness</option><option value="fw_model">by harness, then model</option></select></label></div>
     <div id="chart3"></div>
   </div>
 
   <div class="panel">
-    <h2>4 · Would these rankings survive on a different set of pull requests?</h2>
-    <div class="note"><div><b>Our headline numbers come from six deliberately hard pull requests; this asks whether they would hold up on a different sample.</b> Each row is one setup, and the dot shows the gap between its score on the six hardest PRs and on its full run set (40–50 PRs). A dot on the dashed line means the six-PR sample told the same story as the full set; to the right means the six hard PRs flattered the setup; to the left means they under-sold it. <b>Use it to judge how much to trust the leaderboard, not to re-rank it</b> — it separates conclusions that are real from ones that are artefacts of which PRs we happened to pick.</div><div class="mech">One row per cell with broad coverage — 33 of the 66 ran at least 40 of the 50 PRs, 26 of them all 50 — under the expanded key-union metrics — levels there are superseded by §3.1, so read <i>directions</i>, not levels. x = Δ (top-6 − full-50) for the metric chosen in the dropdown; the dashed line is zero. Rows are sorted by |Δ|, largest first — not by quality. Right of zero = the six-PR number overstates that setup.</div></div>
+    <h2>4 · How does original-gold scoring change between the top six and the broader run set?</h2>
+    <div class="note"><div><b>This compares original benchmark goldens for setups with broad coverage.</b> Each dot is a setup’s top-six score minus its score across its available 40–50 PRs. Positive gaps mean the six-PR score is higher. These paired descriptive comparisons do not establish out-of-sample rankings or validate the __TGDEN__-bug reference set, which was constructed only for the six selected PRs.</div><div class="mech">One row per cell with at least 40 of 50 PRs covered. Both recall and F1 use the original-gold benchmark lens. x = Δ (top-six − broader run set); the dashed line is zero. Rows are sorted by |Δ|. Use the metric dropdown to switch between recall and F1.</div></div>
     <div class="controls"><label>metric <select id="selmet"><option value="recall">recall</option><option value="F1">F1</option></select></label></div>
     <div id="chart4" style="height:720px"></div>
     <div id="takeaway4" style="margin-top:10px;padding:10px 14px;border-left:4px solid #B07AA1;background:#faf7fa;font-size:13.5px;border-radius:0 8px 8px 0"></div>
   </div>
 
   <div class="panel">
-    <h2>5 · Can you trust the six pull requests this report went really deep on?</h2>
-    <div class="note"><div><b>We ran all fifty pull requests for many setups — 33 of the 66 cells ran at least 40 of the 50 PRs (26 ran all 50), and panel 4 compares those against the six — and then chose six to go really deep on:</b> hand-verifying every bug, writing a failing test for each defect and a fix that makes it pass. So the fair question is whether those six, the ones we went deep on, are a soft sample. This panel answers it. Each dot is one PR from the full benchmark: how much severity weight its known bugs carry (left = mild, right = serious) against how well the chosen eval setup did on it. The six we went deep on are highlighted; the other 44 are grey, shown so you can see the whole field and not just our sample.<br><br><b>The highlighted points sit at the far right.</b> The six average about <b>three times the severity weight of the 44 we left out (18.2 vs 6.1)</b>, and the <b>mildest of the six is as severe as the worst PR we did not pick</b>. So the sample is not merely representative — it is a deliberately hard slice of the benchmark, which is what you want from a stress test. The dashed lines compare mean recall on the hard six with the rest: recall is essentially the same either way (REPORT.md §2.4.2), so the difficulty of the sample is a genuine stress test rather than a distortion. The one caveat is that quality <i>levels</i> run slightly higher on the six, and §4.2 gives the per-cell correction. <b>Read this as the validity check on the report itself.</b></div><div class="mech">Per-PR scatter for the cell chosen in the dropdown. x = total severity weight of that PR's golden comments (Critical = 4 … Low = 1, summed per PR) — further right means more serious bug reports. y = that PR's recall (expanded key-union lens — read <i>directions</i> only; levels superseded by §3.1). Highlighted dots = the six PRs we went deep on; grey = the other 44, which we also ran but did not hand-verify. Dashed lines = mean recall on the six vs the rest.</div></div>
+    <h2>5 · How were the six pull requests selected?</h2>
+    <div class="note"><div><b>The six were selected for high golden-comment severity weight.</b> Each dot shows one PR’s severity weight and original-gold recall for the selected setup. The highlighted six average severity weight 18.2, compared with 6.1 for the other 44 benchmark PRs; the lowest selected severity ties the highest unselected severity. This describes a deliberately difficult slice. It does not establish how the six-PR true-gold results generalize to other PRs.</div><div class="mech">x = summed severity weight of original golden comments (Critical = 4, High = 3, Medium = 2, Low = 1). y = per-PR original-gold recall. The dropdown offers setups covering at least 40 PRs; only their available runs are plotted. Highlighted dots = selected PRs; grey = other covered PRs. Dashed lines show unweighted mean per-PR recall within each group, distinct from the pooled recall comparison in panel 4.</div></div>
     <div class="controls"><label>cell <select id="cellsel"></select></label></div>
     <div id="chart5"></div>
   </div>
@@ -360,7 +387,7 @@ const fmt = (v, n=5) => { if(v==null||isNaN(v)||!isFinite(v)) return '—'; retu
 const fmtA = (v, n=5) => { if(v==null||isNaN(v)||!isFinite(v)) return '—'; if(Math.abs(v)>0 && Math.abs(v)<0.01) return parseFloat((v*100).toFixed(n)).toString()+'¢'; return '$'+parseFloat(v.toFixed(n)).toString(); };
 // bracket takes the POINT's unit (no $/¢ mixing inside one CI)
 const fmtAB = (pt, lo, hi, n=5) => { if(Math.abs(pt)>0 && Math.abs(pt)<0.01) return fmtA(pt,n)+' ['+fmtA(lo,n)+', '+fmtA(hi,n)+']'; return '$'+fmt(pt,n)+' [$'+fmt(lo,n)+', $'+fmt(hi,n)+']'; };
-const metName = {cost_run:'$/run', usd_per_tp_sem:'$/true bug found', usd_per_real:'$/adjudicated real finding (legacy, not $/distinct bug)', tok_run:'tokens/run', wall_run:'wall s/run', price_per_ktok:'price per k-tok', F1_sem:'F1 (true set, real-bug precision)', F1p_sem:'F1\u2032 (true set, nitpick-averse lens)', F2_sem:'F2 (true set, recall-weighted 4:1)', F2p_sem:'F2\u2032 (true set \u2014 RECOMMENDED composite)', recall_sem:'recall (true golden set)', adjP_sem:'adjP (claim soundness)', adjPp_sem:'adjP\u2032 (user lens)'};
+const metName = {cost_run:'$/run', usd_per_tp_sem:'$/true bug found', usd_per_real:'$/campaign model-adjudicated finding (legacy; includes repeats)', tok_run:'tokens/run', wall_run:'wall s/run', price_per_ktok:'price per k-tok', F1_sem:'F1 (true set, real-bug precision)', F1p_sem:'F1\u2032 (legacy burden lens)', F2_sem:'F2 (true set, recall-weighted 4:1)', F2p_sem:'F2\u2032 (bug quality + advisory credit)', recall_sem:'recall (true golden set)', adjP_sem:'adjP (claim soundness)', adjPp_sem:'adjP\u2032 (legacy burden lens)'};
 
 function tracesFor(xmet, ymet, showci) {
   const ts = [];
@@ -369,7 +396,7 @@ function tracesFor(xmet, ymet, showci) {
   const _sl = document.getElementById('showlines');
   const linesOn = !_sl || _sl.checked;
   for (const m in mcol) {
-    const pts = DATA.cells.filter(c => c.model === m && vis(c));
+    const pts = DATA.cells.filter(c => c.model === m && vis(c) && (ymet !== 'F2p_sem' || c.advisory_measured));
     if (!pts.length) continue;                    // nothing visible for this model: nothing to draw
     const hasXCI = pts[0][xmet+'_lo'] != null, hasYCI = pts[0][ymet+'_lo'] != null;
     const t = {
@@ -380,7 +407,7 @@ function tracesFor(xmet, ymet, showci) {
       hovertemplate: '<b>%{customdata.modelShort} · %{customdata.fwShort} · %{customdata.eff}</b><br>' +
         metName[xmet] + ': %{x:.4g}' + (hasXCI ? ' [%{customdata.'+xmet+'_lo:.4g}, %{customdata.'+xmet+'_hi:.4g}]' : '') + '<br>' +
         metName[ymet] + ': %{y:.4g}' + (hasYCI ? ' [%{customdata.'+ymet+'_lo:.4g}, %{customdata.'+ymet+'_hi:.4g}]' : '') + '<br>' +
-        'beyond-gold/PR: %{customdata.beyond_per_pr:.1f}<extra></extra>',
+        'observed useful advisories: %{customdata.advisory_count}<br>F2′ advisory instrument: %{customdata.advisory_instruments}<br>classified findings below scoring threshold: %{customdata.advisory_unresolved}<br>%{customdata.advisory_status}<br>beyond-gold/PR: %{customdata.beyond_per_pr:.1f}<extra></extra>',
     };
     if (showci) {
       if (hasXCI) t.error_x = { type:'data', symmetric:false, array: pts.map(c => Math.max(0,c[xmet+'_hi']-c[xmet])), arrayminus: pts.map(c => Math.max(0,c[xmet]-c[xmet+'_lo'])), thickness:.6, width:2, color:'#555', opacity:.5 };
@@ -408,11 +435,16 @@ function tracesFor(xmet, ymet, showci) {
   }
   return ts;
 }
+// Keep the CI-inclusive scale stable when CIs or filters are toggled.
+function qualityRange(metric) {
+  const values = DATA.cells.flatMap(c => [c[metric], c[metric+'_hi']]).filter(Number.isFinite);
+  return [0, Math.max(0.1, ...values) * 1.08];
+}
 const layoutFor = (xmet, ymet, annotate) => ({
   margin:{l:56,r:16,t:8,b:44}, paper_bgcolor:'rgba(0,0,0,0)', plot_bgcolor:'rgba(0,0,0,0)',
   xaxis:{title:{text:metName[xmet]}, type:'log', gridcolor:'#eee', zeroline:false},
   yaxis:{title:{text:metName[ymet]}, gridcolor:'#eee', zeroline:false,
-         range: ['F2_sem','F2p_sem'].includes(ymet) ? [0,0.5] : (['F1','F2','recall','adjP','F1_sem','F1p_sem','F2_sem','F2p_sem','recall_sem','adjP_sem','adjPp_sem'].includes(ymet) ? [0,1] : undefined)},
+         range: ['F2_sem','F2p_sem'].includes(ymet) ? qualityRange(ymet) : (['F1','F2','recall','adjP','F1_sem','F1p_sem','F2_sem','F2p_sem','recall_sem','adjP_sem','adjPp_sem'].includes(ymet) ? [0,1] : undefined)},
   legend:{font:{size:10}, orientation:'h', y:-0.2},
   hoverlabel:{font:{size:12}},
 });
@@ -434,19 +466,23 @@ VIEWS.forEach(v => {
   const c = ev.points[0].customdata; const d = document.getElementById(v[2]);
   const rows = [['model', c.model],['framework', c.fw],['effort', c.eff],['n PRs', c.n||6],
     ['recall (true golden set)', c.recall_sem!=null ? fmt(c.recall_sem)+' ['+fmt(c.recall_sem_lo)+','+fmt(c.recall_sem_hi)+']' : '—'],
-    ['F2\u2032 (OUR EVALUATOR, true set)', c.F2p_sem!=null ? fmt(c.F2p_sem)+(c.F2p_sem_lo!=null?' ['+fmt(c.F2p_sem_lo)+','+fmt(c.F2p_sem_hi)+']':'') : '—'],
+    ['F2\u2032 (bug quality + advisory credit)', c.F2p_sem!=null ? fmt(c.F2p_sem)+(c.F2p_sem_lo!=null?' ['+fmt(c.F2p_sem_lo)+','+fmt(c.F2p_sem_hi)+']':'') : '—'],
     ['F2 (true set, claim-soundness precision)', c.F2_sem!=null ? fmt(c.F2_sem) : '—'],
-    ['F1 (true set) / F1\u2032 (equal-weight lens)', (c.F1_sem!=null ? fmt(c.F1_sem) : '—')+' / '+(c.F1p_sem!=null ? fmt(c.F1p_sem) : '—')],
-    ['adjP / adjP\u2032', c.adjP_sem!=null ? fmt(c.adjP_sem)+' / '+fmt(c.adjPp_sem) : '—'],
+    ['F1 (true set) / F1\u2032 (legacy burden lens)', (c.F1_sem!=null ? fmt(c.F1_sem) : '—')+' / '+(c.F1p_sem!=null ? fmt(c.F1p_sem) : '—')],
+    ['Observed useful advisories', (c.advisory_count ?? 0)+' · '+c.advisory_status],
+    ['F2′ advisory instrument', c.advisory_instruments],
+    ['Classified findings below scoring threshold', c.advisory_unresolved ?? 0],
+    ['F2′ classification-sensitivity bounds (not CI; all penalties → all advisories)', c.F2p_unresolved_bounds ? c.F2p_unresolved_bounds.map(x=>fmt(x)).join(' → ') : '—'],
+    ['adjP / adjP\u2032 (legacy burden lens)', c.adjP_sem!=null ? fmt(c.adjP_sem)+' / '+fmt(c.adjPp_sem) : '—'],
     ['$/true bug found', c.usd_per_tp_sem!=null ? fmtA(c.usd_per_tp_sem) : '—'],
     ['recall (benchmark)', fmt(c.recall)+' ['+fmt(c.recall_lo)+','+fmt(c.recall_hi)+']'],
     ['adjP (benchmark)', fmt(c.adjP)+' ['+fmt(c.adjP_lo)+','+fmt(c.adjP_hi)+']'],
     ['F1 (benchmark)', fmt(c.F1)+' ['+fmt(c.F1_lo)+','+fmt(c.F1_hi)+']'],
     ['F2 (benchmark)', fmt(c.F2)+' ['+fmt(c.F2_lo)+','+fmt(c.F2_hi)+']'],
     ['cost/run', fmtAB(c.cost_run, c.cost_run_lo, c.cost_run_hi)],
-    ['per golden TP (benchmark)', fmtA(c.usd_per_tp)],['per adjudicated real finding (legacy)', fmtA(c.usd_per_real)],
+    ['per golden TP (benchmark)', fmtA(c.usd_per_tp)],['per campaign model-adjudicated finding (legacy; includes repeats)', fmtA(c.usd_per_real)],
     ['tokens/run', Math.round(c.tok_run).toLocaleString()],['wall s/run', Math.round(c.wall_run)],
-    ['beyond-gold/PR', fmt(c.beyond_per_pr)],['instrument', c.instruments],['judge', c.judges],
+    ['beyond-gold/PR', fmt(c.beyond_per_pr)],['Legacy bug-matching instrument', c.instruments],['Legacy bug-matching judge', c.judges],
     ['run dates', c.run_dates],['GLM pre-fix runs', c.glm_prefix==null?'—':c.glm_prefix+'/6'],
     ['no-pmu runs', c.pmu_missing||0]];
   d.innerHTML = '<h3>'+c.modelShort+' · '+c.fwShort+' · '+c.eff+'</h3><table>'+rows.map(r=>'<tr><td>'+r[0]+'</td><td>'+r[1]+'</td></tr>').join('')+'</table>'+
@@ -473,7 +509,7 @@ function draw6(){
     {x:rows.map(r=>r.ceiling), y:yx, mode:'markers', name:'coverage ceiling for this cell', marker:{color:'#666',symbol:'line-ns-open',size:8,line:{width:1}},
      customdata:rows, hovertemplate:'<b>%{customdata.k}</b><br>coverage ceiling (covered PRs): %{x}<extra></extra>'},
   ];
-  const PERFECT = __TGDEN__; // "perfect" agent = __TGGOLD__ goldens + __TGDEF__ individually test-validated defects (facetious: bounded by what the campaign found)
+  const PERFECT = __TGDEN__; // "perfect" agent = __TGGOLD__ goldens + __TGDEF__ verified defects with archived reproduction/fix-test evidence (facetious: bounded by what the campaign found)
   const shapes=[{type:'line', xref:'x', x0:PERFECT, x1:PERFECT, yref:'y', y0:-0.5, y1:rows.length-0.5,
     line:{color:'#333', width:1.2, dash:'dash'}, layer:'below'}];
   const annotations=[{xref:'x', x:PERFECT, yref:'y', y:-0.5, text:'"perfect" agent (as far as we know): __TGGOLD__ goldens + __TGDEF__ verified defects', showarrow:false, font:{size:9}, xanchor:'right', yanchor:'bottom'}];
@@ -497,17 +533,17 @@ function draw2(){
   const fws = sel==='ALL' ? ['van','CE','MRV'] : [sel];
   for (const m in mcol){
     for (const fw of fws){
-      const pts = DATA.cells.filter(c=>c.fwShort===fw && c.model===m && vis(c)).sort((a,b)=>['low','medium','high'].indexOf(a.eff)-['low','medium','high'].indexOf(b.eff));
+      const pts = DATA.cells.filter(c=>c.fwShort===fw && c.model===m && vis(c) && c.advisory_measured).sort((a,b)=>['low','medium','high'].indexOf(a.eff)-['low','medium','high'].indexOf(b.eff));
       if(!pts.length) continue;
       ts.push({x:pts.map(c=>c.cost_run), y:pts.map(c=>(DATA.exp[c.model+'|'+c.fw+'|'+c.eff]||{}).F2p_sem ?? c.F2), mode:'lines+markers', name:m+(fws.length>1?'':''),
         line:{color:mcol[m],width:1.4, dash: sel==='ALL'&&fw==='CE'?'dot':undefined},
         marker:{color:mcol[m],symbol:msym[fw],size:7},
         customdata:pts.map(c=>({...c, fwFull: FW_FULL[c.fwShort]})),
-        hovertemplate:'<b>%{customdata.modelShort} · %{customdata.fwFull} · %{customdata.eff}</b><br>$%{x:.3g} / run · F2\u2032 (our evaluator, true golden set) %{y:.3f}<extra></extra>',
+        hovertemplate:'<b>%{customdata.modelShort} · %{customdata.fwFull} · %{customdata.eff}</b><br>$%{x:.3g} / run · F2\u2032 (bug quality + advisory credit) %{y:.3f}<br>F2′ advisory instrument: %{customdata.advisory_instruments}<br>classified findings below scoring threshold: %{customdata.advisory_unresolved}<extra></extra>',
         showlegend: sel!=='ALL' || fw==='van'});
     }
   }
-  Plotly.react('chart2', ts, {margin:{l:56,r:16,t:8,b:44}, xaxis:{title:'metered $ / run (log)',type:'log',gridcolor:'#eee'}, yaxis:{title:'F2\u2032 (our evaluator, true golden set)',gridcolor:'#eee',range:[0,0.5]}, legend:{font:{size:11},orientation:'h',y:-0.2}, paper_bgcolor:'rgba(0,0,0,0)'}, {displayModeBar:false, responsive:true});
+  Plotly.react('chart2', ts, {margin:{l:56,r:16,t:8,b:44}, xaxis:{title:'metered $ / run (log)',type:'log',gridcolor:'#eee'}, yaxis:{title:'F2\u2032 (bug quality + advisory credit)',gridcolor:'#eee',range:qualityRange('F2p_sem')}, legend:{font:{size:11},orientation:'h',y:-0.2}, paper_bgcolor:'rgba(0,0,0,0)'}, {displayModeBar:false, responsive:true});
 }
 fwsel.onchange=draw2; draw2();
 
@@ -536,12 +572,13 @@ function draw3(){
   else if (sort==='model_fw') keys.sort((a,b)=>{const A=parse(a),B=parse(b); return A.m.localeCompare(B.m)||fwOrder[A.fw]-fwOrder[B.fw];});
   else keys.sort((a,b)=>{const A=parse(a),B=parse(b); return fwOrder[A.fw]-fwOrder[B.fw]||A.m.localeCompare(B.m);});
   const labels=keys.map(k=>DATA.tok[k].label);
+  const metadata=keys.map(k=>({model:DATA.tok[k].model, fw:DATA.tok[k].fw, eff:DATA.tok[k].eff}));
   const t=(field)=>keys.map(k=>DATA.tok[k][field]);
   Plotly.react('chart3', [
-    {x:labels,y:t('fresh'),name:'fresh input',type:'bar',marker:{color:'#4C72B0'},hovertemplate:'%{x}<br>%{y:,.0f} k-tok<extra></extra>'},
-    {x:labels,y:t('cached'),name:'cached read',type:'bar',marker:{color:'#55A868'},hovertemplate:'%{x}<br>%{y:,.0f} k-tok<extra></extra>'},
-    {x:labels,y:t('cw'),name:'cache write',type:'bar',marker:{color:'#C44E52'},hovertemplate:'%{x}<br>%{y:,.0f} k-tok<extra></extra>'},
-    {x:labels,y:t('out'),name:'output (incl. reasoning)',type:'bar',marker:{color:'#CCB974'},hovertemplate:'%{x}<br>%{y:,.0f} k-tok<extra></extra>'}],
+    {x:labels,y:t('fresh'),customdata:metadata,name:'fresh input',type:'bar',marker:{color:'#4C72B0'},hovertemplate:'%{x}<br>%{y:,.0f} k-tok<extra></extra>'},
+    {x:labels,y:t('cached'),customdata:metadata,name:'cached read',type:'bar',marker:{color:'#55A868'},hovertemplate:'%{x}<br>%{y:,.0f} k-tok<extra></extra>'},
+    {x:labels,y:t('cw'),customdata:metadata,name:'cache write',type:'bar',marker:{color:'#C44E52'},hovertemplate:'%{x}<br>%{y:,.0f} k-tok<extra></extra>'},
+    {x:labels,y:t('out'),customdata:metadata,name:'output (incl. reasoning)',type:'bar',marker:{color:'#CCB974'},hovertemplate:'%{x}<br>%{y:,.0f} k-tok<extra></extra>'}],
     {barmode:'stack', margin:{l:56,r:16,t:8,b:120}, xaxis:{tickangle:-45,tickfont:{size:10},gridcolor:'#eee'}, yaxis:{title:'k-tokens / run',gridcolor:'#eee'}, legend:{font:{size:11},orientation:'h',y:-0.42}, paper_bgcolor:'rgba(0,0,0,0)'}, {displayModeBar:false, responsive:true});
 }
 effsel.onchange=draw3; sortsel.onchange=draw3; draw3();
@@ -549,11 +586,11 @@ effsel.onchange=draw3; sortsel.onchange=draw3; draw3();
 // ---- 4 sample-bias check: dumbbell of the pairs (top-6 vs full-50)
 const selmet=document.getElementById('selmet');
 function draw4(){
-  const met=selmet.value; const fk=met+'_exp_full', tk=met+'_exp_t6';
-  const rows=Object.entries(DATA.sel_exp).filter(([k])=>{const p=k.split('|'); return fModels.has(p[0]) && fFws.has(p[1]) && fEffs.has(p[2]);})
-                   .map(([k,v])=>({cell:k, full:v[fk], t6:v[tk], gap:v[tk]-v[fk],
-                             model:k.split('|')[0], mshort:SH2[k.split('|')[0]],
-                             fw:k.split('|')[1], eff:k.split('|')[2]}))
+  const met=selmet.value; const fk=met+'_full', tk=met+'_t6';
+  const rows=DATA.sel.filter(v=>{const p=v.cell.split('|'); return fModels.has(p[0]) && fFws.has(p[1]) && fEffs.has(p[2]);})
+                   .map(v=>({cell:v.cell, full:v[fk], t6:v[tk], gap:v[tk]-v[fk],
+                             model:v.cell.split('|')[0], mshort:SH2[v.cell.split('|')[0]],
+                             fw:v.cell.split('|')[1], eff:v.cell.split('|')[2]}))
                    .sort((a,b)=>Math.abs(b.gap)-Math.abs(a.gap));
   const labels=rows.map(r=>r.mshort+'·'+SH2[r.fw]+'·'+r.eff);
   const yx=rows.map((r,i)=>i);
@@ -565,18 +602,21 @@ function draw4(){
     if(!pts.length) continue;
     ts.push({x:pts.map(r=>r.gap), y:pts.map(r=>r.yi), mode:'markers', name:m,
       marker:{color:mcol[m], symbol:pts.map(r=>msym[r.fw]), size:8, line:{width:.5,color:'#333',opacity:.4}},
-      customdata:pts, hovertemplate:'<b>%{customdata.mshort}·%{customdata.fw}·%{customdata.eff}</b><br>top-6: %{customdata.t6:.2f}<br>full-50: %{customdata.full:.2f}<br>Δ (top-6 − full-50): %{x:+.2f}<extra></extra>'});
+      customdata:pts, hovertemplate:'<b>%{customdata.mshort}·%{customdata.fw}·%{customdata.eff}</b><br>top-6: %{customdata.t6:.2f}<br>broader run set: %{customdata.full:.2f}<br>Δ (top-six − broader run set): %{x:+.2f}<extra></extra>'});
   }
   Plotly.react('chart4', ts, {shapes:shapes, margin:{l:130,r:16,t:8,b:44},
-    xaxis:{title:'Δ (top-6 − full-50), '+met, range:[-0.2, 0.2], zeroline:true, zerolinecolor:'#999', zerolinewidth:1, gridcolor:'#eee'},
+    xaxis:{title:'Δ (top-six − broader run set), original-gold '+met, range:[-1, 1].map(sign=>sign*Math.max(0.05,...rows.map(r=>Math.abs(r.gap)*1.1))), zeroline:true, zerolinecolor:'#999', zerolinewidth:1, gridcolor:'#eee'},
     yaxis:{tickvals:yx, ticktext:labels, tickfont:{size:10}, gridcolor:'#eee', autorange:'reversed', range:[rows.length-0.5, -0.8]},
     legend:{font:{size:11},orientation:'h',y:-0.06}, paper_bgcolor:'rgba(0,0,0,0)'}, {displayModeBar:false, responsive:true});
 }
 selmet.onchange=draw4; draw4();
 function takeaway4(met){
   const el=document.getElementById('takeaway4');
-  if(met==='recall') el.innerHTML='<b>Takeaway (expanded recall):</b> the top-6-vs-full-50 pairs stay close under the real-world lens — what wins on the hard PRs also wins on the full set. Recall levels are conservative lower bounds (union overcounted); the ranking is the reportable quantity.';
-  else el.innerHTML='<b>Takeaway (expanded F1):</b> under the real-world lens the top-6-vs-full-50 F1 gaps shrink relative to the strict benchmark (the adjP artifact mostly disappears when the denominator includes the hidden-gold space) — the top-6 remains a valid comparison surface for the expanded metrics.';
+  const paired=DATA.sel.filter(r=>met==='recall' || r.cell.split('|')[1]!=='vanilla-engineered');
+  const gaps=paired.map(r=>r[met+'_t6']-r[met+'_full']);
+  const group=met==='recall' ? 'all paired cells' : 'paired harness cells (CE and MRV only)';
+  const mean=gaps.reduce((sum,gap)=>sum+gap,0)/gaps.length;
+  el.innerHTML='<b>Takeaway (original-gold '+met+'):</b> the mean top-six minus broader-run-set gap across '+gaps.length+' '+group+' is '+(mean>=0?'+':'')+mean.toFixed(3)+'. This is a descriptive within-benchmark comparison; it does not establish generalization of the six-PR true-gold rankings.';
 }
 takeaway4(selmet.value);
 selmet.addEventListener('change',()=>takeaway4(selmet.value));
@@ -586,24 +626,25 @@ const cellsel=document.getElementById('cellsel');
 function refreshCellsel(){
   const cur=cellsel.value;
   cellsel.innerHTML='';
-  Object.keys(DATA.percell_exp).filter(k=>{const t=DATA.percell_exp[k]; return fModels.has(t.model) && fFws.has(t.fw) && fEffs.has(t.eff);}).sort().forEach(c=>cellsel.add(new Option(c,c)));
-  cellsel.value = Object.keys(DATA.percell_exp).includes(cur) && fModels.has(DATA.percell_exp[cur].model) && fFws.has(DATA.percell_exp[cur].fw) && fEffs.has(DATA.percell_exp[cur].eff) ? cur : (cellsel.options[0] ? cellsel.options[0].value : '');
+  Object.keys(DATA.percell).filter(k=>{const t=DATA.percell[k]; return fModels.has(t.model) && fFws.has(t.fw) && fEffs.has(t.eff);}).sort().forEach(c=>cellsel.add(new Option(c,c)));
+  cellsel.value = Object.keys(DATA.percell).includes(cur) && fModels.has(DATA.percell[cur].model) && fFws.has(DATA.percell[cur].fw) && fEffs.has(DATA.percell[cur].eff) ? cur : (cellsel.options[0] ? cellsel.options[0].value : '');
 }
 refreshCellsel();
 function draw5(){
-  const c=cellsel.value; if(!c) return; const pts=DATA.percell_exp[c].prs;
+  const c=cellsel.value; if(!c) return; const cell=DATA.percell[c];
+  const pts=cell.prs.map(p=>({...p, model:cell.model, fw:cell.fw, eff:cell.eff}));
   const top6=pts.filter(p=>p.top6), rest=pts.filter(p=>!p.top6);
   const mrest=rest.filter(p=>p.rec!=null).reduce((a,p)=>a+p.rec,0)/rest.filter(p=>p.rec!=null).length;
   const mtop=top6.filter(p=>p.rec!=null).reduce((a,p)=>a+p.rec,0)/top6.filter(p=>p.rec!=null).length;
   const ts=[
-    {x:rest.map(p=>p.sev), y:rest.map(p=>p.rec), mode:'markers', name:'other 44 PRs',
-     marker:{color:'#bbb',size:7}, customdata:rest, hovertemplate:'<b>PR %{customdata.pr}</b><br>sev %{x} · expanded recall %{y:.3f}<extra>not selected</extra>'},
+    {x:rest.map(p=>p.sev), y:rest.map(p=>p.rec), mode:'markers', name:'other covered PRs',
+     marker:{color:'#bbb',size:7}, customdata:rest, hovertemplate:'<b>PR %{customdata.pr}</b><br>sev %{x} · original-gold recall %{y:.3f}<extra>not selected</extra>'},
     {x:top6.map(p=>p.sev), y:top6.map(p=>p.rec), mode:'markers', name:'top-6 selected PRs',
-     marker:{color:'#B07AA1',size:11,line:{width:1.5,color:'#333'}}, customdata:top6, hovertemplate:'<b>PR %{customdata.pr}</b><br>sev %{x} · expanded recall %{y:.3f}<extra>top-6</extra>'},
-    {x:[0,26],y:[mrest,mrest],mode:'lines',name:'mean expanded recall, other 44',line:{color:'#999',dash:'dash',width:1},hoverinfo:'skip'},
-    {x:[0,26],y:[mtop,mtop],mode:'lines',name:'mean expanded recall, top-6',line:{color:'#B07AA1',dash:'dash',width:1.5},hoverinfo:'skip'},
+     marker:{color:'#B07AA1',size:11,line:{width:1.5,color:'#333'}}, customdata:top6, hovertemplate:'<b>PR %{customdata.pr}</b><br>sev %{x} · original-gold recall %{y:.3f}<extra>top-6</extra>'},
+    {x:[0,26],y:[mrest,mrest],mode:'lines',name:'mean original-gold recall, other covered PRs',line:{color:'#999',dash:'dash',width:1},hoverinfo:'skip'},
+    {x:[0,26],y:[mtop,mtop],mode:'lines',name:'mean original-gold recall, top-6',line:{color:'#B07AA1',dash:'dash',width:1.5},hoverinfo:'skip'},
   ];
-  Plotly.react('chart5', ts, {margin:{l:56,r:16,t:8,b:44}, xaxis:{title:'golden-comment severity weight (Critical=4 … Low=1)',gridcolor:'#eee'}, yaxis:{title:'per-PR expanded recall',gridcolor:'#eee'}, legend:{font:{size:11},orientation:'h',y:-0.2}, paper_bgcolor:'rgba(0,0,0,0)'}, {displayModeBar:false, responsive:true});
+  Plotly.react('chart5', ts, {margin:{l:56,r:16,t:8,b:44}, xaxis:{title:'golden-comment severity weight (Critical=4 … Low=1)',gridcolor:'#eee'}, yaxis:{title:'per-PR original-gold recall',gridcolor:'#eee'}, legend:{font:{size:11},orientation:'h',y:-0.2}, paper_bgcolor:'rgba(0,0,0,0)'}, {displayModeBar:false, responsive:true});
 }
 cellsel.onchange=draw5; draw5();
 </script>
@@ -617,7 +658,8 @@ out = HTML.replace("__DATA__", json.dumps(DATA, separators=(",", ":")).replace("
           .replace("__SH2__", json.dumps(SH)) \
           .replace("__TGDEN__", str(TG_DEN)) \
           .replace("__TGGOLD__", str(TG_GOLDENS)) \
-          .replace("__TGDEF__", str(TG_DEFECTS))
+          .replace("__TGDEF__", str(TG_DEFECTS)) \
+          .replace("__FRAMEWORK_SUMMARY__", framework_summary)
 path = f"{ROOT}/analysis/figures/interactive_dashboard.html"
 open(path, "w").write(out)
 print("wrote", path, len(out), "bytes")

@@ -87,9 +87,10 @@ loop is the active research direction — see [`FURTHER-RESEARCH.md`](FURTHER-RE
 
 ## Reproducibility pin
 
-The exact code that produced the **current report** is pinned by tag — `git checkout report-2026-09-18`
-after cloning (see `REPORT.md` §5 for the full chain, expected-output checksums, and the
-three-mode taxonomy).
+Tag `report-2026-09-18` pins the **pre-correction September report**. The corrected report must be
+reproduced from the source revision containing its Markdown and matching artifact checksums; do not
+check out the older tag for the corrected edition. See `REPORT.md` §5 for the complete numerical and
+HTML rebuild chains and source-snapshot requirements.
 
 The exact code that produced the **August 384/384 matrix** (historical) is pinned:
 
