@@ -4,10 +4,10 @@
 documented fix that made it pass. Two evidence levels:
 
 3 defects are WITHDRAWN (their tests do not demonstrate the claim) and 2 are merged as DUPLICATES (2026-09-18 audit — see WITHDRAWALS_AND_DEDUP_2026-09-18.md). They are retained below, marked, but no longer count as verified.
-**Every defect is an independent unit**: it owns `defects/<id>/{test.diff,fix.patch,logs/,meta.json}`.
-No defect shares a test with another. `test_origin` records whether the test was written by the verifier
-for this defect alone (with a sibling-fix orthogonality check) or copied from the original execution
-container where it had been authored for exactly this claim.
+Defect directories retain `test.diff`, `fix.patch`, logs, and metadata as evidence artifacts.
+`test_origin` records verifier-authored tests or provenance copied from the execution container.
+Orthogonality is established only when `sibling_fix_leaves_red` is explicitly true;
+a null or false value does not establish independence. Withdrawn tests do not verify their claims.
 
 Merged duplicates and restored/renamed entries carry a provenance note.
 

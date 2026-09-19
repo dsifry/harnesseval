@@ -4,12 +4,12 @@ Denominator (the true golden set): **147** = 42 Martian goldens + 105 verified h
 
 | | cell | recall | **F2′** | adjusted precision (adjP) |
 |---|---|---|---|---|
-| best harness recall | `claude-opus-5|compound-realistic|medium` | 0.599 | 0.460 | 0.518 |
-| **best harness F2′ (our evaluator)** | `glm-5.3-vision-background|compound-realistic|medium` | 0.544 | 0.494 | 0.792 |
-| best vanilla recall | `claude-fable-5-1|vanilla-engineered|medium` | 0.367 | 0.406 | 0.701 |
-| best vanilla F2′ | `claude-fable-5-1|vanilla-engineered|medium` | 0.367 | 0.406 | 0.701 |
+| best harness recall | `claude-opus-5|compound-realistic|medium` | 0.599 | 0.641 | 0.518 |
+| **best harness F2′ (bug quality + advisory credit)** | `claude-opus-5|compound-realistic|medium` | 0.599 | 0.641 | 0.518 |
+| best vanilla recall | `claude-fable-5-1|vanilla-engineered|medium` | 0.367 | 0.427 | 0.701 |
+| best vanilla F2′ | `claude-fable-5-1|vanilla-engineered|medium` | 0.367 | 0.427 | 0.701 |
 
-- **harness ÷ vanilla on F2′: 1.22×**
+- **harness ÷ vanilla on F2′: 1.50×**
 - peak-recall ratio, harness ÷ vanilla: 1.63×
 - (F1′, the equal-weight lens, for reference: 0.98×)
 
