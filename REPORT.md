@@ -210,26 +210,28 @@ scored PRs (§3.6). All headline numbers are primary-sample numbers unless label
 
 #### Caveats: what we did not run, and why
 
-One gap is deliberate and worth stating plainly rather than leaving implicit: **Claude Fable 5.1 was run
-one-shot across all six primary PRs, but its two harness cells (compound-realistic and metareview-realistic)
-were only partially run — one to two PRs each — so they are coverage gaps, not results.** Every other model
-has its full harness grid on the primary sample.
+One gap is a decision of ours, and it is worth stating plainly rather than leaving it implicit: **we did not
+run Claude Fable 5.1 across all PRs and all harnesses.** Fable 5.1 was run one-shot across all six primary
+PRs, but its two harness cells (compound-realistic and metareview-realistic) were run on only one to two PRs
+each. Every other model has its full harness grid on the primary sample.
 
-The reason is **budget**. A harness review is not one model call: the orchestrator dispatches several
-subagent passes and then synthesises, so a harness run costs many times a one-shot run — and Fable is a
-frontier-priced model. Completing the Fable CE/MRV cells across the sample (and beyond) was beyond what this
-campaign could fund. We chose to spend the remaining budget on depth everywhere else — executed ground
-truth, honest adjudication, and the full-50 comparison runs — rather than on one more model's harness grid.
+The reason is **budget**. A harness review is not one model call: the orchestrator dispatches several subagent
+passes and then synthesises, so a harness run costs many times a one-shot run — and Fable 5.1 is a
+frontier-priced model. A full Fable 5.1 grid across the PRs and all three frameworks was more than this
+campaign could fund, and we judged the same money better spent on depth everywhere else: executed ground
+truth, honest adjudication, and the full-50 comparison runs. The partial Fable harness numbers are therefore
+gaps, not findings, and no claim in this report rests on them.
 
-If you have the budget, there are two ways to close it, and we welcome both:
+**We will amend this report with updated numbers in either of two cases:**
 
-- **Fund it and we will run it.** The missing Fable harness cells can be run on the same apparatus and
-  published alongside these results; reach out via the repository
+- **A sponsor funds the runs.** The missing Fable 5.1 harness cells can be run on the same apparatus and
+  merged into the same tables; reach out via the repository
   ([github.com/dsifry/harnesseval](https://github.com/dsifry/harnesseval)).
-- **Run it yourself.** The methodology is laid out to be reproduced: §2 specifies the frameworks, models,
-  effort levels, judges, instruments, run-health and era rules, and §5 publishes the reproduction chain
-  (`runs/` inputs, the exact commands, and the checksums). The resulting cells drop into the same tables and
-  the same scoring code, so the comparison is like-for-like.
+- **Someone runs them and sends us the data.** The methodology is laid out to be reproduced: §2 specifies the
+  frameworks, models, effort levels, judges, instruments, run-health and era rules, and §5 publishes the
+  reproduction chain (`runs/` inputs, the exact commands and the checksums). Data produced that way drops
+  into the same scoring code and the same tables, keeping the comparison like-for-like. Send it to us and we
+  will amend the report with it.
 
 Nothing in the conclusions depends on guessing what those cells would have shown: every headline result is
 computed from the cells that are complete, and `analysis/COVERAGE.md` records exactly what is missing.
@@ -1322,9 +1324,12 @@ decision, GLM partial fills were stopped at the data freeze.
 ## 4. What we cannot claim
 
 
-1. **Fable harness cells are incomplete** (1–2 PRs each; a frontier-priced harness grid was beyond this
-   campaign's budget) — fable harness numbers in T1/T2 are gaps, not results. How to close the gap, or run
-   it yourself from the published methodology, is set out in §2.2's caveats.
+1. **We did not run Fable 5.1 across all PRs and all harnesses — our choice, for budget.** Fable 5.1 was run
+   one-shot on the full primary sample, but its compound-engineering and metareview cells only on 1–2 PRs each:
+   a complete Fable 5.1 harness grid (all PRs × all frameworks) was more than this campaign could fund, and we
+   spent that money on depth instead. The partial Fable harness numbers in T1/T2 are gaps, not results, and no
+   claim in this report rests on them. **We will amend the report with updated data** if a sponsor funds the
+   runs, or if someone runs them per §2 and sends us the data — see §2.2's caveats.
 2. **n = 1 run per cell×PR**: cluster bootstrap quantifies *PR-sampling* variance only;
    run-to-run LLM variance is not in these CIs (`tools/eval_adjudicator.py`,
    `analysis/score_flips.py` outputs, and `analysis/ADJUDICATOR_INTERRATER.md` measure judge-side

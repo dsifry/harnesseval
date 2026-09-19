@@ -168,7 +168,7 @@ in-diff vs 1 out-of-diff.
 
 ## Gaps we will not paper over
 
-Fable-5.1's harness cells don't exist (account rate-capped ~3 days) — 29 of 111 hitlist rows;
+Fable 5.1's harness cells were not run across the primary sample — **our budget decision, not a measurement**: a full Fable 5.1 harness grid (a harness run is many model calls, and Fable is frontier-priced) was more than this campaign could fund, so only 1–2-PR partial runs exist and they are gaps, not results. We will amend the report with updated data if a sponsor funds the runs or someone runs them per §2 and sends us the data (details in §2.2);
 opus/sonnet vanilla cells are top-6-only by operator decision; some metareview cells needed era-rule re-runs; GLM
 full-50 fills were stopped at the data freeze (~40% of the planned fills done, resumable); sonnet-5's compound cells
 *lose* recall because Claude-Code-style routing sends reviewer subagents to haiku — a harness is
