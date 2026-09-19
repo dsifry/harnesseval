@@ -1,0 +1,464 @@
+{
+ "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/8",
+ "pass_digest": "9c5f733ce7a3f996c90c67f262cc4a77e2b234bc415c197afa7c73477ad320be",
+ "request_sha256": "04ca9607a9d917ad69cf8574438e12650668e0a600c11d3f261f71f84b2ca3e6",
+ "request": {
+  "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/8",
+  "model": "glm-5.3-background",
+  "system": "You are clustering code review findings from one PR. Always respond with valid JSON.",
+  "prompt": "You are clustering code review findings from the same PR. For each PAIR below, decide whether the two findings describe the SAME underlying issue — same root cause in the same code location. Different wording is fine. A finding about a DIFFERENT defect in the same file or function is NOT the same issue. Severity or aspect differences of the same root cause ARE the same issue.\n\n\nFor THIS scoring pass, duplicate equivalence is stricter than sharing a root cause.\nYou must compare the COMPLETE MATERIAL CLAIMS, including mechanism, triggering\nconditions, execution path, and consequence. The same line or broad concern does\nnot establish equivalence. A report of wrong-category selection, a case/rename\nmismatch, a crash, and a silent fallback are different claims even at one lookup.\nAn inactive/unbound API concern and an alleged active user-facing failure differ.\nA compound report with an additional material claim does NOT equal its subset.\nDifferences only in wording, severity, or hedging do not create separate claims.\nIf the claimed mechanisms, triggers or consequences conflict, or one report adds\nan unsupported/different material factual claim, return same=false. You are NOT\nverifying which claim is true; do not repair or reinterpret either report to make\nthem match. If unsure whether their full claims are equivalent, return false.\n\nFor every numbered pair, extract what A and B actually CLAIM into mechanism,\ntrigger and consequence. Then list material_differences and give your equivalence\nverdict, confidence and reason. same=true requires no material differences.\nReturn ONLY this JSON object, with EVERY pair index exactly once:\n{\"pairs\":[{\"pair\":1,\"a\":{\"mechanism\":\"...\",\"trigger\":\"...\",\"consequence\":\"...\"},\"b\":{\"mechanism\":\"...\",\"trigger\":\"...\",\"consequence\":\"...\"},\"material_differences\":[],\"same\":true,\"confidence\":0.9,\"reason\":\"...\"}]}\n\nPAIRS:\nPAIR 1:\nA: remove_member calls group.users.delete(user_id) then group.save, bypassing membership callbacks and making the group.save call dead weight on the happy path. Any denormalized state maintained in GroupUser callbacks or Group save hooks (e.g. user_count recalibration) is skipped, and the trailing group.save implies validation runs on removal when it does not — future maintainers will assume removal is validated and callback-driven when it is neither.\nB: remove_member uses `group.users.delete(user_id)`, which deletes the join row directly and bypasses the Group membership callbacks (user_count maintenance, automatic-group refresh hooks) that Group#remove goes through. After removing a member the group's cached user_count is stale until refresh_automatic_groups/reload; any logic keyed on user_count (visibility checks, 'groups.visible' behavior, admin UI pagination totals) reports a member count that includes the removed user, and any future callback added to Group#remove (e.g. primary-group downgrade) silently never fires for this path.\n\nPAIR 2:\nA: remove_member calls group.users.delete(user_id) then group.save, bypassing membership callbacks and making the group.save call dead weight on the happy path. Any denormalized state maintained in GroupUser callbacks or Group save hooks (e.g. user_count recalibration) is skipped, and the trailing group.save implies validation runs on removal when it does not — future maintainers will assume removal is validated and callback-driven when it is neither.\nB: groups_controller#remove_member uses `group.users.delete(user_id)` which skips destroy callbacks, so the user_count counter cache on the group is never decremented, leaving UI user_count and pagination totals stale\n\nPAIR 3:\nA: remove_member calls group.users.delete(user_id) then group.save, bypassing membership callbacks and making the group.save call dead weight on the happy path. Any denormalized state maintained in GroupUser callbacks or Group save hooks (e.g. user_count recalibration) is skipped, and the trailing group.save implies validation runs on removal when it does not — future maintainers will assume removal is validated and callback-driven when it is neither.\nB: P3: remove_member uses group.users.delete(user_id), a direct join-table delete that bypasses GroupUser callbacks (e.g. counter-cache maintenance of user_count, leaving it stale) and silently returns success when user_id is not actually a member\n\nPAIR 4:\nA: remove_member calls group.users.delete(user_id) then group.save, using the association delete as the real mutation and wrapping it in a save that cannot meaningfully fail — validation-less dead control flow. The save/save-failure branch is dead code that implies validation exists where none does; if group.users.delete returns 0 (user not a member) the endpoint still renders success, so clients cannot distinguish 'removed' from 'was never a member'.\nB: remove_member calls group.users.delete(user_id) then group.save and returns success_json even when the user was never a member, and group.save is a no-op on an unchanged record so validation cannot report the miss. A request with a stale or wrong user_id gets a 200 success while no membership was removed; the admin UI (which reloads the list and trusts the response) treats the no-op as a confirmed removal, hiding the real state from the operator.\n\nPAIR 5:\nA: remove_member calls group.users.delete(user_id) then group.save, using the association delete as the real mutation and wrapping it in a save that cannot meaningfully fail — validation-less dead control flow. The save/save-failure branch is dead code that implies validation exists where none does; if group.users.delete returns 0 (user not a member) the endpoint still renders success, so clients cannot distinguish 'removed' from 'was never a member'.\nB: remove_member silently no-ops (and returns success) when user_id is not a member of the group, and group.save on an untouched record can never fail so the 422 branch is dead. A stale UI or double-invocation sends a user_id that was already removed; the endpoint returns success, the client reloads and shows the member still present or the removal 'succeed' with nothing done — no error distinguishes a real removal from a no-op.\n\nPAIR 6:\nA: remove_member calls group.users.delete(user_id) then group.save, using the association delete as the real mutation and wrapping it in a save that cannot meaningfully fail — validation-less dead control flow. The save/save-failure branch is dead code that implies validation exists where none does; if group.users.delete returns 0 (user not a member) the endpoint still renders success, so clients cannot distinguish 'removed' from 'was never a member'.\nB: Removing a non-member silently succeeds with success_json, indistinguishable from an actual removal\n\nPAIR 7:\nA: Spec calls the DELETE remove_member endpoint with xhr :put (wrong verb for a route wired as delete 'members'), and controller specs invoke actions directly bypassing route recognition, so nothing in the suite exercises the actual DELETE /admin/groups/:group_id/members wiring or the :group_id param name — the suite stays green even if the route/param plumbing breaks\nB: Test in remove_member context uses xhr :put against a DELETE route, which would 404 in a real request path (test-only)\n\nPAIR 8:\nA: The shared `.form-horizontal` rules (bold labels, 350px inputs, 20px checkboxes) were deleted from their original broader parent selector and re-added only under `.groups, .badges`, so any other admin section that previously matched the old selector silently loses its form styling. Admin pages outside the groups and badges screens (whatever else fell under the original parent block) render with unstyled default-width inputs and labels after this change; the author had to add `.badges` explicitly, which is evidence the old block was serving sections beyond groups.\nB: This group-memberships PR also restyles the badges admin form: the label/input-width rules were deleted from section.details .form-horizontal and re-added only under a new \".groups, .badges\" scope, which is work not traceable to the stated intent. Any admin page that relied on the deleted section.details .form-horizontal rules without a .groups or .badges ancestor class (the badges details form, if its markup lacks a .badges wrapper) silently loses its 350px input widths and bold labels, and badges styling now changes in lockstep with unrelated group styling.\n\nPAIR 9:\nA: The GET /admin/groups/users endpoint is deleted from the admin namespace with no replacement registered in this diff, breaking any existing client or integration still calling it. Out-of-tree consumers (API scripts, plugins) that listed admin group users via GET /admin/groups/users now get a 404 with no deprecation path.\nB: The GET /admin/groups/users route is deleted and the PATCH-style incremental membership update (update_patch with changes[:add]/[:delete]) is removed in the same diff, breaking the previously supported admin group API surface without deprecation. Out-of-tree consumers (scripts, API integrations, plugins) using GET /admin/groups/users or PATCH /admin/groups/:id with changes silently get 404s/routing failures after upgrade — an objective change (redesign of membership API) with no migration path or acceptance call-out.\n\nPAIR 10:\nA: The GET /admin/groups/users endpoint is deleted from the admin namespace with no replacement registered in this diff, breaking any existing client or integration still calling it. Out-of-tree consumers (API scripts, plugins) that listed admin group users via GET /admin/groups/users now get a 404 with no deprecation path.\nB: The route get \"users\" under admin groups is deleted (replaced by put/delete \"members\"), removing the GET /admin/groups/:id/users endpoint that existed before this diff. Any consumer of the removed endpoint — scripts, API clients, or older deployed front-ends during rolling deploy — now receives a routing failure/404 where they previously received the member list; the endpoint was removed as a side effect of this fix with no replacement route for reads.\n\nPAIR 11:\nA: The GET /admin/groups/users endpoint is deleted from the admin namespace with no replacement registered in this diff, breaking any existing client or integration still calling it. Out-of-tree consumers (API scripts, plugins) that listed admin group users via GET /admin/groups/users now get a 404 with no deprecation path.\nB: Breaking removal of GET /admin/groups/users route with no deprecation or alias, breaking external consumers\n\nPAIR 12:\nA: The GET /admin/groups/users endpoint is deleted from the admin namespace with no replacement registered in this diff, breaking any existing client or integration still calling it. Out-of-tree consumers (API scripts, plugins) that listed admin group users via GET /admin/groups/users now get a 404 with no deprecation path.\nB: GET /admin/groups/:id/users endpoint is removed with no deprecation or alias, a breaking API change for existing consumers\n\nPAIR 13:\nA: create() no longer accepts or sends usernames, so the long-standing ability to add initial members at group-creation time is silently removed from the admin flow. Previously an admin could create a group and seed its membership in one step (createWithUsernames); now they must create the group, wait for it to persist, then add members separately — a user-facing workflow regression introduced by iteration without explicit acceptance of the capability removal.\nB: Membership-at-create via POST /admin/groups is no longer possible since usernames support was dropped entirely\n\nPAIR 14:\nA: No spec covers the new groups_controller.rb members response envelope {members:, meta: {total, limit, offset}}, the default limit, or offset behaviour, despite the JS depending on result.meta.total\nB: No spec exists in spec/controllers/groups_controller_spec.rb covering the rewritten groups#members pagination, limit/offset/total behavior, and meta envelope\n\nPAIR 15:\nA: No spec covers the new groups_controller.rb members response envelope {members:, meta: {total, limit, offset}}, the default limit, or offset behaviour, despite the JS depending on result.meta.total\nB: No test coverage added for groups_controller.rb#members endpoint's new meta/pagination JSON shape or limit/offset handling\n\nPAIR 16:\nA: Group members route/template mismatch: route sets model to the group object while template iterates {{#each m in members}}, which only works if the controller proxies properties; otherwise public group members page renders empty\nB: Public members template {{#each m in members}} depends on controller proxying to the model that isn't included in this diff — if GroupMembersController is auto-generated as a plain Ember.Controller, the page renders an empty list; a proxying controller or members property must exist\n\nPAIR 17:\nA: Three new tests hard-code id 1 / group_id: 1 (the .update test anchored here, plus the 'cannot add members' and 'cannot remove members' examples) and depend on seeded automatic groups instead of fabricating one the way the sibling .destroy test does with Fabricate(:group, automatic: true). The 422 assertions verify test-database seed state as much as controller behavior: if automatic groups are not created before these examples run, or their ids shift, Group.find(1) raises RecordNotFound or a non-automatic group 1 fails the assertions with diagnostics unrelated to the code under test.\nB: The '.add_members cannot add members to automatic groups' test hardcodes group_id: 1 without creating any group, relying on the assumption that group id 1 is automatic. If the test database's group with id 1 is not automatic (e.g. after fixture/seed changes or when another spec deletes/recreates groups), the request succeeds with 200 and the assertion response.status.should == 422 fails — or worse, passes vacuously through a different error path. The same applies to the remove_member automatic test at lines 126-129, which additionally issues a PUT (xhr :put, :remove_member) even though the route/action semantics are DELETE, so the test no longer matches the HTTP verb the client and router actually use.\n\nPAIR 18:\nA: Three new tests hard-code id 1 / group_id: 1 (the .update test anchored here, plus the 'cannot add members' and 'cannot remove members' examples) and depend on seeded automatic groups instead of fabricating one the way the sibling .destroy test does with Fabricate(:group, automatic: true). The 422 assertions verify test-database seed state as much as controller behavior: if automatic groups are not created before these examples run, or their ids shift, Group.find(1) raises RecordNotFound or a non-automatic group 1 fails the assertions with diagnostics unrelated to the code under test.\nB: Tests rely on magic id: 1 / group_id: 1 being an existing automatic group via implicit seed state instead of creating groups with Fabricate(:group, automatic: true) as done elsewhere in the file, making them brittle against seed/schema changes\n\nPAIR 19:\nA: Three new tests hard-code id 1 / group_id: 1 (the .update test anchored here, plus the 'cannot add members' and 'cannot remove members' examples) and depend on seeded automatic groups instead of fabricating one the way the sibling .destroy test does with Fabricate(:group, automatic: true). The 422 assertions verify test-database seed state as much as controller behavior: if automatic groups are not created before these examples run, or their ids shift, Group.find(1) raises RecordNotFound or a non-automatic group 1 fails the assertions with diagnostics unrelated to the code under test.\nB: `update` test uses `id: 1` assuming group id 1 is an automatic group via undocumented fixture/seed dependency instead of explicitly `Fabricate(:group, automatic: true)`\n\nPAIR 20:\nA: next commits group.set(\"offset\", offset) before the findMembers() request resolves — and previous does the same at line 46 — with no rollback and no rejection handler, so a failed request leaves the committed offset in place. When the members request fails after clicking next, currentPage (derived from the pre-committed offset) shows page 2 while the member list still renders page 1's data, and no error is surfaced anywhere — the page indicator and the list content disagree with no way to tell the request failed.\nB: next/previous commit group.set(\"offset\", offset) before findMembers() resolves, with no rollback on failure and no in-flight guard, so pagination bookkeeping is updated for requests that may fail or complete out of order. A failed page fetch leaves the page label advanced while the list still shows the previous page, and the next click silently skips a page; two rapid clicks issue overlapping requests whose out-of-order responses overwrite the newer page with older members because setProperties runs whenever a response lands.\n",
+  "effort": "low",
+  "pairs": [
+   [
+    59,
+    73
+   ],
+   [
+    59,
+    936
+   ],
+   [
+    59,
+    1020
+   ],
+   [
+    60,
+    190
+   ],
+   [
+    60,
+    195
+   ],
+   [
+    60,
+    1081
+   ],
+   [
+    1095,
+    1187
+   ],
+   [
+    147,
+    153
+   ],
+   [
+    210,
+    211
+   ],
+   [
+    210,
+    227
+   ],
+   [
+    210,
+    841
+   ],
+   [
+    210,
+    900
+   ],
+   [
+    171,
+    947
+   ],
+   [
+    976,
+    979
+   ],
+   [
+    976,
+    982
+   ],
+   [
+    903,
+    1051
+   ],
+   [
+    154,
+    199
+   ],
+   [
+    154,
+    1189
+   ],
+   [
+    154,
+    1232
+   ],
+   [
+    179,
+    180
+   ]
+  ]
+ },
+ "parsed_response": {
+  "pairs": [
+   {
+    "pair": 1,
+    "a": {
+     "mechanism": "group.users.delete bypasses membership callbacks; trailing group.save is dead weight",
+     "trigger": "remove_member called",
+     "consequence": "denormalized state (user_count recalibration) not maintained; misleading save implies validation"
+    },
+    "b": {
+     "mechanism": "group.users.delete bypasses Group membership callbacks that Group#remove uses",
+     "trigger": "remove_member called",
+     "consequence": "stale user_count until refresh; future callbacks never fire"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Same mechanism (direct join delete bypassing callbacks) and same consequences (stale denormalized user_count); B elaborates concrete effects."
+   },
+   {
+    "pair": 2,
+    "a": {
+     "mechanism": "group.users.delete bypasses callbacks; group.save dead",
+     "trigger": "remove_member",
+     "consequence": "denormalized state skipped; misleading validation impression"
+    },
+    "b": {
+     "mechanism": "group.users.delete skips destroy callbacks",
+     "trigger": "remove_member",
+     "consequence": "user_count counter cache never decremented; stale UI totals"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "B is a subset describing the same callback-bypass root cause with user_count consequence A already names."
+   },
+   {
+    "pair": 3,
+    "a": {
+     "mechanism": "group.users.delete bypasses callbacks; group.save dead weight",
+     "trigger": "remove_member",
+     "consequence": "denormalized state (user_count) skipped; misleading validation impression"
+    },
+    "b": {
+     "mechanism": "direct join-table delete bypasses GroupUser callbacks",
+     "trigger": "remove_member, including with non-member user_id",
+     "consequence": "stale user_count AND silently returns success when user is not a member"
+    },
+    "material_differences": [
+     "B adds a distinct claim: silent success when user_id is not actually a member, absent from A"
+    ],
+    "same": false,
+    "confidence": 0.85,
+    "reason": "Compound report adds the non-member no-op success claim, a different material defect."
+   },
+   {
+    "pair": 4,
+    "a": {
+     "mechanism": "association delete is the real mutation; save cannot meaningfully fail; delete returning 0 still renders success",
+     "trigger": "remove_member with user not a member",
+     "consequence": "clients cannot distinguish removed from never-a-member; dead save branch"
+    },
+    "b": {
+     "mechanism": "group.users.delete then group.save; save is no-op on unchanged record so validation cannot catch the miss",
+     "trigger": "stale/wrong user_id request",
+     "consequence": "200 success with no removal; admin UI trusts response, hiding real state"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Same core claim: no-op removal returns success indistinguishably; B adds admin UI consequence detail of the same claim."
+   },
+   {
+    "pair": 5,
+    "a": {
+     "mechanism": "association delete is real mutation; save cannot fail; delete returning 0 renders success",
+     "trigger": "user not a member",
+     "consequence": "clients cannot distinguish removal from no-op; dead 422 branch"
+    },
+    "b": {
+     "mechanism": "endpoint silently no-ops and returns success; group.save on untouched record can never fail so 422 branch dead",
+     "trigger": "stale UI or double-invocation sends already-removed user_id",
+     "consequence": "success returned; no error distinguishes real removal from no-op"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Same claims: no-op success indistinguishability and dead save-failure branch; trigger wording differs only."
+   },
+   {
+    "pair": 6,
+    "a": {
+     "mechanism": "association delete is real mutation; save dead; delete returning 0 renders success",
+     "trigger": "user not a member",
+     "consequence": "indistinguishable removed vs never-a-member"
+    },
+    "b": {
+     "mechanism": "removing a non-member silently succeeds",
+     "trigger": "user_id not a member",
+     "consequence": "success_json indistinguishable from actual removal"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.95,
+    "reason": "B is a direct subset of A's non-member success claim."
+   },
+   {
+    "pair": 7,
+    "a": {
+     "mechanism": "spec uses xhr :put on a DELETE route AND controller specs invoke actions directly, bypassing route recognition",
+     "trigger": "running suite",
+     "consequence": "suite green even if route/param plumbing breaks"
+    },
+    "b": {
+     "mechanism": "test uses xhr :put against DELETE route",
+     "trigger": "real request path",
+     "consequence": "would 404 (test-only)"
+    },
+    "material_differences": [
+     "A adds a separate claim: direct action invocation means route recognition and :group_id param wiring are never exercised"
+    ],
+    "same": false,
+    "confidence": 0.85,
+    "reason": "A is a compound report with an additional material claim about bypassed route recognition; B covers only the verb mismatch."
+   },
+   {
+    "pair": 8,
+    "a": {
+     "mechanism": ".form-horizontal rules deleted from broader parent selector and re-added only under .groups,.badges",
+     "trigger": "other admin sections that matched the old selector",
+     "consequence": "those pages silently lose form styling"
+    },
+    "b": {
+     "mechanism": "rules deleted from section.details .form-horizontal and re-scoped to .groups,.badges",
+     "trigger": "pages relying on old rules without .groups/.badges ancestor",
+     "consequence": "badges details form may lose styling; badges styling now coupled to group styling; work untraceable to stated intent"
+    },
+    "material_differences": [
+     "B adds a scope-creep/untraceable-work claim and a coupling claim; A claims other sections beyond groups/badges are affected while B conditions the badges loss on markup lacking a .badges wrapper"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "Overlapping concern but B adds different material claims (scope creep, lockstep coupling) and different affected-page claims."
+   },
+   {
+    "pair": 9,
+    "a": {
+     "mechanism": "GET /admin/groups/users route deleted with no replacement",
+     "trigger": "out-of-tree consumers call the endpoint",
+     "consequence": "404, no deprecation path"
+    },
+    "b": {
+     "mechanism": "GET /admin/groups/users AND PATCH update_patch membership API removed",
+     "trigger": "consumers using either",
+     "consequence": "404s/routing failures, no migration path"
+    },
+    "material_differences": [
+     "B adds removal of the PATCH/update_patch membership update API, a distinct material claim"
+    ],
+    "same": false,
+    "confidence": 0.9,
+    "reason": "Compound report adds the PATCH endpoint removal; A claims only the GET endpoint."
+   },
+   {
+    "pair": 10,
+    "a": {
+     "mechanism": "GET /admin/groups/users deleted with no replacement in diff",
+     "trigger": "out-of-tree consumers call it",
+     "consequence": "404 with no deprecation"
+    },
+    "b": {
+     "mechanism": "get \"users\" route deleted (replaced by put/delete \"members\" for writes), no read replacement",
+     "trigger": "consumers, including older front-ends during rolling deploy",
+     "consequence": "routing failure/404 where member list was previously returned"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.75,
+    "reason": "Same endpoint removal, same consumer-breaking 404 consequence; B adds factual context (write replacements exist, rolling deploy) but the core claim of removed read endpoint with no replacement matches."
+   },
+   {
+    "pair": 11,
+    "a": {
+     "mechanism": "GET /admin/groups/users route deleted, no replacement",
+     "trigger": "existing clients/integrations",
+     "consequence": "404, no deprecation"
+    },
+    "b": {
+     "mechanism": "GET /admin/groups/users removed, no deprecation or alias",
+     "trigger": "external consumers",
+     "consequence": "broken"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.95,
+    "reason": "B is a concise subset of A."
+   },
+   {
+    "pair": 12,
+    "a": {
+     "mechanism": "GET /admin/groups/users endpoint deleted, no replacement",
+     "trigger": "existing clients",
+     "consequence": "404, no deprecation"
+    },
+    "b": {
+     "mechanism": "GET /admin/groups/:id/users removed, no deprecation/alias",
+     "trigger": "existing consumers",
+     "consequence": "breaking API change"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "Same endpoint (same route, minor path-naming difference); same claims."
+   },
+   {
+    "pair": 13,
+    "a": {
+     "mechanism": "create() drops usernames support so initial members cannot be added at creation",
+     "trigger": "admin creates group",
+     "consequence": "workflow regression: must create then add members separately"
+    },
+    "b": {
+     "mechanism": "usernames support dropped from POST /admin/groups",
+     "trigger": "group creation",
+     "consequence": "membership-at-create no longer possible"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.95,
+    "reason": "B is a subset of A's capability-removal claim."
+   },
+   {
+    "pair": 14,
+    "a": {
+     "mechanism": "no spec covers new members envelope {members, meta{total,limit,offset}} or limit/offset behavior",
+     "trigger": "running suite",
+     "consequence": "JS depending on meta.total untested"
+    },
+    "b": {
+     "mechanism": "no spec covers rewritten groups#members pagination, limit/offset/total, meta envelope",
+     "trigger": "running suite",
+     "consequence": "untested"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.95,
+    "reason": "Identical missing-coverage claim."
+   },
+   {
+    "pair": 15,
+    "a": {
+     "mechanism": "no spec covers members envelope/meta/limit/offset",
+     "trigger": "suite",
+     "consequence": "JS dependency on meta.total untested"
+    },
+    "b": {
+     "mechanism": "no tests for members endpoint meta/pagination JSON shape or limit/offset",
+     "trigger": "suite",
+     "consequence": "untested"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.95,
+    "reason": "Same missing-coverage claim."
+   },
+   {
+    "pair": 16,
+    "a": {
+     "mechanism": "route sets model to group while template iterates {{#each m in members}}; works only if controller proxies",
+     "trigger": "public group members page render",
+     "consequence": "renders empty if no proxying"
+    },
+    "b": {
+     "mechanism": "template depends on controller proxying to model not in diff",
+     "trigger": "GroupMembersController auto-generated as plain Ember.Controller",
+     "consequence": "empty list unless proxying controller exists"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Same mechanism and consequence; B spells out the hedged condition identically."
+   },
+   {
+    "pair": 17,
+    "a": {
+     "mechanism": "three tests hardcode id 1/group_id 1 relying on seeded automatic groups instead of Fabricate",
+     "trigger": "seed state missing or ids shift",
+     "consequence": "RecordNotFound or assertion failures unrelated to code under test"
+    },
+    "b": {
+     "mechanism": "add_members test hardcodes group_id: 1 assuming automatic; remove_member test also uses PUT against DELETE semantics",
+     "trigger": "group id 1 not automatic or seed changes",
+     "consequence": "200 instead of 422, failing or vacuous assertions; verb mismatch with client/router"
+    },
+    "material_differences": [
+     "B adds a distinct verb-mismatch (PUT vs DELETE) claim about the remove_member test, not present in A"
+    ],
+    "same": false,
+    "confidence": 0.85,
+    "reason": "B is a compound report adding the HTTP verb mismatch material claim."
+   },
+   {
+    "pair": 18,
+    "a": {
+     "mechanism": "three tests hardcode id 1/group_id 1 relying on seeds instead of Fabricate",
+     "trigger": "seed/schema changes",
+     "consequence": "brittle tests, wrong diagnostics"
+    },
+    "b": {
+     "mechanism": "tests rely on magic id 1 being automatic via implicit seed state instead of Fabricate",
+     "trigger": "seed/schema changes",
+     "consequence": "brittle tests"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.95,
+    "reason": "Same hardcoded-seed-dependency claim."
+   },
+   {
+    "pair": 19,
+    "a": {
+     "mechanism": "three tests hardcode id 1 relying on seeded automatic groups instead of Fabricate",
+     "trigger": "seeds missing or ids shift",
+     "consequence": "RecordNotFound or unrelated assertion failures"
+    },
+    "b": {
+     "mechanism": "update test uses id: 1 assuming automatic via undocumented fixture/seed dependency instead of Fabricate",
+     "trigger": "seed dependency",
+     "consequence": "brittle/undocumented dependency"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Same root cause; B names one of the three tests A covers, same seed-dependency claim."
+   },
+   {
+    "pair": 20,
+    "a": {
+     "mechanism": "next/previous commit offset before findMembers resolves; no rollback, no rejection handler",
+     "trigger": "failed members request after clicking next",
+     "consequence": "page indicator shows page 2 while list shows page 1; no error surfaced"
+    },
+    "b": {
+     "mechanism": "offset committed before request resolves; no rollback and no in-flight guard",
+     "trigger": "failed fetch OR two rapid clicks with overlapping out-of-order responses",
+     "consequence": "page label advanced with stale list, silently skipped page, older response overwrites newer members"
+    },
+    "material_differences": [
+     "B adds an in-flight race condition claim: overlapping out-of-order responses overwriting newer data, absent from A"
+    ],
+    "same": false,
+    "confidence": 0.85,
+    "reason": "B adds a distinct material claim about out-of-order concurrent requests due to missing in-flight guard."
+   }
+  ]
+ },
+ "usage": {
+  "glm-5.3-background": {
+   "input_tokens": 3122,
+   "cache_read_input_tokens": 384,
+   "cache_creation_input_tokens": 0,
+   "output_tokens": 2646,
+   "reasoning_output_tokens": 825,
+   "cost_usd": 0.0,
+   "total_tokens": 6977
+  }
+ },
+ "status": "complete",
+ "error_type": null,
+ "elapsed_s": 22.118854999542236
+}

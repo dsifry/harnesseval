@@ -1,0 +1,488 @@
+{
+ "url": "https://github.com/calcom/cal.com/pull/10967",
+ "pass_digest": "9c5f733ce7a3f996c90c67f262cc4a77e2b234bc415c197afa7c73477ad320be",
+ "request_sha256": "528a6d47650519a759ac12ee7c0bc9784c5c36a37d6da62ddff8083b52841e1a",
+ "request": {
+  "url": "https://github.com/calcom/cal.com/pull/10967",
+  "model": "glm-5.3-background",
+  "system": "You are clustering code review findings from one PR. Always respond with valid JSON.",
+  "prompt": "You are clustering code review findings from the same PR. For each PAIR below, decide whether the two findings describe the SAME underlying issue — same root cause in the same code location. Different wording is fine. A finding about a DIFFERENT defect in the same file or function is NOT the same issue. Severity or aspect differences of the same root cause ARE the same issue.\n\n\nFor THIS scoring pass, duplicate equivalence is stricter than sharing a root cause.\nYou must compare the COMPLETE MATERIAL CLAIMS, including mechanism, triggering\nconditions, execution path, and consequence. The same line or broad concern does\nnot establish equivalence. A report of wrong-category selection, a case/rename\nmismatch, a crash, and a silent fallback are different claims even at one lookup.\nAn inactive/unbound API concern and an alleged active user-facing failure differ.\nA compound report with an additional material claim does NOT equal its subset.\nDifferences only in wording, severity, or hedging do not create separate claims.\nIf the claimed mechanisms, triggers or consequences conflict, or one report adds\nan unsupported/different material factual claim, return same=false. You are NOT\nverifying which claim is true; do not repair or reinterpret either report to make\nthem match. If unsure whether their full claims are equivalent, return false.\n\nFor every numbered pair, extract what A and B actually CLAIM into mechanism,\ntrigger and consequence. Then list material_differences and give your equivalence\nverdict, confidence and reason. same=true requires no material differences.\nReturn ONLY this JSON object, with EVERY pair index exactly once:\n{\"pairs\":[{\"pair\":1,\"a\":{\"mechanism\":\"...\",\"trigger\":\"...\",\"consequence\":\"...\"},\"b\":{\"mechanism\":\"...\",\"trigger\":\"...\",\"consequence\":\"...\"},\"material_differences\":[],\"same\":true,\"confidence\":0.9,\"reason\":\"...\"}]}\n\nPAIRS:\nPAIR 1:\nA: N+1 DB query: per-destination credential fetch inside loop in packages/core/EventManager.ts ~line 345 (createAllCalendarEvents) — individual prisma.credential.findUnique awaited per destination, should be batched with findMany\nB: packages/core/EventManager.ts:339-383 and packages/core/EventManager.ts:504-551 — the credential-fetch-from-DB fallback runs inside a `for` loop with a blocking `await prisma.credential.findUnique(...)` per destination/reference instead of a single batched `findMany`, so booking create/update latency on this hot path now scales linearly with the number of destination calendars (i.e., with team size for collective multi-host events) where before the diff it was at most one such lookup.\n\nPAIR 2:\nA: N+1 DB query: per-destination credential fetch inside loop in packages/core/EventManager.ts ~line 345 (createAllCalendarEvents) — individual prisma.credential.findUnique awaited per destination, should be batched with findMany\nB: packages/core/EventManager.ts:342 — `createAllCalendarEvents` and `updateAllCalendarEvents` perform sequential awaits per destination calendar/reference with a possible DB `findUnique` each, causing N sequential DB round-trips plus calendar API calls in the request path for N hosts\n\nPAIR 3:\nA: N+1 DB query: per-destination credential fetch inside loop in packages/core/EventManager.ts ~line 345 (createAllCalendarEvents) — individual prisma.credential.findUnique awaited per destination, should be batched with findMany\nB: packages/core/EventManager.ts:344 — Collective creation performs a sequential credential query for every destination absent from the organizer credential list, creating an N+1 database path as host count grows.\n\nPAIR 4:\nA: N+1 DB query: per-destination credential fetch inside loop in packages/core/EventManager.ts ~line 345 (createAllCalendarEvents) — individual prisma.credential.findUnique awaited per destination, should be batched with findMany\nB: packages/core/EventManager.ts:344 — New per-destination prisma.credential.findUnique runs inside the loop and always misses the cache for team hosts (EventManager is built only from the organizer's credentials), giving a guaranteed serial N+1 query per booking that a single findMany({ id: { in: ids } }) would replace.\n\nPAIR 5:\nA: N+1 DB query: per-destination credential fetch inside loop in packages/core/EventManager.ts ~line 345 (createAllCalendarEvents) — individual prisma.credential.findUnique awaited per destination, should be batched with findMany\nB: packages/core/EventManager.ts:344 — P2 confidence 100 advisory: `const credentialFromDB = await prisma.credential.findUnique({` inside the destination loop adds one serial database round trip per co-host whose credential is absent from the organizer's credentials, increasing collective-booking latency with host count; small teams limit the impact but do not remove the N+1 path, and fetching all missing IDs with one findMany removes the per-host query.\n\nPAIR 6:\nA: N+1 DB query: per-destination credential fetch inside loop in packages/core/EventManager.ts ~line 345 (createAllCalendarEvents) — individual prisma.credential.findUnique awaited per destination, should be batched with findMany\nB: packages/core/EventManager.ts:370 — Awaiting each destination calendar creation inside the loop serializes all remote calendar API calls, so collective booking latency grows linearly with host count.\n\nPAIR 7:\nA: N+1 DB query: per-destination credential fetch inside loop in packages/core/EventManager.ts ~line 345 (createAllCalendarEvents) — individual prisma.credential.findUnique awaited per destination, should be batched with findMany\nB: packages/core/EventManager.ts:370 — Awaiting each host's remote createEvent inside the destination loop serializes calendar creation and makes booking latency scale with host count.\n\nPAIR 8:\nA: N+1 DB query: per-destination credential fetch inside loop in packages/core/EventManager.ts ~line 345 (createAllCalendarEvents) — individual prisma.credential.findUnique awaited per destination, should be batched with findMany\nB: packages/core/EventManager.ts:370 — createAllCalendarEvents awaits createEvent (external calendar API call) sequentially per collective host destination instead of in parallel, so booking latency grows linearly with host count\n\nPAIR 9:\nA: N+1 DB query: per-destination credential fetch inside loop in packages/core/EventManager.ts ~line 345 (createAllCalendarEvents) — individual prisma.credential.findUnique awaited per destination, should be batched with findMany\nB: Sequential event creation across destination calendars in packages/core/EventManager.ts ~line 340 (createAllCalendarEvents) — createEvent awaited serially per destination instead of Promise.all, increasing wall time for collective bookings\n\nPAIR 10:\nA: N+1 DB query: per-destination credential fetch inside loop in packages/core/EventManager.ts ~line 345 (createAllCalendarEvents) — individual prisma.credential.findUnique awaited per destination, should be batched with findMany\nB: Sequential per-host calendar event creation in `createAllCalendarEvents` (`packages/core/EventManager.ts:~339–362`) replaces the previous parallel `Promise.all` execution, so external API round trips (Google/O365 insert, `getCalendar()` construction, possible OAuth token refresh) now run strictly serially, making booking-creation latency grow linearly with host count (a 5-host collective event can add multiple seconds of serial provider API latency with timeout risk); parallelize across destinations or document the sequencing rationale.\n\nPAIR 11:\nA: N+1 DB query: per-destination credential fetch inside loop in packages/core/EventManager.ts ~line 345 (createAllCalendarEvents) — individual prisma.credential.findUnique awaited per destination, should be batched with findMany\nB: Sequential, unbounded external calls in packages/core/EventManager.ts createAllCalendarEvents (~340-360): createEvent is awaited per destination inside a for...of with no Promise.all and no timeout on external API calls, so a single hung calendar API call blocks the entire booking request indefinitely and latency grows linearly with host count on collective events\n\nPAIR 12:\nA: packages/core/EventManager.ts:344 — Credential (incl. OAuth key) loaded from DB by destinationCalendar.credentialId with no check that it belongs to a booking host/team member or is not invalid, bypassing the calendarCredentials allowlist.\nB: packages/core/EventManager.ts:344 — prisma.credential.findUnique` is called with a raw credentialId from destinationCalendar/BookingReference with no check that the credential belongs to the booking's user or team, so a reference pointing at another user's credential is used verbatim to write/delete calendar events.\n\nPAIR 13:\nA: packages/core/EventManager.ts:344 — Credential (incl. OAuth key) loaded from DB by destinationCalendar.credentialId with no check that it belongs to a booking host/team member or is not invalid, bypassing the calendarCredentials allowlist.\nB: packages/core/EventManager.ts:349-372,506-529 — new DB-fallback logic (`prisma.credential.findUnique` fetching a credential from the DB when not found in `this.calendarCredentials`, in both `createAllCalendarEvents` and `updateAllCalendarEvents`) goes beyond \"handle collective multiple host on destinationCalendar\" (which is about iterating multiple destination calendars) by adding unscoped extra DB queries per host and fetching credentials without any check that the credential's owner (userId/teamId) matches the current booking's organizer/team, which is a plausible cross-tenant credential access path introduced without being called out as in-scope or reviewed for authorization.\n\nPAIR 14:\nA: packages/core/EventManager.ts:344 — Credential (incl. OAuth key) loaded from DB by destinationCalendar.credentialId with no check that it belongs to a booking host/team member or is not invalid, bypassing the calendarCredentials allowlist.\nB: packages/core/EventManager.ts:353 — createAllCalendarEvents now loads any destinationCalendar credential straight from the DB by id with no check that it belongs to the organizer or a host of this booking, and it ignores the `invalid` flag, so a stale or non-host credential gets used to write the event (attendee names/emails, notes) into that user's calendar. Before, those credentials were silently skipped. Example: an eventType.destinationCalendar set by a team admin or by a member who has since left the team, on a round-robin or collective event (P2, conf 50; verbatim: `const credentialFromDB = await prisma.credential.findUnique({ ... where: { id: destination.credentialId } })`)\n\nPAIR 15:\nA: packages/core/EventManager.ts:344 — Credential (incl. OAuth key) loaded from DB by destinationCalendar.credentialId with no check that it belongs to a booking host/team member or is not invalid, bypassing the calendarCredentials allowlist.\nB: packages/core/EventManager.ts:365 — Credentials fetched from the DB for other team members are used without checking `invalid` or that the credential's user is a host on the event type; a stale `destinationCalendar.credentialId` could write bookings into another user's calendar\n\nPAIR 16:\nA: packages/core/EventManager.ts:344 — Credential (incl. OAuth key) loaded from DB by destinationCalendar.credentialId with no check that it belongs to a booking host/team member or is not invalid, bypassing the calendarCredentials allowlist.\nB: packages/core/EventManager.ts:508 — same pattern in updateAllCalendarEvents: `prisma.credential.findUnique({ where: { id: reference.credentialId } })` fallback fetches a credential purely by numeric ID with no ownership/team scoping check before calling `updateEvent(credential, ...)`, removing the implicit scoping previously provided by `this.calendarCredentials.filter(...)`; confidence 50 — severity P2.\n\nPAIR 17:\nA: packages/core/EventManager.ts:344 — Credential (incl. OAuth key) loaded from DB by destinationCalendar.credentialId with no check that it belongs to a booking host/team member or is not invalid, bypassing the calendarCredentials allowlist.\nB: packages/core/EventManager.ts:511-540 — same unscoped `prisma.credential.findUnique({ where: { id: reference.credentialId } })` fallback pattern in `updateAllCalendarEvents` (no ownership check against the booking's users/team), so a stale/foreign `credentialId` on a BookingReference row is trusted and used to authenticate an update against another user's calendar without any tenant-scoping check. Confidence 50, severity P2.\n\nPAIR 18:\nA: packages/core/EventManager.ts:344 — Credential (incl. OAuth key) loaded from DB by destinationCalendar.credentialId with no check that it belongs to a booking host/team member or is not invalid, bypassing the calendarCredentials allowlist.\nB: packages/core/EventManager.ts:511-541 — In updateAllCalendarEvents (used on reschedule), the same unscoped `prisma.credential.findUnique({ where: { id: reference.credentialId } })` fallback is added, so a reference.credentialId not present in this.calendarCredentials causes the code to fetch and use an arbitrary credential row's key to call updateEvent instead of skipping it as before .\n\nPAIR 19:\nA: packages/core/EventManager.ts:344 — Credential (incl. OAuth key) loaded from DB by destinationCalendar.credentialId with no check that it belongs to a booking host/team member or is not invalid, bypassing the calendarCredentials allowlist.\nB: packages/core/EventManager.ts:516 — the update path does the same unscoped `prisma.credential.findUnique` on `reference.credentialId` and uses the credential to modify events without verifying ownership against the booking's hosts (P1, conf 50)\n\nPAIR 20:\nA: packages/core/EventManager.ts:344 — Credential (incl. OAuth key) loaded from DB by destinationCalendar.credentialId with no check that it belongs to a booking host/team member or is not invalid, bypassing the calendarCredentials allowlist.\nB: packages/core/EventManager.ts:517 — `prisma.credential.findUnique({ ... where: { id: reference.credentialId } })` loads and uses any referenced credential without checking its user/team against the booking hosts, so a cross-tenant booking reference updates calendar events through the victim's credential.\n",
+  "effort": "low",
+  "pairs": [
+   [
+    922,
+    1334
+   ],
+   [
+    922,
+    1340
+   ],
+   [
+    922,
+    1355
+   ],
+   [
+    922,
+    1362
+   ],
+   [
+    922,
+    1365
+   ],
+   [
+    922,
+    1391
+   ],
+   [
+    922,
+    1392
+   ],
+   [
+    922,
+    1393
+   ],
+   [
+    922,
+    1893
+   ],
+   [
+    922,
+    1894
+   ],
+   [
+    922,
+    1896
+   ],
+   [
+    1357,
+    1366
+   ],
+   [
+    1357,
+    1375
+   ],
+   [
+    1357,
+    1377
+   ],
+   [
+    1357,
+    1384
+   ],
+   [
+    1357,
+    1435
+   ],
+   [
+    1357,
+    1437
+   ],
+   [
+    1357,
+    1438
+   ],
+   [
+    1357,
+    1441
+   ],
+   [
+    1357,
+    1442
+   ]
+  ]
+ },
+ "parsed_response": {
+  "pairs": [
+   {
+    "pair": 1,
+    "a": {
+     "mechanism": "per-destination prisma.credential.findUnique awaited inside loop instead of batched findMany",
+     "trigger": "createAllCalendarEvents iterating destination calendars",
+     "consequence": "N+1 DB queries; should be batched"
+    },
+    "b": {
+     "mechanism": "credential-fetch-from-DB fallback inside for loop with blocking findUnique per destination instead of single batched findMany",
+     "trigger": "booking create/update on hot path, multiple destination calendars",
+     "consequence": "latency scales linearly with number of destinations; previously at most one lookup"
+    },
+    "material_differences": [
+     "B adds a regression claim that pre-diff behavior had at most one such lookup"
+    ],
+    "same": true,
+    "confidence": 0.75,
+    "reason": "Same mechanism (per-destination findUnique in loop, fix batch findMany), same location; B's prior-behavior claim is severity/regression framing of the same root cause, not a different defect."
+   },
+   {
+    "pair": 2,
+    "a": {
+     "mechanism": "per-destination credential findUnique in loop instead of batched findMany",
+     "trigger": "createAllCalendarEvents loop over destinations",
+     "consequence": "N+1 DB queries"
+    },
+    "b": {
+     "mechanism": "sequential awaits per destination with possible DB findUnique, plus calendar API calls in request path",
+     "trigger": "N hosts in create/update paths",
+     "consequence": "N sequential DB round-trips plus calendar API calls"
+    },
+    "material_differences": [
+     "B is compound: adds sequential calendar API calls as part of the claim, a distinct defect from the DB N+1"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "B combines the DB N+1 claim with an additional material claim about serialized calendar API calls; compound report does not equal its subset."
+   },
+   {
+    "pair": 3,
+    "a": {
+     "mechanism": "per-destination findUnique in loop",
+     "trigger": "createAllCalendarEvents destinations",
+     "consequence": "N+1 DB path; should use findMany"
+    },
+    "b": {
+     "mechanism": "sequential credential query per destination absent from organizer credential list",
+     "trigger": "collective creation, host count grows",
+     "consequence": "N+1 database path"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "Same root cause, same location, same fix; wording only differs."
+   },
+   {
+    "pair": 4,
+    "a": {
+     "mechanism": "per-destination findUnique in loop, should batch with findMany",
+     "trigger": "createAllCalendarEvents per destination",
+     "consequence": "N+1 DB queries"
+    },
+    "b": {
+     "mechanism": "per-destination findUnique inside loop, always cache-miss for team hosts, should be single findMany",
+     "trigger": "team hosts absent from organizer credentials",
+     "consequence": "guaranteed serial N+1 query per booking"
+    },
+    "material_differences": [
+     "B adds claim that the lookup always misses the cache for team hosts because EventManager is built from organizer credentials"
+    ],
+    "same": true,
+    "confidence": 0.7,
+    "reason": "The cache-miss claim explains the trigger for the identical root cause and identical fix (findMany batching); it elaborates rather than conflicts with A."
+   },
+   {
+    "pair": 5,
+    "a": {
+     "mechanism": "per-destination findUnique in loop",
+     "trigger": "createAllCalendarEvents destinations",
+     "consequence": "N+1 DB queries; batch with findMany"
+    },
+    "b": {
+     "mechanism": "findUnique per co-host missing from organizer credentials inside loop; findMany would remove per-host query",
+     "trigger": "collective bookings, host count",
+     "consequence": "increased latency scaling with host count (P2 advisory)"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Identical mechanism, location, and fix; only severity/hedging framing differs."
+   },
+   {
+    "pair": 6,
+    "a": {
+     "mechanism": "per-destination DB credential findUnique (N+1 DB queries)",
+     "trigger": "createAllCalendarEvents loop",
+     "consequence": "excess DB round-trips; batch with findMany"
+    },
+    "b": {
+     "mechanism": "sequential awaits of remote calendar API createEvent calls",
+     "trigger": "destination loop, multiple hosts",
+     "consequence": "booking latency grows linearly with host count due to serialized external API calls"
+    },
+    "material_differences": [
+     "B concerns external calendar API call serialization, not DB credential fetches — different defect"
+    ],
+    "same": false,
+    "confidence": 0.85,
+    "reason": "Different mechanism (external API serialization vs DB N+1 credential fetch); same loop but distinct defect."
+   },
+   {
+    "pair": 7,
+    "a": {
+     "mechanism": "per-destination DB credential findUnique",
+     "trigger": "createAllCalendarEvents loop",
+     "consequence": "N+1 DB queries"
+    },
+    "b": {
+     "mechanism": "sequential awaits of remote createEvent per host",
+     "trigger": "destination loop",
+     "consequence": "booking latency scales with host count"
+    },
+    "material_differences": [
+     "B is about calendar API call serialization, not DB queries"
+    ],
+    "same": false,
+    "confidence": 0.85,
+    "reason": "Different defect despite same loop location."
+   },
+   {
+    "pair": 8,
+    "a": {
+     "mechanism": "per-destination DB credential findUnique",
+     "trigger": "createAllCalendarEvents loop",
+     "consequence": "N+1 DB queries"
+    },
+    "b": {
+     "mechanism": "createEvent awaited sequentially per destination instead of parallel",
+     "trigger": "collective host destinations",
+     "consequence": "booking latency grows linearly with host count"
+    },
+    "material_differences": [
+     "B concerns external API call parallelism, not DB credential fetch batching"
+    ],
+    "same": false,
+    "confidence": 0.85,
+    "reason": "Different defect: API-call serialization vs DB N+1."
+   },
+   {
+    "pair": 9,
+    "a": {
+     "mechanism": "per-destination DB credential findUnique",
+     "trigger": "createAllCalendarEvents loop",
+     "consequence": "N+1 DB queries"
+    },
+    "b": {
+     "mechanism": "createEvent awaited serially per destination instead of Promise.all",
+     "trigger": "multiple destination calendars",
+     "consequence": "increased wall time for collective bookings"
+    },
+    "material_differences": [
+     "B is about event creation serialization, not credential DB fetches"
+    ],
+    "same": false,
+    "confidence": 0.85,
+    "reason": "Different defect in same function/loop."
+   },
+   {
+    "pair": 10,
+    "a": {
+     "mechanism": "per-destination DB credential findUnique",
+     "trigger": "createAllCalendarEvents loop",
+     "consequence": "N+1 DB queries"
+    },
+    "b": {
+     "mechanism": "sequential createEvent replacing previous parallel Promise.all, incl. getCalendar() and token refresh",
+     "trigger": "collective host destinations",
+     "consequence": "strictly serial provider API latency, linear growth, timeout risk"
+    },
+    "material_differences": [
+     "B concerns external API parallelism/regression, not DB credential fetches"
+    ],
+    "same": false,
+    "confidence": 0.85,
+    "reason": "Different defect (API serialization vs DB N+1), same loop only."
+   },
+   {
+    "pair": 11,
+    "a": {
+     "mechanism": "per-destination DB credential findUnique",
+     "trigger": "createAllCalendarEvents loop",
+     "consequence": "N+1 DB queries"
+    },
+    "b": {
+     "mechanism": "unbounded serial createEvent awaits with no Promise.all and no timeout",
+     "trigger": "hung calendar API call during booking",
+     "consequence": "entire booking blocked indefinitely; linear latency growth"
+    },
+    "material_differences": [
+     "B concerns missing timeout/parallelism on external API calls, not DB queries"
+    ],
+    "same": false,
+    "confidence": 0.85,
+    "reason": "Different defect despite same location."
+   },
+   {
+    "pair": 12,
+    "a": {
+     "mechanism": "credential loaded from DB by destinationCalendar.credentialId with no ownership/invalid check, bypassing calendarCredentials allowlist",
+     "trigger": "destinationCalendar with arbitrary credentialId",
+     "consequence": "unauthorized credential (incl. OAuth key) used for writes/deletes"
+    },
+    "b": {
+     "mechanism": "findUnique with raw credentialId from destinationCalendar/BookingReference, no ownership check",
+     "trigger": "reference pointing at another user's credential",
+     "consequence": "foreign credential used verbatim to write/delete calendar events"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Same mechanism, same line, same missing ownership check and consequence; A's mention of the invalid flag is a superset aspect of the same root cause."
+   },
+   {
+    "pair": 13,
+    "a": {
+     "mechanism": "credential loaded by destinationCalendar.credentialId with no ownership/invalid check, bypassing allowlist (line 344 create path)",
+     "trigger": "createAllCalendarEvents destination",
+     "consequence": "unauthorized credential use"
+    },
+    "b": {
+     "mechanism": "DB-fallback in both create (349-372) and update (506-529) fetches credentials without owner matching booking organizer/team; also claims out-of-scope behavior change",
+     "trigger": "credential not in calendarCredentials in either path",
+     "consequence": "plausible cross-tenant credential access; unreviewed scope expansion"
+    },
+    "material_differences": [
+     "B spans both create and update paths (different code locations)",
+     "B adds a scope/process claim that the change exceeds its stated purpose"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "B is compound: covers the update-path location and adds an out-of-scope review-process claim beyond A's create-path defect."
+   },
+   {
+    "pair": 14,
+    "a": {
+     "mechanism": "credential loaded by destinationCalendar.credentialId with no host/invalid check, bypassing allowlist",
+     "trigger": "createAllCalendarEvents with destinationCalendar credential",
+     "consequence": "unauthorized credential used"
+    },
+    "b": {
+     "mechanism": "createAllCalendarEvents loads any destinationCalendar credential by id with no organizer/host check, ignoring invalid flag",
+     "trigger": "stale destinationCalendar set by admin or departed member on round-robin/collective",
+     "consequence": "stale/non-host credential used to write event into that user's calendar; previously skipped"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "Same root cause at the same create-path fallback; B adds trigger examples and regression framing but no different material claim."
+   },
+   {
+    "pair": 15,
+    "a": {
+     "mechanism": "credential loaded by destinationCalendar.credentialId with no ownership/invalid check",
+     "trigger": "destinationCalendar credentialId in create path",
+     "consequence": "unauthorized credential use for writes"
+    },
+    "b": {
+     "mechanism": "credentials fetched from DB used without checking invalid flag or that user is a host on event type",
+     "trigger": "stale destinationCalendar.credentialId",
+     "consequence": "bookings written into another user's calendar"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "Same mechanism, trigger, and consequence within the same create-path block; line 365 is within the same fallback logic."
+   },
+   {
+    "pair": 16,
+    "a": {
+     "mechanism": "create-path (line 344) unscoped credential fetch by destinationCalendar.credentialId, no ownership/invalid check",
+     "trigger": "createAllCalendarEvents destination",
+     "consequence": "allowlist bypass / unauthorized use"
+    },
+    "b": {
+     "mechanism": "update-path (line 508) findUnique on reference.credentialId with no ownership/team scoping before updateEvent",
+     "trigger": "updateAllCalendarEvents with reference not in calendarCredentials",
+     "consequence": "implicit scoping from calendarCredentials.filter lost; unscoped update path"
+    },
+    "material_differences": [
+     "Different function/code location (update vs create path)",
+     "Different trigger object (BookingReference vs destinationCalendar)"
+    ],
+    "same": false,
+    "confidence": 0.75,
+    "reason": "Same defect pattern but different code location and execution path; not the same issue per location requirement."
+   },
+   {
+    "pair": 17,
+    "a": {
+     "mechanism": "create-path line 344 unscoped credential fetch, no ownership/invalid check",
+     "trigger": "createAllCalendarEvents destination",
+     "consequence": "unauthorized credential use"
+    },
+    "b": {
+     "mechanism": "updateAllCalendarEvents (511-540) unscoped findUnique on reference.credentialId, no ownership check",
+     "trigger": "stale/foreign credentialId on BookingReference during reschedule/update",
+     "consequence": "arbitrary credential row's key used to update another user's calendar"
+    },
+    "material_differences": [
+     "Different function (update path vs create path)",
+     "Different trigger (reference.credentialId vs destinationCalendar.credentialId)"
+    ],
+    "same": false,
+    "confidence": 0.75,
+    "reason": "Same pattern but different code location and path; not equivalent under location-based clustering."
+   },
+   {
+    "pair": 18,
+    "a": {
+     "mechanism": "create-path line 344 unscoped credential fetch, no ownership/invalid check",
+     "trigger": "createAllCalendarEvents destination",
+     "consequence": "allowlist bypass"
+    },
+    "b": {
+     "mechanism": "updateAllCalendarEvents (511-541) fallback fetch of arbitrary credential by reference.credentialId",
+     "trigger": "reference.credentialId not in calendarCredentials during update/reschedule",
+     "consequence": "arbitrary credential used to call updateEvent instead of skipping as before"
+    },
+    "material_differences": [
+     "Different function/code location (update vs create)",
+     "Different trigger object (BookingReference vs destinationCalendar)"
+    ],
+    "same": false,
+    "confidence": 0.75,
+    "reason": "Same defect type but distinct code location and execution path."
+   },
+   {
+    "pair": 19,
+    "a": {
+     "mechanism": "create-path line 344 unscoped credential fetch, no ownership/invalid check",
+     "trigger": "createAllCalendarEvents destination",
+     "consequence": "unauthorized credential use"
+    },
+    "b": {
+     "mechanism": "update path (line 516) unscoped findUnique on reference.credentialId, used to modify events without host ownership verification",
+     "trigger": "updateAllCalendarEvents reference",
+     "consequence": "credential used without verifying ownership against booking hosts"
+    },
+    "material_differences": [
+     "Different function/code location",
+     "Different trigger object"
+    ],
+    "same": false,
+    "confidence": 0.75,
+    "reason": "Same pattern at a different location (update path); different issue instance."
+   },
+   {
+    "pair": 20,
+    "a": {
+     "mechanism": "create-path line 344 unscoped credential fetch, no ownership/invalid check",
+     "trigger": "createAllCalendarEvents destination",
+     "consequence": "unauthorized credential use"
+    },
+    "b": {
+     "mechanism": "update path (line 517) findUnique on reference.credentialId without user/team check against booking hosts",
+     "trigger": "cross-tenant booking reference during update",
+     "consequence": "calendar events updated through victim's credential"
+    },
+    "material_differences": [
+     "Different function/code location",
+     "Different trigger object and execution path"
+    ],
+    "same": false,
+    "confidence": 0.75,
+    "reason": "Same defect pattern but in updateAllCalendarEvents, a different code location and path."
+   }
+  ]
+ },
+ "usage": {
+  "glm-5.3-background": {
+   "input_tokens": 2683,
+   "cache_read_input_tokens": 384,
+   "cache_creation_input_tokens": 0,
+   "output_tokens": 2867,
+   "reasoning_output_tokens": 1436,
+   "cost_usd": 0.0,
+   "total_tokens": 7370
+  }
+ },
+ "status": "complete",
+ "error_type": null,
+ "elapsed_s": 26.477994918823242
+}

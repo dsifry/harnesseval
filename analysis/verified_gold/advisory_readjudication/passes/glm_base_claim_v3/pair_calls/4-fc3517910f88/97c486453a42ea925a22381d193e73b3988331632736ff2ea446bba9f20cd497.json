@@ -1,0 +1,491 @@
+{
+ "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/4",
+ "pass_digest": "9c5f733ce7a3f996c90c67f262cc4a77e2b234bc415c197afa7c73477ad320be",
+ "request_sha256": "97c486453a42ea925a22381d193e73b3988331632736ff2ea446bba9f20cd497",
+ "request": {
+  "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/4",
+  "model": "glm-5.3-background",
+  "system": "You are clustering code review findings from one PR. Always respond with valid JSON.",
+  "prompt": "You are clustering code review findings from the same PR. For each PAIR below, decide whether the two findings describe the SAME underlying issue — same root cause in the same code location. Different wording is fine. A finding about a DIFFERENT defect in the same file or function is NOT the same issue. Severity or aspect differences of the same root cause ARE the same issue.\n\n\nFor THIS scoring pass, duplicate equivalence is stricter than sharing a root cause.\nYou must compare the COMPLETE MATERIAL CLAIMS, including mechanism, triggering\nconditions, execution path, and consequence. The same line or broad concern does\nnot establish equivalence. A report of wrong-category selection, a case/rename\nmismatch, a crash, and a silent fallback are different claims even at one lookup.\nAn inactive/unbound API concern and an alleged active user-facing failure differ.\nA compound report with an additional material claim does NOT equal its subset.\nDifferences only in wording, severity, or hedging do not create separate claims.\nIf the claimed mechanisms, triggers or consequences conflict, or one report adds\nan unsupported/different material factual claim, return same=false. You are NOT\nverifying which claim is true; do not repair or reinterpret either report to make\nthem match. If unsure whether their full claims are equivalent, return false.\n\nFor every numbered pair, extract what A and B actually CLAIM into mechanism,\ntrigger and consequence. Then list material_differences and give your equivalence\nverdict, confidence and reason. same=true requires no material differences.\nReturn ONLY this JSON object, with EVERY pair index exactly once:\n{\"pairs\":[{\"pair\":1,\"a\":{\"mechanism\":\"...\",\"trigger\":\"...\",\"consequence\":\"...\"},\"b\":{\"mechanism\":\"...\",\"trigger\":\"...\",\"consequence\":\"...\"},\"material_differences\":[],\"same\":true,\"confidence\":0.9,\"reason\":\"...\"}]}\n\nPAIRS:\nPAIR 1:\nA: RSS feed path (PollFeed) passes i.content straight to import with zero sanitization\nB: Stored XSS: external feed content is imported and served as raw HTML with zero sanitization — the new raw_html cook method makes Post#cook return raw verbatim bypassing the Sanitize pipeline, the RSS path feeds CGI.unescapeHTML-decoded payloads into TopicEmbed.import, absolutize_urls' Nokogiri round-trip preserves script/onerror markup, and TopicEmbed.import interpolates the feed-controlled url into href with only a ^https?:// prefix regex check, so hostile feed content executes for forum users and visitors of third-party embedding pages\n\nPAIR 2:\nA: No enqueue-time dedupe and no negative caching on the retrieve path (app/controllers/embed_controller.rb:15, app/views/embed/loading.html.erb:8-10, lib/topic_retriever.rb:21-33): every embed impression enqueues a job, so a page whose topic can never be imported floods the Sidekiq queue with near-duplicate jobs whose only work is a failed setnx; the 60s throttle only applies inside job execution and is set before retrieval regardless of outcome, so permanently failing URLs (404, readability-empty, fetch error) are re-fetched up to once per minute indefinitely as long as they have viewers.\nB: P2: Unbounded Sidekiq job enqueue per page view in embed_controller.rb:15 — every request for a not-yet-imported URL unconditionally enqueues a retrieve_topic job with no dedup before enqueue; the 30-second auto-reload in loading.html.erb generates ~2 jobs/minute per visitor, and failed imports (retry: false) never resolve the loop, producing an unbounded stream of mostly-no-op jobs and Redis writes\n\nPAIR 3:\nA: No enqueue-time dedupe and no negative caching on the retrieve path (app/controllers/embed_controller.rb:15, app/views/embed/loading.html.erb:8-10, lib/topic_retriever.rb:21-33): every embed impression enqueues a job, so a page whose topic can never be imported floods the Sidekiq queue with near-duplicate jobs whose only work is a failed setnx; the 60s throttle only applies inside job execution and is set before retrieval regardless of outcome, so permanently failing URLs (404, readability-empty, fetch error) are re-fetched up to once per minute indefinitely as long as they have viewers.\nB: Public embed endpoint (embed_controller.rb:15) enqueues background jobs with no request-level rate limit; every miss triggers a remote fetch and permanent topic creation, with only a bypassable 60-second per-URL Redis throttle, a trivially spoofable Referer check, and the loading view reloading every 30s causing ~2 enqueues/minute per visitor forever for unresolvable URLs\n\nPAIR 4:\nA: No enqueue-time dedupe and no negative caching on the retrieve path (app/controllers/embed_controller.rb:15, app/views/embed/loading.html.erb:8-10, lib/topic_retriever.rb:21-33): every embed impression enqueues a job, so a page whose topic can never be imported floods the Sidekiq queue with near-duplicate jobs whose only work is a failed setnx; the 60s throttle only applies inside job execution and is set before retrieval regardless of outcome, so permanently failing URLs (404, readability-empty, fetch error) are re-fetched up to once per minute indefinitely as long as they have viewers.\nB: The unauthenticated /embed/best endpoint (embed_controller.rb:15) drives unbounded outbound fetches and topic creation — the only throttle is per-URL (60s), with no per-IP/global rate limit, so an attacker or crawler hitting distinct paths can flood the job queue with synchronous HTTP fetches and pollute the forum with garbage topics created from arbitrary 200-returning pages\n\nPAIR 5:\nA: [Low/api] lib/tasks/disqus.thor:114-117 — The --category option was removed with no deprecation or error message, silently breaking existing invocations that pass -c; the import also now requires a live network fetch per thread (import_remote), so previously working offline/dry-run-style imports can fail mid-run\nB: Breaking CLI contract change in disqus.thor:117 — removing the `-c/--category` option breaks existing scripts, category routing silently dropped, and content source changed to full remote-page fetch altering dry_run output\n\nPAIR 6:\nA: [Low/api] lib/tasks/disqus.thor:114-117 — The --category option was removed with no deprecation or error message, silently breaking existing invocations that pass -c; the import also now requires a live network fetch per thread (import_remote), so previously working offline/dry-run-style imports can fail mid-run\nB: Disqus import task interface silently broken: the --category option is removed without deprecation or version bump, breaking existing scripted invocations with -c, and the task's semantics changed from importing stored Disqus content to fetching the live thread URL via TopicEmbed.import_remote, coupling a one-shot migration tool to network availability (lib/tasks/disqus.thor:114)\n\nPAIR 7:\nA: [Low/api] lib/tasks/disqus.thor:114-117 — The --category option was removed with no deprecation or error message, silently breaking existing invocations that pass -c; the import also now requires a live network fetch per thread (import_remote), so previously working offline/dry-run-style imports can fail mid-run\nB: Disqus importer regression in lib/tasks/disqus.thor: import now calls TopicEmbed.import_remote (synchronous open(url) + readability) per thread with no rescue, drops the old created_at: Date.parse(t[:created_at]) metadata, and removed the --category option — one dead link aborts the whole import mid-way and non-http(s) links are silently dropped\n\nPAIR 8:\nA: [Low/api] lib/tasks/disqus.thor:114-117 — The --category option was removed with no deprecation or error message, silently breaking existing invocations that pass -c; the import also now requires a live network fetch per thread (import_remote), so previously working offline/dry-run-style imports can fail mid-run\nB: `disqus.thor` behavior regressions (`lib/tasks/disqus.thor:117-146`): the `category` and `created_at` options were removed so imported topics lose category and original timestamps, threads whose links aren't http(s) or whose live fetch fails are now silently skipped where they previously always imported, and `import_remote` makes a live HTTP request per thread\n\nPAIR 9:\nA: [Low/api] lib/tasks/disqus.thor:114-117 — The --category option was removed with no deprecation or error message, silently breaking existing invocations that pass -c; the import also now requires a live network fetch per thread (import_remote), so previously working offline/dry-run-style imports can fail mid-run\nB: disqus.thor removed the --category option, silently dropping a feature; imports now go through import_remote with a live HTTP fetch per thread and no error handling, so a 404 aborts the whole import\n\nPAIR 10:\nA: [Low/api] lib/tasks/disqus.thor:114-117 — The --category option was removed with no deprecation or error message, silently breaking existing invocations that pass -c; the import also now requires a live network fetch per thread (import_remote), so previously working offline/dry-run-style imports can fail mid-run\nB: lib/tasks/disqus.thor removes the --category option and silently repoints topic creation from PostCreator to TopicEmbed.import_remote, breaking existing -c invocations and adding an uncontrolled HTTP fetch per thread, undocumented in the PR description\n\nPAIR 11:\nA: [Low/api] lib/tasks/disqus.thor:114-117 — The --category option was removed with no deprecation or error message, silently breaking existing invocations that pass -c; the import also now requires a live network fetch per thread (import_remote), so previously working offline/dry-run-style imports can fail mid-run\nB: lib/tasks/disqus.thor:114-150 — the importer was switched from PostCreator (permalink raw, optional --category) to TopicEmbed.import_remote, and the --category option was silently removed — a behavioral change with no test added or updated.\n\nPAIR 12:\nA: [Low/api] lib/tasks/disqus.thor:114-117 — The --category option was removed with no deprecation or error message, silently breaking existing invocations that pass -c; the import also now requires a live network fetch per thread (import_remote), so previously working offline/dry-run-style imports can fail mid-run\nB: lib/tasks/disqus.thor:116 — The `--category` option was removed from the disqus import CLI and `created_at` was dropped, so existing invocations using `-c` break and imported topics lose their original dates.\n\nPAIR 13:\nA: [Low/api] lib/tasks/disqus.thor:114-117 — The --category option was removed with no deprecation or error message, silently breaking existing invocations that pass -c; the import also now requires a live network fetch per thread (import_remote), so previously working offline/dry-run-style imports can fail mid-run\nB: lib/tasks/disqus.thor:116-148 — the --category/-c option and category_id assignment were removed with no replacement, deprecation notice, or migration path, silently dropping previously supported category-targeting for disqus imports; the new TopicEmbed.import_remote call path this task introduces has no test coverage at all\n\nPAIR 14:\nA: [Low/api] lib/tasks/disqus.thor:114-117 — The --category option was removed with no deprecation or error message, silently breaking existing invocations that pass -c; the import also now requires a live network fetch per thread (import_remote), so previously working offline/dry-run-style imports can fail mid-run\nB: lib/tasks/disqus.thor:117,141 — `created_at: Date.parse(t[:created_at])` was dropped in favor of scraping via TopicEmbed.import_remote, so imported topics lose their original timestamps (data fidelity loss) and topic creation additionally fails whenever the thread's page is unreachable or unparseable\n\nPAIR 15:\nA: [Low/api] lib/tasks/disqus.thor:114-117 — The --category option was removed with no deprecation or error message, silently breaking existing invocations that pass -c; the import also now requires a live network fetch per thread (import_remote), so previously working offline/dry-run-style imports can fail mid-run\nB: `lib/tasks/disqus.thor:117,143` drops the `--category` option and `created_at: Date.parse(...)` when switching to `TopicEmbed.import_remote`, so imported topics lose original timestamps and category placement\n\nPAIR 16:\nA: [Low/api] lib/tasks/disqus.thor:114-117 — The --category option was removed with no deprecation or error message, silently breaking existing invocations that pass -c; the import also now requires a live network fetch per thread (import_remote), so previously working offline/dry-run-style imports can fail mid-run\nB: lib/tasks/disqus.thor:143: the importer rewrite from PostCreator.new(..., created_at: Date.parse(t[:created_at]), category: category_id) to TopicEmbed.import_remote(user, t[:link], title: t[:title]) silently drops both timestamps and category support — imported Disqus topics are dated 'now' (reordering listing pages and breaking embed dates), always land in uncategorized, and the -c CLI option was removed; import_remote should at least forward created_at.\n\nPAIR 17:\nA: [Low/api] lib/tasks/disqus.thor:114-117 — The --category option was removed with no deprecation or error message, silently breaking existing invocations that pass -c; the import also now requires a live network fetch per thread (import_remote), so previously working offline/dry-run-style imports can fail mid-run\nB: lib/tasks/disqus.thor:147 — Switching to import_remote drops the Disqus thread `created_at` (topics now dated at import time) and silently returns nil for non-http links, skipping all their comments\n\nPAIR 18:\nA: [Low/api] lib/tasks/disqus.thor:114-117 — The --category option was removed with no deprecation or error message, silently breaking existing invocations that pass -c; the import also now requires a live network fetch per thread (import_remote), so previously working offline/dry-run-style imports can fail mid-run\nB: lib/tasks/disqus.thor:148 — [P2, confidence 75] The unrelated Disqus importer rewrite `post = TopicEmbed.import_remote(user, t[:link], title: t[:title])` removes category selection and the original `created_at: Date.parse(t[:created_at])`, so administrators importing historical discussions lose their chosen destination category and receive topics dated at import time, behavior changes outside the stated embed URL handling and validation task.\n\nPAIR 19:\nA: [Low/api] lib/tasks/disqus.thor:114-117 — The --category option was removed with no deprecation or error message, silently breaking existing invocations that pass -c; the import also now requires a live network fetch per thread (import_remote), so previously working offline/dry-run-style imports can fail mid-run\nB: lib/tasks/disqus.thor:148 — Blocking P2, confidence 100: `post = TopicEmbed.import_remote(user, t[:link], title: t[:title])` removes the existing Disqus importer's category selection and original thread creation timestamp without a requirement to change either, so administrators importing historical discussions now receive uncategorized topics dated at import time while their replies retain historical timestamps; preserve the existing import metadata when sharing the embedding implementation.\n\nPAIR 20:\nA: [Low/api] lib/tasks/disqus.thor:114-117 — The --category option was removed with no deprecation or error message, silently breaking existing invocations that pass -c; the import also now requires a live network fetch per thread (import_remote), so previously working offline/dry-run-style imports can fail mid-run\nB: lib/tasks/disqus.thor:148 — Disqus import is rewired to fetch and scrape remote pages via TopicEmbed.import_remote, changing importer behavior (network access, dropped created_at) beyond the stated scope (P1, conf 75)\n",
+  "effort": "low",
+  "pairs": [
+   [
+    1471,
+    1666
+   ],
+   [
+    1335,
+    1388
+   ],
+   [
+    1335,
+    1448
+   ],
+   [
+    1335,
+    1699
+   ],
+   [
+    366,
+    914
+   ],
+   [
+    366,
+    1034
+   ],
+   [
+    366,
+    1036
+   ],
+   [
+    366,
+    1040
+   ],
+   [
+    366,
+    1044
+   ],
+   [
+    366,
+    1176
+   ],
+   [
+    366,
+    1184
+   ],
+   [
+    366,
+    1191
+   ],
+   [
+    366,
+    1194
+   ],
+   [
+    366,
+    1202
+   ],
+   [
+    366,
+    1204
+   ],
+   [
+    366,
+    1208
+   ],
+   [
+    366,
+    1210
+   ],
+   [
+    366,
+    1216
+   ],
+   [
+    366,
+    1221
+   ],
+   [
+    366,
+    1222
+   ]
+  ]
+ },
+ "parsed_response": {
+  "pairs": [
+   {
+    "pair": 1,
+    "a": {
+     "mechanism": "RSS feed path passes i.content to import unsanitized",
+     "trigger": "importing a hostile RSS feed via PollFeed",
+     "consequence": "unsanitized feed content imported"
+    },
+    "b": {
+     "mechanism": "compound stored XSS: raw_html cook bypasses Sanitize, CGI.unescapeHTML decode, Nokogiri round-trip preserves script markup, href interpolation with weak regex check",
+     "trigger": "RSS feed content imported and served to users",
+     "consequence": "script execution for forum users and third-party embed visitors"
+    },
+    "material_differences": [
+     "B claims active script execution via additional mechanisms (cook bypass, href interpolation) not in A",
+     "A is a generic sanitization-gap report, not a claimed XSS execution"
+    ],
+    "same": false,
+    "confidence": 0.85,
+    "reason": "B makes additional material claims (XSS execution, cook bypass, href injection) absent from A."
+   },
+   {
+    "pair": 2,
+    "a": {
+     "mechanism": "no enqueue-time dedupe or negative caching; throttle only in job, set before retrieval",
+     "trigger": "page views of an embed whose topic can never be imported (404, readability-empty, fetch error)",
+     "consequence": "flooded Sidekiq queue with near-duplicate no-op jobs; failing URLs re-fetched ~once/minute indefinitely"
+    },
+    "b": {
+     "mechanism": "unconditional enqueue with no dedup; 30s reload generates ~2 jobs/min; failed imports (retry: false) never resolve",
+     "trigger": "every request for a not-yet-imported URL",
+     "consequence": "unbounded stream of mostly-no-op jobs and Redis writes"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "Both describe unbounded per-view enqueue with no dedupe/negative caching and endless retry loop; wording/severity differ only."
+   },
+   {
+    "pair": 3,
+    "a": {
+     "mechanism": "no enqueue-time dedupe or negative caching; 60s throttle set in job before retrieval regardless of outcome",
+     "trigger": "views of an unimportable embed URL",
+     "consequence": "queue flood with no-op jobs; permanent failures re-fetched ~1/min indefinitely"
+    },
+    "b": {
+     "mechanism": "no request-level rate limit; only bypassable 60s per-URL throttle; spoofable Referer check; every miss triggers remote fetch and permanent topic creation; 30s reload causes ~2 enqueues/min forever",
+     "trigger": "unauthenticated page views / unresolvable URLs",
+     "consequence": "endless enqueues and topic creation"
+    },
+    "material_differences": [
+     "B adds claims: trivially spoofable Referer check and bypassable throttle",
+     "B claims permanent topic creation on every miss; A claims failed setnx no-op jobs"
+    ],
+    "same": false,
+    "confidence": 0.75,
+    "reason": "B adds material claims (Referer spoofability, bypassable throttle, topic creation) that conflict with/extend A's setnx no-op mechanism."
+   },
+   {
+    "pair": 4,
+    "a": {
+     "mechanism": "no enqueue-time dedupe or negative caching on a single URL's impressions; 60s throttle inside job",
+     "trigger": "viewers of one page whose URL always fails import",
+     "consequence": "near-duplicate no-op jobs re-fetch same failing URL ~1/min"
+    },
+    "b": {
+     "mechanism": "no per-IP/global rate limit on distinct-URL attack",
+     "trigger": "attacker or crawler hitting many distinct paths",
+     "consequence": "flood of outbound fetches and garbage topics created from arbitrary 200 pages"
+    },
+    "material_differences": [
+     "A is per-URL viewer-driven re-fetch loop; B is attacker-driven distinct-URL flooding",
+     "A's consequence is failed re-fetches; B's is topic pollution from successful fetches"
+    ],
+    "same": false,
+    "confidence": 0.8,
+    "reason": "Different triggering conditions and consequences; same line but different claimed defects."
+   },
+   {
+    "pair": 5,
+    "a": {
+     "mechanism": "--category option removed without deprecation; import_remote requires live network fetch per thread",
+     "trigger": "existing invocations passing -c; offline imports",
+     "consequence": "CLI silently breaks; imports can fail mid-run"
+    },
+    "b": {
+     "mechanism": "-c/--category removal breaks scripts, category routing silently dropped; content source changed to remote fetch altering dry_run output",
+     "trigger": "existing scripts using -c",
+     "consequence": "broken scripts, dropped category, altered dry_run output"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.8,
+    "reason": "Both claim category-option removal breaking invocations and switch to remote fetch; B's 'dry_run output' is a wording/aspect difference of the same change."
+   },
+   {
+    "pair": 6,
+    "a": {
+     "mechanism": "--category removed silently; import_remote requires live network fetch per thread",
+     "trigger": "existing -c invocations; network availability",
+     "consequence": "silent breakage; offline imports fail"
+    },
+    "b": {
+     "mechanism": "--category removed without deprecation; semantics changed from stored content to fetching live thread URL via import_remote",
+     "trigger": "existing -c scripts; network availability",
+     "consequence": "broken invocations; migration tool coupled to network"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "Same two claims: category removal breaking invocations and network-dependent import_remote switch."
+   },
+   {
+    "pair": 7,
+    "a": {
+     "mechanism": "--category removed silently; import_remote live fetch per thread; offline imports can fail mid-run",
+     "trigger": "existing -c invocations; failing network fetch",
+     "consequence": "CLI breakage; mid-run failure"
+    },
+    "b": {
+     "mechanism": "import_remote synchronous fetch per thread with no rescue; drops created_at metadata; removed --category",
+     "trigger": "dead link / non-http link",
+     "consequence": "one dead link aborts whole import; non-http links silently dropped; lost timestamps"
+    },
+    "material_differences": [
+     "B adds dropped created_at metadata and silent dropping of non-http links, not in A"
+    ],
+    "same": false,
+    "confidence": 0.8,
+    "reason": "B adds material claims (created_at loss, non-http link skipping) absent from A."
+   },
+   {
+    "pair": 8,
+    "a": {
+     "mechanism": "--category removed silently; import_remote live fetch per thread",
+     "trigger": "existing -c invocations; network failure",
+     "consequence": "CLI breakage; offline imports can fail mid-run"
+    },
+    "b": {
+     "mechanism": "category and created_at options removed; non-http or failed-fetch threads silently skipped; import_remote live HTTP per thread",
+     "trigger": "threads with bad links",
+     "consequence": "lost category and timestamps; previously-importable threads now skipped"
+    },
+    "material_differences": [
+     "B adds created_at loss and silent skipping of threads with failed/non-http links"
+    ],
+    "same": false,
+    "confidence": 0.75,
+    "reason": "B makes additional material claims about timestamp loss and skipped threads."
+   },
+   {
+    "pair": 9,
+    "a": {
+     "mechanism": "--category removed silently; import_remote live fetch per thread",
+     "trigger": "existing -c invocations; 404",
+     "consequence": "CLI breakage; offline imports fail mid-run"
+    },
+    "b": {
+     "mechanism": "--category removed; import_remote with live HTTP fetch per thread and no error handling",
+     "trigger": "404",
+     "consequence": "feature silently dropped; 404 aborts whole import"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "Both claim category removal and network-dependent import where a fetch failure aborts mid-run."
+   },
+   {
+    "pair": 10,
+    "a": {
+     "mechanism": "--category removed silently; import_remote live fetch per thread",
+     "trigger": "existing -c invocations; network",
+     "consequence": "CLI breakage; offline imports fail"
+    },
+    "b": {
+     "mechanism": "--category removed; topic creation repointed from PostCreator to import_remote",
+     "trigger": "existing -c invocations",
+     "consequence": "broken -c invocations; uncontrolled HTTP fetch per thread; undocumented in PR"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.8,
+    "reason": "Same claims: category removal breaking invocations and added per-thread HTTP fetch; 'undocumented' is an aspect remark."
+   },
+   {
+    "pair": 11,
+    "a": {
+     "mechanism": "--category removed silently; import_remote live fetch per thread",
+     "trigger": "existing -c invocations; offline imports",
+     "consequence": "CLI breakage; failures mid-run"
+    },
+    "b": {
+     "mechanism": "switch from PostCreator to TopicEmbed.import_remote; --category silently removed",
+     "trigger": "behavioral change",
+     "consequence": "no test added/updated for the change"
+    },
+    "material_differences": [
+     "B claims lack of test coverage rather than import failure/CLI breakage consequences; mechanism (import_remote network fetch) only implied"
+    ],
+    "same": false,
+    "confidence": 0.65,
+    "reason": "B's material consequence is missing test coverage, not the breakage/failure A claims; weaker overlap on the network-fetch claim."
+   },
+   {
+    "pair": 12,
+    "a": {
+     "mechanism": "--category removed silently; import_remote live fetch per thread",
+     "trigger": "existing -c invocations; offline imports",
+     "consequence": "CLI breakage; failures mid-run"
+    },
+    "b": {
+     "mechanism": "--category removed; created_at dropped",
+     "trigger": "existing -c invocations",
+     "consequence": "invocations break; topics lose original dates"
+    },
+    "material_differences": [
+     "B adds created_at loss claim not in A"
+    ],
+    "same": false,
+    "confidence": 0.8,
+    "reason": "B adds the material claim of lost original timestamps."
+   },
+   {
+    "pair": 13,
+    "a": {
+     "mechanism": "--category removed silently; import_remote live fetch per thread",
+     "trigger": "existing -c invocations; offline imports",
+     "consequence": "CLI breakage; failures mid-run"
+    },
+    "b": {
+     "mechanism": "--category/-c and category_id removed without replacement; new import_remote path has no test coverage",
+     "trigger": "existing category-targeted imports",
+     "consequence": "silently dropped category support; untested call path"
+    },
+    "material_differences": [
+     "B's consequence includes no test coverage claim; B omits network-fetch failure consequence"
+    ],
+    "same": false,
+    "confidence": 0.6,
+    "reason": "B centers on dropped category support plus missing tests; A additionally claims network-dependent mid-run failure not asserted by B."
+   },
+   {
+    "pair": 14,
+    "a": {
+     "mechanism": "--category removed silently; import_remote live fetch per thread",
+     "trigger": "existing -c invocations; offline imports",
+     "consequence": "CLI breakage; offline imports fail mid-run"
+    },
+    "b": {
+     "mechanism": "created_at dropped in favor of scraping via import_remote",
+     "trigger": "page unreachable or unparseable",
+     "consequence": "topics lose original timestamps; creation fails on bad pages"
+    },
+    "material_differences": [
+     "B focuses on created_at loss; does not claim category removal breakage",
+     "A does not claim timestamp loss"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "B makes a different material claim (timestamp/data fidelity) not present in A."
+   },
+   {
+    "pair": 15,
+    "a": {
+     "mechanism": "--category removed silently; import_remote live fetch per thread",
+     "trigger": "existing -c invocations; offline imports",
+     "consequence": "CLI breakage; failures mid-run"
+    },
+    "b": {
+     "mechanism": "drops --category option and created_at when switching to import_remote",
+     "trigger": "the switch to import_remote",
+     "consequence": "topics lose original timestamps and category placement"
+    },
+    "material_differences": [
+     "B adds created_at/timestamp loss claim",
+     "A claims mid-run network failure consequence; B claims data loss"
+    ],
+    "same": false,
+    "confidence": 0.75,
+    "reason": "B adds timestamp-loss claim; consequences differ (data fidelity vs. network-dependent failure)."
+   },
+   {
+    "pair": 16,
+    "a": {
+     "mechanism": "--category removed silently; import_remote live fetch per thread",
+     "trigger": "existing -c invocations; offline imports",
+     "consequence": "CLI breakage; failures mid-run"
+    },
+    "b": {
+     "mechanism": "rewrite drops created_at and category support when switching to import_remote",
+     "trigger": "importing Disqus topics",
+     "consequence": "topics dated 'now', uncategorized, -c removed; suggests forwarding created_at"
+    },
+    "material_differences": [
+     "B adds created_at loss and reordering/listing-page consequence claims not in A"
+    ],
+    "same": false,
+    "confidence": 0.75,
+    "reason": "B adds timestamp-loss and listing-reordering claims absent from A."
+   },
+   {
+    "pair": 17,
+    "a": {
+     "mechanism": "--category removed silently; import_remote live fetch per thread",
+     "trigger": "existing -c invocations; offline imports",
+     "consequence": "CLI breakage; failures mid-run"
+    },
+    "b": {
+     "mechanism": "import_remote drops created_at and returns nil for non-http links",
+     "trigger": "non-http thread links",
+     "consequence": "topics dated at import time; comments skipped"
+    },
+    "material_differences": [
+     "B claims created_at loss and silent nil-return skipping comments; not in A",
+     "A claims -c CLI breakage; B omits it"
+    ],
+    "same": false,
+    "confidence": 0.8,
+    "reason": "Different material claims: B is timestamp loss + nil-skip; A is CLI option breakage + network failure."
+   },
+   {
+    "pair": 18,
+    "a": {
+     "mechanism": "--category removed silently; import_remote live fetch per thread",
+     "trigger": "existing -c invocations; offline imports",
+     "consequence": "CLI breakage; offline imports fail mid-run"
+    },
+    "b": {
+     "mechanism": "import_remote call removes category selection and created_at",
+     "trigger": "admin importing historical discussions",
+     "consequence": "uncategorized topics dated at import time; out-of-scope change"
+    },
+    "material_differences": [
+     "B adds created_at loss consequence",
+     "A claims -c invocation breakage and network-failure abort; B frames consequence as data loss"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "B adds timestamp-loss claim and frames consequence as data fidelity, not CLI/network failure."
+   },
+   {
+    "pair": 19,
+    "a": {
+     "mechanism": "--category removed silently; import_remote live fetch per thread",
+     "trigger": "existing -c invocations; offline imports",
+     "consequence": "CLI breakage; offline imports fail mid-run"
+    },
+    "b": {
+     "mechanism": "import_remote removes category selection and original thread timestamp",
+     "trigger": "admins importing historical discussions",
+     "consequence": "uncategorized topics dated at import time while replies keep historical dates"
+    },
+    "material_differences": [
+     "B adds created_at loss and mixed-timestamp consequence",
+     "A claims -c CLI breakage and mid-run network failure"
+    ],
+    "same": false,
+    "confidence": 0.75,
+    "reason": "B's material claims are data-fidelity losses (timestamps, category) with different consequence framing than A's CLI breakage and network-failure abort."
+   },
+   {
+    "pair": 20,
+    "a": {
+     "mechanism": "--category removed silently; import_remote live fetch per thread",
+     "trigger": "existing -c invocations; offline imports",
+     "consequence": "CLI breakage; failures mid-run"
+    },
+    "b": {
+     "mechanism": "importer rewired to fetch/scrape remote pages via import_remote, dropping created_at",
+     "trigger": "the rewiring",
+     "consequence": "network access added, dropped created_at; beyond stated scope"
+    },
+    "material_differences": [
+     "B adds created_at loss claim not in A",
+     "A claims -c invocation breakage not asserted by B"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "B adds the dropped created_at material claim; overlapping on network fetch but full claims differ."
+   }
+  ]
+ },
+ "usage": {
+  "glm-5.3-background": {
+   "input_tokens": 3058,
+   "cache_read_input_tokens": 384,
+   "cache_creation_input_tokens": 0,
+   "output_tokens": 3050,
+   "reasoning_output_tokens": 182,
+   "cost_usd": 0.0,
+   "total_tokens": 6674
+  }
+ },
+ "status": "complete",
+ "error_type": null,
+ "elapsed_s": 17.995141983032227
+}

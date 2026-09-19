@@ -1,0 +1,502 @@
+{
+ "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/8",
+ "pass_digest": "9c5f733ce7a3f996c90c67f262cc4a77e2b234bc415c197afa7c73477ad320be",
+ "request_sha256": "0aaa6f800aa76d6e404b79d62fc19e169ca0aae5f1b23cd0900f26ea7a9ddd68",
+ "request": {
+  "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/8",
+  "model": "glm-5.3-background",
+  "system": "You are clustering code review findings from one PR. Always respond with valid JSON.",
+  "prompt": "You are clustering code review findings from the same PR. For each PAIR below, decide whether the two findings describe the SAME underlying issue — same root cause in the same code location. Different wording is fine. A finding about a DIFFERENT defect in the same file or function is NOT the same issue. Severity or aspect differences of the same root cause ARE the same issue.\n\n\nFor THIS scoring pass, duplicate equivalence is stricter than sharing a root cause.\nYou must compare the COMPLETE MATERIAL CLAIMS, including mechanism, triggering\nconditions, execution path, and consequence. The same line or broad concern does\nnot establish equivalence. A report of wrong-category selection, a case/rename\nmismatch, a crash, and a silent fallback are different claims even at one lookup.\nAn inactive/unbound API concern and an alleged active user-facing failure differ.\nA compound report with an additional material claim does NOT equal its subset.\nDifferences only in wording, severity, or hedging do not create separate claims.\nIf the claimed mechanisms, triggers or consequences conflict, or one report adds\nan unsupported/different material factual claim, return same=false. You are NOT\nverifying which claim is true; do not repair or reinterpret either report to make\nthem match. If unsure whether their full claims are equivalent, return false.\n\nFor every numbered pair, extract what A and B actually CLAIM into mechanism,\ntrigger and consequence. Then list material_differences and give your equivalence\nverdict, confidence and reason. same=true requires no material differences.\nReturn ONLY this JSON object, with EVERY pair index exactly once:\n{\"pairs\":[{\"pair\":1,\"a\":{\"mechanism\":\"...\",\"trigger\":\"...\",\"consequence\":\"...\"},\"b\":{\"mechanism\":\"...\",\"trigger\":\"...\",\"consequence\":\"...\"},\"material_differences\":[],\"same\":true,\"confidence\":0.9,\"reason\":\"...\"}]}\n\nPAIRS:\nPAIR 1:\nA: app/controllers/admin/groups_controller.rb:71 — `usernames.split(\",\")` has no length cap and no strip, so an unbounded list runs one find plus one insert per name inside the request, and entries with padding like \" bob\" miss the lookup and are silently skipped (P3, conf 75)\nB: Unbounded input in admin/groups_controller.rb add_members: params.require(:usernames) is split with no cap on element count, allowing an admin session to submit tens of thousands of usernames in one request, producing a long-running request that holds a save transaction open\n\nPAIR 2:\nA: app/controllers/admin/groups_controller.rb:24 — Create and update now read group attributes only from top-level parameters instead of the established group envelope, breaking existing administrative API clients without versioning or backward compatibility.\nB: app/controllers/admin/groups_controller.rb:29 — Admin `PUT /admin/groups/:id` payload shape changed from nested `group: {...}` to flat params, and no longer accepts `usernames` (membership changes moved to new `add_members`/`remove_member` actions); external callers doing membership sync via the old single PUT with `group[usernames]` will silently no-op on membership\n\nPAIR 3:\nA: app/controllers/admin/groups_controller.rb:24 — Create and update now read group attributes only from top-level parameters instead of the established group envelope, breaking existing administrative API clients without versioning or backward compatibility.\nB: app/controllers/admin/groups_controller.rb:40 — `group.name = params[:name] if params[:name] && !group.automatic` drops the existing nested `group` request envelope without compatibility handling, so existing PUT callers have their requested name and membership edits ignored and their group hidden by line 38 instead of applying the formerly supported payload.\n\nPAIR 4:\nA: app/controllers/admin/groups_controller.rb:71 — `usernames.split(\",\").each { User.find_by_username(username); group.add(user) }` does one user lookup plus one insert per username (N+1) with no dedupe or existing-member check, so re-submitting a username already in the group (the input is never cleared, per the TODO) hits the group_users uniqueness constraint and fails the whole request instead of being idempotent (P2, conf 50)\nB: app/controllers/admin/groups_controller.rb:71-75 — `group.add(user)` is called per-username with no transaction or uniqueness guard visible at this call site, so a duplicated username in the same request (e.g. \"bob,bob\") or two concurrent `add_members` requests for the same user race read-then-insert with no enforced invariant against duplicate `group_users` rows.\n\nPAIR 5:\nA: app/controllers/admin/groups_controller.rb:90 — remove_member` calls `group.users.delete(user_id)` (which mutates the join table immediately) and then calls `group.save`, which does nothing for the removal and misleadingly implies the delete is not yet persisted\nB: app/controllers/admin/groups_controller.rb:92 — add_members/remove_member call group.save after group.add/users.delete even though those already persist, and duplicate the same save/render_json_error block.\n\nPAIR 6:\nA: app/controllers/admin/groups_controller.rb:90 — remove_member` calls `group.users.delete(user_id)` (which mutates the join table immediately) and then calls `group.save`, which does nothing for the removal and misleadingly implies the delete is not yet persisted\nB: groups_controller.rb `add_members`/`remove_member` call group.save after only mutating the users association, which is unnecessary and can trigger unrelated group validations and misleading errors for a membership operation\n\nPAIR 7:\nA: app/controllers/groups_controller.rb:22 — `limit = (params[:limit] || 50).to_i` is uncapped and now applies to every group (previously only automatic), so any anonymous/user caller can request `/groups/trust_level_0/members.json?limit=10000000` and force the server to load and serialize the entire user base, an unauthenticated DoS and bulk user enumeration vector (P2, conf 75)\nB: app/controllers/groups_controller.rb:22 — The public, unauthenticated-reachable members endpoint takes the client `limit` with no upper or lower clamp, so anyone can request `/groups/trust_level_0/members.json?limit=10000000` to pull and serialize every user on the site in one request (full user enumeration plus a cheap DoS amplifier), and `limit=-1`/`offset=-1` produce a PostgreSQL \"must not be negative\" exception that surfaces as a 500 with error-log noise; the rewrite that introduced pagination for all groups left this unbounded instead of capping it (e.g. `[[limit,1].max,50].min`) (P2, conf 75; `limit = (params[:limit] || 50).to_i`)\n\nPAIR 8:\nA: app/controllers/groups_controller.rb:33 — the server echoes the client's `limit` in `meta.limit`, and group.js:33 saves it into the model, so `limit=0` gets stored and admin-group.js.es6 `Math.floor(this.get(\"offset\") / this.get(\"limit\"))` gives NaN/Infinity page numbers, which leaves pagination permanently broken for that model instance (P3, conf 50)\nB: app/controllers/groups_controller.rb:685 — offset/limit are passed unvalidated to SQL, so a negative offset or limit param raises a PostgreSQL error (500) and an unbounded limit dumps the whole member table on a public endpoint (P2, conf 75)\n\nPAIR 9:\nA: app/controllers/groups_controller.rb:33 — the server echoes the client's `limit` in `meta.limit`, and group.js:33 saves it into the model, so `limit=0` gets stored and admin-group.js.es6 `Math.floor(this.get(\"offset\") / this.get(\"limit\"))` gives NaN/Infinity page numbers, which leaves pagination permanently broken for that model instance (P3, conf 50)\nB: The public members endpoint (app/controllers/groups_controller.rb:24-25) accepts raw, unbounded limit/offset: ?limit=10000000 forces an unbounded query and serialization on a user-facing endpoint (memory/DoS vector), and negative values pass straight into limit()/offset() raising a SQL error → a trivially triggerable 500; values need clamping (cap at a few hundred, floor at 0)\n\nPAIR 10:\nA: app/controllers/groups_controller.rb:33 — the server echoes the client's `limit` in `meta.limit`, and group.js:33 saves it into the model, so `limit=0` gets stored and admin-group.js.es6 `Math.floor(this.get(\"offset\") / this.get(\"limit\"))` gives NaN/Infinity page numbers, which leaves pagination permanently broken for that model instance (P3, conf 50)\nB: Uncapped limit/offset on the group members endpoint in app/controllers/groups_controller.rb allows any caller (including anonymous users on visible groups) to force full materialization/serialization of a group's entire membership via ?limit=999999999 or force Postgres to walk/sort and discard the entire member set via ?offset=1000000000; clamp both values (e.g., using Discourse's page_params helper) and reject non-positive values\n\nPAIR 11:\nA: spec/controllers/admin/groups_controller_spec.rb:94 — Automatic-group 422 specs hardcode `group_id: 1`, which relies on a seeded automatic group; if it's missing, Group.find raises and the specs fail or pass for the wrong reason instead of using `Fabricate(:group, automatic: true)`.\nB: spec/controllers/admin/groups_controller_spec.rb:957-960 — the \".remove_member\" test \"cannot remove members from automatic groups\" calls `xhr :put, :remove_member, group_id: 1, user_id: 42` with the same hardcoded group_id: 1 assumption, so it does not actually prove the automatic-group guard works against a group it knows to be automatic.\n\nPAIR 12:\nA: spec/controllers/admin/groups_controller_spec.rb:112 — Deleted \"succeeds silently when removing non-members\" coverage is not replaced; removing a non-member or unknown user_id via `group.users.delete(user_id)` is untested and likely raises RecordNotFound.\nB: spec/controllers/admin/groups_controller_spec.rb:91 — Deleted \"succeeds silently when adding non-existent users\" coverage is not replaced; add_members has no tests for unknown usernames, users who are already members, or a missing usernames param.\n\nPAIR 13:\nA: spec/controllers/admin/groups_controller_spec.rb:112 — Deleted \"succeeds silently when removing non-members\" coverage is not replaced; removing a non-member or unknown user_id via `group.users.delete(user_id)` is untested and likely raises RecordNotFound.\nB: spec/controllers/admin/groups_controller_spec.rb:91 — the change deletes the specs for adding unknown usernames and removing non-members and adds no replacements, so add_members silently skipping unknown usernames (`if user = User.find_by_username(username)`), re-adding existing members, and removing a user_id that is not a member have no test and give the admin no feedback (P2, conf 75)\n\nPAIR 14:\nA: spec/controllers/admin/groups_controller_spec.rb:112 — Deleted \"succeeds silently when removing non-members\" coverage is not replaced; removing a non-member or unknown user_id via `group.users.delete(user_id)` is untested and likely raises RecordNotFound.\nB: spec/controllers/admin/groups_controller_spec.rb:98 — deleted tests \"succeeds silently when adding non-existent users\" and duplicate/already-member handling have no replacement, so add_members' silent-skip branch for unknown usernames (app/controllers/admin/groups_controller.rb:65) is untested (P3, conf 65)\n\nPAIR 15:\nA: spec/controllers/admin/groups_controller_spec.rb:112 — Deleted \"succeeds silently when removing non-members\" coverage is not replaced; removing a non-member or unknown user_id via `group.users.delete(user_id)` is untested and likely raises RecordNotFound.\nB: spec/controllers/admin/groups_controller_spec.rb:98 — Dropped coverage for the previously-specified edge cases: adding a non-existent user, removing a non-member, and duplicate adds.\n\nPAIR 16:\nA: spec/controllers/admin/groups_controller_spec.rb:112 — Deleted \"succeeds silently when removing non-members\" coverage is not replaced; removing a non-member or unknown user_id via `group.users.delete(user_id)` is untested and likely raises RecordNotFound.\nB: spec/controllers/admin/groups_controller_spec.rb:98 — Removed coverage for silently ignoring nonexistent usernames when adding members; add_members has no nonexistent/duplicate-username test\n\nPAIR 17:\nA: spec/controllers/admin/groups_controller_spec.rb:56 — `group.name.should_not == \"WAT\"` passes when the update corrupts an automatic group's name to any value other than `WAT`, so the test reports success without verifying the promised invariant that the original name is preserved.\nB: spec/controllers/admin/groups_controller_spec.rb:57 — Silent-pass assertions: `Group.find(1)` (hardcoded seeded id) is already visible=true and `name.should_not == \"WAT\"` passes for any other value, so the spec cannot detect a broken update.\n\nPAIR 18:\nA: This diff deletes the 'succeeds silently when adding non-existent users' and 'succeeds silently when removing non-members' tests, but the replacement add_members/remove_member actions retain the silent-skip behavior with no replacement assertion anywhere in the rewritten spec (the only test file changed for this controller). add_members still skips unknown usernames without error (and now also silently skips whitespace-padded entries because usernames.split(',') is never stripped) and remove_member no-ops on a non-member user_id; nothing pins that contract, so a future change to 422 on unknown users — or a bug that silently drops real members — ships undetected.\nB: remove_member calls group.users.delete(user_id) followed by group.save, but the diff removes the patch-based incremental delete path (update_patch) that the old specs verified ('can make incremental deletes', 'succeeds silently when removing non-members') without any replacement coverage for non-existent user_ids. The new DELETE endpoint has no spec for removing a user who is not a member (or a non-existent user_id), so a regression in GroupUser join-row deletion would ship unnoticed; group.save on an association mutation is also a no-op placeholder that hides whether deletion actually failed.\n\nPAIR 19:\nA: Frontend addMembers/removeMember/findMembers have no .catch/error handlers and no loading/disabled state on buttons, so on failure the admin gets zero feedback and can repeatedly click Add firing duplicate requests\nB: Routes fire findMembers() and discard the promise: both the admin group route and the public group-members route previously returned the members promise from afterModel, but now setupController calls model.findMembers() fire-and-forget, so a failed request leaves a silently empty member list with no user feedback\n\nPAIR 20:\nA: members passes user-controlled (params[:limit] || 50).to_i and params[:offset].to_i straight into .limit/.offset with no bounds validation, and this diff newly applies user-controlled pagination to every group rather than only automatic ones. Any user who can see a group can hit GET /groups/:name/members.json?offset=-1 (or limit=-1) and get a Postgres 'OFFSET must not be negative' 500 on the public endpoint (error-log noise and cheap error-tracking spam), and an arbitrarily large limit serializes the entire membership of huge groups in a single response.\nB: The members endpoint passes params[:offset].to_i straight into the SQL offset clause without clamping, so offset=-1 produces a negative OFFSET that PostgreSQL rejects. A request to /groups/:name/members.json?offset=-1 raises ActiveRecord::StatementInvalid and returns a 500 instead of a 4xx, breaking any caller that paginates backwards past zero.\n",
+  "effort": "low",
+  "pairs": [
+   [
+    659,
+    1219
+   ],
+   [
+    603,
+    604
+   ],
+   [
+    603,
+    613
+   ],
+   [
+    660,
+    661
+   ],
+   [
+    704,
+    711
+   ],
+   [
+    704,
+    922
+   ],
+   [
+    751,
+    788
+   ],
+   [
+    831,
+    837
+   ],
+   [
+    831,
+    1205
+   ],
+   [
+    831,
+    1227
+   ],
+   [
+    1168,
+    1172
+   ],
+   [
+    1116,
+    1161
+   ],
+   [
+    1116,
+    1163
+   ],
+   [
+    1116,
+    1176
+   ],
+   [
+    1116,
+    1177
+   ],
+   [
+    1116,
+    1179
+   ],
+   [
+    1152,
+    1153
+   ],
+   [
+    151,
+    189
+   ],
+   [
+    897,
+    1089
+   ],
+   [
+    51,
+    214
+   ]
+  ]
+ },
+ "parsed_response": {
+  "pairs": [
+   {
+    "pair": 1,
+    "a": {
+     "mechanism": "usernames.split(\",\") with no cap and no strip; per-name find+insert",
+     "trigger": "admin submits unbounded list, or padded entries like \" bob\"",
+     "consequence": "long-running request; padded entries miss lookup and are silently skipped"
+    },
+    "b": {
+     "mechanism": "params.require(:usernames) split with no cap on element count",
+     "trigger": "admin submits tens of thousands of usernames",
+     "consequence": "long-running request holding a save transaction open"
+    },
+    "material_differences": [
+     "A adds a no-strip claim causing silent skipping of padded entries, absent from B",
+     "B adds a save-transaction-held-open consequence absent from A"
+    ],
+    "same": false,
+    "confidence": 0.85,
+    "reason": "Shared unbounded-input concern, but each adds material claims (strip/silent-skip vs transaction) the other lacks."
+   },
+   {
+    "pair": 2,
+    "a": {
+     "mechanism": "create/update read flat top-level params instead of group envelope",
+     "trigger": "existing admin API clients send nested group payload",
+     "consequence": "clients break with no versioning/backward compatibility"
+    },
+    "b": {
+     "mechanism": "PUT payload changed from nested group to flat; usernames no longer accepted on PUT",
+     "trigger": "external callers doing membership sync via old PUT with group[usernames]",
+     "consequence": "membership changes silently no-op"
+    },
+    "material_differences": [
+     "B adds a distinct material claim about membership/usernames handling moving to new actions with silent no-op behavior, absent from A"
+    ],
+    "same": false,
+    "confidence": 0.85,
+    "reason": "B is a compound report adding the membership silent-no-op claim not present in A."
+   },
+   {
+    "pair": 3,
+    "a": {
+     "mechanism": "create/update read only top-level params, dropping group envelope",
+     "trigger": "existing admin API clients",
+     "consequence": "breaking change without versioning/compatibility"
+    },
+    "b": {
+     "mechanism": "line 40 assignment drops nested group envelope without compatibility handling",
+     "trigger": "existing PUT callers",
+     "consequence": "name/membership edits ignored and group hidden by line 38"
+    },
+    "material_differences": [
+     "B adds claims about membership edits being ignored and the group being hidden by line 38, absent from A",
+     "A frames consequence as generic API break; B specifies particular silent misbehavior"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "Overlapping root cause (envelope dropped), but B adds material claims (membership edits, line-38 hiding) beyond A."
+   },
+   {
+    "pair": 4,
+    "a": {
+     "mechanism": "per-username find+insert with no dedupe or existing-member check",
+     "trigger": "re-submitting a username already in the group (input never cleared)",
+     "consequence": "uniqueness constraint fails the whole request; non-idempotent"
+    },
+    "b": {
+     "mechanism": "group.add per-username with no transaction or uniqueness guard",
+     "trigger": "duplicate username in same request or two concurrent add_members requests",
+     "consequence": "race read-then-insert with no enforced invariant, duplicate group_users rows"
+    },
+    "material_differences": [
+     "A claims the uniqueness constraint exists and fails the request; B claims no enforced invariant and duplicate rows result — conflicting mechanisms/consequences",
+     "Different triggers: sequential re-submit vs same-request duplicates/concurrency"
+    ],
+    "same": false,
+    "confidence": 0.85,
+    "reason": "Consequences conflict (constraint aborts request vs duplicates persisted); different triggering conditions."
+   },
+   {
+    "pair": 5,
+    "a": {
+     "mechanism": "remove_member calls users.delete then group.save which does nothing",
+     "trigger": "remove_member invocation",
+     "consequence": "misleadingly implies delete not yet persisted"
+    },
+    "b": {
+     "mechanism": "add_members/remove_member call group.save after already-persisting mutations",
+     "trigger": "add_members or remove_member",
+     "consequence": "unnecessary save; duplicated save/render_json_error block"
+    },
+    "material_differences": [
+     "B covers add_members as well and adds a code-duplication claim absent from A"
+    ],
+    "same": false,
+    "confidence": 0.75,
+    "reason": "B is a compound report covering both actions plus a duplication claim; A is only the remove_member subset."
+   },
+   {
+    "pair": 6,
+    "a": {
+     "mechanism": "group.save after users.delete does nothing for the removal",
+     "trigger": "remove_member",
+     "consequence": "misleadingly implies delete not persisted (no-op save)"
+    },
+    "b": {
+     "mechanism": "group.save after association mutation is unnecessary and can trigger unrelated group validations",
+     "trigger": "add_members/remove_member membership operations",
+     "consequence": "unrelated validations and misleading errors can fire"
+    },
+    "material_differences": [
+     "A claims the save does nothing; B claims it actively triggers unrelated validations — conflicting mechanisms",
+     "B covers both actions; A only remove_member"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "The claimed behavior of the save (no-op vs triggering validations) conflicts materially."
+   },
+   {
+    "pair": 7,
+    "a": {
+     "mechanism": "uncapped limit applied to every group, client-controlled",
+     "trigger": "anonymous request with limit=10000000",
+     "consequence": "server loads/serializes entire user base; DoS and bulk enumeration"
+    },
+    "b": {
+     "mechanism": "client limit with no upper/lower clamp on public endpoint",
+     "trigger": "limit=10000000, or limit=-1/offset=-1",
+     "consequence": "full user enumeration/DoS; plus negative values cause PostgreSQL exception and 500 with log noise"
+    },
+    "material_differences": [
+     "B adds a distinct claim: negative limit/offset raise a PostgreSQL error producing a 500, absent from A"
+    ],
+    "same": false,
+    "confidence": 0.85,
+    "reason": "B is a compound report adding the negative-value 500 claim not in A."
+   },
+   {
+    "pair": 8,
+    "a": {
+     "mechanism": "server echoes client limit into meta.limit; frontend stores limit=0 and divides by it",
+     "trigger": "limit=0 stored in model",
+     "consequence": "NaN/Infinity page numbers; pagination permanently broken for that model instance"
+    },
+    "b": {
+     "mechanism": "offset/limit passed unvalidated to SQL",
+     "trigger": "negative offset/limit or huge limit",
+     "consequence": "PostgreSQL error 500 and full member table dump"
+    },
+    "material_differences": [
+     "Completely different mechanisms: frontend echo/division-by-zero vs SQL injection of unclamped values",
+     "Different triggers and consequences"
+    ],
+    "same": false,
+    "confidence": 0.95,
+    "reason": "Distinct defects even though both involve the limit param."
+   },
+   {
+    "pair": 9,
+    "a": {
+     "mechanism": "limit echoed in meta.limit, stored by frontend, division by zero",
+     "trigger": "limit=0",
+     "consequence": "NaN/Infinity pagination broken in frontend model"
+    },
+    "b": {
+     "mechanism": "raw unbounded limit/offset accepted on public endpoint",
+     "trigger": "?limit=10000000 or negative values",
+     "consequence": "unbounded query/DoS and SQL error 500"
+    },
+    "material_differences": [
+     "Different mechanisms (frontend state corruption vs SQL validation/DoS)",
+     "Different triggers and consequences"
+    ],
+    "same": false,
+    "confidence": 0.95,
+    "reason": "Different defects involving the same parameter."
+   },
+   {
+    "pair": 10,
+    "a": {
+     "mechanism": "limit echoed to frontend and stored; division by stored limit",
+     "trigger": "limit=0",
+     "consequence": "NaN/Infinity page numbers, broken pagination"
+    },
+    "b": {
+     "mechanism": "uncapped limit/offset on members endpoint",
+     "trigger": "?limit=999999999 or ?offset=1000000000",
+     "consequence": "full membership serialization or Postgres walking/discarding entire member set"
+    },
+    "material_differences": [
+     "Different mechanisms, triggers, and consequences (frontend arithmetic vs SQL resource exhaustion)"
+    ],
+    "same": false,
+    "confidence": 0.95,
+    "reason": "Unrelated defects despite shared parameter."
+   },
+   {
+    "pair": 11,
+    "a": {
+     "mechanism": "422 specs hardcode group_id:1 relying on seeded automatic group",
+     "trigger": "seeded automatic group missing",
+     "consequence": "Group.find raises; specs fail or pass for wrong reason"
+    },
+    "b": {
+     "mechanism": "remove_member test hardcodes group_id:1 without fabricating an automatic group",
+     "trigger": "running the remove_member automatic-group spec",
+     "consequence": "test does not prove the automatic-group guard works"
+    },
+    "material_differences": [
+     "Different spec tests (create/update 422 specs at line 94 vs remove_member test at 957-960)",
+     "Different claimed consequences (spec failure vs test not proving guard)"
+    ],
+    "same": false,
+    "confidence": 0.8,
+    "reason": "Same coding pattern but different test locations and claims — not the same issue instance."
+   },
+   {
+    "pair": 12,
+    "a": {
+     "mechanism": "removed coverage for removing non-members via users.delete",
+     "trigger": "remove_member with non-member/unknown user_id",
+     "consequence": "untested; likely RecordNotFound"
+    },
+    "b": {
+     "mechanism": "removed coverage for adding non-existent users",
+     "trigger": "add_members with unknown usernames",
+     "consequence": "add_members edge cases untested"
+    },
+    "material_differences": [
+     "A concerns remove_member; B concerns add_members — different actions and code paths"
+    ],
+    "same": false,
+    "confidence": 0.9,
+    "reason": "Different actions, different missing coverage."
+   },
+   {
+    "pair": 13,
+    "a": {
+     "mechanism": "missing spec for removing non-members/unknown user_id",
+     "trigger": "remove_member edge cases",
+     "consequence": "untested, likely RecordNotFound"
+    },
+    "b": {
+     "mechanism": "specs deleted for adding unknown usernames, re-adding members, removing non-members",
+     "trigger": "add_members and remove_member edge cases",
+     "consequence": "no tests, admin gets no feedback"
+    },
+    "material_differences": [
+     "B is compound, covering add_members unknown usernames and duplicates in addition to A's removal claim"
+    ],
+    "same": false,
+    "confidence": 0.75,
+    "reason": "B is a compound report; A is only a subset of its claims."
+   },
+   {
+    "pair": 14,
+    "a": {
+     "mechanism": "missing spec for removing non-members/unknown user_id",
+     "trigger": "remove_member edge cases",
+     "consequence": "untested, likely RecordNotFound"
+    },
+    "b": {
+     "mechanism": "deleted tests for unknown usernames and duplicate/already-member handling",
+     "trigger": "add_members edge cases",
+     "consequence": "silent-skip branch untested"
+    },
+    "material_differences": [
+     "A is about remove_member; B is about add_members — different code paths and behaviors"
+    ],
+    "same": false,
+    "confidence": 0.85,
+    "reason": "Different actions despite both being about deleted edge-case specs."
+   },
+   {
+    "pair": 15,
+    "a": {
+     "mechanism": "missing spec for removing non-members/unknown user_id",
+     "trigger": "remove_member edge cases",
+     "consequence": "untested, likely RecordNotFound"
+    },
+    "b": {
+     "mechanism": "dropped specs for adding non-existent user, removing non-member, duplicate adds",
+     "trigger": "add_members and remove_member edge cases",
+     "consequence": "no replacement coverage"
+    },
+    "material_differences": [
+     "B is compound covering add-side cases beyond A's removal-only claim"
+    ],
+    "same": false,
+    "confidence": 0.75,
+    "reason": "B adds material claims (add non-existent, duplicate adds) beyond A's subset."
+   },
+   {
+    "pair": 16,
+    "a": {
+     "mechanism": "missing spec for removing non-members/unknown user_id",
+     "trigger": "remove_member edge cases",
+     "consequence": "untested, likely RecordNotFound"
+    },
+    "b": {
+     "mechanism": "removed coverage for silently ignoring nonexistent usernames in add_members",
+     "trigger": "add_members unknown/duplicate usernames",
+     "consequence": "no nonexistent/duplicate-username test"
+    },
+    "material_differences": [
+     "A concerns remove_member removal path; B concerns add_members unknown-username handling"
+    ],
+    "same": false,
+    "confidence": 0.85,
+    "reason": "Different actions and behaviors."
+   },
+   {
+    "pair": 17,
+    "a": {
+     "mechanism": "assertion name.should_not == \"WAT\" passes for any value other than WAT",
+     "trigger": "automatic group update spec",
+     "consequence": "test passes without verifying original name preserved"
+    },
+    "b": {
+     "mechanism": "name.should_not == \"WAT\" passes for any other value; Group.find(1) hardcoded seeded id already visible=true",
+     "trigger": "same update spec",
+     "consequence": "spec cannot detect a broken update (silent pass)"
+    },
+    "material_differences": [
+     "B adds hardcoded Group.find(1)/visibility detail, but same spec, same weak-assertion mechanism and consequence"
+    ],
+    "same": true,
+    "confidence": 0.8,
+    "reason": "Same test, same weak assertion mechanism, same silent-pass consequence; B's extra detail is elaboration of the same claim."
+   },
+   {
+    "pair": 18,
+    "a": {
+     "mechanism": "deleted silent-skip specs with no replacement; add_members silently skips unknown and whitespace-padded usernames; remove_member no-ops",
+     "trigger": "rewritten spec lacks assertions pinning silent-skip contract",
+     "consequence": "future 422 change or silent member-drop ships undetected"
+    },
+    "b": {
+     "mechanism": "removed patch-based incremental delete path and its specs; no spec for removing non-existent user_ids; group.save is a no-op placeholder",
+     "trigger": "new DELETE endpoint",
+     "consequence": "join-row deletion regression ships unnoticed"
+    },
+    "material_differences": [
+     "A adds whitespace-strip silent-skip claim absent from B",
+     "B adds update_patch removal and group.save no-op claims absent from A",
+     "Different focus: contract-pinning vs regression-detection framing"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "Both concern missing coverage, but each adds distinct material claims about different behaviors."
+   },
+   {
+    "pair": 19,
+    "a": {
+     "mechanism": "frontend addMembers/removeMember/findMembers lack .catch handlers and loading/disabled states",
+     "trigger": "request failure",
+     "consequence": "no feedback; repeated clicks fire duplicate requests"
+    },
+    "b": {
+     "mechanism": "setupController calls model.findMembers() fire-and-forget, discarding the promise previously returned from afterModel",
+     "trigger": "failed findMembers request",
+     "consequence": "silently empty member list with no user feedback"
+    },
+    "material_differences": [
+     "Different code locations and mechanisms (component error handling vs route promise handling)",
+     "A adds duplicate-click/repeated-request consequence absent from B; B adds empty-member-list consequence"
+    ],
+    "same": false,
+    "confidence": 0.85,
+    "reason": "Different defects: missing frontend error handling vs route-level discarded promise."
+   },
+   {
+    "pair": 20,
+    "a": {
+     "mechanism": "user-controlled limit/offset passed unvalidated into .limit/.offset, newly applied to all groups",
+     "trigger": "offset=-1/limit=-1 or huge limit",
+     "consequence": "Postgres 'must not be negative' 500 plus arbitrary large limit serializes entire membership"
+    },
+    "b": {
+     "mechanism": "params[:offset].to_i passed straight into SQL offset without clamping",
+     "trigger": "offset=-1 request",
+     "consequence": "negative OFFSET rejected by PostgreSQL; ActiveRecord::StatementInvalid 500 instead of 4xx"
+    },
+    "material_differences": [
+     "A is compound: adds unbounded-limit serialization/DoS claim and newly-applies-to-all-groups claim beyond B's negative-offset-only report"
+    ],
+    "same": false,
+    "confidence": 0.75,
+    "reason": "B's claim is a strict subset of A's compound report, which adds the unbounded-limit material claim."
+   }
+  ]
+ },
+ "usage": {
+  "glm-5.3-background": {
+   "input_tokens": 2976,
+   "cache_read_input_tokens": 3712,
+   "cache_creation_input_tokens": 0,
+   "output_tokens": 6217,
+   "reasoning_output_tokens": 1702,
+   "cost_usd": 0.0,
+   "total_tokens": 14607
+  }
+ },
+ "status": "complete",
+ "error_type": null,
+ "elapsed_s": 67.73657178878784
+}

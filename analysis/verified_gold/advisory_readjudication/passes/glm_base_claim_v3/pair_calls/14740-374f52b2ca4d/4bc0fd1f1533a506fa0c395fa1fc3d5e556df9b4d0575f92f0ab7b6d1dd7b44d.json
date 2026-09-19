@@ -1,0 +1,333 @@
+{
+ "url": "https://github.com/calcom/cal.com/pull/14740",
+ "pass_digest": "9c5f733ce7a3f996c90c67f262cc4a77e2b234bc415c197afa7c73477ad320be",
+ "request_sha256": "4bc0fd1f1533a506fa0c395fa1fc3d5e556df9b4d0575f92f0ab7b6d1dd7b44d",
+ "request": {
+  "url": "https://github.com/calcom/cal.com/pull/14740",
+  "model": "glm-5.3-background",
+  "system": "You are clustering code review findings from one PR. Always respond with valid JSON.",
+  "prompt": "You are clustering code review findings from the same PR. For each PAIR below, decide whether the two findings describe the SAME underlying issue — same root cause in the same code location. Different wording is fine. A finding about a DIFFERENT defect in the same file or function is NOT the same issue. Severity or aspect differences of the same root cause ARE the same issue.\n\n\nFor THIS scoring pass, duplicate equivalence is stricter than sharing a root cause.\nYou must compare the COMPLETE MATERIAL CLAIMS, including mechanism, triggering\nconditions, execution path, and consequence. The same line or broad concern does\nnot establish equivalence. A report of wrong-category selection, a case/rename\nmismatch, a crash, and a silent fallback are different claims even at one lookup.\nAn inactive/unbound API concern and an alleged active user-facing failure differ.\nA compound report with an additional material claim does NOT equal its subset.\nDifferences only in wording, severity, or hedging do not create separate claims.\nIf the claimed mechanisms, triggers or consequences conflict, or one report adds\nan unsupported/different material factual claim, return same=false. You are NOT\nverifying which claim is true; do not repair or reinterpret either report to make\nthem match. If unsure whether their full claims are equivalent, return false.\n\nFor every numbered pair, extract what A and B actually CLAIM into mechanism,\ntrigger and consequence. Then list material_differences and give your equivalence\nverdict, confidence and reason. same=true requires no material differences.\nReturn ONLY this JSON object, with EVERY pair index exactly once:\n{\"pairs\":[{\"pair\":1,\"a\":{\"mechanism\":\"...\",\"trigger\":\"...\",\"consequence\":\"...\"},\"b\":{\"mechanism\":\"...\",\"trigger\":\"...\",\"consequence\":\"...\"},\"material_differences\":[],\"same\":true,\"confidence\":0.9,\"reason\":\"...\"}]}\n\nPAIRS:\nPAIR 1:\nA: packages/trpc/server/routers/viewer/bookings/addGuests.schema.ts:5 — The unbounded guests array permits arbitrarily large database writes, calendar payloads, translation work, and concurrent email fan-out per request.\nB: Unbounded guests array (no max() on z.array in addGuests.schema.ts) with no rate limiting, combined with attendee authorization path — any authenticated attendee on any booking can create thousands of attendee rows and trigger thousands of invite emails in a single API call (email-bombing vector)\n\nPAIR 2:\nA: packages/trpc/server/routers/viewer/bookings/addGuests.schema.ts:5 — The unbounded guests array permits arbitrarily large database writes, calendar payloads, translation work, and concurrent email fan-out per request.\nB: Unbounded guests array size on the input schema — no .max() on z.array(z.string().email()), allowing a single authenticated request to create arbitrary attendees and fan out emails and calendar writes (addGuests.schema.ts:5)\n\nPAIR 3:\nA: The write `prisma.booking.update({ where: { id: bookingId } })` re-derives authorization only from the earlier in-memory check with no ownership predicate in the update's where clause, and the guests are created before calendar/email work with no rollback path. Attendee rows are persisted even if eventManager.updateCalendarAttendees or email sending subsequently fails, leaving the booking's stored attendee list, the remote calendar event's attendee list, and the sent invitations permanently out of sync (added guests see the event in DB responses but were never invited or calendared).\nB: The booking row is updated with createMany of attendees but the new attendee emails are never pushed to the existing calendar event attendees before eventManager.updateCalendarAttendees, and guests already present on the booking's calendar entry are not reconciled with the evt attendee list ordering. Depending on EventManager.updateCalendarAttendees semantics, the calendar event can be rebuilt with an attendee list that includes the just-created DB rows, so any failure between the Prisma update and the calendar update leaves the database and the external calendar event permanently out of sync (attendees on the booking but not invited on the calendar event), with no rollback of the created Attendee rows.\n\nPAIR 4:\nA: The write `prisma.booking.update({ where: { id: bookingId } })` re-derives authorization only from the earlier in-memory check with no ownership predicate in the update's where clause, and the guests are created before calendar/email work with no rollback path. Attendee rows are persisted even if eventManager.updateCalendarAttendees or email sending subsequently fails, leaving the booking's stored attendee list, the remote calendar event's attendee list, and the sent invitations permanently out of sync (added guests see the event in DB responses but were never invited or calendared).\nB: Inconsistent error handling for side effects after the DB commit: `eventManager.updateCalendarAttendees` runs unguarded while the adjacent email call is wrapped in a swallow-everything catch; if the calendar update throws, the mutation rejects even though guests were persisted, and the user's retry hits the confusing `emails_must_be_unique_valid` BAD_REQUEST\n\nPAIR 5:\nA: The write `prisma.booking.update({ where: { id: bookingId } })` re-derives authorization only from the earlier in-memory check with no ownership predicate in the update's where clause, and the guests are created before calendar/email work with no rollback path. Attendee rows are persisted even if eventManager.updateCalendarAttendees or email sending subsequently fails, leaving the booking's stored attendee list, the remote calendar event's attendee list, and the sent invitations permanently out of sync (added guests see the event in DB responses but were never invited or calendared).\nB: The handler's side effects aren't atomic: DB write → external calendar update (which can throw after persistence, leaving guests saved with an error returned to the client) → swallowed emails; separating an `addGuestsToBooking` service from the tRPC handler would make the sequencing and failure modes explicit.\n\nPAIR 6:\nA: The BAD_REQUEST message 'emails_must_be_unique_valid' is reused for the all-guests-filtered condition, where the emails are actually unique and valid — they were merely already attending or blacklisted. A user who submits an already-invited guest is told their email must be unique and valid, misdirecting them to retype a valid address instead of revealing the guest is already on the booking; after the unguarded calendar-failure path it also misreports an already-persisted add as an input-format error, sending debugging in the wrong direction.\nB: The BAD_REQUEST thrown when uniqueGuests is empty reuses 'emails_must_be_unique_valid', but the actual condition is that every submitted guest was already an attendee or blacklisted — not that the emails are malformed or duplicated. A user who re-submits valid, unique addresses — for example retrying after the calendar-update failure in the non-atomic flow — is told their correctly-formatted emails are invalid, misdirecting debugging and hiding that the first attempt already added the guests.\n\nPAIR 7:\nA: The BAD_REQUEST message 'emails_must_be_unique_valid' is reused for the all-guests-filtered condition, where the emails are actually unique and valid — they were merely already attending or blacklisted. A user who submits an already-invited guest is told their email must be unique and valid, misdirecting them to retype a valid address instead of revealing the guest is already on the booking; after the unguarded calendar-failure path it also misreports an already-persisted add as an input-format error, sending debugging in the wrong direction.\nB: When uniqueGuests.length === 0 after filtering, the handler throws TRPCError BAD_REQUEST \"emails_must_be_unique_valid\", but that condition also covers the case where every requested guest already exists as an attendee. A user who retries after a partially-failed earlier request (attendees persisted, calendar/emails failed — see the no-rollback finding) gets 'emails must be unique and valid' even though their input is perfectly valid and unique; the wrong-shape, wrong-content error misdirects debugging and blocks the retry that would be needed to complete the calendar update and emails.\n\nPAIR 8:\nA: The existing-attendee dedup compares guest === attendee.email case-sensitively while attendee emails are stored exactly as entered, so the write path and the compare path disagree on canonical form. Re-adding an existing attendee with different casing (John@X.com vs john@x.com) passes the filter, creating a duplicate Attendee row for the same person, who then receives both a full AttendeeScheduledEmail (as a 'new' guest) and an AttendeeAddGuestsEmail (as an existing one) for the same event.\nB: Dedupe vs existing attendees uses exact match, so case/whitespace variants create duplicate attendees for the same person\n\nPAIR 9:\nA: The existing-attendee dedup compares guest === attendee.email case-sensitively while attendee emails are stored exactly as entered, so the write path and the compare path disagree on canonical form. Re-adding an existing attendee with different casing (John@X.com vs john@x.com) passes the filter, creating a duplicate Attendee row for the same person, who then receives both a full AttendeeScheduledEmail (as a 'new' guest) and an AttendeeAddGuestsEmail (as an existing one) for the same event.\nB: P2 — Server schema is weaker than the client contract: `guests` array has no uniqueness validation or case normalization, so duplicate or case-variant emails produce duplicate attendee rows, duplicate emails, and duplicated ICS attendees\n\nPAIR 10:\nA: The isAttendee permission check compares attendee.email === user.email with exact case-sensitive string equality, though attendee emails are stored exactly as typed at booking time. A user whose account email casing differs from the mixed-case email they booked with (attendee rows are not normalized) is denied with FORBIDDEN even though they are a legitimate attendee of the booking, while the same email matched case-insensitively elsewhere in the codebase.\nB: Attendee identity check uses exact non-normalized email match (attendee.email === user.email), so case differences can cause legitimate organizers/co-attendees to fail the isAttendee check\n\nPAIR 11:\nA: Server schema lacks the intra-request uniqueness validation the client enforces — duplicate emails like `[\"dup@x.com\", \"dup@x.com\"]` pass both the server schema and the handler's `uniqueGuests` filter (which only dedups against existing attendees), hitting `createMany` and either violating the `(bookingId, email)` unique constraint (unhandled Prisma error → 500) or creating duplicate attendee rows and duplicate emails/invites\nB: Server-side validation gap: input array is not deduped or case-normalized, so User@Example.com vs user@example.com creates duplicate attendee rows\n\nPAIR 12:\nA: Server schema lacks the intra-request uniqueness validation the client enforces — duplicate emails like `[\"dup@x.com\", \"dup@x.com\"]` pass both the server schema and the handler's `uniqueGuests` filter (which only dedups against existing attendees), hitting `createMany` and either violating the `(bookingId, email)` unique constraint (unhandled Prisma error → 500) or creating duplicate attendee rows and duplicate emails/invites\nB: Uniqueness/dedupe logic scattered across three layers — duplicates within the input guests array are not filtered server-side; server schema should be the single source of truth\n\nPAIR 13:\nA: sendAddGuestsEmails sends emails to all attendees (existing + new) plus organizer and team members on every invocation, awaited synchronously in the request path, causing response latency to grow linearly with attendee count and quadratic total email volume\nB: Synchronous email sending in mutation path: await sendAddGuestsEmails serially renders N email payloads, multiplying latency with attendee count; should be backgrounded/queued\n",
+  "effort": "low",
+  "pairs": [
+   [
+    1279,
+    1403
+   ],
+   [
+    1279,
+    1405
+   ],
+   [
+    134,
+    249
+   ],
+   [
+    134,
+    710
+   ],
+   [
+    134,
+    1387
+   ],
+   [
+    236,
+    237
+   ],
+   [
+    236,
+    360
+   ],
+   [
+    288,
+    594
+   ],
+   [
+    288,
+    809
+   ],
+   [
+    298,
+    510
+   ],
+   [
+    1346,
+    1350
+   ],
+   [
+    1346,
+    1408
+   ],
+   [
+    1339,
+    1363
+   ]
+  ]
+ },
+ "parsed_response": {
+  "pairs": [
+   {
+    "pair": 1,
+    "a": {
+     "mechanism": "unbounded z.array in addGuests.schema.ts allows arbitrarily large payloads per request",
+     "trigger": "single request with huge guests array",
+     "consequence": "large DB writes, calendar payloads, translation work, concurrent email fan-out"
+    },
+    "b": {
+     "mechanism": "unbounded guests array with no max(), combined with attendee authorization path and no rate limiting",
+     "trigger": "any authenticated attendee on any booking",
+     "consequence": "thousands of attendee rows created and thousands of invite emails in one call (email-bombing vector)"
+    },
+    "material_differences": [
+     "B adds authorization-path claim (any attendee can invoke) and rate limiting absence as part of the exploit vector",
+     "B frames as security/email-bombing vector with authorization basis; A is a generic resource-exhaustion concern"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "Same schema line, but B adds material claims about the attendee authorization path and absence of rate limiting forming an email-bombing attack vector, beyond A's generic unbounded-input concern."
+   },
+   {
+    "pair": 2,
+    "a": {
+     "mechanism": "unbounded guests array permits arbitrarily large DB writes, calendar payloads, translation work, concurrent email fan-out",
+     "trigger": "single request with large guests array",
+     "consequence": "arbitrarily large side-effect fan-out per request"
+    },
+    "b": {
+     "mechanism": "no .max() on z.array(z.string().email()) in addGuests.schema.ts:5",
+     "trigger": "single authenticated request",
+     "consequence": "arbitrary attendees created, emails and calendar writes fanned out"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Both claim the same schema line lacks a bound, same trigger (single request), same consequence (attendee/DB/email fan-out); no additional material claims in B."
+   },
+   {
+    "pair": 3,
+    "a": {
+     "mechanism": "no ownership predicate in update where clause; guests created before calendar/email work with no rollback",
+     "trigger": "failure of updateCalendarAttendees or email sending after persistence",
+     "consequence": "DB attendee list, calendar event attendee list, and sent invitations permanently out of sync; guests see event in DB but never invited/calendared"
+    },
+    "b": {
+     "mechanism": "new attendee emails not pushed to existing calendar event attendees before updateCalendarAttendees; attendee ordering not reconciled; no rollback of Attendee rows",
+     "trigger": "failure between Prisma update and calendar update",
+     "consequence": "DB and external calendar event permanently out of sync (attendees on booking but not on calendar event)"
+    },
+    "material_differences": [
+     "A centers on missing ownership predicate in the update where clause; B does not claim this",
+     "B claims specific calendar-attendee-list mechanics (emails not pushed, ordering not reconciled) absent from A",
+     "A includes email-sending failure in the desync path; B only considers failure between Prisma update and calendar update"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "Both touch non-atomicity/rollback around the same write, but A's claims include missing ownership predicate and email-failure desync, while B makes distinct calendar-attendee-list mechanics claims; the mechanisms diverge materially."
+   },
+   {
+    "pair": 4,
+    "a": {
+     "mechanism": "no ownership predicate in update where; guests persisted before calendar/email with no rollback",
+     "trigger": "updateCalendarAttendees or email sending fails after DB commit",
+     "consequence": "DB, calendar, and invitations permanently out of sync; guests see event in DB responses but were never invited"
+    },
+    "b": {
+     "mechanism": "inconsistent error handling: updateCalendarAttendees unguarded while email call wrapped in swallow-everything catch",
+     "trigger": "calendar update throws after persistence",
+     "consequence": "mutation rejects though guests persisted; retry hits confusing emails_must_be_unique_valid BAD_REQUEST"
+    },
+    "material_differences": [
+     "A claims missing ownership predicate and tri-way desync including sent invitations; B does not",
+     "B claims the specific guard asymmetry (unguarded calendar vs swallowed email) and the retry-hits-BAD_REQUEST consequence; A does not",
+     "A's consequence is silent out-of-sync state; B's is a client-facing error plus confusing retry"
+    ],
+    "same": false,
+    "confidence": 0.75,
+    "reason": "Both involve post-commit failure of the calendar update, but A and B assert different mechanisms (ownership predicate / desync vs guard asymmetry / misleading retry error) with different consequences; overlap in trigger does not establish equivalence."
+   },
+   {
+    "pair": 5,
+    "a": {
+     "mechanism": "no ownership predicate in update where; guests created before calendar/email with no rollback path",
+     "trigger": "calendar update or email sending fails after persistence",
+     "consequence": "DB, calendar event, and invitations permanently out of sync; guests see event in DB but never invited/calendared"
+    },
+    "b": {
+     "mechanism": "side effects not atomic: DB write → calendar update (can throw after persistence) → swallowed emails",
+     "trigger": "calendar update throws after persistence",
+     "consequence": "guests saved with an error returned to client; suggests extracting a service to make sequencing/failure modes explicit"
+    },
+    "material_differences": [
+     "A claims missing ownership predicate as part of the root cause; B does not",
+     "A's consequence is a silent tri-way desync (including email/invitation state); B's is error returned to client with guests persisted",
+     "B adds a refactoring/architecture recommendation claim"
+    ],
+    "same": false,
+    "confidence": 0.65,
+    "reason": "Both describe non-atomic post-commit failure, but A includes the ownership-predicate claim and a silent permanent desync consequence, while B claims client-visible rejection and an architectural recommendation; the full claims are not equivalent."
+   },
+   {
+    "pair": 6,
+    "a": {
+     "mechanism": "BAD_REQUEST 'emails_must_be_unique_valid' reused for the all-guests-filtered condition where emails are actually unique/valid (already attending or blacklisted)",
+     "trigger": "all guests filtered out because already attending or blacklisted; also post-calendar-failure retry",
+     "consequence": "user misdirected to retype valid address; misreports persisted add as input-format error"
+    },
+    "b": {
+     "mechanism": "'emails_must_be_unique_valid' thrown when uniqueGuests is empty, but condition is all guests already attendee or blacklisted, not malformed/duplicated",
+     "trigger": "all guests already attendees/blacklisted; also retry after calendar-update failure in non-atomic flow",
+     "consequence": "user with valid unique emails told invalid; misdirects debugging, hides first attempt already added guests"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.92,
+    "reason": "Both claim the same misleading error message for the same filter-empty condition with the same retry-after-calendar-failure scenario and same debugging-misdirection consequence."
+   },
+   {
+    "pair": 7,
+    "a": {
+     "mechanism": "'emails_must_be_unique_valid' reused for all-guests-filtered condition; emails actually unique/valid but already attending/blacklisted",
+     "trigger": "already-invited guest submitted; also retry after unguarded calendar failure",
+     "consequence": "misdirected to retype valid address; misreports persisted add as input-format error"
+    },
+    "b": {
+     "mechanism": "uniqueGuests.length === 0 throws 'emails_must_be_unique_valid' but also covers all-requested-guests-already-exist case",
+     "trigger": "all guests already attendees; retry after partially-failed request (attendees persisted, calendar/emails failed)",
+     "consequence": "valid unique input reported invalid; wrong-shape error misdirects debugging, blocks retry needed to complete calendar/emails"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Same message, same trigger condition (all guests filtered as already-attendees), same retry-after-partial-failure scenario, same misleading-debugging consequence."
+   },
+   {
+    "pair": 8,
+    "a": {
+     "mechanism": "dedup compares guest === attendee.email case-sensitively while emails stored as entered",
+     "trigger": "re-adding attendee with different casing (John@X.com vs john@x.com)",
+     "consequence": "duplicate Attendee row; person receives both AttendeeScheduledEmail and AttendeeAddGuestsEmail for same event"
+    },
+    "b": {
+     "mechanism": "dedupe vs existing attendees uses exact match",
+     "trigger": "case/whitespace variants of existing attendee email",
+     "consequence": "duplicate attendees for same person"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.88,
+    "reason": "Same mechanism (case-sensitive exact dedup against stored emails), same trigger (case variants); B is a less detailed version, whitespace mention is a minor variant of the same claim."
+   },
+   {
+    "pair": 9,
+    "a": {
+     "mechanism": "case-sensitive dedup against non-normalized stored emails lets re-added attendee pass filter",
+     "trigger": "re-adding existing attendee with different casing",
+     "consequence": "duplicate Attendee row; person receives both AttendeeScheduledEmail and AttendeeAddGuestsEmail"
+    },
+    "b": {
+     "mechanism": "server schema weaker than client contract: guests array has no uniqueness validation or case normalization",
+     "trigger": "duplicate or case-variant emails in input",
+     "consequence": "duplicate attendee rows, duplicate emails, duplicated ICS attendees"
+    },
+    "material_differences": [
+     "A locates the defect in the handler's existing-attendee dedup comparison; B locates it in the server schema lacking uniqueness validation and normalization (a schema-level claim covering exact duplicates within the request as well)",
+     "B's consequence includes duplicated ICS attendees, which A does not claim",
+     "A's consequence is two specific different email types to the same person; B's is generic duplicate emails"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "Both concern case-variant duplicates, but A's root cause is the handler's dedup comparison against existing attendees, while B's is a missing schema-level uniqueness/normalization validation; B also covers exact duplicates and ICS duplication. Mechanisms and scope differ materially."
+   },
+   {
+    "pair": 10,
+    "a": {
+     "mechanism": "isAttendee check uses case-sensitive attendee.email === user.email while attendee emails stored as typed at booking time",
+     "trigger": "account email casing differs from mixed-case email used at booking",
+     "consequence": "legitimate attendee denied with FORBIDDEN though same email matched case-insensitively elsewhere"
+    },
+    "b": {
+     "mechanism": "attendee identity check uses exact non-normalized email match",
+     "trigger": "case differences between stored attendee email and user email",
+     "consequence": "legitimate organizers/co-attendees fail isAttendee check"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Same check, same non-normalized exact-match mechanism, same case-difference trigger, same denial consequence; wording detail differences only."
+   },
+   {
+    "pair": 11,
+    "a": {
+     "mechanism": "no intra-request uniqueness validation: exact duplicates pass schema and uniqueGuests filter (which only dedups vs existing attendees), hitting createMany",
+     "trigger": "duplicate emails like [dup@x.com, dup@x.com] in one request",
+     "consequence": "violates (bookingId, email) unique constraint → unhandled Prisma 500, or duplicate rows and duplicate emails/invites"
+    },
+    "b": {
+     "mechanism": "input array not deduped or case-normalized server-side",
+     "trigger": "User@Example.com vs user@example.com in one request",
+     "consequence": "duplicate attendee rows"
+    },
+    "material_differences": [
+     "A's trigger is exact same-case duplicates hitting the DB unique constraint with possible 500; B's trigger is case variants",
+     "A claims unhandled Prisma constraint violation → 500; B does not",
+     "B claims case normalization absent; A's claim is only intra-request exact-duplicate uniqueness"
+    ],
+    "same": false,
+    "confidence": 0.65,
+    "reason": "Both are server-side dedup gaps, but A claims exact duplicates trigger the DB unique constraint with a 500 crash path, while B claims case-variant inputs create duplicates; different triggering conditions and consequences."
+   },
+   {
+    "pair": 12,
+    "a": {
+     "mechanism": "server schema lacks intra-request uniqueness validation; exact duplicates pass schema and uniqueGuests filter, hitting createMany",
+     "trigger": "duplicate emails like [dup@x.com, dup@x.com] in one request",
+     "consequence": "unique constraint violation → unhandled Prisma 500, or duplicate rows and duplicate emails/invites"
+    },
+    "b": {
+     "mechanism": "uniqueness/dedupe logic scattered across three layers; input duplicates not filtered server-side; schema should be single source of truth",
+     "trigger": "duplicates within input guests array",
+     "consequence": "duplicates not filtered server-side; architectural observation"
+    },
+    "material_differences": [
+     "A claims concrete consequence of unique-constraint violation → 500 or duplicate rows/emails; B makes an architectural layering claim without that specific failure",
+     "B adds the three-layer-scatter / single-source-of-truth claim absent from A"
+    ],
+    "same": false,
+    "confidence": 0.6,
+    "reason": "Overlapping concern (input duplicates unfiltered server-side), but B's material claim is about logic scattered across layers as an architecture critique, while A claims a specific DB constraint violation/500 consequence; not equivalent full claims."
+   },
+   {
+    "pair": 13,
+    "a": {
+     "mechanism": "sendAddGuestsEmails emails all attendees (existing + new) plus organizer and team, awaited synchronously in request path",
+     "trigger": "every addGuests invocation",
+     "consequence": "response latency grows linearly with attendee count, quadratic total email volume"
+    },
+    "b": {
+     "mechanism": "synchronous awaited sendAddGuestsEmails serially renders N email payloads in mutation path",
+     "trigger": "mutation execution",
+     "consequence": "latency multiplied with attendee count; should be backgrounded/queued"
+    },
+    "material_differences": [
+     "A adds the claim that emails go to existing + new attendees plus organizer and team, making total email volume quadratic; B only claims N payloads with linear latency scaling"
+    ],
+    "same": false,
+    "confidence": 0.6,
+    "reason": "Same synchronous-email-in-request-path root cause, but A adds a material claim about recipient scope (all existing attendees + organizer + team) yielding quadratic email volume, which B does not assert."
+   }
+  ]
+ },
+ "usage": {
+  "glm-5.3-background": {
+   "input_tokens": 2127,
+   "cache_read_input_tokens": 384,
+   "cache_creation_input_tokens": 0,
+   "output_tokens": 2825,
+   "reasoning_output_tokens": 1,
+   "cost_usd": 0.0,
+   "total_tokens": 5337
+  }
+ },
+ "status": "complete",
+ "error_type": null,
+ "elapsed_s": 24.815868854522705
+}

@@ -1,0 +1,468 @@
+{
+ "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/10",
+ "pass_digest": "9c5f733ce7a3f996c90c67f262cc4a77e2b234bc415c197afa7c73477ad320be",
+ "request_sha256": "280d1d08d139ec994d84d3cf8cfec39047a1456804ddb248333c7a1908ac77b1",
+ "request": {
+  "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/10",
+  "model": "glm-5.3-background",
+  "system": "You are clustering code review findings from one PR. Always respond with valid JSON.",
+  "prompt": "You are clustering code review findings from the same PR. For each PAIR below, decide whether the two findings describe the SAME underlying issue — same root cause in the same code location. Different wording is fine. A finding about a DIFFERENT defect in the same file or function is NOT the same issue. Severity or aspect differences of the same root cause ARE the same issue.\n\n\nFor THIS scoring pass, duplicate equivalence is stricter than sharing a root cause.\nYou must compare the COMPLETE MATERIAL CLAIMS, including mechanism, triggering\nconditions, execution path, and consequence. The same line or broad concern does\nnot establish equivalence. A report of wrong-category selection, a case/rename\nmismatch, a crash, and a silent fallback are different claims even at one lookup.\nAn inactive/unbound API concern and an alleged active user-facing failure differ.\nA compound report with an additional material claim does NOT equal its subset.\nDifferences only in wording, severity, or hedging do not create separate claims.\nIf the claimed mechanisms, triggers or consequences conflict, or one report adds\nan unsupported/different material factual claim, return same=false. You are NOT\nverifying which claim is true; do not repair or reinterpret either report to make\nthem match. If unsure whether their full claims are equivalent, return false.\n\nFor every numbered pair, extract what A and B actually CLAIM into mechanism,\ntrigger and consequence. Then list material_differences and give your equivalence\nverdict, confidence and reason. same=true requires no material differences.\nReturn ONLY this JSON object, with EVERY pair index exactly once:\n{\"pairs\":[{\"pair\":1,\"a\":{\"mechanism\":\"...\",\"trigger\":\"...\",\"consequence\":\"...\"},\"b\":{\"mechanism\":\"...\",\"trigger\":\"...\",\"consequence\":\"...\"},\"material_differences\":[],\"same\":true,\"confidence\":0.9,\"reason\":\"...\"}]}\n\nPAIRS:\nPAIR 1:\nA: Embed authorization switched from reading the process-cached SiteSetting.embeddable_hosts value to EmbeddableHost.host_allowed?, which issues an unindexed lower(host) = ? SQL query on every request. Every page view of every page embedding this forum's comments now costs a database round-trip on the public embed path that previously served from the settings cache, adding DB load proportional to embed traffic (and the migration creates no index on host).\nB: EmbeddableHost.host_allowed?(request.referer) replaces the previously in-process-cached SiteSetting read with an uncached database query (WHERE lower(host) = ?, which no existing index supports — the migration creates none, and a plain b-tree on host would not even serve the lower() predicate) executed on every single embed comments request. Every page view on every embedding site now adds a sequential-scan query per request on a hot path the old code served from memory with zero database round-trips; high-traffic embedding hosts multiply database load, and the load is invisible until N grows.\n\nPAIR 2:\nA: Embed authorization switched from reading the process-cached SiteSetting.embeddable_hosts value to EmbeddableHost.host_allowed?, which issues an unindexed lower(host) = ? SQL query on every request. Every page view of every page embedding this forum's comments now costs a database round-trip on the public embed path that previously served from the settings cache, adding DB load proportional to embed traffic (and the migration creates no index on host).\nB: embeddable_hosts.host has no index and no foreign key on category_id, while host is now the lookup key for the per-request ensure_embeddable? path and category_id is dereferenced at topic-import time. Every embed comments/retrieve request issues an unindexed full-table scan on embeddable_hosts, and a deleted category leaves orphan rows whose dead category_id blows up PostCreator on the next import from that host.\n\nPAIR 3:\nA: Embed authorization switched from reading the process-cached SiteSetting.embeddable_hosts value to EmbeddableHost.host_allowed?, which issues an unindexed lower(host) = ? SQL query on every request. Every page view of every page embedding this forum's comments now costs a database round-trip on the public embed path that previously served from the settings cache, adding DB load proportional to embed traffic (and the migration creates no index on host).\nB: `ensure_embeddable` now calls `EmbeddableHost.host_allowed?`, which executes an uncached `SELECT ... WHERE lower(host) = ?` query on every request, replacing the previous in-memory cached site-setting comparison. Forums with heavy embedding traffic gain one database round-trip per embedded pageview on /embed/comments and /embed/count — a path that previously cost zero queries — and `lower(host) = ?` cannot use a plain index on host (the new migration creates none), so the lookup is always a sequential scan; under embed-traffic spikes this adds measurable database load.\n\nPAIR 4:\nA: Embed authorization switched from reading the process-cached SiteSetting.embeddable_hosts value to EmbeddableHost.host_allowed?, which issues an unindexed lower(host) = ? SQL query on every request. Every page view of every page embedding this forum's comments now costs a database round-trip on the public embed path that previously served from the settings cache, adding DB load proportional to embed traffic (and the migration creates no index on host).\nB: ensure_embeddable replaces an in-memory cached SiteSetting check with a live DB query (EmbeddableHost.host_allowed?) on every embed request, with no caching layer added. High-traffic embedded comment widgets now add a DB round-trip per request that previously hit the cached settings object; a slow or saturated DB now degrades the embed endpoint, which is fetched cross-origin on third-party pages.\n\nPAIR 5:\nA: Embed authorization switched from reading the process-cached SiteSetting.embeddable_hosts value to EmbeddableHost.host_allowed?, which issues an unindexed lower(host) = ? SQL query on every request. Every page view of every page embedding this forum's comments now costs a database round-trip on the public embed path that previously served from the settings cache, adding DB load proportional to embed traffic (and the migration creates no index on host).\nB: ensure_embeddable runs on every embedded-comments request and now resolves permission through a SQL query (`lower(host) = ?`, line 17) with no index on host, replacing the previous in-memory site-setting read. The embed hot path (per pageview of embedded comment iframes, plus TopicRetriever and TopicEmbed.import) pays a non-indexable sequential scan per request where the old path was a cached memory lookup.\n\nPAIR 6:\nA: Embed authorization switched from reading the process-cached SiteSetting.embeddable_hosts value to EmbeddableHost.host_allowed?, which issues an unindexed lower(host) = ? SQL query on every request. Every page view of every page embedding this forum's comments now costs a database round-trip on the public embed path that previously served from the settings cache, adding DB load proportional to embed traffic (and the migration creates no index on host).\nB: No index is created on embeddable_hosts.host, and EmbeddableHost.record_for_host performs a full-table `lower(host) = ?` query on every embed request (ensure_embeddable) and every TopicEmbed.import. Each embedded-comments page load triggers an unindexed case-insensitive scan of embeddable_hosts; with a large hosts table this adds latency to the embed widget hot path.\n\nPAIR 7:\nA: Embed authorization switched from reading the process-cached SiteSetting.embeddable_hosts value to EmbeddableHost.host_allowed?, which issues an unindexed lower(host) = ? SQL query on every request. Every page view of every page embedding this forum's comments now costs a database round-trip on the public embed path that previously served from the settings cache, adding DB load proportional to embed traffic (and the migration creates no index on host).\nB: `record_for_host` runs `where(\"lower(host) = ?\", host).first` on every embed request, replacing the old `SiteSetting.allows_embeddable_host?` read that was served from Discourse's per-process settings cache, and the migration creates no index on `host` (which the `lower()` wrap would defeat anyway). Every pageview of every externally embedding site now incurs a per-request sequential-scan DB query on the /embed/comments hot path — externally driven traffic the forum cannot throttle — so database load scales with third-party pageviews where it previously scaled at zero.\n\nPAIR 8:\nA: Embed authorization switched from reading the process-cached SiteSetting.embeddable_hosts value to EmbeddableHost.host_allowed?, which issues an unindexed lower(host) = ? SQL query on every request. Every page view of every page embedding this forum's comments now costs a database round-trip on the public embed path that previously served from the settings cache, adding DB load proportional to embed traffic (and the migration creates no index on host).\nB: The embed allowlist check moved from an in-memory cached SiteSetting to an unconditional per-request DB query (EmbeddableHost.host_allowed? -> where(lower(host) = ?)) on the public, unauthenticated, high-traffic /embed/comments path, and the LOWER(host) predicate is non-sargable so no index on host can serve it. Every comment-iframe request from every embedded site now costs a full-table scan on embeddable_hosts; a site with heavy embedding traffic pays a DB roundtrip per request where the previous design served the answer from the cached settings object, and the table will grow one row per host with no caching layer to absorb it.\n\nPAIR 9:\nA: Embed authorization switched from reading the process-cached SiteSetting.embeddable_hosts value to EmbeddableHost.host_allowed?, which issues an unindexed lower(host) = ? SQL query on every request. Every page view of every page embedding this forum's comments now costs a database round-trip on the public embed path that previously served from the settings cache, adding DB load proportional to embed traffic (and the migration creates no index on host).\nB: EmbeddableHost.host_allowed? performs a DB query (where(\"lower(host) = ?\") on every call in ensure_embeddable, topic retriever, and topic embed, replacing a previously free in-memory SiteSetting lookup on a high-traffic unauthenticated path\n\nPAIR 10:\nA: Embed authorization switched from reading the process-cached SiteSetting.embeddable_hosts value to EmbeddableHost.host_allowed?, which issues an unindexed lower(host) = ? SQL query on every request. Every page view of every page embedding this forum's comments now costs a database round-trip on the public embed path that previously served from the settings cache, adding DB load proportional to embed traffic (and the migration creates no index on host).\nB: embeddable_hosts.host column has no index despite being looked up on every embed request, and lookups use lower(host) which wouldn't use a plain btree index anyway\n\nPAIR 11:\nA: Embed authorization switched from reading the process-cached SiteSetting.embeddable_hosts value to EmbeddableHost.host_allowed?, which issues an unindexed lower(host) = ? SQL query on every request. Every page view of every page embedding this forum's comments now costs a database round-trip on the public embed path that previously served from the settings cache, adding DB load proportional to embed traffic (and the migration creates no index on host).\nB: Host is never lowercased before save, so lower() does real work; a functional index on lower(host) or normalized lowercase storage with a plain unique index would fix this\n\nPAIR 12:\nA: Embed authorization switched from reading the process-cached SiteSetting.embeddable_hosts value to EmbeddableHost.host_allowed?, which issues an unindexed lower(host) = ? SQL query on every request. Every page view of every page embedding this forum's comments now costs a database round-trip on the public embed path that previously served from the settings cache, adding DB load proportional to embed traffic (and the migration creates no index on host).\nB: host_allowed? runs an uncacheable lower(host) = ? SQL lookup per embed request, replacing the memoized site setting check and adding per-view DB cost on a hot path\n\nPAIR 13:\nA: Embed authorization switched from reading the process-cached SiteSetting.embeddable_hosts value to EmbeddableHost.host_allowed?, which issues an unindexed lower(host) = ? SQL query on every request. Every page view of every page embedding this forum's comments now costs a database round-trip on the public embed path that previously served from the settings cache, adding DB load proportional to embed traffic (and the migration creates no index on host).\nB: Migration lacks an index on `category_id`; `lower(host)` queries on every embed request force a full table scan\n\nPAIR 14:\nA: Embed authorization switched from reading the process-cached SiteSetting.embeddable_hosts value to EmbeddableHost.host_allowed?, which issues an unindexed lower(host) = ? SQL query on every request. Every page view of every page embedding this forum's comments now costs a database round-trip on the public embed path that previously served from the settings cache, adding DB load proportional to embed traffic (and the migration creates no index on host).\nB: New DB query on hot embed path (EmbeddableHost lookup in ensure_embeddable) per request with no index on host and lower(host) = ? query causes a full table scan per request on a high-traffic public endpoint, regressing from cached SiteSetting behavior\n\nPAIR 15:\nA: Embed authorization switched from reading the process-cached SiteSetting.embeddable_hosts value to EmbeddableHost.host_allowed?, which issues an unindexed lower(host) = ? SQL query on every request. Every page view of every page embedding this forum's comments now costs a database round-trip on the public embed path that previously served from the settings cache, adding DB load proportional to embed traffic (and the migration creates no index on host).\nB: No functional index on `embeddable_hosts (lower(host))`: the table is created with only a PK, so the hot-path lookup `WHERE lower(host) = ?` cannot use a plain index and requires a sequential scan per embed request\n\nPAIR 16:\nA: Embed authorization switched from reading the process-cached SiteSetting.embeddable_hosts value to EmbeddableHost.host_allowed?, which issues an unindexed lower(host) = ? SQL query on every request. Every page view of every page embedding this forum's comments now costs a database round-trip on the public embed path that previously served from the settings cache, adding DB load proportional to embed traffic (and the migration creates no index on host).\nB: The hot-path host lookup query is unindexable as written: the migration creates no index on `host`, and the query `lower(host) = ?` cannot use a plain index anyway (would need a functional index on `lower(host)`), guaranteeing a sequential scan on every embed request; fix by normalizing the stored host to lowercase in `before_validation`, adding `add_index :embeddable_hosts, :host`, and querying `where(host: uri.host)`.\n\nPAIR 17:\nA: Embed authorization switched from reading the process-cached SiteSetting.embeddable_hosts value to EmbeddableHost.host_allowed?, which issues an unindexed lower(host) = ? SQL query on every request. Every page view of every page embedding this forum's comments now costs a database round-trip on the public embed path that previously served from the settings cache, adding DB load proportional to embed traffic (and the migration creates no index on host).\nB: The lower(host) query cannot be served by a plain index on host, and the migration creates no index at all, forcing full table scans\n\nPAIR 18:\nA: embeddable_hosts.category_id has no foreign key and EmbeddableHost declares belongs_to :category with no cleanup path, so deleting a category leaves host rows pointing at it. Imports for those hosts then run with a stale category_id (no longer the admin's intended category) and the host row renders a blank category badge, with nothing prompting the admin to fix the mapping.\nB: category_id in the embeddable_hosts migration is null: false with no foreign key or dependent: handling; deleting a category leaves orphaned hosts and TopicEmbed.import creates posts in a dead category\n\nPAIR 19:\nA: embeddable_hosts.category_id has no foreign key and EmbeddableHost declares belongs_to :category with no cleanup path, so deleting a category leaves host rows pointing at it. Imports for those hosts then run with a stale category_id (no longer the admin's intended category) and the host row renders a blank category badge, with nothing prompting the admin to fix the mapping.\nB: No cleanup for embeddable_hosts.category_id when a category is deleted: belongs_to :category has no dependent handling and no FK, leaving dangling category_id values that flow into TopicEmbed.import and the serializer/admin UI, potentially causing wrong/uncategorized categorization or failed imports\n\nPAIR 20:\nA: embeddable_hosts.category_id has no foreign key and EmbeddableHost declares belongs_to :category with no cleanup path, so deleting a category leaves host rows pointing at it. Imports for those hosts then run with a stale category_id (no longer the admin's intended category) and the host row renders a blank category badge, with nothing prompting the admin to fix the mapping.\nB: No handling for category deletion leaves dangling embeddable_hosts.category_id: the bare belongs_to has no FK constraint and Discourse's category-deletion reassignment flow is unaware of the new table, so deleting a referenced category causes TopicEmbed.import to pass a dead id to PostCreator, topic creation fails, and TopicEmbed.create! raises, breaking embed/feed retrieval for that host until an admin re-saves it; the admin UI also renders a blank category badge\n",
+  "effort": "low",
+  "pairs": [
+   [
+    22,
+    25
+   ],
+   [
+    22,
+    28
+   ],
+   [
+    22,
+    32
+   ],
+   [
+    22,
+    37
+   ],
+   [
+    22,
+    38
+   ],
+   [
+    22,
+    50
+   ],
+   [
+    22,
+    56
+   ],
+   [
+    22,
+    81
+   ],
+   [
+    22,
+    1253
+   ],
+   [
+    22,
+    1257
+   ],
+   [
+    22,
+    1298
+   ],
+   [
+    22,
+    1300
+   ],
+   [
+    22,
+    1378
+   ],
+   [
+    22,
+    1390
+   ],
+   [
+    22,
+    1398
+   ],
+   [
+    22,
+    1676
+   ],
+   [
+    22,
+    1679
+   ],
+   [
+    27,
+    919
+   ],
+   [
+    27,
+    1393
+   ],
+   [
+    27,
+    1399
+   ]
+  ]
+ },
+ "parsed_response": {
+  "pairs": [
+   {
+    "pair": 1,
+    "a": {
+     "mechanism": "host_allowed? issues unindexed lower(host)=? DB query per request, replacing process-cached SiteSetting read",
+     "trigger": "every page view of every page embedding the forum's comments",
+     "consequence": "DB round-trip per embed request on public path; DB load scales with embed traffic; migration has no index"
+    },
+    "b": {
+     "mechanism": "host_allowed? issues uncached, unindexable lower(host)=? sequential-scan query per embed comments request, replacing cached SiteSetting read",
+     "trigger": "every embed comments request / page view on every embedding site",
+     "consequence": "per-request sequential scan on hot path adding DB load proportional to third-party traffic; load invisible until N grows"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.95,
+    "reason": "Same mechanism, trigger, and consequence; only wording differs."
+   },
+   {
+    "pair": 2,
+    "a": {
+     "mechanism": "host_allowed? issues unindexed lower(host)=? DB query per request replacing cached setting",
+     "trigger": "every embed request",
+     "consequence": "DB round-trip per pageview, DB load scales with embed traffic"
+    },
+    "b": {
+     "mechanism": "no index on host and no FK on category_id; host is lookup key per request; category_id dereferenced at import",
+     "trigger": "embed requests and topic imports; category deletion",
+     "consequence": "unindexed full-table scan per request AND orphaned category rows crash PostCreator on import"
+    },
+    "material_differences": [
+     "B adds a distinct orphaned-category_id/PostCreator crash claim not in A"
+    ],
+    "same": false,
+    "confidence": 0.9,
+    "reason": "B compounds the missing-index issue with a different defect (missing FK causing import crashes)."
+   },
+   {
+    "pair": 3,
+    "a": {
+     "mechanism": "host_allowed? unindexed lower(host)=? per request replacing cached setting",
+     "trigger": "every embed request",
+     "consequence": "DB round-trip per embedded pageview, load scales with embed traffic; migration has no index"
+    },
+    "b": {
+     "mechanism": "host_allowed? uncached SELECT WHERE lower(host)=? per request on /embed/comments and /embed/count, replacing cached site-setting; lower() defeats plain index, migration has none",
+     "trigger": "heavy embedding traffic per embedded pageview",
+     "consequence": "measurable DB load from sequential scans per request"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.95,
+    "reason": "Identical claims about unindexed per-request query replacing cached lookup."
+   },
+   {
+    "pair": 4,
+    "a": {
+     "mechanism": "host_allowed? unindexed lower(host)=? per request replacing cached setting",
+     "trigger": "every embed request",
+     "consequence": "DB round-trip per pageview, load scales with embed traffic"
+    },
+    "b": {
+     "mechanism": "live DB query per embed request with no caching layer, replacing cached SiteSetting",
+     "trigger": "high-traffic embedded comment widgets",
+     "consequence": "DB round-trip per request; slow DB degrades embed endpoint fetched cross-origin"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "B's added note on slow-DB degradation is a consequence elaboration of the same per-request DB cost claim, not a new defect."
+   },
+   {
+    "pair": 5,
+    "a": {
+     "mechanism": "host_allowed? unindexed lower(host)=? per request replacing cached setting",
+     "trigger": "every embed request",
+     "consequence": "DB round-trip per pageview, load scales with embed traffic"
+    },
+    "b": {
+     "mechanism": "ensure_embeddable runs per embedded-comments request, resolving permission via unindexed lower(host)=? SQL replacing in-memory site-setting read",
+     "trigger": "every embedded-comments request plus TopicRetriever and TopicEmbed.import",
+     "consequence": "non-indexable sequential scan per request on hot path"
+    },
+    "material_differences": [
+     "B extends trigger to TopicRetriever and TopicEmbed.import, but same mechanism/consequence"
+    ],
+    "same": true,
+    "confidence": 0.8,
+    "reason": "Same core defect; B lists additional call sites of the same lookup, an elaboration not a new defect."
+   },
+   {
+    "pair": 6,
+    "a": {
+     "mechanism": "host_allowed? unindexed lower(host)=? per request replacing cached setting",
+     "trigger": "every embed request",
+     "consequence": "DB round-trip per pageview, load scales with embed traffic"
+    },
+    "b": {
+     "mechanism": "record_for_host full-table lower(host)=? query on every embed request (ensure_embeddable) and every TopicEmbed.import; no index on host",
+     "trigger": "embedded-comments page load",
+     "consequence": "unindexed scan adds latency to embed widget hot path with large hosts table"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "Same mechanism and consequence; latency vs DB load wording only."
+   },
+   {
+    "pair": 7,
+    "a": {
+     "mechanism": "host_allowed? unindexed lower(host)=? per request replacing cached setting",
+     "trigger": "every embed request",
+     "consequence": "DB round-trip per pageview, load scales with embed traffic; no index in migration"
+    },
+    "b": {
+     "mechanism": "record_for_host runs where(lower(host)=?).first per embed request replacing cached SiteSetting.allows_embeddable_host?; migration creates no index; lower() defeats it",
+     "trigger": "every pageview of every externally embedding site on /embed/comments",
+     "consequence": "per-request sequential-scan DB query; load scales with unthrottleable third-party pageviews"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.95,
+    "reason": "Same claims throughout."
+   },
+   {
+    "pair": 8,
+    "a": {
+     "mechanism": "host_allowed? unindexed lower(host)=? per request replacing cached setting",
+     "trigger": "every embed request",
+     "consequence": "DB round-trip per pageview, load scales with embed traffic; no index in migration"
+    },
+    "b": {
+     "mechanism": "unconditional per-request DB query (host_allowed? -> lower(host)=?) on unauthenticated /embed/comments; LOWER non-sargable, no index",
+     "trigger": "every comment-iframe request from every embedded site",
+     "consequence": "full-table scan per request where old design used cache; table grows one row per host with no caching layer"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.95,
+    "reason": "Same mechanism, trigger, consequence; only elaboration."
+   },
+   {
+    "pair": 9,
+    "a": {
+     "mechanism": "host_allowed? unindexed lower(host)=? per request replacing cached setting",
+     "trigger": "every embed request",
+     "consequence": "DB round-trip per pageview, load scales with embed traffic"
+    },
+    "b": {
+     "mechanism": "host_allowed? DB query on every call in ensure_embeddable, topic retriever, topic embed, replacing free in-memory SiteSetting lookup",
+     "trigger": "high-traffic unauthenticated path",
+     "consequence": "per-call DB cost on hot path"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Same defect; B lists multiple call sites of the same lookup."
+   },
+   {
+    "pair": 10,
+    "a": {
+     "mechanism": "host_allowed? unindexed lower(host)=? per request replacing cached setting",
+     "trigger": "every embed request",
+     "consequence": "DB round-trip per pageview, load scales with embed traffic; migration has no index"
+    },
+    "b": {
+     "mechanism": "embeddable_hosts.host has no index and lower(host) lookups would not use a plain btree anyway",
+     "trigger": "every embed request",
+     "consequence": "unindexed per-request lookup"
+    },
+    "material_differences": [
+     "B omits the cached-setting regression but core claim of unindexed per-request lookup matches"
+    ],
+    "same": true,
+    "confidence": 0.75,
+    "reason": "B is a subset of A's claims (no new or conflicting material claim)."
+   },
+   {
+    "pair": 11,
+    "a": {
+     "mechanism": "host_allowed? unindexed lower(host)=? per request replacing cached setting",
+     "trigger": "every embed request",
+     "consequence": "DB round-trip per pageview, load scales with embed traffic"
+    },
+    "b": {
+     "mechanism": "host not lowercased before save; suggests functional index on lower(host) or normalized lowercase storage",
+     "trigger": "host storage/lookup",
+     "consequence": "proposed fix context for the index problem"
+    },
+    "material_differences": [
+     "B is a fix suggestion / storage-normalization observation, not a report of the per-request regression; no claim about per-request DB cost or cached-setting regression"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "B makes a different material claim (data normalization) rather than the regression A reports; no shared consequence claim."
+   },
+   {
+    "pair": 12,
+    "a": {
+     "mechanism": "host_allowed? unindexed lower(host)=? per request replacing cached setting",
+     "trigger": "every embed request",
+     "consequence": "DB round-trip per pageview, load scales with embed traffic"
+    },
+    "b": {
+     "mechanism": "host_allowed? uncacheable lower(host)=? SQL per embed request replacing memoized site setting check",
+     "trigger": "per embed request / per view",
+     "consequence": "per-view DB cost on hot path"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.95,
+    "reason": "Same claims, condensed wording."
+   },
+   {
+    "pair": 13,
+    "a": {
+     "mechanism": "host_allowed? unindexed lower(host)=? per request replacing cached setting",
+     "trigger": "every embed request",
+     "consequence": "DB round-trip per pageview, load scales with embed traffic; migration lacks host index"
+    },
+    "b": {
+     "mechanism": "migration lacks index on category_id; lower(host) per request forces full table scan",
+     "trigger": "every embed request",
+     "consequence": "full table scan per request"
+    },
+    "material_differences": [
+     "B claims the missing index is on category_id, which is not the lookup key — a different (and incoherent) factual claim about which index is missing"
+    ],
+    "same": false,
+    "confidence": 0.75,
+    "reason": "B asserts a missing index on a different column (category_id) as the defect, a materially different claim from missing host index."
+   },
+   {
+    "pair": 14,
+    "a": {
+     "mechanism": "host_allowed? unindexed lower(host)=? per request replacing cached setting",
+     "trigger": "every embed request",
+     "consequence": "DB round-trip per pageview, load scales with embed traffic; no index in migration"
+    },
+    "b": {
+     "mechanism": "new DB query in ensure_embeddable per request, no index on host, lower(host)=? causes full table scan",
+     "trigger": "high-traffic public endpoint requests",
+     "consequence": "full table scan per request, regression from cached SiteSetting behavior"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.95,
+    "reason": "Same claims throughout."
+   },
+   {
+    "pair": 15,
+    "a": {
+     "mechanism": "host_allowed? unindexed lower(host)=? per request replacing cached setting",
+     "trigger": "every embed request",
+     "consequence": "DB round-trip per pageview, load scales with embed traffic; migration has no index"
+    },
+    "b": {
+     "mechanism": "no functional index on lower(host); table created with only PK; WHERE lower(host)=? cannot use plain index",
+     "trigger": "every embed request",
+     "consequence": "sequential scan per embed request"
+    },
+    "material_differences": [
+     "B does not mention the cached-setting regression, but no conflicting claim"
+    ],
+    "same": true,
+    "confidence": 0.8,
+    "reason": "B is a subset of A's claims; same core defect."
+   },
+   {
+    "pair": 16,
+    "a": {
+     "mechanism": "host_allowed? unindexed lower(host)=? per request replacing cached setting",
+     "trigger": "every embed request",
+     "consequence": "DB round-trip per pageview, load scales with embed traffic; migration has no index"
+    },
+    "b": {
+     "mechanism": "lower(host)=? unindexable as written, migration creates no index, needs functional index; suggests normalizing host lowercase, add_index on host, query where(host:)",
+     "trigger": "every embed request",
+     "consequence": "sequential scan on every embed request"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "Same defect plus fix suggestion; no new material factual claim."
+   },
+   {
+    "pair": 17,
+    "a": {
+     "mechanism": "host_allowed? unindexed lower(host)=? per request replacing cached setting",
+     "trigger": "every embed request",
+     "consequence": "DB round-trip per pageview, load scales with embed traffic; migration has no index"
+    },
+    "b": {
+     "mechanism": "lower(host) can't use plain index on host; migration creates no index",
+     "trigger": "(unspecified lookups)",
+     "consequence": "full table scans"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.8,
+    "reason": "B is a subset of A's claims."
+   },
+   {
+    "pair": 18,
+    "a": {
+     "mechanism": "category_id has no FK and belongs_to :category has no cleanup; deleting category leaves host rows pointing at it",
+     "trigger": "category deletion then imports from that host",
+     "consequence": "imports run with stale category_id (not admin's intended category) and admin UI renders blank category badge"
+    },
+    "b": {
+     "mechanism": "category_id null:false, no FK, no dependent handling; deleting category leaves orphaned hosts",
+     "trigger": "category deletion then TopicEmbed.import",
+     "consequence": "TopicEmbed.import creates posts in a dead category"
+    },
+    "material_differences": [
+     "A emphasizes stale/silently-wrong category and blank badge in admin UI; B says import creates posts in a dead category — compatible framings of the same dangling-category_id defect"
+    ],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "Same root cause (orphaned category_id, no FK/cleanup) with compatible consequences."
+   },
+   {
+    "pair": 19,
+    "a": {
+     "mechanism": "category_id has no FK and belongs_to :category has no cleanup; deleting category leaves host rows pointing at it",
+     "trigger": "category deletion then imports from that host",
+     "consequence": "imports run with stale category_id and admin UI renders blank category badge"
+    },
+    "b": {
+     "mechanism": "no cleanup for embeddable_hosts.category_id on category deletion; belongs_to has no dependent handling and no FK",
+     "trigger": "deleting a referenced category",
+     "consequence": "dangling category_id flows into TopicEmbed.import, serializer, admin UI; potentially wrong/uncategorized or failed imports"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Same root cause and consequence set, hedged differently."
+   },
+   {
+    "pair": 20,
+    "a": {
+     "mechanism": "category_id has no FK and belongs_to :category has no cleanup; deleting category leaves host rows pointing at it",
+     "trigger": "category deletion then imports from that host",
+     "consequence": "imports run with stale category_id (silently wrong category) and admin UI renders blank category badge"
+    },
+    "b": {
+     "mechanism": "no FK/dependent handling; category-deletion reassignment flow unaware of table; TopicEmbed.import passes dead id to PostCreator, topic creation fails, TopicEmbed.create! raises",
+     "trigger": "deleting a referenced category then embed/feed retrieval for that host",
+     "consequence": "topic creation fails and raises, breaking embed/feed retrieval until admin re-saves; blank badge in admin UI"
+    },
+    "material_differences": [
+     "A claims imports silently proceed with a stale category; B claims topic creation fails/raises and breaks retrieval — conflicting consequences (silent wrong category vs. crash/failure)"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "Same root cause but materially conflicting claimed consequences (silent mis-categorization vs. failed import/raise breaking retrieval)."
+   }
+  ]
+ },
+ "usage": {
+  "glm-5.3-background": {
+   "input_tokens": 3357,
+   "cache_read_input_tokens": 384,
+   "cache_creation_input_tokens": 0,
+   "output_tokens": 3086,
+   "reasoning_output_tokens": 1,
+   "cost_usd": 0.0,
+   "total_tokens": 6828
+  }
+ },
+ "status": "complete",
+ "error_type": null,
+ "elapsed_s": 17.03987193107605
+}

@@ -1,0 +1,456 @@
+{
+ "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/4",
+ "pass_digest": "9c5f733ce7a3f996c90c67f262cc4a77e2b234bc415c197afa7c73477ad320be",
+ "request_sha256": "d051c1c7f463d9ec44c4eb395dc9c70067c9d953f03e8223e2c6b3f6147df411",
+ "request": {
+  "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/4",
+  "model": "glm-5.3-background",
+  "system": "You are clustering code review findings from one PR. Always respond with valid JSON.",
+  "prompt": "You are clustering code review findings from the same PR. For each PAIR below, decide whether the two findings describe the SAME underlying issue — same root cause in the same code location. Different wording is fine. A finding about a DIFFERENT defect in the same file or function is NOT the same issue. Severity or aspect differences of the same root cause ARE the same issue.\n\n\nFor THIS scoring pass, duplicate equivalence is stricter than sharing a root cause.\nYou must compare the COMPLETE MATERIAL CLAIMS, including mechanism, triggering\nconditions, execution path, and consequence. The same line or broad concern does\nnot establish equivalence. A report of wrong-category selection, a case/rename\nmismatch, a crash, and a silent fallback are different claims even at one lookup.\nAn inactive/unbound API concern and an alleged active user-facing failure differ.\nA compound report with an additional material claim does NOT equal its subset.\nDifferences only in wording, severity, or hedging do not create separate claims.\nIf the claimed mechanisms, triggers or consequences conflict, or one report adds\nan unsupported/different material factual claim, return same=false. You are NOT\nverifying which claim is true; do not repair or reinterpret either report to make\nthem match. If unsure whether their full claims are equivalent, return false.\n\nFor every numbered pair, extract what A and B actually CLAIM into mechanism,\ntrigger and consequence. Then list material_differences and give your equivalence\nverdict, confidence and reason. same=true requires no material differences.\nReturn ONLY this JSON object, with EVERY pair index exactly once:\n{\"pairs\":[{\"pair\":1,\"a\":{\"mechanism\":\"...\",\"trigger\":\"...\",\"consequence\":\"...\"},\"b\":{\"mechanism\":\"...\",\"trigger\":\"...\",\"consequence\":\"...\"},\"material_differences\":[],\"same\":true,\"confidence\":0.9,\"reason\":\"...\"}]}\n\nPAIRS:\nPAIR 1:\nA: Both 'valid host' tests stub retrieved_recently? directly ('topic_retriever.expects(:retrieved_recently?).returns(false)' / '.returns(true)'), so the redis throttle logic introduced in this diff ($redis.setnx on 'retrieved:<url>' plus $redis.expire(key, 60), lines 20-29 of lib/topic_retriever.rb) is never executed by any test. The real throttle code is only covered by mocks of itself: a regression where setnx succeeds but expire is never called (leaving a permanent key that throttles the URL forever after the first retrieval), or where the no_throttle branch (user.try(:staff?) from Jobs::RetrieveTopic) is inverted, passes the suite; only the one-line short-circuit 'perform_retrieve unless (invalid_host? || retrieved_recently?)' is actually verified.\nB: lib/topic_retriever.rb:21 — retrieved_recently? real Redis setnx/expire throttle behavior (first-call vs within-60s vs after-expiry) is never tested; every spec stubs retrieved_recently? away\n\nPAIR 2:\nA: A single embed request synchronously runs the entire feed poll (topic_retriever.rb:36): Jobs::PollFeed.new.execute({}) re-downloads and re-parses the whole RSS/Atom feed and re-imports every item (per-item DB lookup, SHA1, possible PostRevisor/PostCreator runs) just to resolve one URL, duplicating the hourly schedule; the unused feed_key (poll_feed.rb:20-22) suggests conditional fetching was intended but never wired up\nB: lib/topic_retriever.rb:40 — perform_retrieve runs the full Jobs::PollFeed (network fetch of entire feed + PostCreator/PostRevisor for every item) synchronously on every cache-miss for each distinct embed_url; the redis throttle is keyed per URL so N unknown URLs trigger N full feed polls per minute.\n\nPAIR 3:\nA: A single embed request synchronously runs the entire feed poll (topic_retriever.rb:36): Jobs::PollFeed.new.execute({}) re-downloads and re-parses the whole RSS/Atom feed and re-imports every item (per-item DB lookup, SHA1, possible PostRevisor/PostCreator runs) just to resolve one URL, duplicating the hourly schedule; the unused feed_key (poll_feed.rb:20-22) suggests conditional fetching was intended but never wired up\nB: lib/topic_retriever.rb:40-43 — `perform_retrieve` synchronously instantiates and executes `Jobs::PollFeed.new.execute({})` inline on the web/job-processing request path, fetching and parsing the entire remote RSS/Atom feed just to resolve one embed_url, coupling the latency and failure mode of an external feed fetch to every uncached embed request.\n\nPAIR 4:\nA: A single embed request synchronously runs the entire feed poll (topic_retriever.rb:36): Jobs::PollFeed.new.execute({}) re-downloads and re-parses the whole RSS/Atom feed and re-imports every item (per-item DB lookup, SHA1, possible PostRevisor/PostCreator runs) just to resolve one URL, duplicating the hourly schedule; the unused feed_key (poll_feed.rb:20-22) suggests conditional fetching was intended but never wired up\nB: lib/topic_retriever.rb:41 — Each retrieve synchronously re-runs the whole PollFeed, so N unique embed URLs amplify into N full feed fetches and imports.\n\nPAIR 5:\nA: A single embed request synchronously runs the entire feed poll (topic_retriever.rb:36): Jobs::PollFeed.new.execute({}) re-downloads and re-parses the whole RSS/Atom feed and re-imports every item (per-item DB lookup, SHA1, possible PostRevisor/PostCreator runs) just to resolve one URL, duplicating the hourly schedule; the unused feed_key (poll_feed.rb:20-22) suggests conditional fetching was intended but never wired up\nB: lib/topic_retriever.rb:41 — Every first-time embed URL executes the full RSS import; the per-URL throttle does not share a feed-level cache, so traffic across distinct pages multiplies all-item database work and can saturate workers.\n\nPAIR 6:\nA: A single embed request synchronously runs the entire feed poll (topic_retriever.rb:36): Jobs::PollFeed.new.execute({}) re-downloads and re-parses the whole RSS/Atom feed and re-imports every item (per-item DB lookup, SHA1, possible PostRevisor/PostCreator runs) just to resolve one URL, duplicating the hourly schedule; the unused feed_key (poll_feed.rb:20-22) suggests conditional fetching was intended but never wired up\nB: lib/topic_retriever.rb:41 — every lookup miss for any URL on the embeddable host runs `Jobs::PollFeed.new.execute({})` inline, which downloads the whole feed and re-imports every item, and the throttle is keyed per URL (`retrieved:#{@embed_url}`), so N distinct missing URLs trigger N full feed polls with no feed-level cache (the unused `feed_key` shows this cache was planned but never built) (P2, conf 100)\n\nPAIR 7:\nA: A single embed request synchronously runs the entire feed poll (topic_retriever.rb:36): Jobs::PollFeed.new.execute({}) re-downloads and re-parses the whole RSS/Atom feed and re-imports every item (per-item DB lookup, SHA1, possible PostRevisor/PostCreator runs) just to resolve one URL, duplicating the hourly schedule; the unused feed_key (poll_feed.rb:20-22) suggests conditional fetching was intended but never wired up\nB: lib/topic_retriever.rb:41 — Jobs::PollFeed.new.execute({}) is run inline inside another job, doing a full blocking feed fetch and import on the user-triggered path.\n\nPAIR 8:\nA: A single embed request synchronously runs the entire feed poll (topic_retriever.rb:36): Jobs::PollFeed.new.execute({}) re-downloads and re-parses the whole RSS/Atom feed and re-imports every item (per-item DB lookup, SHA1, possible PostRevisor/PostCreator runs) just to resolve one URL, duplicating the hourly schedule; the unused feed_key (poll_feed.rb:20-22) suggests conditional fetching was intended but never wired up\nB: lib/topic_retriever.rb:41 — TopicRetriever synchronously drives an unrelated scheduled job via `Jobs::PollFeed.new.execute({})`, coupling retrieval to that job's internals instead of extracting the shared feed-import logic\n\nPAIR 9:\nA: A single embed request synchronously runs the entire feed poll (topic_retriever.rb:36): Jobs::PollFeed.new.execute({}) re-downloads and re-parses the whole RSS/Atom feed and re-imports every item (per-item DB lookup, SHA1, possible PostRevisor/PostCreator runs) just to resolve one URL, duplicating the hourly schedule; the unused feed_key (poll_feed.rb:20-22) suggests conditional fetching was intended but never wired up\nB: perform_retrieve synchronously executes Jobs::PollFeed inside every embed-retrieval job (lib/topic_retriever.rb:35-41), causing full feed fetch + N-item import per new embed URL with concurrent jobs polling simultaneously with no lock\n\nPAIR 10:\nA: A single embed request synchronously runs the entire feed poll (topic_retriever.rb:36): Jobs::PollFeed.new.execute({}) re-downloads and re-parses the whole RSS/Atom feed and re-imports every item (per-item DB lookup, SHA1, possible PostRevisor/PostCreator runs) just to resolve one URL, duplicating the hourly schedule; the unused feed_key (poll_feed.rb:20-22) suggests conditional fetching was intended but never wired up\nB: Retrieving a single embed URL synchronously executes the entire feed poll: lib/topic_retriever.rb:40-43 calls Jobs::PollFeed.new.execute({}) inline, so M distinct un-imported URLs (each with its own 60s throttle key at :21-33) trigger M full feed polls, uncoordinated with the hourly schedule — on initial embed rollout that means one full fetch+scan per page view.\n\nPAIR 11:\nA: A single embed request synchronously runs the entire feed poll (topic_retriever.rb:36): Jobs::PollFeed.new.execute({}) re-downloads and re-parses the whole RSS/Atom feed and re-imports every item (per-item DB lookup, SHA1, possible PostRevisor/PostCreator runs) just to resolve one URL, duplicating the hourly schedule; the unused feed_key (poll_feed.rb:20-22) suggests conditional fetching was intended but never wired up\nB: TopicRetriever synchronously instantiates the scheduled PollFeed job and calls execute({}) directly, a separation-of-concerns violation where a single user-triggered embed request causes a full inline feed fetch/parse/import of every item (lib/topic_retriever.rb:38)\n\nPAIR 12:\nA: Both positive-path tests stub retrieved_recently? and mock perform_retrieve, so the real throttle logic ($redis.setnx with 60-second expire), the TopicEmbed.where(embed_url:).exists? dedupe, the feed-polling branch, and fetch_http's embed_by_username lookup are never executed (checked spec/components/topic_retriever_spec.rb — the only spec referencing TopicRetriever; all five tests stub or mock these methods). A regression in the redis throttle (e.g., the key never expiring, permanently blocking retrieval for a URL) or in the dedupe/fetch internals passes the suite; the staff no_throttle bypass consumed here is likewise never exercised anywhere in the diff.\nB: spec/components/topic_retriever_spec.rb: perform_retrieve, retrieved_recently? (Redis 60-second $redis.setnx throttle including no_throttle staff bypass), and fetch_http are entirely untested; only the host-validation gate is covered\n\nPAIR 13:\nA: Both positive-path tests stub retrieved_recently? and mock perform_retrieve, so the real throttle logic ($redis.setnx with 60-second expire), the TopicEmbed.where(embed_url:).exists? dedupe, the feed-polling branch, and fetch_http's embed_by_username lookup are never executed (checked spec/components/topic_retriever_spec.rb — the only spec referencing TopicRetriever; all five tests stub or mock these methods). A regression in the redis throttle (e.g., the key never expiring, permanently blocking retrieval for a URL) or in the dedupe/fetch internals passes the suite; the staff no_throttle bypass consumed here is likewise never exercised anywhere in the diff.\nB: spec/components/topic_retriever_spec.rb:1-46 — all tests mock `perform_retrieve` and `retrieved_recently?` on the instance, so `perform_retrieve`, `fetch_http`, `invalid_host?`'s successful (non-raising) URI path, and the real `$redis.setnx`/`expire` throttle logic in lib/topic_retriever.rb:16-54 are never executed by any spec; confidence 100, severity P0.\n\nPAIR 14:\nA: Both positive-path tests stub retrieved_recently? and mock perform_retrieve, so the real throttle logic ($redis.setnx with 60-second expire), the TopicEmbed.where(embed_url:).exists? dedupe, the feed-polling branch, and fetch_http's embed_by_username lookup are never executed (checked spec/components/topic_retriever_spec.rb — the only spec referencing TopicRetriever; all five tests stub or mock these methods). A regression in the redis throttle (e.g., the key never expiring, permanently blocking retrieval for a URL) or in the dedupe/fetch internals passes the suite; the staff no_throttle bypass consumed here is likewise never exercised anywhere in the diff.\nB: spec/components/topic_retriever_spec.rb:27 — perform_retrieve is always mocked; the existing-embed short-circuit, RSS-first fallback, and fetch_http/missing-user paths are untested.\n\nPAIR 15:\nA: Both positive-path tests stub retrieved_recently? and mock perform_retrieve, so the real throttle logic ($redis.setnx with 60-second expire), the TopicEmbed.where(embed_url:).exists? dedupe, the feed-polling branch, and fetch_http's embed_by_username lookup are never executed (checked spec/components/topic_retriever_spec.rb — the only spec referencing TopicRetriever; all five tests stub or mock these methods). A regression in the redis throttle (e.g., the key never expiring, permanently blocking retrieval for a URL) or in the dedupe/fetch internals passes the suite; the staff no_throttle bypass consumed here is likewise never exercised anywhere in the diff.\nB: spec/components/topic_retriever_spec.rb:32 — retrieved_recently? is stubbed in every case, so the redis setnx/expire throttle and the no_throttle staff bypass have no real coverage.\n\nPAIR 16:\nA: Both positive-path tests stub retrieved_recently? and mock perform_retrieve, so the real throttle logic ($redis.setnx with 60-second expire), the TopicEmbed.where(embed_url:).exists? dedupe, the feed-polling branch, and fetch_http's embed_by_username lookup are never executed (checked spec/components/topic_retriever_spec.rb — the only spec referencing TopicRetriever; all five tests stub or mock these methods). A regression in the redis throttle (e.g., the key never expiring, permanently blocking retrieval for a URL) or in the dedupe/fetch internals passes the suite; the staff no_throttle bypass consumed here is likewise never exercised anywhere in the diff.\nB: spec/components/topic_retriever_spec.rb:32 — The retriever specs mock both private control-flow methods, leaving Redis throttling, feed fallback, and HTTP import behavior untested.\n\nPAIR 17:\nA: Both positive-path tests stub retrieved_recently? and mock perform_retrieve, so the real throttle logic ($redis.setnx with 60-second expire), the TopicEmbed.where(embed_url:).exists? dedupe, the feed-polling branch, and fetch_http's embed_by_username lookup are never executed (checked spec/components/topic_retriever_spec.rb — the only spec referencing TopicRetriever; all five tests stub or mock these methods). A regression in the redis throttle (e.g., the key never expiring, permanently blocking retrieval for a URL) or in the dedupe/fetch internals passes the suite; the staff no_throttle bypass consumed here is likewise never exercised anywhere in the diff.\nB: spec/components/topic_retriever_spec.rb:33 — perform_retrieve is stubbed in every example, so the existing-embed short-circuit, feed-polling recheck, and fetch_http/import_remote path (lib/topic_retriever.rb:35-53) have zero coverage (P1, conf 100)\n\nPAIR 18:\nA: Both positive-path tests stub retrieved_recently? and mock perform_retrieve, so the real throttle logic ($redis.setnx with 60-second expire), the TopicEmbed.where(embed_url:).exists? dedupe, the feed-polling branch, and fetch_http's embed_by_username lookup are never executed (checked spec/components/topic_retriever_spec.rb — the only spec referencing TopicRetriever; all five tests stub or mock these methods). A regression in the redis throttle (e.g., the key never expiring, permanently blocking retrieval for a URL) or in the dedupe/fetch internals passes the suite; the staff no_throttle bypass consumed here is likewise never exercised anywhere in the diff.\nB: spec/components/topic_retriever_spec.rb:34 — [P1, confidence 100] `topic_retriever.expects(:retrieved_recently?).returns(false)` replaces the Redis throttle under test, so broken `setnx`/expiry behavior and the untested `no_throttle` bypass leave every `TopicRetriever` spec green.\n\nPAIR 19:\nA: Both positive-path tests stub retrieved_recently? and mock perform_retrieve, so the real throttle logic ($redis.setnx with 60-second expire), the TopicEmbed.where(embed_url:).exists? dedupe, the feed-polling branch, and fetch_http's embed_by_username lookup are never executed (checked spec/components/topic_retriever_spec.rb — the only spec referencing TopicRetriever; all five tests stub or mock these methods). A regression in the redis throttle (e.g., the key never expiring, permanently blocking retrieval for a URL) or in the dedupe/fetch internals passes the suite; the staff no_throttle bypass consumed here is likewise never exercised anywhere in the diff.\nB: spec/components/topic_retriever_spec.rb:34 — both valid-host examples stub the private `retrieved_recently?` and `perform_retrieve` of the object under test, so the Redis throttle (`$redis.setnx`/`expire` at lib/topic_retriever.rb:27) and the `no_throttle` bypass for staff are never executed; a throttle that always returns true (blocking all retrieval) or never expires passes the suite (P2, conf 100)\n\nPAIR 20:\nA: Both positive-path tests stub retrieved_recently? and mock perform_retrieve, so the real throttle logic ($redis.setnx with 60-second expire), the TopicEmbed.where(embed_url:).exists? dedupe, the feed-polling branch, and fetch_http's embed_by_username lookup are never executed (checked spec/components/topic_retriever_spec.rb — the only spec referencing TopicRetriever; all five tests stub or mock these methods). A regression in the redis throttle (e.g., the key never expiring, permanently blocking retrieval for a URL) or in the dedupe/fetch internals passes the suite; the staff no_throttle bypass consumed here is likewise never exercised anywhere in the diff.\nB: spec/components/topic_retriever_spec.rb:34 — both valid-host tests stub `retrieved_recently?` on the object under test, so the real redis `setnx`/`expire(…, 60)` throttle and the `no_throttle` bypass in lib/topic_retriever.rb:21-33 are never run; an inverted `setnx` check that throttles every first request would pass (P1, confidence 100).\n",
+  "effort": "low",
+  "pairs": [
+   [
+    21,
+    1263
+   ],
+   [
+    404,
+    1280
+   ],
+   [
+    404,
+    1283
+   ],
+   [
+    404,
+    1289
+   ],
+   [
+    404,
+    1292
+   ],
+   [
+    404,
+    1293
+   ],
+   [
+    404,
+    1294
+   ],
+   [
+    404,
+    1303
+   ],
+   [
+    404,
+    1404
+   ],
+   [
+    404,
+    1469
+   ],
+   [
+    404,
+    1725
+   ],
+   [
+    23,
+    1480
+   ],
+   [
+    23,
+    1481
+   ],
+   [
+    23,
+    1487
+   ],
+   [
+    23,
+    1489
+   ],
+   [
+    23,
+    1490
+   ],
+   [
+    23,
+    1496
+   ],
+   [
+    23,
+    1498
+   ],
+   [
+    23,
+    1501
+   ],
+   [
+    23,
+    1502
+   ]
+  ]
+ },
+ "parsed_response": {
+  "pairs": [
+   {
+    "pair": 1,
+    "a": {
+     "mechanism": "all valid-host tests stub retrieved_recently?, so the redis setnx/expire throttle code is never executed",
+     "trigger": "running the spec suite",
+     "consequence": "regressions in setnx/expire throttle or no_throttle branch pass the suite"
+    },
+    "b": {
+     "mechanism": "every spec stubs retrieved_recently?, real setnx/expire throttle behavior never tested",
+     "trigger": "running the spec suite",
+     "consequence": "first-call vs 60s vs after-expiry throttle behavior untested"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Both claim the redis throttle is untested because specs stub retrieved_recently?; same root cause and consequence."
+   },
+   {
+    "pair": 2,
+    "a": {
+     "mechanism": "perform_retrieve runs full Jobs::PollFeed synchronously per embed URL",
+     "trigger": "single embed request",
+     "consequence": "full feed fetch/import per URL, duplicating hourly schedule; feed_key unused"
+    },
+    "b": {
+     "mechanism": "perform_retrieve runs full PollFeed synchronously per cache-miss; throttle keyed per URL",
+     "trigger": "each distinct embed_url cache-miss",
+     "consequence": "N unknown URLs trigger N full feed polls"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.8,
+    "reason": "Same mechanism and trigger; B's N-URL amplification is a derived consequence of the same per-URL full-poll behavior, not a new mechanism."
+   },
+   {
+    "pair": 3,
+    "a": {
+     "mechanism": "PollFeed.new.execute({}) inline per embed request",
+     "trigger": "single embed request",
+     "consequence": "full feed fetch/import to resolve one URL, duplicating schedule"
+    },
+    "b": {
+     "mechanism": "PollFeed.new.execute({}) inline on request path",
+     "trigger": "every uncached embed request",
+     "consequence": "external feed latency/failure coupled to each request"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Identical mechanism and trigger; B only rephrases the consequence (latency/failure coupling)."
+   },
+   {
+    "pair": 4,
+    "a": {
+     "mechanism": "full PollFeed run synchronously per embed URL",
+     "trigger": "single embed request",
+     "consequence": "full feed re-fetch and re-import per URL"
+    },
+    "b": {
+     "mechanism": "each retrieve synchronously re-runs whole PollFeed",
+     "trigger": "N unique embed URLs",
+     "consequence": "N full feed fetches and imports"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "B is a direct restatement of A's core claim with the same mechanism and consequence."
+   },
+   {
+    "pair": 5,
+    "a": {
+     "mechanism": "full PollFeed run per embed URL",
+     "trigger": "single embed request",
+     "consequence": "full feed fetch + all-item re-import, no feed-level cache (feed_key unused)"
+    },
+    "b": {
+     "mechanism": "full RSS import per first-time URL; no feed-level cache shared by per-URL throttle",
+     "trigger": "traffic across distinct pages",
+     "consequence": "multiplied all-item DB work, worker saturation"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "Same mechanism and no-feed-level-cache claim; B frames the same multiplication consequence."
+   },
+   {
+    "pair": 6,
+    "a": {
+     "mechanism": "PollFeed.new.execute({}) inline per embed URL; feed_key unused suggests planned cache",
+     "trigger": "single embed request",
+     "consequence": "full feed fetch/import per URL, duplicating schedule"
+    },
+    "b": {
+     "mechanism": "PollFeed.new.execute({}) inline per cache-miss; per-URL throttle key; no feed-level cache; feed_key unused",
+     "trigger": "N distinct missing URLs",
+     "consequence": "N full feed polls"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "B reproduces A's full set of claims including the unused feed_key and per-URL amplification."
+   },
+   {
+    "pair": 7,
+    "a": {
+     "mechanism": "PollFeed.new.execute({}) inline synchronously",
+     "trigger": "single embed request",
+     "consequence": "full blocking feed fetch and import to resolve one URL"
+    },
+    "b": {
+     "mechanism": "PollFeed.new.execute({}) inline inside another job",
+     "trigger": "user-triggered path",
+     "consequence": "full blocking feed fetch and import"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Identical mechanism, trigger, and consequence; wording only differs."
+   },
+   {
+    "pair": 8,
+    "a": {
+     "mechanism": "PollFeed.new.execute({}) inline per embed request; feed_key unused",
+     "trigger": "single embed request",
+     "consequence": "full feed fetch/import per URL duplicating hourly schedule"
+    },
+    "b": {
+     "mechanism": "TopicRetriever synchronously drives the scheduled PollFeed job inline",
+     "trigger": "embed retrieval",
+     "consequence": "coupling to PollFeed internals instead of extracting shared feed-import logic"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.7,
+    "reason": "Same mechanism (inline execute of PollFeed in perform_retrieve); B frames the consequence as an architecture/design concern rather than performance, an aspect difference of the same root cause."
+   },
+   {
+    "pair": 9,
+    "a": {
+     "mechanism": "full PollFeed run inline per embed request",
+     "trigger": "single embed request",
+     "consequence": "full feed fetch/import per URL, duplicating schedule"
+    },
+    "b": {
+     "mechanism": "full PollFeed inline per embed job",
+     "trigger": "every embed-retrieval job",
+     "consequence": "full fetch + N-item import per new URL with concurrent jobs polling simultaneously with no lock"
+    },
+    "material_differences": [
+     "B adds a concurrency/no-lock claim not present in A"
+    ],
+    "same": false,
+    "confidence": 0.75,
+    "reason": "B adds an additional material claim about concurrent simultaneous polling without a lock, which A does not make."
+   },
+   {
+    "pair": 10,
+    "a": {
+     "mechanism": "PollFeed.new.execute({}) inline per embed URL",
+     "trigger": "single embed request",
+     "consequence": "full feed fetch/import per URL, duplicating hourly schedule"
+    },
+    "b": {
+     "mechanism": "PollFeed.new.execute({}) inline per embed URL with per-URL 60s throttle key",
+     "trigger": "M distinct un-imported URLs / initial rollout page views",
+     "consequence": "M full feed polls uncoordinated with hourly schedule"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "B restates A's per-URL poll, hourly-schedule duplication, and adds only a derived rollout amplification of the same mechanism."
+   },
+   {
+    "pair": 11,
+    "a": {
+     "mechanism": "PollFeed.new.execute({}) inline per embed request",
+     "trigger": "single user-triggered embed request",
+     "consequence": "full inline feed fetch/parse/import of every item"
+    },
+    "b": {
+     "mechanism": "TopicRetriever directly calls PollFeed execute({}) inline",
+     "trigger": "single user-triggered embed request",
+     "consequence": "full inline feed fetch/parse/import; framed as separation-of-concerns violation"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.8,
+    "reason": "Identical mechanism, trigger, and consequence; B adds only a design-flaw framing of the same root cause."
+   },
+   {
+    "pair": 12,
+    "a": {
+     "mechanism": "positive-path tests stub retrieved_recently? and mock perform_retrieve",
+     "trigger": "running the spec suite",
+     "consequence": "throttle, dedupe, feed-polling branch, fetch_http, and staff bypass untested; regressions pass"
+    },
+    "b": {
+     "mechanism": "specs mock the methods, only host-validation gate covered",
+     "trigger": "running the spec suite",
+     "consequence": "perform_retrieve, retrieved_recently? throttle (incl. staff bypass), fetch_http untested"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "B's claims are a subset of A's claims about the same stubbing-induced coverage gap."
+   },
+   {
+    "pair": 13,
+    "a": {
+     "mechanism": "all five tests stub or mock retrieved_recently?, perform_retrieve",
+     "trigger": "running the spec suite",
+     "consequence": "throttle, dedupe, feed branch, fetch_http, staff bypass untested"
+    },
+    "b": {
+     "mechanism": "all tests mock perform_retrieve and retrieved_recently?",
+     "trigger": "running the spec suite",
+     "consequence": "perform_retrieve, fetch_http, throttle, and invalid_host?'s non-raising URI path never executed"
+    },
+    "material_differences": [
+     "B adds that invalid_host?'s successful/non-raising URI path is untested, a specific additional coverage claim not made by A"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "B is a compound report adding a distinct material claim (untested invalid_host? success path) beyond A's set."
+   },
+   {
+    "pair": 14,
+    "a": {
+     "mechanism": "tests stub retrieved_recently? and mock perform_retrieve",
+     "trigger": "running the spec suite",
+     "consequence": "dedupe short-circuit, feed branch, fetch_http, throttle, staff bypass untested"
+    },
+    "b": {
+     "mechanism": "perform_retrieve is always mocked",
+     "trigger": "running the spec suite",
+     "consequence": "existing-embed short-circuit, RSS-first fallback, fetch_http untested"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "B's claims are a subset of A's claims about the same mock-induced coverage gap."
+   },
+   {
+    "pair": 15,
+    "a": {
+     "mechanism": "tests stub retrieved_recently? and mock perform_retrieve",
+     "trigger": "running the spec suite",
+     "consequence": "throttle and staff no_throttle bypass untested among other paths"
+    },
+    "b": {
+     "mechanism": "retrieved_recently? stubbed in every case",
+     "trigger": "running the spec suite",
+     "consequence": "redis setnx/expire throttle and no_throttle staff bypass lack real coverage"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "B is a subset of A's claim focused on the same throttle/staff-bypass coverage gap."
+   },
+   {
+    "pair": 16,
+    "a": {
+     "mechanism": "tests stub control-flow methods",
+     "trigger": "running the spec suite",
+     "consequence": "throttle, feed fallback, HTTP import untested among other paths"
+    },
+    "b": {
+     "mechanism": "specs mock both private control-flow methods",
+     "trigger": "running the spec suite",
+     "consequence": "Redis throttling, feed fallback, HTTP import untested"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "B restates a subset of A's claims with equivalent mechanism and consequence."
+   },
+   {
+    "pair": 17,
+    "a": {
+     "mechanism": "tests stub retrieved_recently? and mock perform_retrieve",
+     "trigger": "running the spec suite",
+     "consequence": "dedupe short-circuit, feed branch, fetch_http untested"
+    },
+    "b": {
+     "mechanism": "perform_retrieve stubbed in every example",
+     "trigger": "running the spec suite",
+     "consequence": "existing-embed short-circuit, feed-polling recheck, fetch_http/import_remote path have zero coverage"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "B is a subset of A's coverage-gap claims about the same stubbed methods."
+   },
+   {
+    "pair": 18,
+    "a": {
+     "mechanism": "tests stub retrieved_recently? and mock perform_retrieve",
+     "trigger": "running the spec suite",
+     "consequence": "redis throttle and staff bypass untested; regressions pass"
+    },
+    "b": {
+     "mechanism": "retrieved_recently? replaced by a stub in specs",
+     "trigger": "running the spec suite",
+     "consequence": "broken setnx/expiry and untested no_throttle bypass leave specs green"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "B restates A's throttle/staff-bypass untested claim with the same consequence."
+   },
+   {
+    "pair": 19,
+    "a": {
+     "mechanism": "tests stub retrieved_recently? and mock perform_retrieve",
+     "trigger": "running the spec suite",
+     "consequence": "throttle (e.g., key never expiring) and no_throttle bypass untested; regressions pass"
+    },
+    "b": {
+     "mechanism": "valid-host tests stub retrieved_recently? and perform_retrieve",
+     "trigger": "running the spec suite",
+     "consequence": "redis setnx/expire throttle and no_throttle bypass never executed; broken throttles pass the suite"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Same stubbing mechanism and same untested-throttle/bypass consequence; only the example regression differs."
+   },
+   {
+    "pair": 20,
+    "a": {
+     "mechanism": "tests stub retrieved_recently? and mock perform_retrieve",
+     "trigger": "running the spec suite",
+     "consequence": "throttle regressions (e.g., key never expiring) and staff bypass untested; regressions pass"
+    },
+    "b": {
+     "mechanism": "valid-host tests stub retrieved_recently?",
+     "trigger": "running the spec suite",
+     "consequence": "real setnx/expire(60) throttle and no_throttle bypass never run; inverted setnx check would pass the suite"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Same mechanism and consequence; the specific regression example differs (never-expiring vs inverted setnx) but both illustrate the same untested-throttle claim."
+   }
+  ]
+ },
+ "usage": {
+  "glm-5.3-background": {
+   "input_tokens": 3919,
+   "cache_read_input_tokens": 384,
+   "cache_creation_input_tokens": 0,
+   "output_tokens": 2668,
+   "reasoning_output_tokens": 1032,
+   "cost_usd": 0.0,
+   "total_tokens": 8003
+  }
+ },
+ "status": "complete",
+ "error_type": null,
+ "elapsed_s": 20.55711579322815
+}

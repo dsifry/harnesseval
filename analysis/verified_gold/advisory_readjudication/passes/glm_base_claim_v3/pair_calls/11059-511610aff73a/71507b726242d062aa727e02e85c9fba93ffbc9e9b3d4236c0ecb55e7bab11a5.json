@@ -1,0 +1,505 @@
+{
+ "url": "https://github.com/calcom/cal.com/pull/11059",
+ "pass_digest": "9c5f733ce7a3f996c90c67f262cc4a77e2b234bc415c197afa7c73477ad320be",
+ "request_sha256": "71507b726242d062aa727e02e85c9fba93ffbc9e9b3d4236c0ecb55e7bab11a5",
+ "request": {
+  "url": "https://github.com/calcom/cal.com/pull/11059",
+  "model": "glm-5.3-background",
+  "system": "You are clustering code review findings from one PR. Always respond with valid JSON.",
+  "prompt": "You are clustering code review findings from the same PR. For each PAIR below, decide whether the two findings describe the SAME underlying issue — same root cause in the same code location. Different wording is fine. A finding about a DIFFERENT defect in the same file or function is NOT the same issue. Severity or aspect differences of the same root cause ARE the same issue.\n\n\nFor THIS scoring pass, duplicate equivalence is stricter than sharing a root cause.\nYou must compare the COMPLETE MATERIAL CLAIMS, including mechanism, triggering\nconditions, execution path, and consequence. The same line or broad concern does\nnot establish equivalence. A report of wrong-category selection, a case/rename\nmismatch, a crash, and a silent fallback are different claims even at one lookup.\nAn inactive/unbound API concern and an alleged active user-facing failure differ.\nA compound report with an additional material claim does NOT equal its subset.\nDifferences only in wording, severity, or hedging do not create separate claims.\nIf the claimed mechanisms, triggers or consequences conflict, or one report adds\nan unsupported/different material factual claim, return same=false. You are NOT\nverifying which claim is true; do not repair or reinterpret either report to make\nthem match. If unsure whether their full claims are equivalent, return false.\n\nFor every numbered pair, extract what A and B actually CLAIM into mechanism,\ntrigger and consequence. Then list material_differences and give your equivalence\nverdict, confidence and reason. same=true requires no material differences.\nReturn ONLY this JSON object, with EVERY pair index exactly once:\n{\"pairs\":[{\"pair\":1,\"a\":{\"mechanism\":\"...\",\"trigger\":\"...\",\"consequence\":\"...\"},\"b\":{\"mechanism\":\"...\",\"trigger\":\"...\",\"consequence\":\"...\"},\"material_differences\":[],\"same\":true,\"confidence\":0.9,\"reason\":\"...\"}]}\n\nPAIRS:\nPAIR 1:\nA: The new Salesforce refresh block never routes through refreshOAuthTokens, so when APP_CREDENTIAL_SHARING_ENABLED and CALCOM_CREDENTIAL_SYNC_ENDPOINT are set it still refreshes against login.salesforce.com using this instance's own client_id/client_secret. For the stated audience (self-hosters whose parent application holds the real Salesforce app credentials), the local instance's client_secret does not match the parent's OAuth app, so the refresh call fails with invalid_client and Salesforce calendar sync is broken in exactly the deployments the feature targets — the sync feature is inconsistently scoped across the apps it touches in this diff.\nB: packages/app-store/salesforce/lib/CalendarService.ts:75 — Salesforce's refreshAccessToken inlines its own `fetch` to Salesforce instead of using the shared `refreshOAuthTokens` wrapper that all 6 other refreshAccessToken implementations in this diff now use, so it silently doesn't participate in the credential-sync feature despite importing `parseRefreshTokenResponse` — an inconsistent pattern across otherwise-parallel provider implementations\n\nPAIR 2:\nA: The new Salesforce refresh block never routes through refreshOAuthTokens, so when APP_CREDENTIAL_SHARING_ENABLED and CALCOM_CREDENTIAL_SYNC_ENDPOINT are set it still refreshes against login.salesforce.com using this instance's own client_id/client_secret. For the stated audience (self-hosters whose parent application holds the real Salesforce app credentials), the local instance's client_secret does not match the parent's OAuth app, so the refresh call fails with invalid_client and Salesforce calendar sync is broken in exactly the deployments the feature targets — the sync feature is inconsistently scoped across the apps it touches in this diff.\nB: packages/app-store/salesforce/lib/CalendarService.ts:75 — the change adds a new refresh on every `getClient` call (`const response = await fetch(\"https://login.salesforce.com/services/oauth2/token\", ...)` plus `prisma.credential.update`) that no requirement asks for, and it skips `refreshOAuthTokens`, so with credential sync on (`CALCOM_CREDENTIAL_SYNC_ENDPOINT` set) Salesforce still refreshes directly with the local refresh_token; sync is not actually wired up for Salesforce, and every constructed CalendarService makes an extra network call and DB write (P1, conf 75)\n\nPAIR 3:\nA: The new Salesforce refresh block never routes through refreshOAuthTokens, so when APP_CREDENTIAL_SHARING_ENABLED and CALCOM_CREDENTIAL_SYNC_ENDPOINT are set it still refreshes against login.salesforce.com using this instance's own client_id/client_secret. For the stated audience (self-hosters whose parent application holds the real Salesforce app credentials), the local instance's client_secret does not match the parent's OAuth app, so the refresh call fails with invalid_client and Salesforce calendar sync is broken in exactly the deployments the feature targets — the sync feature is inconsistently scoped across the apps it touches in this diff.\nB: packages/app-store/salesforce/lib/CalendarService.ts:75 — The new `await fetch(\"https://login.salesforce.com/services/oauth2/token\", ...)` block adds an unconditional refresh-token round trip plus `prisma.credential.update` every time a Salesforce client is constructed, and it never goes through `refreshOAuthTokens`. Every existing Salesforce install, sync on or off, now makes an extra token call per service instantiation (and hits an unimported `prisma`), while sync-enabled deployments still bypass the sync endpoint. (P1, conf 75)\n\nPAIR 4:\nA: The new Salesforce refresh block never routes through refreshOAuthTokens, so when APP_CREDENTIAL_SHARING_ENABLED and CALCOM_CREDENTIAL_SYNC_ENDPOINT are set it still refreshes against login.salesforce.com using this instance's own client_id/client_secret. For the stated audience (self-hosters whose parent application holds the real Salesforce app credentials), the local instance's client_secret does not match the parent's OAuth app, so the refresh call fails with invalid_client and Salesforce calendar sync is broken in exactly the deployments the feature targets — the sync feature is inconsistently scoped across the apps it touches in this diff.\nB: Salesforce implements its own bespoke inline fetch token refresh path in the connection-setup flow instead of using refreshOAuthTokens, so the credential-sync feature silently doesn't apply to salesforce (duplicated, divergent refresh logic); it also performs an eager token refresh on every service instantiation (extra network round-trip per operation, rate-limit exposure) where jsforce already handles refresh\n\nPAIR 5:\nA: packages/app-store/salesforce/lib/CalendarService.ts:75 — The token refresh is executed on every `getClient()` call with no expiry check and bypasses `refreshOAuthTokens`, so salesforce is excluded from credential sync and refreshes constantly\nB: Salesforce CalendarService (packages/app-store/salesforce/lib/CalendarService.ts:75-99): the conn initializer unconditionally POSTs to login.salesforce.com/services/oauth2/token and updates the credential on every service construction, with no expiry check or caching and bypassing refreshOAuthTokens entirely — since calendar services are constructed per availability check/booking/calendar op, every Salesforce operation gains a serial network round-trip plus a DB write, parallel ops race-write the same credential row, and the Salesforce token endpoint is hit at full request volume (rate-limit/lockout risk).\n\nPAIR 6:\nA: packages/app-store/salesforce/lib/CalendarService.ts:75 — The token refresh is executed on every `getClient()` call with no expiry check and bypasses `refreshOAuthTokens`, so salesforce is excluded from credential sync and refreshes constantly\nB: Salesforce CalendarService unconditionally refreshes tokens (blocking fetch + DB write) on every instantiation with no expiry check, adding ~200-800ms to every request (packages/app-store/salesforce/lib/CalendarService.ts:75)\n\nPAIR 7:\nA: Salesforce connection-setup path now unconditionally fires a live token refresh on every run with a fragile success check (statusText !== 'OK' instead of response.ok) and no refresh_token existence guard, so credentials without a real refresh token send refresh_token=undefined and fail with a hard 400\nB: Salesforce eager refresh on every instantiation plus fragile status check: a Salesforce token refresh (network call + credential DB write) now runs on every service instantiation where previously jsforce used the stored access token and refreshed lazily, adding a per-operation round trip (a downed/rate-limiting Salesforce now fails operations that previously succeeded with the cached token); the fetch has no timeout, and the guard response.statusText !== \"OK\" is fragile since HTTP/2 responses carry an empty reason phrase, with the response body discarded on failure so the thrown HttpError says only \"Bad Request\" with no diagnostic detail (salesforce/lib/CalendarService.ts:~75-98)\n\nPAIR 8:\nA: Salesforce connection-setup path now unconditionally fires a live token refresh on every run with a fragile success check (statusText !== 'OK' instead of response.ok) and no refresh_token existence guard, so credentials without a real refresh token send refresh_token=undefined and fail with a hard 400\nB: Salesforce now performs a full token refresh plus `prisma.credential.update` inline on every service construction (packages/app-store/salesforce/lib/CalendarService.ts:~75-99) where jsforce previously refreshed lazily, so any transient refresh failure hard-fails the entire service; also `response.statusText !== \"OK\"` is fragile (HTTP/2 responses carry an empty statusText) and discards the error body, turning real failures into a meaningless 400\n\nPAIR 9:\nA: Salesforce connection-setup path now unconditionally fires a live token refresh on every run with a fragile success check (statusText !== 'OK' instead of response.ok) and no refresh_token existence guard, so credentials without a real refresh token send refresh_token=undefined and fail with a hard 400\nB: The forced Salesforce refresh makes the unreliable statusText !== 'OK' check execute on every call, turning transient non-'OK' statuses into thrown 400s on the booking hot path\n\nPAIR 10:\nA: Salesforce CalendarService performs an unguarded token refresh fetch on every service construction with no try/catch, no gating on APP_CREDENTIAL_SHARING_ENABLED, no timeout, and no retry/backoff, so network failures make all Salesforce operations fail even with a valid access token and expose the token endpoint to rate-limiting under load\nB: Salesforce conn initializer hard-fails construction on any refresh error even when the stored access token is still valid, whereas the previous jsforce-based code refreshed lazily on 401.\n\nPAIR 11:\nA: Salesforce CalendarService performs an unguarded token refresh fetch on every service construction with no try/catch, no gating on APP_CREDENTIAL_SHARING_ENABLED, no timeout, and no retry/backoff, so network failures make all Salesforce operations fail even with a valid access token and expose the token endpoint to rate-limiting under load\nB: Salesforce performs an eager unconditional refresh on every service construction (ungated by `APP_CREDENTIAL_SHARING_ENABLED` or token expiry) with no error tolerance, so any transient refresh failure throws before `jsforce.Connection` is created and blocks all Salesforce operations, unlike the previous lazy refresh on 401\n\nPAIR 12:\nA: Salesforce CalendarService performs an unguarded token refresh fetch on every service construction with no try/catch, no gating on APP_CREDENTIAL_SHARING_ENABLED, no timeout, and no retry/backoff, so network failures make all Salesforce operations fail even with a valid access token and expose the token endpoint to rate-limiting under load\nB: Salesforce refreshes tokens unconditionally in the constructor path with no expiry check and doesn't use refreshOAuthTokens, silently breaking credential-sharing and risking provider throttling; it also discards extra fields in credential.key when updating\n\nPAIR 13:\nA: Salesforce CalendarService performs an unguarded token refresh fetch on every service construction with no try/catch, no gating on APP_CREDENTIAL_SHARING_ENABLED, no timeout, and no retry/backoff, so network failures make all Salesforce operations fail even with a valid access token and expose the token endpoint to rate-limiting under load\nB: Salesforce refreshes tokens unconditionally on every service instantiation with no expiry check, causing a token refresh and DB write per calendar operation plus avoidable Salesforce API-quota consumption; it also bypasses refreshOAuthTokens entirely so credential-sharing mode is silently ignored for Salesforce, inconsistent with every other adapter\n\nPAIR 14:\nA: The example states the key 'must be 32 bytes for AES256' and then tells the operator to generate it with `openssl rand -base64 24`, which produces 24 bytes — while the sibling CALCOM_WEBHOOK_SECRET line correctly uses `rand -base64 32`. A self-hoster following the example deploys a 24-byte key against a comment demanding 32: if symmetricDecrypt passes the key raw to an aes-256 createDecipheriv, every webhook decryption throws and the endpoint 500s on every call, bricking the sync integration at setup; under any key-normalizing implementation the 'must be 32 bytes' instruction is instead the false one — the two adjacent shipped lines cannot both be right.\nB: The setup comment states CALCOM_APP_CREDENTIAL_ENCRYPTION_KEY 'must be 32 bytes for AES256 encryption algorithm' but then instructs generating it with `openssl rand -base64 24`, which yields 24 bytes (32 base64 characters). Self-hosters following the comment will generate a key that contradicts the stated 32-byte requirement and then mismatch the parent application if the parent generated a 32-byte key, producing undecryptable credentials on the webhook endpoint with no error pointing at the key mismatch.\n\nPAIR 15:\nA: The example states the key 'must be 32 bytes for AES256' and then tells the operator to generate it with `openssl rand -base64 24`, which produces 24 bytes — while the sibling CALCOM_WEBHOOK_SECRET line correctly uses `rand -base64 32`. A self-hoster following the example deploys a 24-byte key against a comment demanding 32: if symmetricDecrypt passes the key raw to an aes-256 createDecipheriv, every webhook decryption throws and the endpoint 500s on every call, bricking the sync integration at setup; under any key-normalizing implementation the 'must be 32 bytes' instruction is instead the false one — the two adjacent shipped lines cannot both be right.\nB: [Low/doc_defect] .env.example:~240 — the key \"must be 32 bytes\" for AES256, but the suggested openssl rand -base64 24 generates 24 bytes (32 base64 characters); if the key is base64-decoded before use it is an invalid AES-256 key length, and if used raw it has only 192 bits of entropy. The doc and the stated requirement contradict each other.\n\nPAIR 16:\nA: Service construction now unconditionally POSTs to login.salesforce.com for a fresh access token and writes the credential row on every SalesforceCalendarService instantiation, replacing jsforce's lazy refresh-on-expiry flow. Every booking create/update and availability check on a Salesforce-connected calendar gains a Salesforce token-endpoint round-trip plus a DB write even when the stored token is valid, and a Salesforce outage or token-endpoint rate limit now fails every one of those operations at construction time instead of only expired-token paths.\nB: The connection getter now unconditionally POSTs to Salesforce's token endpoint and writes the credential row on every service construction — no expiry check, no timeout — where previously jsforce refreshed lazily only when the stored token expired. Every Salesforce-connected booking operation gains a remote token refresh plus a DB write (token churn and rate-limit exposure), and a transient token-endpoint failure or network blip now fails operations that would previously have succeeded with the still-valid stored access token.\n\nPAIR 17:\nA: Service construction now unconditionally POSTs to login.salesforce.com for a fresh access token and writes the credential row on every SalesforceCalendarService instantiation, replacing jsforce's lazy refresh-on-expiry flow. Every booking create/update and availability check on a Salesforce-connected calendar gains a Salesforce token-endpoint round-trip plus a DB write even when the stored token is valid, and a Salesforce outage or token-endpoint rate limit now fails every one of those operations at construction time instead of only expired-token paths.\nB: The connection setup now performs an unconditional token refresh - a fetch to login.salesforce.com plus a prisma credential write - on every SalesforceCalendarService instantiation, where the previous code created the jsforce Connection lazily and refreshed only when an API call actually needed a new token. Every booking operation touching a Salesforce calendar now incurs a synchronous round-trip to Salesforce and a DB write, burns Salesforce token-endpoint rate limits, and fails outright whenever Salesforce's token endpoint hiccups even though the stored access token is still valid - converting a transient Salesforce outage into total Salesforce unavailability.\n\nPAIR 18:\nA: Service construction now unconditionally POSTs to login.salesforce.com for a fresh access token and writes the credential row on every SalesforceCalendarService instantiation, replacing jsforce's lazy refresh-on-expiry flow. Every booking create/update and availability check on a Salesforce-connected calendar gains a Salesforce token-endpoint round-trip plus a DB write even when the stored token is valid, and a Salesforce outage or token-endpoint rate limit now fails every one of those operations at construction time instead of only expired-token paths.\nB: The constructor now performs a blocking remote POST to login.salesforce.com and a Prisma credential.update on every SalesforceCalendarService instantiation, where previously jsforce.Connection refreshed tokens lazily only when an access token expired. Every Salesforce calendar operation (and every booking touching Salesforce) now pays an extra OAuth round-trip plus a DB write per instantiation — a hot-path regression and a new network failure point that turns previously-cached-token operations into hard failures when Salesforce is slow or rate-limits.\n\nPAIR 19:\nA: Service construction now unconditionally POSTs to login.salesforce.com for a fresh access token and writes the credential row on every SalesforceCalendarService instantiation, replacing jsforce's lazy refresh-on-expiry flow. Every booking create/update and availability check on a Salesforce-connected calendar gains a Salesforce token-endpoint round-trip plus a DB write even when the stored token is valid, and a Salesforce outage or token-endpoint rate limit now fails every one of those operations at construction time instead of only expired-token paths.\nB: The new token fetch runs unconditionally on every connection creation — no expiry check, no APP_CREDENTIAL_SHARING_ENABLED gate, and no timeout — replacing jsforce's lazy refresh-on-401 with a per-operation round trip plus credential write. Every Salesforce calendar operation now costs an extra outbound token request and a DB write even when the stored token is still valid, adding latency and avoidable rate-limit exposure on login.salesforce.com, and a refresh-endpoint hiccup now fails operations that previously would have succeeded on the still-valid stored token.\n\nPAIR 20:\nA: Service construction now unconditionally POSTs to login.salesforce.com for a fresh access token and writes the credential row on every SalesforceCalendarService instantiation, replacing jsforce's lazy refresh-on-expiry flow. Every booking create/update and availability check on a Salesforce-connected calendar gains a Salesforce token-endpoint round-trip plus a DB write even when the stored token is valid, and a Salesforce outage or token-endpoint rate limit now fails every one of those operations at construction time instead of only expired-token paths.\nB: The newly added Salesforce refresh block runs unconditionally inside connection setup — every time a jsforce.Connection is constructed the code fetches a fresh token from login.salesforce.com and writes it via prisma.credential.update, regardless of whether the existing access_token is expired. On any deployment with salesforce installed, each calendar operation that builds a service adds one outbound token request plus one credential DB write to the hot path, multiplying Salesforce API consumption and credential-row churn; token endpoint rate limits now gate ordinary calendar reads.\n",
+  "effort": "low",
+  "pairs": [
+   [
+    472,
+    1272
+   ],
+   [
+    472,
+    1274
+   ],
+   [
+    472,
+    1275
+   ],
+   [
+    472,
+    1892
+   ],
+   [
+    1279,
+    1864
+   ],
+   [
+    1279,
+    1877
+   ],
+   [
+    1887,
+    1889
+   ],
+   [
+    1887,
+    1895
+   ],
+   [
+    1887,
+    1951
+   ],
+   [
+    1873,
+    1886
+   ],
+   [
+    1873,
+    1898
+   ],
+   [
+    1873,
+    1909
+   ],
+   [
+    1873,
+    1910
+   ],
+   [
+    117,
+    183
+   ],
+   [
+    117,
+    579
+   ],
+   [
+    68,
+    79
+   ],
+   [
+    68,
+    80
+   ],
+   [
+    68,
+    81
+   ],
+   [
+    68,
+    151
+   ],
+   [
+    68,
+    152
+   ]
+  ]
+ },
+ "parsed_response": {
+  "pairs": [
+   {
+    "pair": 1,
+    "a": {
+     "mechanism": "Salesforce refresh bypasses refreshOAuthTokens, refreshing with local client_id/client_secret",
+     "trigger": "APP_CREDENTIAL_SHARING_ENABLED + CALCOM_CREDENTIAL_SYNC_ENDPOINT set (self-hosters whose parent holds real credentials)",
+     "consequence": "invalid_client failure, Salesforce calendar sync broken in targeted deployments"
+    },
+    "b": {
+     "mechanism": "Salesforce inlines bespoke fetch instead of shared refreshOAuthTokens wrapper used by 6 other providers",
+     "trigger": "Code-pattern comparison across provider implementations",
+     "consequence": "Silently doesn't participate in credential-sync feature; inconsistent pattern"
+    },
+    "material_differences": [
+     "A claims an active runtime failure (invalid_client, sync broken) for a specific audience; B claims only a silent non-participation / pattern inconsistency",
+     "A's triggering mechanism (client_secret mismatch with parent OAuth app) is absent from B"
+    ],
+    "same": false,
+    "confidence": 0.85,
+    "reason": "A alleges an active user-facing failure with a distinct mechanism (client_secret mismatch → invalid_client); B reports inactive/non-participating pattern inconsistency. Different consequence claims."
+   },
+   {
+    "pair": 2,
+    "a": {
+     "mechanism": "Salesforce refresh bypasses refreshOAuthTokens, refreshing against login.salesforce.com with local credentials",
+     "trigger": "Credential sync enabled in self-hoster deployments",
+     "consequence": "invalid_client refresh failure; Salesforce calendar sync broken"
+    },
+    "b": {
+     "mechanism": "New refresh runs on every getClient call, skipping refreshOAuthTokens; refreshes directly with local refresh_token",
+     "trigger": "Every getClient call / sync-enabled deployments",
+     "consequence": "Sync not wired for Salesforce; unwanted extra network call and DB write per service construction (requirement not asked for)"
+    },
+    "material_differences": [
+     "B claims an unconditional per-call refresh on every getClient (trigger not limited to sync-enabled deployments)",
+     "B adds claims of unnecessary extra network call + DB write on all constructions",
+     "A claims invalid_client failure mechanism absent from B"
+    ],
+    "same": false,
+    "confidence": 0.85,
+    "reason": "B adds material claims (unwanted per-call refresh and DB write affecting all deployments) and lacks A's invalid_client failure mechanism."
+   },
+   {
+    "pair": 3,
+    "a": {
+     "mechanism": "Salesforce refresh bypasses refreshOAuthTokens, refreshing with local client credentials",
+     "trigger": "Credential-sync-enabled self-hoster deployments",
+     "consequence": "invalid_client failure; Salesforce calendar sync broken in targeted deployments"
+    },
+    "b": {
+     "mechanism": "Unconditional refresh fetch plus prisma.credential.update per client construction, skipping refreshOAuthTokens",
+     "trigger": "Every Salesforce service instantiation, all deployments; sync-enabled still bypasses endpoint",
+     "consequence": "Extra token call + DB write per instantiation; sync not wired; references an unimported prisma"
+    },
+    "material_differences": [
+     "B adds unimported-prisma claim (different defect)",
+     "B adds per-instantiation refresh affecting all installs; A's trigger is only sync-enabled deployments",
+     "A's invalid_client failure mechanism absent from B"
+    ],
+    "same": false,
+    "confidence": 0.85,
+    "reason": "B adds distinct material claims (unimported prisma, unconditional refresh for all installs) not in A."
+   },
+   {
+    "pair": 4,
+    "a": {
+     "mechanism": "Refresh bypasses refreshOAuthTokens, using local client_id/client_secret",
+     "trigger": "Sync-enabled self-hoster deployments",
+     "consequence": "invalid_client; Salesforce sync broken in targeted deployments"
+    },
+    "b": {
+     "mechanism": "Bespoke inline refresh instead of refreshOAuthTokens (duplicated divergent logic); eager refresh per instantiation where jsforce already handles refresh",
+     "trigger": "Every service instantiation; code duplication",
+     "consequence": "Credential-sync silently doesn't apply; extra network round-trip, rate-limit exposure"
+    },
+    "material_differences": [
+     "B adds eager-refresh-per-instantiation / rate-limit claim",
+     "A's invalid_client active-failure mechanism absent from B",
+     "Different consequences: silent non-application vs broken sync"
+    ],
+    "same": false,
+    "confidence": 0.8,
+    "reason": "B is a compound report with additional material claims (eager refresh, rate-limit) and lacks A's active failure mechanism."
+   },
+   {
+    "pair": 5,
+    "a": {
+     "mechanism": "Token refresh on every getClient call, no expiry check, bypasses refreshOAuthTokens",
+     "trigger": "Every getClient() call",
+     "consequence": "Salesforce excluded from credential sync; constant refreshing"
+    },
+    "b": {
+     "mechanism": "Unconditional POST + credential update on every service construction, no expiry check, bypassing refreshOAuthTokens",
+     "trigger": "Per availability check/booking/calendar op",
+     "consequence": "Serial round-trip + DB write per operation; parallel ops race-write the same credential row; endpoint hit at full request volume (rate-limit/lockout)"
+    },
+    "material_differences": [
+     "B adds parallel-ops race-write of credential row claim",
+     "B adds rate-limit/lockout consequence; A's consequence is exclusion from sync + constant refresh"
+    ],
+    "same": false,
+    "confidence": 0.75,
+    "reason": "Shared core, but B adds a distinct race-write claim and different consequence emphasis; A is not a subset match under strict equivalence."
+   },
+   {
+    "pair": 6,
+    "a": {
+     "mechanism": "Refresh on every getClient call, no expiry check, bypasses refreshOAuthTokens",
+     "trigger": "Every getClient() call",
+     "consequence": "Excluded from credential sync; refreshes constantly"
+    },
+    "b": {
+     "mechanism": "Unconditional blocking refresh fetch + DB write on every instantiation, no expiry check",
+     "trigger": "Every service instantiation",
+     "consequence": "~200-800ms added to every request"
+    },
+    "material_differences": [
+     "A claims refreshOAuthTokens bypass / credential-sync exclusion; B does not",
+     "B quantifies latency consequence; A claims sync-exclusion consequence"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "A is a compound report (refresh-every-call + sync bypass) whose subset B lacks the sync-bypass claim; consequences differ."
+   },
+   {
+    "pair": 7,
+    "a": {
+     "mechanism": "Unconditional refresh with fragile statusText check and no refresh_token existence guard",
+     "trigger": "Credentials without a real refresh token send refresh_token=undefined",
+     "consequence": "Hard 400 failure"
+    },
+    "b": {
+     "mechanism": "Eager refresh on every instantiation replacing lazy jsforce; no timeout; fragile statusText check (HTTP/2 empty reason phrase); response body discarded",
+     "trigger": "Every service instantiation; HTTP/2 responses; failure paths",
+     "consequence": "Per-op round trip; downed/rate-limiting Salesforce fails previously-succeeding ops; HttpError says only 'Bad Request' with no detail"
+    },
+    "material_differences": [
+     "A's distinctive claim: no refresh_token guard → refresh_token=undefined → 400 (absent from B)",
+     "B adds no-timeout and discarded-body/diagnostic claims absent from A",
+     "Different triggers for the 400 consequence"
+    ],
+    "same": false,
+    "confidence": 0.8,
+    "reason": "Both mention fragile statusText, but each adds distinct material claims (A: undefined refresh_token mechanism; B: timeout, discarded error body)."
+   },
+   {
+    "pair": 8,
+    "a": {
+     "mechanism": "Unconditional refresh with fragile statusText check and no refresh_token guard",
+     "trigger": "Credentials lacking refresh_token send refresh_token=undefined",
+     "consequence": "Hard 400 failure"
+    },
+    "b": {
+     "mechanism": "Full refresh + credential update on every construction; transient failure hard-fails service; fragile statusText; error body discarded",
+     "trigger": "Any transient refresh failure; HTTP/2 empty statusText",
+     "consequence": "Whole service hard-fails; meaningless 400 with no diagnostic"
+    },
+    "material_differences": [
+     "A's mechanism is refresh_token=undefined → 400; B's is transient failure hard-failing service",
+     "B adds discarded-body claim; A's no-guard claim absent from B"
+    ],
+    "same": false,
+    "confidence": 0.8,
+    "reason": "Different triggering mechanisms for failure and each side has distinct additional claims."
+   },
+   {
+    "pair": 9,
+    "a": {
+     "mechanism": "Unconditional refresh, fragile statusText check, no refresh_token guard",
+     "trigger": "Credentials without a real refresh token (refresh_token=undefined)",
+     "consequence": "Hard 400 failure"
+    },
+    "b": {
+     "mechanism": "Forced refresh makes fragile statusText check execute every call",
+     "trigger": "Transient non-'OK' statuses",
+     "consequence": "Thrown 400s on booking hot path"
+    },
+    "material_differences": [
+     "A's trigger is missing refresh_token; B's trigger is transient non-'OK' status",
+     "A's no-guard mechanism absent from B"
+    ],
+    "same": false,
+    "confidence": 0.75,
+    "reason": "Both involve statusText fragility, but the claimed triggers (undefined refresh_token vs transient statuses) differ materially."
+   },
+   {
+    "pair": 10,
+    "a": {
+     "mechanism": "Unguarded refresh fetch per construction: no try/catch, no gating, no timeout, no retry/backoff",
+     "trigger": "Network failures during refresh",
+     "consequence": "All Salesforce ops fail even with valid access token; token endpoint rate-limit exposure"
+    },
+    "b": {
+     "mechanism": "Constructor hard-fails on any refresh error",
+     "trigger": "Any refresh error while stored access token still valid",
+     "consequence": "Construction fails despite valid token; previously jsforce refreshed lazily on 401"
+    },
+    "material_differences": [
+     "A adds no-gating, no-timeout, no-retry claims and rate-limit-exposure consequence absent from B",
+     "B adds previous lazy-refresh-on-401 comparison"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "B's core is contained in A, but A is a compound report with additional material claims (gating, timeout, retry, rate-limit exposure)."
+   },
+   {
+    "pair": 11,
+    "a": {
+     "mechanism": "Unguarded refresh: no try/catch, no gating, no timeout, no retry/backoff",
+     "trigger": "Network failures during refresh",
+     "consequence": "All Salesforce ops fail with valid token; rate-limit exposure under load"
+    },
+    "b": {
+     "mechanism": "Eager unconditional refresh, ungated, no error tolerance; throws before jsforce.Connection created",
+     "trigger": "Any transient refresh failure",
+     "consequence": "Blocks all Salesforce operations; unlike previous lazy refresh on 401"
+    },
+    "material_differences": [
+     "A adds no-timeout and no-retry claims absent from B",
+     "A adds rate-limit-exposure consequence; B adds lazy-401 comparison"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "Overlapping core, but A is compound with additional material claims (timeout, retry, rate-limit) not present in B."
+   },
+   {
+    "pair": 12,
+    "a": {
+     "mechanism": "Unguarded refresh per construction: no try/catch, no gating, no timeout, no retry",
+     "trigger": "Network failures during refresh",
+     "consequence": "All ops fail with valid token; rate-limit exposure"
+    },
+    "b": {
+     "mechanism": "Unconditional refresh, no expiry check, doesn't use refreshOAuthTokens; discards extra fields in credential.key on update",
+     "trigger": "Every service instantiation",
+     "consequence": "Credential-sharing silently broken; throttling risk; data loss in credential.key"
+    },
+    "material_differences": [
+     "B adds claim of discarding extra fields in credential.key (distinct defect)",
+     "B adds refreshOAuthTokens bypass / credential-sharing claim absent from A"
+    ],
+    "same": false,
+    "confidence": 0.85,
+    "reason": "B adds a distinct material defect (credential.key field loss) plus a sync-bypass claim not in A."
+   },
+   {
+    "pair": 13,
+    "a": {
+     "mechanism": "Unguarded refresh: no try/catch, no gating, no timeout, no retry/backoff",
+     "trigger": "Network failures during refresh",
+     "consequence": "All Salesforce ops fail with valid token; token-endpoint rate-limiting"
+    },
+    "b": {
+     "mechanism": "Unconditional refresh per instantiation, no expiry check, bypasses refreshOAuthTokens",
+     "trigger": "Every calendar operation",
+     "consequence": "Token refresh + DB write per op; API-quota consumption; credential-sharing silently ignored, inconsistent with other adapters"
+    },
+    "material_differences": [
+     "B adds refreshOAuthTokens bypass / credential-sharing-inconsistency claim absent from A",
+     "A adds no-timeout / no-retry / no-gating claims absent from B"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "Each side carries material claims the other lacks; shared concern but not equivalent complete claims."
+   },
+   {
+    "pair": 14,
+    "a": {
+     "mechanism": "Comment demands 32-byte key but example generates 24-byte key via openssl rand -base64 24",
+     "trigger": "Self-hoster follows the example",
+     "consequence": "If raw key passed to aes-256 createDecipheriv, every webhook decryption throws, endpoint 500s, sync bricked; or the 32-byte instruction is false"
+    },
+    "b": {
+     "mechanism": "Comment says 32 bytes required but rand -base64 24 yields 24 bytes (32 base64 chars)",
+     "trigger": "Self-hoster follows comment AND parent app generated a 32-byte key",
+     "consequence": "Key mismatch with parent → undecryptable credentials on webhook endpoint with no error pointing at key mismatch"
+    },
+    "material_differences": [
+     "A's consequence: local decryption throws → 500 bricking (or instruction false); B's consequence: cross-app key mismatch with parent → undecryptable with misleading absence of diagnostics",
+     "B conditions the failure on parent generating a 32-byte key; A's mechanism is local createDecipheriv throw"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "Same doc contradiction root, but consequences and triggering conditions (local throw/500 vs parent-key mismatch) differ materially."
+   },
+   {
+    "pair": 15,
+    "a": {
+     "mechanism": "Comment demands 32 bytes; example generates 24 bytes",
+     "trigger": "Self-hoster follows example",
+     "consequence": "If raw key used with aes-256 createDecipheriv, decryption throws and endpoint 500s on every call; or the 32-byte instruction is false"
+    },
+    "b": {
+     "mechanism": "Doc says 32 bytes; rand -base64 24 generates 24 bytes (32 base64 chars)",
+     "trigger": "Following the doc",
+     "consequence": "If base64-decoded, invalid AES-256 key length; if used raw, only 192 bits of entropy; doc and requirement contradict"
+    },
+    "material_differences": [
+     "A claims endpoint 500s / bricking; B claims invalid key length or reduced entropy (192 bits), no 500/bricking claim",
+     "Different consequences for the same contradiction"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "Same doc inconsistency, but the claimed consequences conflict (active 500 failure vs invalid-length/entropy analysis)."
+   },
+   {
+    "pair": 16,
+    "a": {
+     "mechanism": "Unconditional POST for fresh token + credential write on every instantiation, replacing jsforce lazy refresh",
+     "trigger": "Every booking create/update and availability check on Salesforce-connected calendar",
+     "consequence": "Extra round-trip + DB write even with valid token; Salesforce outage/rate limit fails ops at construction instead of expired-token paths only"
+    },
+    "b": {
+     "mechanism": "Unconditional POST + credential write per construction — no expiry check, no timeout — previously lazy on expiry",
+     "trigger": "Every Salesforce-connected booking operation",
+     "consequence": "Extra token refresh + DB write per op (token churn, rate-limit exposure); transient failure fails ops that previously succeeded with valid token"
+    },
+    "material_differences": [
+     "B adds explicit no-timeout claim absent from A"
+    ],
+    "same": false,
+    "confidence": 0.65,
+    "reason": "Core claims match closely, but B adds a no-timeout material claim; under strict equivalence the compound is not equal to its subset."
+   },
+   {
+    "pair": 17,
+    "a": {
+     "mechanism": "Unconditional POST + credential row write per instantiation, replacing jsforce lazy refresh-on-expiry",
+     "trigger": "Every booking create/update and availability check",
+     "consequence": "Extra round-trip + DB write even with valid token; outage/rate limit fails all those ops at construction"
+    },
+    "b": {
+     "mechanism": "Unconditional token refresh fetch + prisma write per instantiation, previously lazy refresh only when API call needed",
+     "trigger": "Every booking operation touching Salesforce",
+     "consequence": "Synchronous round-trip + DB write per op; burns token-endpoint rate limits; fails outright on token-endpoint hiccup despite valid stored token"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "Mechanism, trigger, and consequence claims are equivalent; only wording/severity framing differs."
+   },
+   {
+    "pair": 18,
+    "a": {
+     "mechanism": "Unconditional POST + credential write per instantiation, replacing lazy refresh-on-expiry",
+     "trigger": "Every booking create/update and availability check",
+     "consequence": "Extra round-trip + DB write even with valid token; outage/rate limit fails ops at construction"
+    },
+    "b": {
+     "mechanism": "Blocking remote POST + Prisma credential.update per instantiation, previously lazy on expiry",
+     "trigger": "Every Salesforce calendar operation / booking",
+     "consequence": "Extra OAuth round-trip + DB write per instantiation (hot-path regression); fails ops when Salesforce slow or rate-limits despite valid token"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "All material claims (mechanism, trigger, consequence) align; differences are wording only."
+   },
+   {
+    "pair": 19,
+    "a": {
+     "mechanism": "Unconditional POST + credential write per instantiation, replacing jsforce lazy refresh",
+     "trigger": "Every booking create/update and availability check",
+     "consequence": "Extra round-trip + DB write even with valid token; outage/rate limit fails ops at construction"
+    },
+    "b": {
+     "mechanism": "Unconditional token fetch per connection creation — no expiry check, no APP_CREDENTIAL_SHARING_ENABLED gate, no timeout — replacing lazy refresh-on-401",
+     "trigger": "Every Salesforce calendar operation",
+     "consequence": "Extra token request + DB write even with valid token; latency + rate-limit exposure; refresh-endpoint hiccup fails ops that previously succeeded"
+    },
+    "material_differences": [
+     "B adds no-expiry-check, no-APP_CREDENTIAL_SHARING_ENABLED-gate, and no-timeout claims absent from A"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "Core matches, but B is a compound report adding gating/timeout/expiry-check claims not in A."
+   },
+   {
+    "pair": 20,
+    "a": {
+     "mechanism": "Unconditional POST + credential row write per instantiation, replacing jsforce lazy refresh",
+     "trigger": "Every booking create/update and availability check on Salesforce-connected calendar",
+     "consequence": "Extra round-trip + DB write even with valid token; outage/rate limit fails ops at construction instead of expired-only paths"
+    },
+    "b": {
+     "mechanism": "Unconditional token fetch + prisma credential.update on every connection construction regardless of token expiry",
+     "trigger": "Every calendar operation that builds a service, on any deployment with Salesforce installed",
+     "consequence": "One outbound token request + one credential DB write per op on the hot path; multiplied API consumption and credential-row churn; token endpoint rate limits gate ordinary calendar reads"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.8,
+    "reason": "Mechanism, trigger, and consequence claims are equivalent; churn/quota wording restates the same DB-write and rate-limit consequences."
+   }
+  ]
+ },
+ "usage": {
+  "glm-5.3-background": {
+   "input_tokens": 3736,
+   "cache_read_input_tokens": 384,
+   "cache_creation_input_tokens": 0,
+   "output_tokens": 4816,
+   "reasoning_output_tokens": 2127,
+   "cost_usd": 0.0,
+   "total_tokens": 11063
+  }
+ },
+ "status": "complete",
+ "error_type": null,
+ "elapsed_s": 54.90808296203613
+}

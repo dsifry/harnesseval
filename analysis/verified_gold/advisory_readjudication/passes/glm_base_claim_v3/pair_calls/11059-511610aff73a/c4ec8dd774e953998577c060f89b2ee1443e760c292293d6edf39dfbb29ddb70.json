@@ -1,0 +1,487 @@
+{
+ "url": "https://github.com/calcom/cal.com/pull/11059",
+ "pass_digest": "9c5f733ce7a3f996c90c67f262cc4a77e2b234bc415c197afa7c73477ad320be",
+ "request_sha256": "c4ec8dd774e953998577c060f89b2ee1443e760c292293d6edf39dfbb29ddb70",
+ "request": {
+  "url": "https://github.com/calcom/cal.com/pull/11059",
+  "model": "glm-5.3-background",
+  "system": "You are clustering code review findings from one PR. Always respond with valid JSON.",
+  "prompt": "You are clustering code review findings from the same PR. For each PAIR below, decide whether the two findings describe the SAME underlying issue — same root cause in the same code location. Different wording is fine. A finding about a DIFFERENT defect in the same file or function is NOT the same issue. Severity or aspect differences of the same root cause ARE the same issue.\n\n\nFor THIS scoring pass, duplicate equivalence is stricter than sharing a root cause.\nYou must compare the COMPLETE MATERIAL CLAIMS, including mechanism, triggering\nconditions, execution path, and consequence. The same line or broad concern does\nnot establish equivalence. A report of wrong-category selection, a case/rename\nmismatch, a crash, and a silent fallback are different claims even at one lookup.\nAn inactive/unbound API concern and an alleged active user-facing failure differ.\nA compound report with an additional material claim does NOT equal its subset.\nDifferences only in wording, severity, or hedging do not create separate claims.\nIf the claimed mechanisms, triggers or consequences conflict, or one report adds\nan unsupported/different material factual claim, return same=false. You are NOT\nverifying which claim is true; do not repair or reinterpret either report to make\nthem match. If unsure whether their full claims are equivalent, return false.\n\nFor every numbered pair, extract what A and B actually CLAIM into mechanism,\ntrigger and consequence. Then list material_differences and give your equivalence\nverdict, confidence and reason. same=true requires no material differences.\nReturn ONLY this JSON object, with EVERY pair index exactly once:\n{\"pairs\":[{\"pair\":1,\"a\":{\"mechanism\":\"...\",\"trigger\":\"...\",\"consequence\":\"...\"},\"b\":{\"mechanism\":\"...\",\"trigger\":\"...\",\"consequence\":\"...\"},\"material_differences\":[],\"same\":true,\"confidence\":0.9,\"reason\":\"...\"}]}\n\nPAIRS:\nPAIR 1:\nA: When credential sync is enabled, refreshOAuthTokens returns a raw fetch Response object, and the code then reads `res?.data` — a property that does not exist on a fetch Response — so token is undefined. `token.access_token` throws TypeError (Cannot read properties of undefined) inside refreshAccessToken, turning a refresh under credential-sharing mode into an unhandled 500 on the booking path instead of a token refresh.\nB: With credential sharing enabled refreshOAuthTokens returns the raw fetch Response, but this code reads res?.data (the googleauth response shape), so token is undefined and token.access_token throws a TypeError — and the sync response body is never read, so the shared token is never applied. On any deployment with CALCOM_CREDENTIAL_SYNC_ENDPOINT set, every Google Calendar token refresh crashes; the operation falls back to the expired token and Google Calendar availability/booking calls fail with auth errors until the app is reinstalled.\n\nPAIR 2:\nA: The minimumTokenResponseSchema uses computed keys `[z.string().toString()]` and `[z.string().optional().toString()]`, which evaluate to literal property names \"z.string()\"/\"z.string().optional()\" rather than validating arbitrary token fields, so the schema only enforces access_token and validates nothing else. When APP_CREDENTIAL_SHARING_ENABLED, any provider response — including malformed ones missing refresh_token, expiry, or with wrong types — passes validation, and garbage credentials get persisted to the DB.\nB: When credential sharing is enabled, full per-app schema validation (zoomRefreshedTokenSchema, refreshTokenResponseSchema, googleCredentialSchema, salesforceTokenSchema) is discarded in favor of the broken minimum schema, so garbage or malformed token payloads are accepted whenever they contain an access_token. A credential-sync endpoint returning malformed data (missing instance_url for Salesforce, expiry_date for Google, etc.) passes validation, corrupt credentials get persisted via prisma.credential.update, and subsequent API calls fail in provider-specific ways instead of being rejected at refresh time — validation weakened on the sync path with no requirement justifying it.\n\nPAIR 3:\nA: The minimumTokenResponseSchema uses computed keys `[z.string().toString()]` and `[z.string().optional().toString()]`, which evaluate to literal property names \"z.string()\"/\"z.string().optional()\" rather than validating arbitrary token fields, so the schema only enforces access_token and validates nothing else. When APP_CREDENTIAL_SHARING_ENABLED, any provider response — including malformed ones missing refresh_token, expiry, or with wrong types — passes validation, and garbage credentials get persisted to the DB.\nB: `minimumTokenResponseSchema` uses computed keys `[z.string().toString()]` which don't act as a catch-all; in credential-sharing mode provider-specific validation (scopes, expiry_date, instance_url, Zoom fields) is bypassed and malformed payloads are persisted\n\nPAIR 4:\nA: The minimumTokenResponseSchema uses computed keys `[z.string().toString()]` and `[z.string().optional().toString()]`, which evaluate to literal property names \"z.string()\"/\"z.string().optional()\" rather than validating arbitrary token fields, so the schema only enforces access_token and validates nothing else. When APP_CREDENTIAL_SHARING_ENABLED, any provider response — including malformed ones missing refresh_token, expiry, or with wrong types — passes validation, and garbage credentials get persisted to the DB.\nB: parseRefreshTokenResponse's minimum schema is broken: z.string().toString() evaluates to '[object Object]', collapsing both computed keys into one meaningless property so the schema only requires access_token, and since zod strips unknown keys by default, every other token-response field (including expiry_date and the real refresh_token) is stripped; lines 22-24 then write the literal string 'refresh_token' into the parsed data whenever it's missing. Because the schema is selected purely on APP_CREDENTIAL_SHARING_ENABLED && CALCOM_CREDENTIAL_SYNC_ENDPOINT rather than which refresh path actually ran, team-owned Google/Zoom/O365 credentials get their real refresh tokens overwritten with the literal 'refresh_token' and persisted (silent data loss requiring re-auth), Salesforce token responses lose instance_url/signature before being persisted (breaking the jsforce connection), and even in the intended sync path all credentials get a placeholder refresh token, bricking every OAuth credential if sharing is later disabled.\n\nPAIR 5:\nA: The minimumTokenResponseSchema uses computed keys `[z.string().toString()]` and `[z.string().optional().toString()]`, which evaluate to literal property names \"z.string()\"/\"z.string().optional()\" rather than validating arbitrary token fields, so the schema only enforces access_token and validates nothing else. When APP_CREDENTIAL_SHARING_ENABLED, any provider response — including malformed ones missing refresh_token, expiry, or with wrong types — passes validation, and garbage credentials get persisted to the DB.\nB: z.object strips unknown keys by default, so data parsed by minimumTokenResponseSchema contains only access_token (plus the injected placeholder): in sync mode expiry_date/expires_in is never persisted, causing Office365/Zoom to re-refresh on every operation, and Salesforce (CalendarService.ts:~91) — which uses this schema whenever the feature flag is on even though its fetch goes directly to login.salesforce.com — has instance_url, signature and issued_at stripped from the stored credential, breaking the next jsforce.Connection.\n\nPAIR 6:\nA: apps/web/pages/api/webhook/app-credential.ts:58 — Falls back to an empty-string AES key when CALCOM_APP_CREDENTIAL_ENCRYPTION_KEY is unset instead of refusing to decrypt credential material\nB: apps/web/pages/api/webhook/app-credential.ts:58 — `process.env.CALCOM_APP_CREDENTIAL_ENCRYPTION_KEY || \"\"` silently falls back to an empty-string encryption key when the env var is unset, producing a publicly-known/predictable key so anyone can forge the `keys` ciphertext accepted by symmetricDecrypt instead of the operation failing closed\n\nPAIR 7:\nA: apps/web/pages/api/webhook/app-credential.ts:58 — Falls back to an empty-string AES key when CALCOM_APP_CREDENTIAL_ENCRYPTION_KEY is unset instead of refusing to decrypt credential material\nB: apps/web/pages/api/webhook/app-credential.ts:58 — `process.env.CALCOM_APP_CREDENTIAL_ENCRYPTION_KEY || \"\"` silently falls back to an empty-string encryption key with no startup/runtime validation that the key is configured, so a misconfigured deployment fails only when the first webhook call arrives (or worse, decrypts to garbage) rather than being caught as an explicit configuration requirement.\n\nPAIR 8:\nA: apps/web/pages/api/webhook/app-credential.ts:58 — Falls back to an empty-string AES key when CALCOM_APP_CREDENTIAL_ENCRYPTION_KEY is unset instead of refusing to decrypt credential material\nB: apps/web/pages/api/webhook/app-credential.ts:58 — `process.env.CALCOM_APP_CREDENTIAL_ENCRYPTION_KEY || \"\"` silently falls back to an empty-string key when the env var is unset, so symmetricDecrypt is invoked with no real key instead of failing closed with a clear configuration error; packages/lib/crypto.ts was not present in this trimmed checkout to confirm whether Node's AES-256-CBC createDecipheriv throws on a non-32-byte key or produces unexpected output, so this is flagged as an unverified footgun rather than a confirmed exploit path. Confidence 50, Severity P3.\n\nPAIR 9:\nA: apps/web/pages/api/webhook/app-credential.ts:58 — Falls back to an empty-string AES key when CALCOM_APP_CREDENTIAL_ENCRYPTION_KEY is unset instead of refusing to decrypt credential material\nB: apps/web/pages/api/webhook/app-credential.ts:58 — symmetricDecrypt is called with an empty-string key fallback when CALCOM_APP_CREDENTIAL_ENCRYPTION_KEY is unset instead of failing closed with an explicit configuration error\n\nPAIR 10:\nA: apps/web/pages/api/webhook/app-credential.ts:58 — Falls back to an empty-string AES key when CALCOM_APP_CREDENTIAL_ENCRYPTION_KEY is unset instead of refusing to decrypt credential material\nB: apps/web/pages/api/webhook/app-credential.ts:58 — symmetricDecrypt` is called with `process.env.CALCOM_APP_CREDENTIAL_ENCRYPTION_KEY || \"\"`, silently falling back to an empty encryption key when unset rather than failing closed, which could allow decryption to proceed with a predictable/weak key\n\nPAIR 11:\nA: apps/web/pages/api/webhook/app-credential.ts:58 — Falls back to an empty-string AES key when CALCOM_APP_CREDENTIAL_ENCRYPTION_KEY is unset instead of refusing to decrypt credential material\nB: apps/web/pages/api/webhook/app-credential.ts:58 — `symmetricDecrypt(reqBody.keys, process.env.CALCOM_APP_CREDENTIAL_ENCRYPTION_KEY || \"\")` falls back to an empty key instead of failing closed. A missing encryption key does not stop the endpoint; decryption just runs with an empty key. Also, `JSON.parse` of the decrypted output is written straight into `credential.key` with no schema check, so whoever holds the secret can store any JSON as any app's credential (P2, conf 50)\n\nPAIR 12:\nA: apps/web/pages/api/webhook/app-credential.ts:58 — Falls back to an empty-string AES key when CALCOM_APP_CREDENTIAL_ENCRYPTION_KEY is unset instead of refusing to decrypt credential material\nB: P2: New public webhook endpoint lets unhandled zod errors throw as 500s with stack traces instead of returning 400 (apps/web/pages/api/webhook/app-credential.ts:16-21,41)\n\nPAIR 13:\nA: packages/app-store/salesforce/lib/CalendarService.ts:75 — Salesforce refresh bypasses refreshOAuthTokens, so the stored refresh_token is sent to Salesforce directly even when credential sharing is meant to keep secrets external\nB: packages/app-store/salesforce/lib/CalendarService.ts:75 — Salesforce refreshes directly against Salesforce instead of the configured credential-sync endpoint, so synced installations cannot refresh source-held credentials.\n\nPAIR 14:\nA: packages/app-store/salesforce/lib/CalendarService.ts:75 — Salesforce refresh bypasses refreshOAuthTokens, so the stored refresh_token is sent to Salesforce directly even when credential sharing is meant to keep secrets external\nB: packages/app-store/salesforce/lib/CalendarService.ts:75 — salesforce skips `refreshOAuthTokens`, calling login.salesforce.com directly on every `getClient`, so it ignores credential sync while every other app uses the shared helper, and it does an unconditional refresh plus DB write per instantiation (N calls x M credentials) (P1, conf 75)\n\nPAIR 15:\nA: packages/app-store/salesforce/lib/CalendarService.ts:75 — Salesforce refresh bypasses refreshOAuthTokens, so the stored refresh_token is sent to Salesforce directly even when credential sharing is meant to keep secrets external\nB: packages/app-store/salesforce/lib/CalendarService.ts:75 — the change adds a new refresh on every `getClient` call (`const response = await fetch(\"https://login.salesforce.com/services/oauth2/token\", ...)` plus `prisma.credential.update`) that no requirement asks for, and it skips `refreshOAuthTokens`, so with credential sync on (`CALCOM_CREDENTIAL_SYNC_ENDPOINT` set) Salesforce still refreshes directly with the local refresh_token; sync is not actually wired up for Salesforce, and every constructed CalendarService makes an extra network call and DB write (P1, conf 75)\n\nPAIR 16:\nA: packages/app-store/salesforce/lib/CalendarService.ts:75 — Salesforce refresh bypasses refreshOAuthTokens, so the stored refresh_token is sent to Salesforce directly even when credential sharing is meant to keep secrets external\nB: packages/app-store/salesforce/lib/CalendarService.ts:75 — The new `await fetch(\"https://login.salesforce.com/services/oauth2/token\", ...)` block adds an unconditional refresh-token round trip plus `prisma.credential.update` every time a Salesforce client is constructed, and it never goes through `refreshOAuthTokens`. Every existing Salesforce install, sync on or off, now makes an extra token call per service instantiation (and hits an unimported `prisma`), while sync-enabled deployments still bypass the sync endpoint. (P1, conf 75)\n\nPAIR 17:\nA: packages/app-store/salesforce/lib/CalendarService.ts:75 — Salesforce refresh bypasses refreshOAuthTokens, so the stored refresh_token is sent to Salesforce directly even when credential sharing is meant to keep secrets external\nB: Salesforce implements its own bespoke inline fetch token refresh path in the connection-setup flow instead of using refreshOAuthTokens, so the credential-sync feature silently doesn't apply to salesforce (duplicated, divergent refresh logic); it also performs an eager token refresh on every service instantiation (extra network round-trip per operation, rate-limit exposure) where jsforce already handles refresh\n\nPAIR 18:\nA: SalesforceCalendarService now performs an unconditional Salesforce token refresh plus a prisma.credential.update on every service construction — no expiry/isExpired guard, and no routing through refreshOAuthTokens — creating a parallel refresh path that duplicates jsforce's own OAuth refresh and bypasses the sync abstraction every other app in this PR uses. Every availability check and booking involving a Salesforce-connected user now makes a login.salesforce.com round trip (which counts against the org's Salesforce API/login limits) plus a DB write, even on hosts that never enable credential sharing: hot-path latency and org API-quota exhaustion are added to all Salesforce booking flows, and concurrent constructions race read-modify-write on credential.key.\nB: The hand-rolled Salesforce token refresh is not gated on APP_CREDENTIAL_SHARING_ENABLED and bypasses refreshOAuthTokens entirely, unlike every other integration in this diff. With the feature off, every SalesforceCalendarService instantiation now performs an eager token-endpoint round-trip plus a credential-table write on the path jsforce previously refreshed lazily (extra remote call + DB write on every availability/booking operation); with the feature on, Salesforce never consults CALCOM_CREDENTIAL_SYNC_ENDPOINT, so it is the one OAuth app the sync feature silently does not cover.\n\nPAIR 19:\nA: SalesforceCalendarService now performs an unconditional Salesforce token refresh plus a prisma.credential.update on every service construction — no expiry/isExpired guard, and no routing through refreshOAuthTokens — creating a parallel refresh path that duplicates jsforce's own OAuth refresh and bypasses the sync abstraction every other app in this PR uses. Every availability check and booking involving a Salesforce-connected user now makes a login.salesforce.com round trip (which counts against the org's Salesforce API/login limits) plus a DB write, even on hosts that never enable credential sharing: hot-path latency and org API-quota exhaustion are added to all Salesforce booking flows, and concurrent constructions race read-modify-write on credential.key.\nB: The new Salesforce token refresh plus prisma.credential.update runs unconditionally on every jsforce connection creation — unlike every other refresh path in this diff, it is not gated on APP_CREDENTIAL_SHARING_ENABLED. All existing non-sharing Salesforce users now pay an extra synchronous OAuth round-trip plus DB write per service instantiation, and any Salesforce or network failure during the refresh throws HttpError and aborts calendar operations that previously succeeded using the still-valid stored token.\n\nPAIR 20:\nA: SalesforceCalendarService now performs an unconditional Salesforce token refresh plus a prisma.credential.update on every service construction — no expiry/isExpired guard, and no routing through refreshOAuthTokens — creating a parallel refresh path that duplicates jsforce's own OAuth refresh and bypasses the sync abstraction every other app in this PR uses. Every availability check and booking involving a Salesforce-connected user now makes a login.salesforce.com round trip (which counts against the org's Salesforce API/login limits) plus a DB write, even on hosts that never enable credential sharing: hot-path latency and org API-quota exhaustion are added to all Salesforce booking flows, and concurrent constructions race read-modify-write on credential.key.\nB: The service now performs an unconditional Salesforce token refresh plus a credential DB write on every SalesforceCalendarService construction — previously the jsforce connection refreshed lazily — and this new flow never routes through refreshOAuthTokens, so it is disconnected from the credential-sync feature the PR claims to implement. Every Salesforce availability check and booking now makes a synchronous login.salesforce.com round-trip and a DB write even when the stored access token is valid, adding latency to the booking hot path and multiplying token-endpoint load; the change is also implementation work not traceable to any stated requirement.\n",
+  "effort": "low",
+  "pairs": [
+   [
+    535,
+    542
+   ],
+   [
+    470,
+    528
+   ],
+   [
+    470,
+    883
+   ],
+   [
+    470,
+    1814
+   ],
+   [
+    470,
+    2018
+   ],
+   [
+    726,
+    728
+   ],
+   [
+    726,
+    729
+   ],
+   [
+    726,
+    730
+   ],
+   [
+    726,
+    731
+   ],
+   [
+    726,
+    732
+   ],
+   [
+    726,
+    733
+   ],
+   [
+    726,
+    943
+   ],
+   [
+    1263,
+    1266
+   ],
+   [
+    1263,
+    1270
+   ],
+   [
+    1263,
+    1274
+   ],
+   [
+    1263,
+    1275
+   ],
+   [
+    1263,
+    1892
+   ],
+   [
+    406,
+    459
+   ],
+   [
+    406,
+    474
+   ],
+   [
+    406,
+    484
+   ]
+  ]
+ },
+ "parsed_response": {
+  "pairs": [
+   {
+    "pair": 1,
+    "a": {
+     "mechanism": "refreshOAuthTokens returns raw fetch Response under credential sync; code reads res?.data which doesn't exist on Response, so token is undefined",
+     "trigger": "token refresh with credential sharing enabled",
+     "consequence": "token.access_token throws TypeError, causing an unhandled 500 on booking path instead of a successful refresh"
+    },
+    "b": {
+     "mechanism": "same res?.data mismatch; adds that sync response body is never read so shared token never applied",
+     "trigger": "any deployment with CALCOM_CREDENTIAL_SYNC_ENDPOINT set",
+     "consequence": "every Google Calendar token refresh crashes; operation falls back to the expired token and availability/booking fail with auth errors until app reinstalled"
+    },
+    "material_differences": [
+     "B adds claim that sync response body is never read / shared token never applied",
+     "B claims fallback to expired token plus persistent failure until reinstall, conflicting with A's single-crash/500 framing"
+    ],
+    "same": false,
+    "confidence": 0.8,
+    "reason": "B adds distinct material claims about fallback, token never applied, and reinstall-required persistence."
+   },
+   {
+    "pair": 2,
+    "a": {
+     "mechanism": "minimumTokenResponseSchema computed keys become literal property names, so only access_token is enforced",
+     "trigger": "APP_CREDENTIAL_SHARING_ENABLED and malformed provider response",
+     "consequence": "garbage credentials pass validation and are persisted to DB"
+    },
+    "b": {
+     "mechanism": "broken minimum schema replaces full per-app schemas whenever sharing enabled; accepts anything with access_token",
+     "trigger": "credential sharing enabled; sync endpoint returns malformed data",
+     "consequence": "corrupt credentials persisted via prisma.credential.update; later provider API calls fail instead of being rejected at refresh time"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "Same mechanism, trigger, and consequence (weakened validation, malformed data persisted); B only adds provider examples."
+   },
+   {
+    "pair": 3,
+    "a": {
+     "mechanism": "computed keys become literal property names; only access_token enforced",
+     "trigger": "APP_CREDENTIAL_SHARING_ENABLED with malformed response",
+     "consequence": "garbage credentials persisted"
+    },
+    "b": {
+     "mechanism": "same computed-key bug; provider-specific validation bypassed",
+     "trigger": "credential-sharing mode",
+     "consequence": "malformed payloads persisted"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Identical claims about the computed-key schema bug and persistence of malformed payloads."
+   },
+   {
+    "pair": 4,
+    "a": {
+     "mechanism": "computed-key schema bug; only access_token enforced",
+     "trigger": "sharing enabled, malformed response",
+     "consequence": "garbage credentials persisted to DB"
+    },
+    "b": {
+     "mechanism": "adds: zod strips unknown keys, literal 'refresh_token' placeholder injected, schema selection based on flag not actual refresh path",
+     "trigger": "team-owned credentials, any mode",
+     "consequence": "real refresh tokens overwritten with placeholder (re-auth), instance_url/signature stripped breaking jsforce, all credentials bricked if sharing later disabled"
+    },
+    "material_differences": [
+     "B claims zod key-stripping plus placeholder injection, not just weak validation",
+     "B claims silent data loss and credential bricking — different consequences from A's 'garbage accepted'"
+    ],
+    "same": false,
+    "confidence": 0.85,
+    "reason": "B asserts additional mechanisms (stripping, placeholder injection) and materially different consequences."
+   },
+   {
+    "pair": 5,
+    "a": {
+     "mechanism": "computed-key schema bug; only access_token enforced; nothing else validated",
+     "trigger": "sharing enabled, malformed response",
+     "consequence": "garbage credentials persisted to DB"
+    },
+    "b": {
+     "mechanism": "z.object strips unknown keys; parsed data contains only access_token plus injected placeholder",
+     "trigger": "sync mode; Salesforce uses schema even when flag on and fetch goes direct",
+     "consequence": "expiry never persisted causing re-refresh loops; Salesforce instance_url/signature stripped breaking jsforce.Connection"
+    },
+    "material_differences": [
+     "B's mechanism is key-stripping with data loss, not merely absent validation",
+     "B claims specific field-stripping consequences (re-refresh, broken jsforce) absent from A"
+    ],
+    "same": false,
+    "confidence": 0.8,
+    "reason": "Different mechanism framing (stripping vs non-validation) and different concrete consequences."
+   },
+   {
+    "pair": 6,
+    "a": {
+     "mechanism": "falls back to empty-string AES key when env var unset",
+     "trigger": "CALCOM_APP_CREDENTIAL_ENCRYPTION_KEY unset",
+     "consequence": "decryption proceeds instead of refusing to decrypt credential material"
+    },
+    "b": {
+     "mechanism": "same empty-string fallback, publicly-known/predictable key",
+     "trigger": "env var unset",
+     "consequence": "anyone can forge the keys ciphertext accepted by symmetricDecrypt instead of failing closed"
+    },
+    "material_differences": [
+     "B adds an attacker-exploitation claim (forging ciphertext) not present in A"
+    ],
+    "same": false,
+    "confidence": 0.6,
+    "reason": "B adds a distinct material security-exploit claim on top of the shared fallback claim."
+   },
+   {
+    "pair": 7,
+    "a": {
+     "mechanism": "empty-string AES key fallback",
+     "trigger": "env var unset",
+     "consequence": "decrypt proceeds instead of refusing"
+    },
+    "b": {
+     "mechanism": "same empty-string fallback with no startup/runtime validation",
+     "trigger": "env var unset",
+     "consequence": "failure surfaces only at first webhook call rather than as explicit configuration requirement"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.7,
+    "reason": "Same fallback mechanism and fail-closed concern; B only elaborates on when the failure surfaces."
+   },
+   {
+    "pair": 8,
+    "a": {
+     "mechanism": "empty-string AES key fallback",
+     "trigger": "env var unset",
+     "consequence": "should refuse to decrypt credential material"
+    },
+    "b": {
+     "mechanism": "same empty-string fallback; hedged on downstream crypto behavior",
+     "trigger": "env var unset",
+     "consequence": "decrypt invoked with no real key instead of failing closed with config error (unverified footgun)"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "Identical claims; B only adds hedging about unverified downstream behavior."
+   },
+   {
+    "pair": 9,
+    "a": {
+     "mechanism": "empty-string AES key fallback",
+     "trigger": "env var unset",
+     "consequence": "should refuse to decrypt"
+    },
+    "b": {
+     "mechanism": "symmetricDecrypt called with empty-string key fallback",
+     "trigger": "env var unset",
+     "consequence": "should fail closed with explicit config error"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.95,
+    "reason": "Identical mechanism, trigger, and consequence."
+   },
+   {
+    "pair": 10,
+    "a": {
+     "mechanism": "empty-string AES key fallback",
+     "trigger": "env var unset",
+     "consequence": "should refuse to decrypt credential material"
+    },
+    "b": {
+     "mechanism": "same fallback in symmetricDecrypt call",
+     "trigger": "env var unset",
+     "consequence": "decryption could proceed with predictable/weak key rather than failing closed"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Same claim with mild hedging only."
+   },
+   {
+    "pair": 11,
+    "a": {
+     "mechanism": "empty-string AES key fallback",
+     "trigger": "env var unset",
+     "consequence": "should refuse to decrypt credential material"
+    },
+    "b": {
+     "mechanism": "same fallback; adds JSON.parse of decrypted output written into credential.key with no schema check",
+     "trigger": "env var unset / holder of secret",
+     "consequence": "decryption runs with empty key; additionally any JSON can be stored as any app's credential"
+    },
+    "material_differences": [
+     "B adds a separate missing-schema-validation claim with its own consequence"
+    ],
+    "same": false,
+    "confidence": 0.8,
+    "reason": "B is a compound report with an additional material claim (no schema check on decrypted JSON)."
+   },
+   {
+    "pair": 12,
+    "a": {
+     "mechanism": "empty-string AES key fallback",
+     "trigger": "env var unset",
+     "consequence": "should refuse to decrypt"
+    },
+    "b": {
+     "mechanism": "unhandled zod errors throw as 500s with stack traces",
+     "trigger": "invalid webhook payload",
+     "consequence": "500 with stack trace instead of 400"
+    },
+    "material_differences": [
+     "Entirely different defect: error handling of zod validation vs encryption key fallback"
+    ],
+    "same": false,
+    "confidence": 0.95,
+    "reason": "Different defects in the same file."
+   },
+   {
+    "pair": 13,
+    "a": {
+     "mechanism": "Salesforce refresh bypasses refreshOAuthTokens, sending stored refresh_token directly to Salesforce",
+     "trigger": "credential sharing enabled (secrets should stay external)",
+     "consequence": "stored refresh_token exposed/sent to Salesforce despite sharing keeping secrets external"
+    },
+    "b": {
+     "mechanism": "Salesforce refreshes directly against Salesforce instead of credential-sync endpoint",
+     "trigger": "synced installations",
+     "consequence": "synced installations cannot refresh source-held credentials"
+    },
+    "material_differences": [
+     "A's consequence is secret-handling violation; B's consequence is functional failure of sync refresh",
+     "Different claimed consequences of the same bypass"
+    ],
+    "same": false,
+    "confidence": 0.6,
+    "reason": "Same mechanism and location but materially different claimed consequences (secret exposure vs sync-refresh functional failure)."
+   },
+   {
+    "pair": 14,
+    "a": {
+     "mechanism": "Salesforce refresh bypasses refreshOAuthTokens",
+     "trigger": "credential sharing meant to keep secrets external",
+     "consequence": "stored refresh_token sent directly to Salesforce"
+    },
+    "b": {
+     "mechanism": "skips refreshOAuthTokens, calling login.salesforce.com directly on every getClient; adds unconditional refresh plus DB write per instantiation",
+     "trigger": "every getClient call (N calls x M credentials)",
+     "consequence": "extra refresh + DB write per call in addition to bypassing sync"
+    },
+    "material_differences": [
+     "B adds unconditional per-call refresh and DB write claims absent from A"
+    ],
+    "same": false,
+    "confidence": 0.85,
+    "reason": "B is a compound report adding the per-instantiation refresh/DB-write claim."
+   },
+   {
+    "pair": 15,
+    "a": {
+     "mechanism": "Salesforce refresh bypasses refreshOAuthTokens",
+     "trigger": "credential sharing on",
+     "consequence": "stored refresh_token sent to Salesforce directly"
+    },
+    "b": {
+     "mechanism": "new refresh on every getClient + prisma.credential.update, skipping refreshOAuthTokens",
+     "trigger": "every getClient with sync on; also extra network call/DB write always",
+     "consequence": "sync not wired for Salesforce; extra network call and DB write per construction"
+    },
+    "material_differences": [
+     "B adds per-call refresh, DB write, and 'no requirement' claims"
+    ],
+    "same": false,
+    "confidence": 0.85,
+    "reason": "B adds material per-instantiation cost claims beyond A's bypass claim."
+   },
+   {
+    "pair": 16,
+    "a": {
+     "mechanism": "Salesforce refresh bypasses refreshOAuthTokens",
+     "trigger": "credential sharing on",
+     "consequence": "stored refresh_token sent directly to Salesforce"
+    },
+    "b": {
+     "mechanism": "unconditional fetch to login.salesforce.com + prisma.credential.update per construction, never via refreshOAuthTokens",
+     "trigger": "every Salesforce install, sync on or off; hits unimported prisma",
+     "consequence": "extra token call per instantiation; sync deployments bypass sync endpoint"
+    },
+    "material_differences": [
+     "B adds unconditional-per-construction claim, unimported prisma, applies even with sync off"
+    ],
+    "same": false,
+    "confidence": 0.85,
+    "reason": "B adds material claims (per-instantiation refresh regardless of flag, missing prisma import)."
+   },
+   {
+    "pair": 17,
+    "a": {
+     "mechanism": "Salesforce refresh bypasses refreshOAuthTokens",
+     "trigger": "credential sharing on",
+     "consequence": "stored refresh_token sent directly to Salesforce"
+    },
+    "b": {
+     "mechanism": "bespoke inline refresh instead of refreshOAuthTokens; adds eager refresh per instantiation where jsforce already handles refresh",
+     "trigger": "every service instantiation; sync feature",
+     "consequence": "sync silently doesn't apply to salesforce; extra network round-trip/rate-limit exposure per operation"
+    },
+    "material_differences": [
+     "B adds eager per-instantiation refresh and duplication-of-jsforce claims"
+    ],
+    "same": false,
+    "confidence": 0.8,
+    "reason": "B adds per-instantiation refresh and jsforce-duplication material claims."
+   },
+   {
+    "pair": 18,
+    "a": {
+     "mechanism": "unconditional refresh + prisma.credential.update on every construction, no expiry guard, bypasses refreshOAuthTokens and sync abstraction",
+     "trigger": "every availability check/booking with Salesforce user, regardless of sharing flag",
+     "consequence": "login.salesforce.com round trip + DB write per op, API-quota exhaustion, race on credential.key read-modify-write"
+    },
+    "b": {
+     "mechanism": "refresh not gated on APP_CREDENTIAL_SHARING_ENABLED, bypasses refreshOAuthTokens",
+     "trigger": "feature off: eager round-trip + DB write per instantiation; feature on: sync not covered",
+     "consequence": "extra remote call + DB write on every availability/booking; sync silently not covering Salesforce"
+    },
+    "material_differences": [
+     "A claims concurrency race on credential.key and org API-quota exhaustion; B does not",
+     "A claims jsforce-duplication angle; B frames feature-on vs feature-off consequences"
+    ],
+    "same": false,
+    "confidence": 0.65,
+    "reason": "Substantially overlapping, but A adds a race-condition claim and quota-exhaustion consequence absent from B."
+   },
+   {
+    "pair": 19,
+    "a": {
+     "mechanism": "unconditional refresh + DB write per construction, no expiry guard, bypasses refreshOAuthTokens/sync, duplicates jsforce",
+     "trigger": "every Salesforce availability/booking, sharing off included",
+     "consequence": "round trip + DB write per op, quota exhaustion, race on credential.key"
+    },
+    "b": {
+     "mechanism": "unconditional refresh + DB write per connection creation, not gated on sharing flag",
+     "trigger": "all existing non-sharing users; Salesforce/network failure during refresh",
+     "consequence": "extra OAuth round-trip + DB write per instantiation; refresh failure throws HttpError and aborts previously-succeeding operations"
+    },
+    "material_differences": [
+     "B adds failure-abort (HttpError) claim absent from A",
+     "A adds race condition and API-quota claims absent from B"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "Core overlap, but each adds material consequences the other lacks (A: race/quota; B: failure aborts operations)."
+   },
+   {
+    "pair": 20,
+    "a": {
+     "mechanism": "unconditional refresh + prisma.credential.update per construction, no expiry guard, bypasses refreshOAuthTokens/sync",
+     "trigger": "every Salesforce availability/booking regardless of sharing flag",
+     "consequence": "round trip + DB write per op, latency, quota exhaustion, race on credential.key"
+    },
+    "b": {
+     "mechanism": "unconditional refresh + DB write per construction, never routed through refreshOAuthTokens",
+     "trigger": "every availability/booking even with valid stored token",
+     "consequence": "latency on booking hot path, multiplied token-endpoint load; work not traceable to requirement"
+    },
+    "material_differences": [
+     "A claims race condition on credential.key and org API-quota exhaustion; B omits these",
+     "B adds 'not traceable to any stated requirement' process claim"
+    ],
+    "same": false,
+    "confidence": 0.65,
+    "reason": "A's race and quota-exhaustion claims are material consequences absent from B."
+   }
+  ]
+ },
+ "usage": {
+  "glm-5.3-background": {
+   "input_tokens": 3440,
+   "cache_read_input_tokens": 384,
+   "cache_creation_input_tokens": 0,
+   "output_tokens": 2989,
+   "reasoning_output_tokens": 1322,
+   "cost_usd": 0.0,
+   "total_tokens": 8135
+  }
+ },
+ "status": "complete",
+ "error_type": null,
+ "elapsed_s": 29.773486137390137
+}

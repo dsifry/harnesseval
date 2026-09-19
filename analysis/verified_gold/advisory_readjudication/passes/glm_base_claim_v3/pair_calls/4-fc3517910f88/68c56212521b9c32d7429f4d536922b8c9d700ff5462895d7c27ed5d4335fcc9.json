@@ -1,0 +1,417 @@
+{
+ "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/4",
+ "pass_digest": "9c5f733ce7a3f996c90c67f262cc4a77e2b234bc415c197afa7c73477ad320be",
+ "request_sha256": "68c56212521b9c32d7429f4d536922b8c9d700ff5462895d7c27ed5d4335fcc9",
+ "request": {
+  "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/4",
+  "model": "glm-5.3-background",
+  "system": "You are clustering code review findings from one PR. Always respond with valid JSON.",
+  "prompt": "You are clustering code review findings from the same PR. For each PAIR below, decide whether the two findings describe the SAME underlying issue — same root cause in the same code location. Different wording is fine. A finding about a DIFFERENT defect in the same file or function is NOT the same issue. Severity or aspect differences of the same root cause ARE the same issue.\n\n\nFor THIS scoring pass, duplicate equivalence is stricter than sharing a root cause.\nYou must compare the COMPLETE MATERIAL CLAIMS, including mechanism, triggering\nconditions, execution path, and consequence. The same line or broad concern does\nnot establish equivalence. A report of wrong-category selection, a case/rename\nmismatch, a crash, and a silent fallback are different claims even at one lookup.\nAn inactive/unbound API concern and an alleged active user-facing failure differ.\nA compound report with an additional material claim does NOT equal its subset.\nDifferences only in wording, severity, or hedging do not create separate claims.\nIf the claimed mechanisms, triggers or consequences conflict, or one report adds\nan unsupported/different material factual claim, return same=false. You are NOT\nverifying which claim is true; do not repair or reinterpret either report to make\nthem match. If unsure whether their full claims are equivalent, return false.\n\nFor every numbered pair, extract what A and B actually CLAIM into mechanism,\ntrigger and consequence. Then list material_differences and give your equivalence\nverdict, confidence and reason. same=true requires no material differences.\nReturn ONLY this JSON object, with EVERY pair index exactly once:\n{\"pairs\":[{\"pair\":1,\"a\":{\"mechanism\":\"...\",\"trigger\":\"...\",\"consequence\":\"...\"},\"b\":{\"mechanism\":\"...\",\"trigger\":\"...\",\"consequence\":\"...\"},\"material_differences\":[],\"same\":true,\"confidence\":0.9,\"reason\":\"...\"}]}\n\nPAIRS:\nPAIR 1:\nA: Every request to /embed/best for an unknown embed_url enqueues a RetrieveTopic job with no rate limit on the endpoint, and the per-URL 60s throttle inside the job is keyed on the full URL, so varying the path or query string bypasses it — each novel URL triggers a full HTTP fetch of the embeddable_host page and, on success, creation of a real topic. An anonymous client forging a Referer header can flood the sidekiq queue, pin workers on outbound fetches against the embedded site, and mint unbounded scraped topics in the forum's database, exhausting workers and storage on the request path.\nB: P2: `/embed/best` lets unauthenticated callers trigger outbound fetches and unlimited topic creation — the referer check is trivially forged and the throttle key is per-URL only (`retrieved:<embed_url>`), so an attacker cycling unique paths on `embeddable_host` bypasses it entirely, causing Sidekiq flooding, fetch amplification against the embeddable host, and unbounded DB/forum spam via auto-created topics/posts with `skip_validations: true`; no global rate limit or caller consideration on the new public endpoint\n\nPAIR 2:\nA: Every request to /embed/best for an unknown embed_url enqueues a RetrieveTopic job with no rate limit on the endpoint, and the per-URL 60s throttle inside the job is keyed on the full URL, so varying the path or query string bypasses it — each novel URL triggers a full HTTP fetch of the embeddable_host page and, on success, creation of a real topic. An anonymous client forging a Referer header can flood the sidekiq queue, pin workers on outbound fetches against the embedded site, and mint unbounded scraped topics in the forum's database, exhausting workers and storage on the request path.\nB: P3: Unauthenticated users can enqueue arbitrary retrieval jobs (server-side open(url) fetch; throttle only mitigates repeated URLs; feed_polling path runs PollFeed synchronously, resource-exhaustion vector)\n\nPAIR 3:\nA: Every request to /embed/best for an unknown embed_url enqueues a RetrieveTopic job with no rate limit on the endpoint, and the per-URL 60s throttle inside the job is keyed on the full URL, so varying the path or query string bypasses it — each novel URL triggers a full HTTP fetch of the embeddable_host page and, on success, creation of a real topic. An anonymous client forging a Referer header can flood the sidekiq queue, pin workers on outbound fetches against the embedded site, and mint unbounded scraped topics in the forum's database, exhausting workers and storage on the request path.\nB: Unauthenticated /embed/best acts as a job-enqueue and outbound-fetch amplifier; the Referer header check provides no real protection and per-URL throttling is bypassed by cycling URLs, flooding Sidekiq, performing outbound fetches, and writing Redis keys\n\nPAIR 4:\nA: `Jobs::PollFeed.new.execute({})` executes the entire feed poll synchronously inside the retrieve_topic sidekiq job, but PollFeed's execute guard re-checks `SiteSetting.feed_polling_enabled?` — already true — and `poll_feed` then does a blocking `open(SiteSetting.feed_polling_url)` network fetch plus a PostCreator DB write per item, all inside a job whose sole purpose is to fetch one URL. Each first-time embed request triggers a full-feed import inside the retrieve_topic worker; a large feed makes the worker block for minutes and hammers the third-party feed server on every new embedded URL, and if the feed fetch raises (e.g. timeout) the RetrieveTopic job fails with retry instead of falling through to fetch_http.\nB: P2: TopicRetriever#perform_retrieve calls Jobs::PollFeed.new.execute({}) directly, bypassing the job queue and coupling retriever to feed poller internals, side-stepping retry/queueing semantics\n\nPAIR 5:\nA: Unrelated force: true added to previously shipped create_top_topics migration is a latent data-drop hazard on partially-migrated DBs and obscures PR intent (along with whitespace-only migrate_word_counts.rb edit)\nB: Unrelated `force: true` added to the already-applied 20131223171005_create_top_topics migration (and the new create_topic_embeds) with no explanation — if the migration re-runs it silently drops the table, and the churn pollutes history for rollback auditing\n\nPAIR 6:\nA: The rss.items loop has no per-item error handling, and two crash triggers pass the existing guards: an item without content (`nil.scrub` raises NoMethodError) and a link that satisfies import's `^https?\\://` regex but fails URI parsing inside absolutize_urls (URI::InvalidURIError, e.g. a space in the path). One malformed feed item aborts the entire import at that point, and because items are processed in order with retry disabled, every feed item after it is never imported on any future hourly run — feed polling is permanently stuck.\nB: The rss.items loop has no per-item error handling, so the first item that raises aborts the entire feed import — most concretely, i.content is nil for feed items with no content element (plain RSS 2.0 feeds that use <description> only), and nil.scrub raises NoMethodError at line 35. One malformed or content-less item permanently halts processing of every item after it; with sidekiq_options retry: false (line 12) the hourly job never retries, so the enabled feed importer imports only a prefix (or nothing, on description-only feeds) each hour with no per-item record of what was dropped — and via TopicRetriever's inline call the same crash also fails every interactive embed retrieval.\n\nPAIR 7:\nA: The rss.items loop has no per-item error handling, and two crash triggers pass the existing guards: an item without content (`nil.scrub` raises NoMethodError) and a link that satisfies import's `^https?\\://` regex but fails URI parsing inside absolutize_urls (URI::InvalidURIError, e.g. a space in the path). One malformed feed item aborts the entire import at that point, and because items are processed in order with retry disabled, every feed item after it is never imported on any future hourly run — feed polling is permanently stuck.\nB: The rss.items loop has no per-item error isolation, so the first item that raises — a missing title making PostCreator/TopicEmbed.create! fail on a NOT NULL column, a nil link, or ActiveRecord::RecordNotUnique from the check-then-insert in TopicEmbed.import when the scheduled poll and a retriever-triggered poll run concurrently — aborts the entire loop. One malformed feed entry stops import of every remaining feed item until it ages out of the feed, and because TopicRetriever invokes this poll synchronously the same exception also kills retrieval for every embed URL, leaving those pages reloading the loading view forever.\n\nPAIR 8:\nA: The rss.items loop has no per-item error handling, and two crash triggers pass the existing guards: an item without content (`nil.scrub` raises NoMethodError) and a link that satisfies import's `^https?\\://` regex but fails URI parsing inside absolutize_urls (URI::InvalidURIError, e.g. a space in the path). One malformed feed item aborts the entire import at that point, and because items are processed in order with retry disabled, every feed item after it is never imported on any future hourly run — feed polling is permanently stuck.\nB: The rss.items.each loop has no per-item error isolation: an item lacking a `content` tag (e.g. RSS feeds with only <description>), lacking `id` when `link` is unusable, or whose link passes the /^https?\\:\\/\\// regex but fails URI parsing in absolutize_urls raises and aborts the whole loop. One malformed feed item permanently halts import of every item after it: items before the failure are imported, the rest are silently skipped, and with retry: false nothing re-attempts until the next hourly run — the feed silently stops importing new posts while the job still 'ran'.\n\nPAIR 9:\nA: The rss.items loop has no per-item error handling, and two crash triggers pass the existing guards: an item without content (`nil.scrub` raises NoMethodError) and a link that satisfies import's `^https?\\://` regex but fails URI parsing inside absolutize_urls (URI::InvalidURIError, e.g. a space in the path). One malformed feed item aborts the entire import at that point, and because items are processed in order with retry disabled, every feed item after it is never imported on any future hourly run — feed polling is permanently stuck.\nB: Feed item parsing assumes `i.content` exists, but simple-rss exposes namespaced `content:encoded` as `content_encoded`, so RSS 2.0 description-only feeds raise `NoMethodError` on `i.content.scrub`, and combined with the missing error isolation one such item kills the entire poll.\n\nPAIR 10:\nA: The rss.items loop has no per-item error handling, and two crash triggers pass the existing guards: an item without content (`nil.scrub` raises NoMethodError) and a link that satisfies import's `^https?\\://` regex but fails URI parsing inside absolutize_urls (URI::InvalidURIError, e.g. a space in the path). One malformed feed item aborts the entire import at that point, and because items are processed in order with retry disabled, every feed item after it is never imported on any future hourly run — feed polling is permanently stuck.\nB: No nil/field guards on feed items in PollFeed: nil `i.content` raises NoMethodError on `nil.scrub`, nil `i.title` creates a blank-title topic via PostCreator with skip_validations, and with retry: false the first malformed item aborts every hourly run at the same item\n\nPAIR 11:\nA: The rss.items loop has no per-item error handling, and two crash triggers pass the existing guards: an item without content (`nil.scrub` raises NoMethodError) and a link that satisfies import's `^https?\\://` regex but fails URI parsing inside absolutize_urls (URI::InvalidURIError, e.g. a space in the path). One malformed feed item aborts the entire import at that point, and because items are processed in order with retry disabled, every feed item after it is never imported on any future hourly run — feed polling is permanently stuck.\nB: One malformed feed item permanently wedges the hourly feed import — rss.items.each calls TopicEmbed.import with no per-item error handling and the job sets retry: false, so a single item with nil title/content, a duplicate link (unique index on embed_url causing RecordNotUnique), or any import exception aborts the loop and every subsequent hourly run crashes at the same item, silently skipping everything after it forever\n\nPAIR 12:\nA: The rss.items loop has no per-item error handling, and two crash triggers pass the existing guards: an item without content (`nil.scrub` raises NoMethodError) and a link that satisfies import's `^https?\\://` regex but fails URI parsing inside absolutize_urls (URI::InvalidURIError, e.g. a space in the path). One malformed feed item aborts the entire import at that point, and because items are processed in order with retry disabled, every feed item after it is never imported on any future hourly run — feed polling is permanently stuck.\nB: poll_feed aborts entirely on any single bad feed item — no per-item rescue around TopicEmbed.import; combined with retry: false the whole hourly poll is dropped and remaining items never imported; feed_key/feed-modified machinery unused so no resumption mechanism\n\nPAIR 13:\nA: The rss.items loop has no per-item error handling, and two crash triggers pass the existing guards: an item without content (`nil.scrub` raises NoMethodError) and a link that satisfies import's `^https?\\://` regex but fails URI parsing inside absolutize_urls (URI::InvalidURIError, e.g. a space in the path). One malformed feed item aborts the entire import at that point, and because items are processed in order with retry disabled, every feed item after it is never imported on any future hourly run — feed polling is permanently stuck.\nB: PollFeed fails silently and permanently: retry: false with no error handling means nil feed fields (i.content, i.title) crash the run, one malformed item skips all subsequent items forever, and blank titles bypass validations due to skip_validations: true\n\nPAIR 14:\nA: The rss.items loop has no per-item error handling, and two crash triggers pass the existing guards: an item without content (`nil.scrub` raises NoMethodError) and a link that satisfies import's `^https?\\://` regex but fails URI parsing inside absolutize_urls (URI::InvalidURIError, e.g. a space in the path). One malformed feed item aborts the entire import at that point, and because items are processed in order with retry disabled, every feed item after it is never imported on any future hourly run — feed polling is permanently stuck.\nB: PollFeed has no per-item error handling: i.content.scrub raises NoMethodError for feeds lacking an Atom-style <content> element (plain RSS 2.0 uses description/content:encoded), nil titles hit the PostCreator NOT NULL constraint, URI(url) raises for URLs passing the loose /^https?\\:\\/\\// guard, and URLs longer than the 255-char embed_url column raise on insert — any of these aborts the items loop mid-feed, and with retry: false and hourly recurrence the job re-fails at the same item every hour with no rescue or logging\n\nPAIR 15:\nA: The rss.items loop has no per-item error handling, and two crash triggers pass the existing guards: an item without content (`nil.scrub` raises NoMethodError) and a link that satisfies import's `^https?\\://` regex but fails URI parsing inside absolutize_urls (URI::InvalidURIError, e.g. a space in the path). One malformed feed item aborts the entire import at that point, and because items are processed in order with retry disabled, every feed item after it is never imported on any future hourly run — feed polling is permanently stuck.\nB: PollFeed: a single transient network blip loses an entire hour's worth of imports with no alert and no recovery\n\nPAIR 16:\nA: The rss.items loop has no per-item error handling, and two crash triggers pass the existing guards: an item without content (`nil.scrub` raises NoMethodError) and a link that satisfies import's `^https?\\://` regex but fails URI parsing inside absolutize_urls (URI::InvalidURIError, e.g. a space in the path). One malformed feed item aborts the entire import at that point, and because items are processed in order with retry disabled, every feed item after it is never imported on any future hourly run — feed polling is permanently stuck.\nB: sidekiq_options retry: false on feed polling means transient failures silently drop the whole polling cycle (P2)\n",
+  "effort": "low",
+  "pairs": [
+   [
+    39,
+    1361
+   ],
+   [
+    39,
+    1402
+   ],
+   [
+    39,
+    1733
+   ],
+   [
+    238,
+    1386
+   ],
+   [
+    1745,
+    1746
+   ],
+   [
+    329,
+    330
+   ],
+   [
+    329,
+    331
+   ],
+   [
+    329,
+    332
+   ],
+   [
+    329,
+    1093
+   ],
+   [
+    329,
+    1338
+   ],
+   [
+    329,
+    1346
+   ],
+   [
+    329,
+    1408
+   ],
+   [
+    329,
+    1415
+   ],
+   [
+    329,
+    1417
+   ],
+   [
+    329,
+    1429
+   ],
+   [
+    329,
+    1475
+   ]
+  ]
+ },
+ "parsed_response": {
+  "pairs": [
+   {
+    "pair": 1,
+    "a": {
+     "mechanism": "Unthrottled /embed/best enqueues RetrieveTopic; per-URL 60s throttle keyed on full URL bypassed by varying path/query",
+     "trigger": "Anonymous request with forged Referer, novel embed_urls",
+     "consequence": "Sidekiq flooding, outbound fetch amplification, unbounded topic creation/storage exhaustion"
+    },
+    "b": {
+     "mechanism": "Unauthenticated /embed/best triggers fetches; throttle keyed per-URL (retrieved:<embed_url>) bypassed by cycling unique paths",
+     "trigger": "Unauthenticated caller cycling unique paths on embeddable_host",
+     "consequence": "Sidekiq flooding, fetch amplification, unbounded DB/forum spam via skip_validations topics/posts; no global rate limit"
+    },
+    "material_differences": [
+     "B adds skip_validations: true detail — minor elaboration of same mechanism"
+    ],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Same mechanism (per-URL throttle bypass via URL cycling on unauthenticated /embed/best), same trigger, same consequences; skip_validations is an elaboration not a different claim."
+   },
+   {
+    "pair": 2,
+    "a": {
+     "mechanism": "Unthrottled /embed/best + per-URL throttle keyed on full URL, bypassed by varying path/query",
+     "trigger": "Anonymous forged-Referer requests with novel URLs",
+     "consequence": "Sidekiq flooding, outbound fetches against embedded site, unbounded scraped topic creation, storage/worker exhaustion"
+    },
+    "b": {
+     "mechanism": "Unauthenticated users enqueue arbitrary retrieval jobs with server-side open(url); throttle only mitigates repeated URLs; feed_polling runs PollFeed synchronously",
+     "trigger": "Unauthenticated enqueue requests",
+     "consequence": "Resource exhaustion"
+    },
+    "material_differences": [
+     "B omits the URL-cycling throttle-bypass mechanism that is central to A",
+     "B adds the synchronous PollFeed path as a separate vector",
+     "A emphasizes topic-creation spam; B is a vaguer resource-exhaustion claim"
+    ],
+    "same": false,
+    "confidence": 0.75,
+    "reason": "B does not claim the throttle-keying bypass; it adds the feed_polling path and frames the throttle as merely limited, a materially different mechanism set."
+   },
+   {
+    "pair": 3,
+    "a": {
+     "mechanism": "Unthrottled /embed/best + per-URL throttle keyed on full URL bypassed by varying path/query",
+     "trigger": "Anonymous forged-Referer novel-URL requests",
+     "consequence": "Sidekiq flooding, outbound fetches, unbounded scraped topics, worker/storage exhaustion"
+    },
+    "b": {
+     "mechanism": "Unauthenticated /embed/best job-enqueue and fetch amplifier; forged Referer; per-URL throttle bypassed by cycling URLs",
+     "trigger": "Unauthenticated requests cycling URLs",
+     "consequence": "Sidekiq flooding, outbound fetches, Redis key writes"
+    },
+    "material_differences": [
+     "A emphasizes unbounded topic creation/storage exhaustion; B mentions Redis key writes instead"
+    ],
+    "same": true,
+    "confidence": 0.8,
+    "reason": "Same core mechanism (forged Referer + URL-cycling throttle bypass on unauthenticated endpoint) and consequences overlap; Redis key writes vs topic creation is an emphasis difference within the same amplification claim."
+   },
+   {
+    "pair": 4,
+    "a": {
+     "mechanism": "PollFeed.execute runs synchronously inside retrieve_topic job, with blocking feed fetch and DB writes, and a feed error fails RetrieveTopic with retry",
+     "trigger": "First-time embed request",
+     "consequence": "Worker blocks for minutes, hammers feed server per new embed URL, RetrieveTopic job fails on feed errors instead of falling through to fetch_http"
+    },
+    "b": {
+     "mechanism": "TopicRetriever#perform_retrieve calls Jobs::PollFeed.new.execute({}) directly, bypassing job queue and coupling retriever to feed poller internals",
+     "trigger": "Any embed retrieval",
+     "consequence": "Side-steps retry/queueing semantics; coupling concern"
+    },
+    "material_differences": [
+     "A claims blocking feed fetch, minutes-long worker block, third-party server hammering, and RetrieveTopic failure cascade — concrete operational failures",
+     "B is a design/coupling complaint about bypassing queue and retry semantics without A's failure claims"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "B is a code-design concern (coupling, queue bypass); A asserts active runtime failures (blocking fetches, job failure). A compound report with additional material claims does not equal its subset."
+   },
+   {
+    "pair": 5,
+    "a": {
+     "mechanism": "force: true added to already-shipped create_top_topics migration is latent data-drop hazard and obscures PR intent",
+     "trigger": "Re-run on partially-migrated DB",
+     "consequence": "Data drop; obscured PR intent; also whitespace-only migrate_word_counts edit"
+    },
+    "b": {
+     "mechanism": "Unexplained force: true on already-applied 20131223171005_create_top_topics (and new create_topic_embeds)",
+     "trigger": "Migration re-run",
+     "consequence": "Silently drops table; churn pollutes rollback auditing history"
+    },
+    "material_differences": [
+     "B includes create_topic_embeds migration as well",
+     "A also mentions whitespace-only migrate_word_counts edit"
+    ],
+    "same": true,
+    "confidence": 0.75,
+    "reason": "Same root cause: unexplained force: true on the already-applied create_top_topics migration with data-drop risk on re-run; the extra migration/file mentions are peripheral elaborations of the same review nit."
+   },
+   {
+    "pair": 6,
+    "a": {
+     "mechanism": "No per-item error handling in rss.items loop; two crash triggers pass guards: nil content (nil.scrub NoMethodError) and URI-invalid link after regex guard",
+     "trigger": "One malformed feed item",
+     "consequence": "Import aborts at that item; subsequent items never imported on future hourly runs — polling permanently stuck"
+    },
+    "b": {
+     "mechanism": "No per-item error handling in rss.items loop; i.content nil for description-only RSS 2.0 feeds, nil.scrub NoMethodError; retry: false so hourly job never retries",
+     "trigger": "Content-less feed item",
+     "consequence": "Permanently halts processing of items after it; imports only a prefix each hour with no per-item record; also crashes interactive embed retrieval via TopicRetriever inline call"
+    },
+    "material_differences": [
+     "A includes the URI-parsing crash trigger as a second mechanism; B only claims nil content",
+     "B explicitly attributes nil content to description-only RSS 2.0 feeds — consistent with A's 'item without content'",
+     "B adds the interactive embed retrieval consequence"
+    ],
+    "same": false,
+    "confidence": 0.65,
+    "reason": "B is largely a subset of A but adds the interactive embed-retrieval failure consequence and omits A's second trigger; under strict equivalence, B's added claim and narrower mechanism set break full equivalence."
+   },
+   {
+    "pair": 7,
+    "a": {
+     "mechanism": "No per-item error handling; triggers: nil content (nil.scrub) and URI-invalid link passing regex guard",
+     "trigger": "One malformed feed item",
+     "consequence": "Import aborts at that item; later items never imported on future hourly runs"
+    },
+    "b": {
+     "mechanism": "No per-item error isolation; triggers: missing title failing NOT NULL, nil link, or RecordNotUnique from concurrent poll/retriever race",
+     "trigger": "First item raising",
+     "consequence": "Aborts loop; import stops until item ages out of feed; kills retrieval for every embed URL, pages stuck in loading view forever"
+    },
+    "material_differences": [
+     "Different crash triggers: A claims nil content + URI parse failure; B claims missing title, nil link, race-induced RecordNotUnique",
+     "B adds embed-retrieval killing and stuck loading view consequence"
+    ],
+    "same": false,
+    "confidence": 0.8,
+    "reason": "Shared broad concern (no per-item error isolation) but different concrete claimed triggers and consequences; strict equivalence fails."
+   },
+   {
+    "pair": 8,
+    "a": {
+     "mechanism": "No per-item error handling; triggers: nil content (nil.scrub) and URI-invalid link passing regex guard",
+     "trigger": "One malformed feed item",
+     "consequence": "Import aborts at that item; later items never imported on future hourly runs"
+    },
+    "b": {
+     "mechanism": "No per-item error isolation; triggers: missing content tag, missing id when link unusable, or link passing regex but failing URI parsing in absolutize_urls",
+     "trigger": "Malformed feed item",
+     "consequence": "Items before failure imported, rest silently skipped; retry:false so nothing re-attempts until next hourly run; feed silently stops importing while job 'ran'"
+    },
+    "material_differences": [
+     "B adds missing-id trigger; A's triggers otherwise covered by B",
+     "Consequence framing differs: A says permanently stuck across hourly runs; B says next hourly run re-attempts (and would re-fail). A claims items never imported on any future run while B says until next hourly run"
+    ],
+    "same": true,
+    "confidence": 0.7,
+    "reason": "Same root cause (no per-item isolation with these concrete triggers incl. URI parse failure); the recurrence framing differs but describes the same stuck-import consequence; missing id is an added trigger within the same mechanism."
+   },
+   {
+    "pair": 9,
+    "a": {
+     "mechanism": "No per-item error handling; nil content (nil.scrub NoMethodError) and URI-invalid link passing regex guard",
+     "trigger": "One malformed feed item",
+     "consequence": "Import aborts; later items never imported on future hourly runs"
+    },
+    "b": {
+     "mechanism": "simple-rss exposes content:encoded as content_encoded, not content, so description-only RSS 2.0 raises NoMethodError on i.content.scrub; combined with missing error isolation one item kills entire poll",
+     "trigger": "RSS 2.0 description-only feed item",
+     "consequence": "One item kills entire poll"
+    },
+    "material_differences": [
+     "B's nil.content mechanism is a specific root-cause attribution (gem naming) for A's 'item without content' trigger",
+     "A adds URI parse trigger not in B",
+     "Consequence scope: A claims permanent halt across hourly runs; B says kills the poll (same run)"
+    ],
+    "same": true,
+    "confidence": 0.65,
+    "reason": "Both center on nil i.content crashing the loop without per-item isolation causing whole-poll failure; B's gem attribution explains A's trigger; A's second trigger is an added example of the same unguarded-loop claim."
+   },
+   {
+    "pair": 10,
+    "a": {
+     "mechanism": "No per-item error handling; nil content (nil.scrub) and URI-invalid link passing regex guard",
+     "trigger": "One malformed feed item",
+     "consequence": "Import aborts; later items never imported on future hourly runs"
+    },
+    "b": {
+     "mechanism": "No nil/field guards: nil i.content NoMethodError, nil i.title creates blank-title topic via PostCreator with skip_validations, retry:false",
+     "trigger": "First malformed item",
+     "consequence": "First malformed item aborts every hourly run at same item"
+    },
+    "material_differences": [
+     "B claims nil title creates a blank-title topic (a distinct defect: invalid data written) rather than only crashes",
+     "B omits the URI-parse trigger of A"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "B adds a materially different claim (nil title silently creating blank topics via skip_validations) beyond A's crash-only claim, and omits A's second trigger; strict equivalence fails."
+   },
+   {
+    "pair": 11,
+    "a": {
+     "mechanism": "No per-item error handling; nil content (nil.scrub) and URI-invalid link passing regex guard",
+     "trigger": "One malformed feed item",
+     "consequence": "Import aborts; later items never imported on future hourly runs"
+    },
+    "b": {
+     "mechanism": "No per-item error handling in TopicEmbed.import; retry:false; triggers include nil title/content, duplicate link RecordNotUnique via unique index",
+     "trigger": "Single bad item",
+     "consequence": "Loop aborts; every subsequent hourly run crashes at same item, silently skipping everything after it forever"
+    },
+    "material_differences": [
+     "B adds RecordNotUnique duplicate-link trigger not in A",
+     "B's nil-title trigger differs from A's nil-content and URI triggers, though 'malformed item' overlaps"
+    ],
+    "same": true,
+    "confidence": 0.6,
+    "reason": "Same root cause (missing per-item error handling + retry:false causing permanent mid-feed wedge at the same item); B lists overlapping-but-different concrete triggers (nil content shared, duplicate-link new), which are examples within the same unguarded-loop defect."
+   },
+   {
+    "pair": 12,
+    "a": {
+     "mechanism": "No per-item error handling; nil content (nil.scrub) and URI-invalid link passing regex guard",
+     "trigger": "One malformed feed item",
+     "consequence": "Import aborts; later items never imported on future hourly runs — polling permanently stuck"
+    },
+    "b": {
+     "mechanism": "No per-item rescue around TopicEmbed.import; retry:false drops whole hourly poll; no resumption via feed_key/feed-modified machinery",
+     "trigger": "Single bad item",
+     "consequence": "Remaining items never imported; poll dropped"
+    },
+    "material_differences": [
+     "B adds no-resumption/feed_key observation",
+     "B omits specific triggers but same defect"
+    ],
+    "same": true,
+    "confidence": 0.8,
+    "reason": "Same mechanism (no per-item rescue + retry:false → permanent loss of remaining items); B's resumption note is an elaboration of the same consequence."
+   },
+   {
+    "pair": 13,
+    "a": {
+     "mechanism": "No per-item error handling; nil content (nil.scrub) and URI-invalid link passing regex guard",
+     "trigger": "One malformed feed item",
+     "consequence": "Import aborts; later items never imported on future hourly runs"
+    },
+    "b": {
+     "mechanism": "retry:false with no error handling; nil feed fields (i.content, i.title) crash the run; one malformed item skips all subsequent items forever; blank titles bypass validations via skip_validations",
+     "trigger": "Malformed item with nil fields",
+     "consequence": "Silent permanent failure; subsequent items never imported"
+    },
+    "material_differences": [
+     "B adds blank titles bypassing validations via skip_validations as an additional claim",
+     "B's nil-title is a crash trigger here, consistent with A's malformed-item claim"
+    ],
+    "same": false,
+    "confidence": 0.6,
+    "reason": "B adds the skip_validations blank-title data-quality claim, a material additional claim beyond A's crash-and-stuck report; strict equivalence fails."
+   },
+   {
+    "pair": 14,
+    "a": {
+     "mechanism": "No per-item error handling; nil content (nil.scrub) and URI-invalid link passing regex guard",
+     "trigger": "One malformed feed item",
+     "consequence": "Import aborts; later items never imported on future hourly runs"
+    },
+    "b": {
+     "mechanism": "No per-item error handling; triggers: nil content for RSS 2.0, nil title NOT NULL, URI(url) failure past loose regex guard, URLs >255 chars exceeding embed_url column",
+     "trigger": "Any malformed item",
+     "consequence": "Loop aborts mid-feed; job re-fails at same item every hour with no rescue/logging"
+    },
+    "material_differences": [
+     "B adds 255-char URL insert failure and nil-title NOT NULL triggers not in A",
+     "Core nil-content and URI-parse triggers match; consequence matches"
+    ],
+    "same": true,
+    "confidence": 0.7,
+    "reason": "Same root cause and consequence (unguarded items loop, retry:false, re-fail at same item hourly); B's extra trigger examples are elaborations of the same missing-error-isolation defect, and its core triggers include both of A's."
+   },
+   {
+    "pair": 15,
+    "a": {
+     "mechanism": "No per-item error handling; nil content and URI-invalid link crashes abort import at that item; retry disabled so later items never imported",
+     "trigger": "One malformed feed item",
+     "consequence": "Feed polling permanently stuck at that item"
+    },
+    "b": {
+     "mechanism": "A single transient network blip loses an entire hour's imports with no alert and no recovery",
+     "trigger": "Transient network failure",
+     "consequence": "Loses one hour's worth of imports; no alert/recovery"
+    },
+    "material_differences": [
+     "A's trigger is a malformed feed item causing a deterministic permanent wedge; B's trigger is a transient network error",
+     "A claims items never imported on ANY future run (permanent); B claims only that hour's imports lost (transient loss, recovered next run)"
+    ],
+    "same": false,
+    "confidence": 0.85,
+    "reason": "Different triggering conditions (malformed item vs transient network error) and materially different consequences (permanent wedge vs one-hour loss); both derive from retry:false but are different failure claims."
+   },
+   {
+    "pair": 16,
+    "a": {
+     "mechanism": "No per-item error handling; nil content and URI-invalid link crashes abort import at that item; retry disabled so later items never imported",
+     "trigger": "One malformed feed item",
+     "consequence": "Feed polling permanently stuck at that item"
+    },
+    "b": {
+     "mechanism": "retry: false on feed polling silently drops the whole polling cycle on transient failures",
+     "trigger": "Transient failure",
+     "consequence": "Whole polling cycle silently dropped"
+    },
+    "material_differences": [
+     "A's trigger is malformed item with deterministic permanent wedge; B's is transient failure dropping one cycle",
+     "B does not claim the malformed-item/permanent-wedge mechanism"
+    ],
+    "same": false,
+    "confidence": 0.85,
+    "reason": "Different triggers and consequence scope; B is a retry-semantics claim about transient failures, not the malformed-item permanent wedge A describes."
+   }
+  ]
+ },
+ "usage": {
+  "glm-5.3-background": {
+   "input_tokens": 3238,
+   "cache_read_input_tokens": 384,
+   "cache_creation_input_tokens": 0,
+   "output_tokens": 3467,
+   "reasoning_output_tokens": 1,
+   "cost_usd": 0.0,
+   "total_tokens": 7090
+  }
+ },
+ "status": "complete",
+ "error_type": null,
+ "elapsed_s": 18.971758127212524
+}

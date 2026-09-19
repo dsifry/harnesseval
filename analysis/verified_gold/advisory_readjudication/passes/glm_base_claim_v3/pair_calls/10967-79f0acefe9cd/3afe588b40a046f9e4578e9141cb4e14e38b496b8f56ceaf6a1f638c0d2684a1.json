@@ -1,0 +1,472 @@
+{
+ "url": "https://github.com/calcom/cal.com/pull/10967",
+ "pass_digest": "9c5f733ce7a3f996c90c67f262cc4a77e2b234bc415c197afa7c73477ad320be",
+ "request_sha256": "3afe588b40a046f9e4578e9141cb4e14e38b496b8f56ceaf6a1f638c0d2684a1",
+ "request": {
+  "url": "https://github.com/calcom/cal.com/pull/10967",
+  "model": "glm-5.3-background",
+  "system": "You are clustering code review findings from one PR. Always respond with valid JSON.",
+  "prompt": "You are clustering code review findings from the same PR. For each PAIR below, decide whether the two findings describe the SAME underlying issue — same root cause in the same code location. Different wording is fine. A finding about a DIFFERENT defect in the same file or function is NOT the same issue. Severity or aspect differences of the same root cause ARE the same issue.\n\n\nFor THIS scoring pass, duplicate equivalence is stricter than sharing a root cause.\nYou must compare the COMPLETE MATERIAL CLAIMS, including mechanism, triggering\nconditions, execution path, and consequence. The same line or broad concern does\nnot establish equivalence. A report of wrong-category selection, a case/rename\nmismatch, a crash, and a silent fallback are different claims even at one lookup.\nAn inactive/unbound API concern and an alleged active user-facing failure differ.\nA compound report with an additional material claim does NOT equal its subset.\nDifferences only in wording, severity, or hedging do not create separate claims.\nIf the claimed mechanisms, triggers or consequences conflict, or one report adds\nan unsupported/different material factual claim, return same=false. You are NOT\nverifying which claim is true; do not repair or reinterpret either report to make\nthem match. If unsure whether their full claims are equivalent, return false.\n\nFor every numbered pair, extract what A and B actually CLAIM into mechanism,\ntrigger and consequence. Then list material_differences and give your equivalence\nverdict, confidence and reason. same=true requires no material differences.\nReturn ONLY this JSON object, with EVERY pair index exactly once:\n{\"pairs\":[{\"pair\":1,\"a\":{\"mechanism\":\"...\",\"trigger\":\"...\",\"consequence\":\"...\"},\"b\":{\"mechanism\":\"...\",\"trigger\":\"...\",\"consequence\":\"...\"},\"material_differences\":[],\"same\":true,\"confidence\":0.9,\"reason\":\"...\"}]}\n\nPAIRS:\nPAIR 1:\nA: packages/core/CalendarManager.ts:267 — The returned `externalId` is the *requested* destination, not where the event was actually created, so BookingReference.externalCalendarId can disagree with the real location whenever a service falls back (primary/first calendar).\nB: The new externalId parameter on CalendarManager.createEvent (packages/core/CalendarManager.ts:221, 264-265) is dead weight: it never influences creation and is only echoed into the EventResult, while the service independently re-derives the target calendar from credentialId — two sources of truth for where the event landed; if a provider's internal derivation ever diverges (e.g., the 'primary' fallback), the persisted reference describes a calendar the event isn't in.\n\nPAIR 2:\nA: packages/core/CalendarManager.ts:267 — The returned `externalId` is the *requested* destination, not where the event was actually created, so BookingReference.externalCalendarId can disagree with the real location whenever a service falls back (primary/first calendar).\nB: The new externalId? parameter on CalendarManager.createEvent (packages/core/CalendarManager.ts:219-221, 267-270) is a pure pass-through that never influences event creation and is only echoed into the return object, so it can record a calendar the event was not actually created on (Google falls back to 'primary' when the credentialId find misses).\n\nPAIR 3:\nA: The new externalId parameter on CalendarManager.createEvent (packages/core/CalendarManager.ts:221, 264-265) is dead weight: it never influences creation and is only echoed into the EventResult, while the service independently re-derives the target calendar from credentialId — two sources of truth for where the event landed; if a provider's internal derivation ever diverges (e.g., the 'primary' fallback), the persisted reference describes a calendar the event isn't in.\nB: The new externalId? parameter on CalendarManager.createEvent (packages/core/CalendarManager.ts:219-221, 267-270) is a pure pass-through that never influences event creation and is only echoed into the return object, so it can record a calendar the event was not actually created on (Google falls back to 'primary' when the credentialId find misses).\n\nPAIR 4:\nA: N+1 DB query: per-reference credential fetch inside loop in packages/core/EventManager.ts ~line 500 (updateAllCalendarEvents) — sequential prisma.credential.findUnique per calendar reference, should be batched\nB: packages/core/EventManager.ts:344 — A sequential credential lookup runs once per destination host, creating an N+1 query path whose booking latency grows with collective size.\n\nPAIR 5:\nA: N+1 DB query: per-reference credential fetch inside loop in packages/core/EventManager.ts ~line 500 (updateAllCalendarEvents) — sequential prisma.credential.findUnique per calendar reference, should be batched\nB: packages/core/EventManager.ts:344 — createAllCalendarEvents loops over destination calendars (one per collective-event host) and runs a sequential `prisma.credential.findUnique` inside the loop instead of a single batched `findMany({ id: { in: [...] } })\n\nPAIR 6:\nA: N+1 DB query: per-reference credential fetch inside loop in packages/core/EventManager.ts ~line 500 (updateAllCalendarEvents) — sequential prisma.credential.findUnique per calendar reference, should be batched\nB: packages/core/EventManager.ts:344 — prisma.credential.findUnique is issued per destination inside the loop (N+1) for credentials not in calendarCredentials; should batch with findMany({id: {in}}) up front\n\nPAIR 7:\nA: N+1 DB query: per-reference credential fetch inside loop in packages/core/EventManager.ts ~line 500 (updateAllCalendarEvents) — sequential prisma.credential.findUnique per calendar reference, should be batched\nB: packages/core/EventManager.ts:344-403 (createAllCalendarEvents) and :506-543 (updateAllCalendarEvents) — inside a loop over `event.destinationCalendar` / `calendarReference` (sized by number of hosts), a cache miss on `this.calendarCredentials` falls back to `prisma.credential.findUnique(...)` per iteration, an N+1 query added specifically to support the new multi-host array with no batched `findMany({ id: { in: [...] } })` alternative. Severity: P2. Confidence: 80.\n\nPAIR 8:\nA: N+1 DB query: per-reference credential fetch inside loop in packages/core/EventManager.ts ~line 500 (updateAllCalendarEvents) — sequential prisma.credential.findUnique per calendar reference, should be batched\nB: packages/core/EventManager.ts:504 — The reference loop serially awaits each missing-credential query before scheduling its update, adding one database round trip per host calendar.\n\nPAIR 9:\nA: N+1 DB query: per-reference credential fetch inside loop in packages/core/EventManager.ts ~line 500 (updateAllCalendarEvents) — sequential prisma.credential.findUnique per calendar reference, should be batched\nB: packages/core/EventManager.ts:504 — Updating a multi-calendar booking performs missing-credential database lookups sequentially per reference, creating an N+1 latency path as host references grow.\n\nPAIR 10:\nA: N+1 DB query: per-reference credential fetch inside loop in packages/core/EventManager.ts ~line 500 (updateAllCalendarEvents) — sequential prisma.credential.findUnique per calendar reference, should be batched\nB: packages/core/EventManager.ts:504-541 — `updateAllCalendarEvents` has the identical N+1 pattern: `for (const reference of calendarReference) { ... await prisma.credential.findUnique(...) ... }`, one DB round-trip per calendar reference per reschedule/update instead of batching (P2, confidence 90).\n\nPAIR 11:\nA: N+1 DB query: per-reference credential fetch inside loop in packages/core/EventManager.ts ~line 500 (updateAllCalendarEvents) — sequential prisma.credential.findUnique per calendar reference, should be batched\nB: packages/core/EventManager.ts:517 — updateAllCalendarEvents awaits a credential.findUnique per calendar reference inside the loop, serializing N DB round-trips on every reschedule/update of a collective booking.\n\nPAIR 12:\nA: N+1 DB query: per-reference credential fetch inside loop in packages/core/EventManager.ts ~line 500 (updateAllCalendarEvents) — sequential prisma.credential.findUnique per calendar reference, should be batched\nB: packages/core/EventManager.ts:517 — updateAllCalendarEvents awaits a prisma.credential.findUnique inside the per-reference loop (N+1) instead of batch-fetching the missing credentials with a single findMany\n\nPAIR 13:\nA: N+1 DB query: per-reference credential fetch inside loop in packages/core/EventManager.ts ~line 500 (updateAllCalendarEvents) — sequential prisma.credential.findUnique per calendar reference, should be batched\nB: packages/core/EventManager.ts:517 — updateAllCalendarEvents does a sequential per-reference prisma.credential.findUnique inside the loop over calendar references (N+1)\n\nPAIR 14:\nA: N+1 DB query: per-reference credential fetch inside loop in packages/core/EventManager.ts ~line 500 (updateAllCalendarEvents) — sequential prisma.credential.findUnique per calendar reference, should be batched\nB: packages/core/EventManager.ts:517 — Updating multiple calendar references performs sequential per-reference credential lookups, creating an N+1 database path for collective reschedules and attendee updates.\n\nPAIR 15:\nA: N+1 DB query: per-reference credential fetch inside loop in packages/core/EventManager.ts ~line 500 (updateAllCalendarEvents) — sequential prisma.credential.findUnique per calendar reference, should be batched\nB: packages/core/EventManager.ts:518 — updateAllCalendarEvents iterates every calendar reference (scales with host count on collective events) and issues a sequential `prisma.credential.findUnique` per reference rather than batching with `findMany\n\nPAIR 16:\nA: N+1 DB query: per-reference credential fetch inside loop in packages/core/EventManager.ts ~line 500 (updateAllCalendarEvents) — sequential prisma.credential.findUnique per calendar reference, should be batched\nB: Same N+1 pattern in updateAllCalendarEvents: await prisma.credential.findUnique() per booking reference executed serially in packages/core/EventManager.ts (~lines 505-540); batch-fetch all referenced credential IDs up front\n\nPAIR 17:\nA: packages/core/EventManager.ts:344 — A sequential credential lookup runs once per destination host, creating an N+1 query path whose booking latency grows with collective size.\nB: packages/core/EventManager.ts:344 — createAllCalendarEvents loops over destination calendars (one per collective-event host) and runs a sequential `prisma.credential.findUnique` inside the loop instead of a single batched `findMany({ id: { in: [...] } })\n\nPAIR 18:\nA: packages/core/EventManager.ts:344 — A sequential credential lookup runs once per destination host, creating an N+1 query path whose booking latency grows with collective size.\nB: packages/core/EventManager.ts:344 — prisma.credential.findUnique is issued per destination inside the loop (N+1) for credentials not in calendarCredentials; should batch with findMany({id: {in}}) up front\n\nPAIR 19:\nA: packages/core/EventManager.ts:344 — A sequential credential lookup runs once per destination host, creating an N+1 query path whose booking latency grows with collective size.\nB: packages/core/EventManager.ts:344-403 (createAllCalendarEvents) and :506-543 (updateAllCalendarEvents) — inside a loop over `event.destinationCalendar` / `calendarReference` (sized by number of hosts), a cache miss on `this.calendarCredentials` falls back to `prisma.credential.findUnique(...)` per iteration, an N+1 query added specifically to support the new multi-host array with no batched `findMany({ id: { in: [...] } })` alternative. Severity: P2. Confidence: 80.\n\nPAIR 20:\nA: packages/core/EventManager.ts:344 — A sequential credential lookup runs once per destination host, creating an N+1 query path whose booking latency grows with collective size.\nB: packages/core/EventManager.ts:504 — The reference loop serially awaits each missing-credential query before scheduling its update, adding one database round trip per host calendar.\n",
+  "effort": "low",
+  "pairs": [
+   [
+    1236,
+    1914
+   ],
+   [
+    1236,
+    1915
+   ],
+   [
+    1914,
+    1915
+   ],
+   [
+    923,
+    1354
+   ],
+   [
+    923,
+    1356
+   ],
+   [
+    923,
+    1367
+   ],
+   [
+    923,
+    1373
+   ],
+   [
+    923,
+    1432
+   ],
+   [
+    923,
+    1433
+   ],
+   [
+    923,
+    1434
+   ],
+   [
+    923,
+    1450
+   ],
+   [
+    923,
+    1451
+   ],
+   [
+    923,
+    1452
+   ],
+   [
+    923,
+    1456
+   ],
+   [
+    923,
+    1458
+   ],
+   [
+    923,
+    1888
+   ],
+   [
+    1354,
+    1356
+   ],
+   [
+    1354,
+    1367
+   ],
+   [
+    1354,
+    1373
+   ],
+   [
+    1354,
+    1432
+   ]
+  ]
+ },
+ "parsed_response": {
+  "pairs": [
+   {
+    "pair": 1,
+    "a": {
+     "mechanism": "CalendarManager.createEvent returns the requested externalId (destination), which may differ from where the event was actually created",
+     "trigger": "a service falls back to primary/first calendar",
+     "consequence": "persisted BookingReference.externalCalendarId can disagree with the real event location"
+    },
+    "b": {
+     "mechanism": "externalId parameter is dead weight: never influences creation, only echoed into EventResult; service independently re-derives target calendar from credentialId, creating two sources of truth",
+     "trigger": "provider's internal derivation diverges, e.g. 'primary' fallback",
+     "consequence": "persisted reference describes a calendar the event isn't in"
+    },
+    "material_differences": [
+     "B adds the claim that the parameter never influences creation and that there are two independent sources of truth (service re-derivation), which A does not state",
+     "B frames divergence as conditional/hypothetical while A asserts it occurs on fallback"
+    ],
+    "same": true,
+    "confidence": 0.7,
+    "reason": "Both identify the same root cause at the same location: externalId is a pass-through of the requested destination and can mismatch the actual created calendar via the primary fallback. B's extra framing (dead parameter, two sources of truth) is a mechanism description of the same defect rather than a different claim."
+   },
+   {
+    "pair": 2,
+    "a": {
+     "mechanism": "returned externalId is the requested destination, not actual creation location",
+     "trigger": "service falls back to primary/first calendar",
+     "consequence": "BookingReference.externalCalendarId can disagree with real location"
+    },
+    "b": {
+     "mechanism": "externalId? is a pure pass-through that never influences creation and is echoed into the return object",
+     "trigger": "Google falls back to 'primary' when the credentialId find misses",
+     "consequence": "can record a calendar the event was not actually created on"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "Identical mechanism, trigger (primary fallback), and consequence; only wording differs."
+   },
+   {
+    "pair": 3,
+    "a": {
+     "mechanism": "externalId never influences creation, only echoed into EventResult; service independently re-derives target from credentialId — two sources of truth",
+     "trigger": "provider internal derivation diverges, e.g. primary fallback",
+     "consequence": "persisted reference describes a calendar the event isn't in"
+    },
+    "b": {
+     "mechanism": "externalId? is a pure pass-through, never influences creation, echoed into return object",
+     "trigger": "Google falls back to 'primary' when credentialId find misses",
+     "consequence": "can record a calendar the event was not actually created on"
+    },
+    "material_differences": [
+     "A adds the 'two sources of truth / service re-derivation' framing absent in B"
+    ],
+    "same": true,
+    "confidence": 0.75,
+    "reason": "Same core defect (pass-through externalId can mismatch actual calendar via primary fallback); A's extra 'two sources of truth' framing describes the same mechanism, not a different factual claim."
+   },
+   {
+    "pair": 4,
+    "a": {
+     "mechanism": "sequential prisma.credential.findUnique per calendar reference inside loop",
+     "trigger": "updateAllCalendarEvents (~line 500) iterating references",
+     "consequence": "N+1 DB queries in update path"
+    },
+    "b": {
+     "mechanism": "sequential credential lookup once per destination host",
+     "trigger": "line 344 (createAllCalendarEvents path)",
+     "consequence": "N+1 query path; booking latency grows with collective size"
+    },
+    "material_differences": [
+     "Different function/code path: A is updateAllCalendarEvents (~500), B is the creation path at line 344"
+    ],
+    "same": false,
+    "confidence": 0.85,
+    "reason": "Same pattern but in different functions/locations; not the same underlying issue instance."
+   },
+   {
+    "pair": 5,
+    "a": {
+     "mechanism": "sequential findUnique per calendar reference in loop",
+     "trigger": "updateAllCalendarEvents ~line 500",
+     "consequence": "N+1 queries, should batch"
+    },
+    "b": {
+     "mechanism": "sequential findUnique inside loop over destination calendars",
+     "trigger": "createAllCalendarEvents, line 344",
+     "consequence": "N+1 instead of batched findMany"
+    },
+    "material_differences": [
+     "Different function (updateAllCalendarEvents vs createAllCalendarEvents) and line (~500 vs 344)"
+    ],
+    "same": false,
+    "confidence": 0.9,
+    "reason": "Same pattern in a different code location (creation vs update path)."
+   },
+   {
+    "pair": 6,
+    "a": {
+     "mechanism": "sequential findUnique per reference in loop",
+     "trigger": "updateAllCalendarEvents ~line 500",
+     "consequence": "N+1, should batch"
+    },
+    "b": {
+     "mechanism": "findUnique per destination inside loop for credentials not in calendarCredentials cache",
+     "trigger": "createAllCalendarEvents, line 344",
+     "consequence": "N+1, batch with findMany up front"
+    },
+    "material_differences": [
+     "Different function/location (update vs create path)",
+     "B adds cache-miss condition detail"
+    ],
+    "same": false,
+    "confidence": 0.85,
+    "reason": "B describes the creation path at line 344, a different code location from A's updateAllCalendarEvents."
+   },
+   {
+    "pair": 7,
+    "a": {
+     "mechanism": "sequential findUnique per calendar reference in loop",
+     "trigger": "updateAllCalendarEvents ~line 500",
+     "consequence": "N+1, should batch"
+    },
+    "b": {
+     "mechanism": "cache miss falls back to findUnique per iteration inside loops",
+     "trigger": "both createAllCalendarEvents (344-403) AND updateAllCalendarEvents (506-543)",
+     "consequence": "N+1 with no batched alternative, P2"
+    },
+    "material_differences": [
+     "B is a compound report covering both the create and update functions, adding the createAllCalendarEvents instance and the cache-miss mechanism beyond A's subset"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "Under strict scoring, a compound report with additional material scope (second function, cache-miss mechanism) does not equal its subset."
+   },
+   {
+    "pair": 8,
+    "a": {
+     "mechanism": "sequential findUnique per calendar reference in loop",
+     "trigger": "updateAllCalendarEvents ~line 500",
+     "consequence": "N+1 queries, should batch"
+    },
+    "b": {
+     "mechanism": "reference loop serially awaits each missing-credential query before scheduling update",
+     "trigger": "line 504, updateAllCalendarEvents",
+     "consequence": "one DB round trip per host calendar"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "Same function, same loop, same sequential per-reference credential query consequence."
+   },
+   {
+    "pair": 9,
+    "a": {
+     "mechanism": "sequential findUnique per calendar reference in loop",
+     "trigger": "updateAllCalendarEvents ~line 500",
+     "consequence": "N+1, should batch"
+    },
+    "b": {
+     "mechanism": "missing-credential DB lookups sequentially per reference",
+     "trigger": "line 504, updateAllCalendarEvents",
+     "consequence": "N+1 latency path as host references grow"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "Same function and mechanism, matching consequence."
+   },
+   {
+    "pair": 10,
+    "a": {
+     "mechanism": "sequential findUnique per calendar reference in loop",
+     "trigger": "updateAllCalendarEvents ~line 500",
+     "consequence": "N+1, should batch"
+    },
+    "b": {
+     "mechanism": "for (const reference of calendarReference) { await prisma.credential.findUnique(...) }",
+     "trigger": "updateAllCalendarEvents 504-541",
+     "consequence": "one DB round-trip per reference per reschedule instead of batching"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Identical issue in same function with matching mechanism and fix."
+   },
+   {
+    "pair": 11,
+    "a": {
+     "mechanism": "sequential findUnique per calendar reference in loop",
+     "trigger": "updateAllCalendarEvents ~line 500",
+     "consequence": "N+1, should batch"
+    },
+    "b": {
+     "mechanism": "awaits credential.findUnique per calendar reference inside loop",
+     "trigger": "updateAllCalendarEvents, line 517",
+     "consequence": "serializes N DB round-trips per reschedule/update"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Same function, same sequential per-reference credential lookup."
+   },
+   {
+    "pair": 12,
+    "a": {
+     "mechanism": "sequential findUnique per calendar reference in loop",
+     "trigger": "updateAllCalendarEvents ~line 500",
+     "consequence": "N+1, should batch"
+    },
+    "b": {
+     "mechanism": "awaits findUnique inside per-reference loop instead of batch findMany",
+     "trigger": "updateAllCalendarEvents, line 517",
+     "consequence": "N+1"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Identical claim in same function."
+   },
+   {
+    "pair": 13,
+    "a": {
+     "mechanism": "sequential findUnique per calendar reference in loop",
+     "trigger": "updateAllCalendarEvents ~line 500",
+     "consequence": "N+1, should batch"
+    },
+    "b": {
+     "mechanism": "sequential per-reference findUnique inside loop over calendar references",
+     "trigger": "updateAllCalendarEvents, line 517",
+     "consequence": "N+1"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Identical claim in same function."
+   },
+   {
+    "pair": 14,
+    "a": {
+     "mechanism": "sequential findUnique per calendar reference in loop",
+     "trigger": "updateAllCalendarEvents ~line 500",
+     "consequence": "N+1, should batch"
+    },
+    "b": {
+     "mechanism": "sequential per-reference credential lookups for multiple calendar references",
+     "trigger": "updateAllCalendarEvents, line 517",
+     "consequence": "N+1 DB path for collective reschedules/attendee updates"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "Same function and mechanism; B names reschedule/attendee update triggers consistent with updateAllCalendarEvents."
+   },
+   {
+    "pair": 15,
+    "a": {
+     "mechanism": "sequential findUnique per calendar reference in loop",
+     "trigger": "updateAllCalendarEvents ~line 500",
+     "consequence": "N+1, should batch"
+    },
+    "b": {
+     "mechanism": "iterates every calendar reference, sequential findUnique per reference rather than findMany",
+     "trigger": "updateAllCalendarEvents, line 518",
+     "consequence": "N+1 scaling with host count"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Identical claim in same function."
+   },
+   {
+    "pair": 16,
+    "a": {
+     "mechanism": "sequential findUnique per calendar reference in loop",
+     "trigger": "updateAllCalendarEvents ~line 500",
+     "consequence": "N+1, should batch"
+    },
+    "b": {
+     "mechanism": "await findUnique() per booking reference executed serially in loop",
+     "trigger": "updateAllCalendarEvents ~lines 505-540",
+     "consequence": "N+1, batch up front"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Identical claim in same function and line range."
+   },
+   {
+    "pair": 17,
+    "a": {
+     "mechanism": "sequential credential lookup once per destination host",
+     "trigger": "createAllCalendarEvents, line 344",
+     "consequence": "N+1; booking latency grows with collective size"
+    },
+    "b": {
+     "mechanism": "loops over destination calendars, sequential findUnique inside loop instead of batched findMany",
+     "trigger": "createAllCalendarEvents, line 344",
+     "consequence": "N+1 instead of single batched query"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Same location, mechanism, and consequence."
+   },
+   {
+    "pair": 18,
+    "a": {
+     "mechanism": "sequential credential lookup once per destination host",
+     "trigger": "createAllCalendarEvents, line 344",
+     "consequence": "N+1; booking latency grows with collective size"
+    },
+    "b": {
+     "mechanism": "findUnique issued per destination inside loop for credentials not in calendarCredentials cache",
+     "trigger": "createAllCalendarEvents, line 344",
+     "consequence": "N+1, batch with findMany up front"
+    },
+    "material_differences": [
+     "B adds cache-miss trigger condition detail"
+    ],
+    "same": true,
+    "confidence": 0.8,
+    "reason": "Same location and defect; the cache-miss detail refines the trigger condition without changing the claim."
+   },
+   {
+    "pair": 19,
+    "a": {
+     "mechanism": "sequential credential lookup once per destination host",
+     "trigger": "createAllCalendarEvents, line 344",
+     "consequence": "N+1; booking latency grows with collective size"
+    },
+    "b": {
+     "mechanism": "cache miss falls back to findUnique per iteration in loops",
+     "trigger": "both createAllCalendarEvents (344-403) AND updateAllCalendarEvents (506-543)",
+     "consequence": "N+1 with no batched alternative, P2"
+    },
+    "material_differences": [
+     "B is a compound report covering both create and update functions, adding a second code location and cache-miss mechanism beyond A's single-function claim"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "Compound report with additional scope does not equal its subset under strict scoring."
+   },
+   {
+    "pair": 20,
+    "a": {
+     "mechanism": "sequential credential lookup once per destination host",
+     "trigger": "createAllCalendarEvents, line 344",
+     "consequence": "N+1; booking latency grows with collective size"
+    },
+    "b": {
+     "mechanism": "reference loop serially awaits each missing-credential query",
+     "trigger": "line 504, updateAllCalendarEvents",
+     "consequence": "one DB round trip per host calendar"
+    },
+    "material_differences": [
+     "Different function: A is the creation path (344), B is the update path (504)"
+    ],
+    "same": false,
+    "confidence": 0.85,
+    "reason": "Same pattern but in a different function/code path."
+   }
+  ]
+ },
+ "usage": {
+  "glm-5.3-background": {
+   "input_tokens": 2294,
+   "cache_read_input_tokens": 384,
+   "cache_creation_input_tokens": 0,
+   "output_tokens": 2767,
+   "reasoning_output_tokens": 1279,
+   "cost_usd": 0.0,
+   "total_tokens": 6724
+  }
+ },
+ "status": "complete",
+ "error_type": null,
+ "elapsed_s": 26.616241931915283
+}

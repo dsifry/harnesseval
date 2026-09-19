@@ -1493,9 +1493,10 @@ and `runs/` directories retain cluster plans, judgments and the frozen per-run a
 records the offline chain consumes; `progress.json` records current-pass progress. These preserve
 decisions and provenance. Raw per-call payloads (`pair_calls/`, `pair_attempts/`, `group_calls/`,
 `grouping_calls/`, `grouping_attempts/`, scoring-policy `attempts/`) are excluded from the
-repository by `.gitignore`: they are mode-(iii) artifacts reproducible only by new model calls,
-and the identity decisions they fed are frozen in the hash-bound `groups/` and `audit/`
-artifacts instead. Original run judgments and verified bug assignments are preserved.
+repository by `.gitignore` — they are mode-(iii) artifacts reproducible only by new model calls —
+with one deliberate exception: the hash-bound policy audit pins the sha256 of every grouping and
+pair call it consumed, and those ~780 checkpoint payloads are tracked so the audit can be verified
+offline. Original run judgments and verified bug assignments are preserved.
 These saved judgments are inputs to offline metric regeneration, not outputs an offline command can invent.
 The raw pass is `passes/glm_base_claim_v3/`; the selected policy is
 `scoring_policies/advisory070_penalty080_v1/`, selected by `active_scoring_policy.json`. Its `policy.json`

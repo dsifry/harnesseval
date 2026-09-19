@@ -1,0 +1,473 @@
+{
+ "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/10",
+ "pass_digest": "9c5f733ce7a3f996c90c67f262cc4a77e2b234bc415c197afa7c73477ad320be",
+ "request_sha256": "fd982e3454744805775cc35f05fbd8ee21ca43292f7029ffacdab6897aa9e8d4",
+ "request": {
+  "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/10",
+  "model": "glm-5.3-background",
+  "system": "You are clustering code review findings from one PR. Always respond with valid JSON.",
+  "prompt": "You are clustering code review findings from the same PR. For each PAIR below, decide whether the two findings describe the SAME underlying issue — same root cause in the same code location. Different wording is fine. A finding about a DIFFERENT defect in the same file or function is NOT the same issue. Severity or aspect differences of the same root cause ARE the same issue.\n\n\nFor THIS scoring pass, duplicate equivalence is stricter than sharing a root cause.\nYou must compare the COMPLETE MATERIAL CLAIMS, including mechanism, triggering\nconditions, execution path, and consequence. The same line or broad concern does\nnot establish equivalence. A report of wrong-category selection, a case/rename\nmismatch, a crash, and a silent fallback are different claims even at one lookup.\nAn inactive/unbound API concern and an alleged active user-facing failure differ.\nA compound report with an additional material claim does NOT equal its subset.\nDifferences only in wording, severity, or hedging do not create separate claims.\nIf the claimed mechanisms, triggers or consequences conflict, or one report adds\nan unsupported/different material factual claim, return same=false. You are NOT\nverifying which claim is true; do not repair or reinterpret either report to make\nthem match. If unsure whether their full claims are equivalent, return false.\n\nFor every numbered pair, extract what A and B actually CLAIM into mechanism,\ntrigger and consequence. Then list material_differences and give your equivalence\nverdict, confidence and reason. same=true requires no material differences.\nReturn ONLY this JSON object, with EVERY pair index exactly once:\n{\"pairs\":[{\"pair\":1,\"a\":{\"mechanism\":\"...\",\"trigger\":\"...\",\"consequence\":\"...\"},\"b\":{\"mechanism\":\"...\",\"trigger\":\"...\",\"consequence\":\"...\"},\"material_differences\":[],\"same\":true,\"confidence\":0.9,\"reason\":\"...\"}]}\n\nPAIRS:\nPAIR 1:\nA: destroy dereferences the result of EmbeddableHost.where(id: params[:id]).first without a nil check, so destroying a nonexistent host id raises NoMethodError on nil.destroy and returns a raw 500 instead of the 404 Discourse returns for missing records. An admin with a stale page (the row was deleted by another admin) or a double-click that fires two DELETEs for the same row hits a 500 from the staff endpoint on the second request, where Discourse's convention (find/raise, RecordNotFound) yields a 404.\nB: update/destroy in EmbeddableHostsController raise NoMethodError on unknown id: where(id:).first returns nil, then save_host calls nil.host= and destroy calls nil.destroy, producing a 500 instead of 404; also params[:embeddable_host][:host] raises if the key is absent; add a not-found guard and use params.require(:embeddable_host).permit(:host, :category_id)\n\nPAIR 2:\nA: spec/controllers/admin/embeddable_hosts_controller_spec.rb:5 — The new controller specs only assert the subclass relationship, so create/update/destroy, the nil-record crashes, and the category fallback are completely untested (silent pass).\nB: The only controller specs (embeddable_hosts_controller_spec.rb and embedding_controller_spec.rb) are vacuous — they only assert `Controller < Admin::AdminController` and pass even if create/update/destroy are entirely broken; combined with zero request-level coverage, the migration crash, normalization regression, and nil-500s all shipped under a suite that cannot detect them.\n\nPAIR 3:\nA: app/assets/javascripts/discourse/adapters/rest.js.es6:22 — type.replace('_', '-')` only replaces the first underscore; brittle normalization inside a shared adapter for a single new model.\nB: app/assets/javascripts/discourse/adapters/rest.js.es6:22 — `type.replace('_', '-')` replaces only the first underscore and papers over the fact that `_hydrateEmbedded` derives the sub-type from the JSON key (`embeddable_host`) while `createRecord('embeddable-host')` uses the dasherized name, so the same model lives under two `__type`s and two identity-map namespaces; the next admin model whose key has two-plus underscores (e.g. `user_api_key_ids` -> `user-api_key`) silently misses ADMIN_MODELS and is routed to `/user_api_keys` instead of `/admin/...`, failing only with a 404 at runtime; the right seam is dasherizing subType once in `_lookupSubType` (severity P3, confidence 75, advisory)\n\nPAIR 4:\nA: app/assets/javascripts/discourse/adapters/rest.js.es6:22 — type.replace('_', '-')` only replaces the first underscore; brittle normalization inside a shared adapter for a single new model.\nB: app/assets/javascripts/discourse/adapters/rest.js.es6:22 — `type.replace('_', '-')` replaces only the first underscore, so the new admin base-path routing is right only for single-underscore types, and no adapter test covers \"embeddable_host\" or \"embeddable-host\" (P3, conf 50)\n\nPAIR 5:\nA: app/controllers/admin/embeddable_hosts_controller.rb:15-16 — `host = EmbeddableHost.where(id: params[:id]).first; host.destroy` raises NoMethodError on nil for an already-deleted id, returning 500 where a 404 belongs; combined with the client's uncaught destroyRecord the admin sees the row stay with no message (severity P2, confidence 100, blocking)\nB: app/controllers/admin/embeddable_hosts_controller.rb:16 — `host = EmbeddableHost.where(id: params[:id]).first; host.destroy` (and `save_host(host)` at line 11) calls methods on `nil` when the id no longer exists (row already deleted from another tab/session), producing a NoMethodError 500 instead of a 404 and leaving the client-side `destroyRecord().then(...)` never firing `deleteHost`, so the stale row stays in the admin table (severity P2, confidence 75, advisory)\n\nPAIR 6:\nA: app/controllers/admin/embeddable_hosts_controller.rb:15-16 — `host = EmbeddableHost.where(id: params[:id]).first; host.destroy` raises NoMethodError on nil for an already-deleted id, returning 500 where a 404 belongs; combined with the client's uncaught destroyRecord the admin sees the row stay with no message (severity P2, confidence 100, blocking)\nB: update/destroy actions in app/controllers/admin/embeddable_hosts_controller.rb:12,18 use EmbeddableHost.where(id: params[:id]).first which can be nil, causing save_host(nil) and host.destroy to raise NoMethodError (500) for nonexistent ids, with no controller test covering missing-id\n\nPAIR 7:\nA: app/controllers/admin/embedding_controller.rb:9 — The `update` action is a no-op that just re-renders `show`, and the PUT route exists only to support it.\nB: EmbeddingController#update (app/controllers/admin/embedding_controller.rb:11-14) performs no persistence but is the target of the UI's saveChanges; the spec doesn't hit show/update to pin the serialized payload contract (id, embeddable_hosts embedded ids) that the store hydration depends on\n\nPAIR 8:\nA: config/site_settings.yml:762 — `embeddable_hosts` and `embed_category` are deleted from the settings registry, so any caller outside this diff that still assigns or reads `SiteSetting.embeddable_hosts` / `SiteSetting.embed_category` (e.g. the existing `spec/components/topic_retriever_spec.rb` setup that sets `SiteSetting.embeddable_hosts`) now raises NoMethodError; the diff touches only embed_controller/topic/topic_embed/topic_retriever and the truncated review tree cannot show the remaining callers (severity P2, confidence 50, advisory; rebuttal: the author may have grepped the full tree — survives because no spec in the diff exercises TopicRetriever or Topic#expandable_first_post? after the removal)\nB: config/site_settings.yml:762 — removing `embeddable_hosts` and `embed_category` from the settings registry (plus `SiteSetting.allows_embeddable_host?`) turns any remaining caller into a NoMethodError at runtime; the diff only migrates three core callers and this review repo contains no other files to verify plugins, other-locale server.*.yml entries, or `spec/models/site_setting_spec.rb`/`topic_embed_spec.rb` references were updated (severity P2, confidence 50, advisory; rebuttal gate: a full-repo grep for `embeddable_hosts|embed_category|allows_embeddable_host` returning only files in this diff)\n\nPAIR 9:\nA: db/migrate/20150818190757_create_embeddable_hosts.rb:11 — `execute(\"SELECT c.id ... WHERE s.name = 'embed_category'\")[0]['id']` raises IndexError on an empty PG::Result whenever `embed_category` was never set (the default '', so no site_settings row) or doesn't exactly match a category name, which aborts the migration before any existing `embeddable_hosts` get copied, so default installs can't upgrade with their embed config intact (P0, conf 75)\nB: db/migrate/20150818190757_create_embeddable_hosts.rb:11 — execute(...)[0]['id']` raises IndexError on PG::Result when no category matches `embed_category` (default '' / fresh DB / setting row absent), so the migration fails for most sites and all fresh installs.\n\nPAIR 10:\nA: db/migrate/20150818190757_create_embeddable_hosts.rb:11 — `execute(\"SELECT c.id ... WHERE s.name = 'embed_category'\")[0]['id']` raises IndexError on an empty PG::Result whenever `embed_category` was never set (the default '', so no site_settings row) or doesn't exactly match a category name, which aborts the migration before any existing `embeddable_hosts` get copied, so default installs can't upgrade with their embed config intact (P0, conf 75)\nB: db/migrate/20150818190757_create_embeddable_hosts.rb:11 — the migration assumes a `site_settings` row for `embed_category` always exists, but Discourse only persists non-default settings, so on every install where embed_category was never set `execute(...)[0]` on an empty PG::Result raises IndexError and the migration aborts, blocking deploy for the default configuration (same unguarded `[0]['value']` at line 15 for uncategorized_category_id) (severity P0, confidence 75, blocking)\n\nPAIR 11:\nA: db/migrate/20150818190757_create_embeddable_hosts.rb:11 — `execute(\"SELECT c.id ... WHERE s.name = 'embed_category'\")[0]['id']` raises IndexError on an empty PG::Result whenever `embed_category` was never set (the default '', so no site_settings row) or doesn't exactly match a category name, which aborts the migration before any existing `embeddable_hosts` get copied, so default installs can't upgrade with their embed config intact (P0, conf 75)\nB: db/migrate/20150818190757_create_embeddable_hosts.rb:12 — Migration indexes `[0]['id']` on the PG::Result of the embed_category lookup, which raises IndexError when no category matches (the default `embed_category: ''` case), so the migration crashes on most sites; same for the `uncategorized_category_id` lookup on line 15 since defaults are not stored in site_settings.\n\nPAIR 12:\nA: db/migrate/20150818190757_create_embeddable_hosts.rb:11 — `execute(\"SELECT c.id ... WHERE s.name = 'embed_category'\")[0]['id']` raises IndexError on an empty PG::Result whenever `embed_category` was never set (the default '', so no site_settings row) or doesn't exactly match a category name, which aborts the migration before any existing `embeddable_hosts` get copied, so default installs can't upgrade with their embed config intact (P0, conf 75)\nB: db/migrate/20150818190757_create_embeddable_hosts.rb:9 — `execute(\"SELECT c.id ... WHERE s.name = 'embed_category'\")[0]['id']` indexes an empty PG::Result (IndexError) on every site that never set embed_category (no site_settings row exists for default values), so the migration aborts and the old embeddable_hosts setting is never carried over; existing embedding setups are lost at deploy rather than preserved (severity P0, confidence 75, blocking)\n\nPAIR 13:\nA: db/migrate/20150818190757_create_embeddable_hosts.rb:11 — `execute(\"SELECT c.id ... WHERE s.name = 'embed_category'\")[0]['id']` raises IndexError on an empty PG::Result whenever `embed_category` was never set (the default '', so no site_settings row) or doesn't exactly match a category name, which aborts the migration before any existing `embeddable_hosts` get copied, so default installs can't upgrade with their embed config intact (P0, conf 75)\nB: db/migrate/20150818190757_create_embeddable_hosts.rb:9 — `execute(\"SELECT c.id ... WHERE s.name = 'embed_category'\")[0]['id']` indexes row 0 unconditionally, but a site that never changed embed_category from its '' default has no site_settings row, so PG::Result#[] raises IndexError and the migration aborts on the common default install (P0, conf 75)\n\nPAIR 14:\nA: db/migrate/20150818190757_create_embeddable_hosts.rb:11 — `execute(\"SELECT c.id ... WHERE s.name = 'embed_category'\")[0]['id']` raises IndexError on an empty PG::Result whenever `embed_category` was never set (the default '', so no site_settings row) or doesn't exactly match a category name, which aborts the migration before any existing `embeddable_hosts` get copied, so default installs can't upgrade with their embed config intact (P0, conf 75)\nB: db/migrate/20150818190757_create_embeddable_hosts.rb:9 — `execute(\"SELECT c.id FROM categories ... WHERE s.name = 'embed_category'\")[0]['id']` indexes row 0 of an empty PG::Result on every install where `embed_category` was never changed from its default (no site_settings row exists), raising IndexError and aborting `db:migrate` for the majority of upgrading sites; the removal of the site setting is thus not safely migrated (severity P0, confidence 75, blocking)\n\nPAIR 15:\nA: db/migrate/20150818190757_create_embeddable_hosts.rb:11 — `execute(\"SELECT c.id ... WHERE s.name = 'embed_category'\")[0]['id']` raises IndexError on an empty PG::Result whenever `embed_category` was never set (the default '', so no site_settings row) or doesn't exactly match a category name, which aborts the migration before any existing `embeddable_hosts` get copied, so default installs can't upgrade with their embed config intact (P0, conf 75)\nB: db/migrate/20150818190757_create_embeddable_hosts.rb:9 — `execute(\"SELECT c.id FROM categories ... WHERE s.name = 'embed_category'\")[0]['id']` indexes row 0 of an empty PG::Result on every site that never set embed_category (default '' is not persisted to site_settings), so the migration raises and aborts the deploy for most installs; no edge-case handling or migration spec exists (P0, conf 75)\n\nPAIR 16:\nA: db/migrate/20150818190757_create_embeddable_hosts.rb:11 — `execute(\"SELECT c.id ... WHERE s.name = 'embed_category'\")[0]['id']` raises IndexError on an empty PG::Result whenever `embed_category` was never set (the default '', so no site_settings row) or doesn't exactly match a category name, which aborts the migration before any existing `embeddable_hosts` get copied, so default installs can't upgrade with their embed config intact (P0, conf 75)\nB: db/migrate/20150818190757_create_embeddable_hosts.rb:9 — `execute(...)[0]['id']` is called without checking the query returned any rows; if no category matches the old `embed_category` setting by name, this raises NoMethodError on nil and aborts the migration, blocking deploy for any site with a stale/renamed category, confidence 70, severity P1.\n\nPAIR 17:\nA: db/migrate/20150818190757_create_embeddable_hosts.rb:11 — `execute(\"SELECT c.id ... WHERE s.name = 'embed_category'\")[0]['id']` raises IndexError on an empty PG::Result whenever `embed_category` was never set (the default '', so no site_settings row) or doesn't exactly match a category name, which aborts the migration before any existing `embeddable_hosts` get copied, so default installs can't upgrade with their embed config intact (P0, conf 75)\nB: db/migrate/20150818190757_create_embeddable_hosts.rb:9-11 — `execute(\"SELECT c.id ... WHERE s.name = 'embed_category'\")[0]['id']` indexes row 0 of an empty PG::Result whenever `embed_category` was never overridden (the default '' is not persisted in site_settings, and it is the default on every fresh install and on every site that never set it) or was set in a case that does not match `c.name` exactly, so PG::Result#[] raises IndexError and `db:migrate` aborts before the old hosts/category are carried over — the migration that is supposed to preserve the removed settings' behavior fails on the majority of databases (upstream guards this with `cmd_tuples > 0`, this version does not) (severity P0, confidence 75, blocking)\n\nPAIR 18:\nA: db/migrate/20150818190757_create_embeddable_hosts.rb:11 — `execute(\"SELECT c.id ... WHERE s.name = 'embed_category'\")[0]['id']` raises IndexError on an empty PG::Result whenever `embed_category` was never set (the default '', so no site_settings row) or doesn't exactly match a category name, which aborts the migration before any existing `embeddable_hosts` get copied, so default installs can't upgrade with their embed config intact (P0, conf 75)\nB: db/migrate/20150818190757_create_embeddable_hosts.rb:9-11 — `execute(\"SELECT c.id FROM categories ... WHERE s.name = 'embed_category'\")[0]['id']` runs unconditionally before any host check, so on every site where `embed_category` was never set to an existing category name (all fresh installs and every site that never used embedding) the empty PG::Result raises IndexError and `db:migrate` aborts, blocking the upgrade for users who never touched embedding (severity P0, confidence 75, blocking)\n\nPAIR 19:\nA: db/migrate/20150818190757_create_embeddable_hosts.rb:11 — `execute(\"SELECT c.id ... WHERE s.name = 'embed_category'\")[0]['id']` raises IndexError on an empty PG::Result whenever `embed_category` was never set (the default '', so no site_settings row) or doesn't exactly match a category name, which aborts the migration before any existing `embeddable_hosts` get copied, so default installs can't upgrade with their embed config intact (P0, conf 75)\nB: db/migrate/20150818190757_create_embeddable_hosts.rb:9-11 — `execute(\"SELECT c.id FROM categories AS c INNER JOIN site_settings AS s ON s.value = c.name WHERE s.name = 'embed_category'\")[0]['id']` indexes row 0 of a result that is empty whenever embed_category was never set (defaults are not stored in site_settings) or names no existing category, so PG::Result#[] raises IndexError and the migration aborts on those sites instead of taking the `category_id == 0` fallback, which is unreachable in that case (P0, conf 75)\n\nPAIR 20:\nA: db/migrate/20150818190757_create_embeddable_hosts.rb:11 — `execute(\"SELECT c.id ... WHERE s.name = 'embed_category'\")[0]['id']` raises IndexError on an empty PG::Result whenever `embed_category` was never set (the default '', so no site_settings row) or doesn't exactly match a category name, which aborts the migration before any existing `embeddable_hosts` get copied, so default installs can't upgrade with their embed config intact (P0, conf 75)\nB: Migration 20150818190757_create_embeddable_hosts crashes on most existing installs: `execute(\"SELECT c.id ... WHERE s.name = 'embed_category'\")[0]['id'].to_i` raises NoMethodError because Discourse only persists site settings changed from defaults, so most installs have no `embed_category` row (and a persisted empty value fails the join too); the fallback at line 15 has the same problem on fresh installs since no `uncategorized_category_id` row exists until seeds run, making `db:migrate` a deploy/upgrade blocker for the majority of forums.\n",
+  "effort": "low",
+  "pairs": [
+   [
+    185,
+    1719
+   ],
+   [
+    1501,
+    1690
+   ],
+   [
+    515,
+    518
+   ],
+   [
+    515,
+    527
+   ],
+   [
+    611,
+    615
+   ],
+   [
+    611,
+    1717
+   ],
+   [
+    691,
+    1264
+   ],
+   [
+    948,
+    949
+   ],
+   [
+    984,
+    993
+   ],
+   [
+    984,
+    1005
+   ],
+   [
+    984,
+    1013
+   ],
+   [
+    984,
+    1204
+   ],
+   [
+    984,
+    1205
+   ],
+   [
+    984,
+    1208
+   ],
+   [
+    984,
+    1209
+   ],
+   [
+    984,
+    1210
+   ],
+   [
+    984,
+    1219
+   ],
+   [
+    984,
+    1222
+   ],
+   [
+    984,
+    1224
+   ],
+   [
+    984,
+    1320
+   ]
+  ]
+ },
+ "parsed_response": {
+  "pairs": [
+   {
+    "pair": 1,
+    "a": {
+     "mechanism": "destroy calls nil.destroy via where(id:).first without nil check",
+     "trigger": "destroy of nonexistent/stale host id",
+     "consequence": "500 instead of 404"
+    },
+    "b": {
+     "mechanism": "update/destroy call methods on nil from where(id:).first; plus params[:embeddable_host][:host] raises when key absent",
+     "trigger": "unknown id on update or destroy; missing param key",
+     "consequence": "500 instead of 404; additional param-guard claim and suggested fix"
+    },
+    "material_differences": [
+     "B is compound: covers update too, adds params.require claim and fix recommendation absent from A"
+    ],
+    "same": false,
+    "confidence": 0.8,
+    "reason": "B adds material claims (update action, missing param key, require fix) beyond A's destroy-only report."
+   },
+   {
+    "pair": 2,
+    "a": {
+     "mechanism": "controller specs only assert subclass relationship",
+     "trigger": "any broken create/update/destroy, nil crashes, category fallback",
+     "consequence": "tests silently pass, defects undetected"
+    },
+    "b": {
+     "mechanism": "specs are vacuous, only assert Admin::AdminController subclass",
+     "trigger": "broken create/update/destroy, migration crash, normalization, nil-500s",
+     "consequence": "suite cannot detect shipped defects"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Both claim the same vacuous-spec root cause with same consequence."
+   },
+   {
+    "pair": 3,
+    "a": {
+     "mechanism": "replace('_','-') replaces only first underscore; brittle normalization in shared adapter",
+     "trigger": "single new model usage",
+     "consequence": "brittleness only, no concrete failure claimed"
+    },
+    "b": {
+     "mechanism": "first-underscore-only replace plus dual __type/identity-map namespaces and ADMIN_MODELS routing misses for multi-underscore keys",
+     "trigger": "next admin model with 2+ underscores, e.g. user_api_key_ids",
+     "consequence": "wrong route /user_api_keys, 404 at runtime"
+    },
+    "material_differences": [
+     "B adds concrete dual-namespace and routing-failure claims not in A"
+    ],
+    "same": false,
+    "confidence": 0.75,
+    "reason": "A is a subset; B adds different material claims about namespaces and routing."
+   },
+   {
+    "pair": 4,
+    "a": {
+     "mechanism": "replace only first underscore; brittle normalization in shared adapter",
+     "trigger": "dasherized/underscored type names",
+     "consequence": "brittle normalization"
+    },
+    "b": {
+     "mechanism": "replace only first underscore correct only for single-underscore types; no adapter test covers embeddable_host",
+     "trigger": "single vs multi underscore types",
+     "consequence": "routing wrong for multi-underscore; missing test coverage"
+    },
+    "material_differences": [
+     "B adds a test-coverage claim absent from A"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "B is a compound report adding a material coverage claim."
+   },
+   {
+    "pair": 5,
+    "a": {
+     "mechanism": "where(id:).first nil then nil.destroy",
+     "trigger": "already-deleted id",
+     "consequence": "NoMethodError 500 instead of 404; uncaught destroyRecord leaves row in UI"
+    },
+    "b": {
+     "mechanism": "nil.destroy and save_host(host) on nil",
+     "trigger": "id no longer exists, deleted from another session",
+     "consequence": "NoMethodError 500 instead of 404; destroyRecord.then never fires, stale row stays in table"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Same mechanism, trigger, and consequence including client-side row-stays behavior."
+   },
+   {
+    "pair": 6,
+    "a": {
+     "mechanism": "nil.destroy for already-deleted id; uncaught destroyRecord",
+     "trigger": "stale/already-deleted id",
+     "consequence": "500 vs 404; row stays with no message"
+    },
+    "b": {
+     "mechanism": "update and destroy both can call methods on nil",
+     "trigger": "nonexistent ids",
+     "consequence": "NoMethodError 500; no controller test covers missing-id"
+    },
+    "material_differences": [
+     "B covers update as well and adds a test-coverage claim; drops client-side consequence"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "B is compound with broader scope and added coverage claim."
+   },
+   {
+    "pair": 7,
+    "a": {
+     "mechanism": "update action is a no-op re-rendering show; PUT route exists only for it",
+     "trigger": "PUT to embedding update",
+     "consequence": "no persistence / dead route"
+    },
+    "b": {
+     "mechanism": "update performs no persistence and is target of saveChanges; spec doesn't pin payload contract",
+     "trigger": "UI saveChanges; serialized payload hydration",
+     "consequence": "no persistence; store hydration contract unpinned by tests"
+    },
+    "material_differences": [
+     "B adds a material claim about missing spec coverage of the payload contract"
+    ],
+    "same": false,
+    "confidence": 0.6,
+    "reason": "B adds an unsupported-in-A test/contract claim; compound report."
+   },
+   {
+    "pair": 8,
+    "a": {
+     "mechanism": "removing embeddable_hosts/embed_category from registry leaves callers raising NoMethodError",
+     "trigger": "any remaining caller, e.g. topic_retriever_spec setup",
+     "consequence": "NoMethodError outside the diff, unverifiable in truncated tree"
+    },
+    "b": {
+     "mechanism": "same removal turns remaining callers into NoMethodError",
+     "trigger": "any remaining caller incl. plugins, locale files, specs",
+     "consequence": "NoMethodError at runtime; cannot verify updates"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.8,
+    "reason": "Same root cause, mechanism, trigger, and consequence; B only broadens the caller list."
+   },
+   {
+    "pair": 9,
+    "a": {
+     "mechanism": "execute(...)[0]['id'] IndexError on empty PG::Result",
+     "trigger": "embed_category never set (default '') or name mismatch",
+     "consequence": "migration aborts, embed config not copied, default installs can't upgrade"
+    },
+    "b": {
+     "mechanism": "same [0]['id'] IndexError on empty result",
+     "trigger": "no category matches embed_category (default/fresh DB/absent row)",
+     "consequence": "migration fails for most sites and fresh installs"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.95,
+    "reason": "Identical mechanism, trigger, and consequence."
+   },
+   {
+    "pair": 10,
+    "a": {
+     "mechanism": "[0]['id'] IndexError on empty result for embed_category lookup",
+     "trigger": "never set or name mismatch",
+     "consequence": "abort before hosts copied; default installs can't upgrade"
+    },
+    "b": {
+     "mechanism": "same IndexError, assumes site_settings row always exists; adds same unguarded [0]['value'] at line 15",
+     "trigger": "embed_category never set",
+     "consequence": "migration aborts, deploy blocked"
+    },
+    "material_differences": [
+     "B adds a separate defect claim at line 15 (uncategorized_category_id)"
+    ],
+    "same": false,
+    "confidence": 0.65,
+    "reason": "B is compound, adding a distinct unguarded-lookup claim at line 15."
+   },
+   {
+    "pair": 11,
+    "a": {
+     "mechanism": "[0]['id'] IndexError on empty result",
+     "trigger": "embed_category unset or name mismatch",
+     "consequence": "migration aborts, config lost"
+    },
+    "b": {
+     "mechanism": "same IndexError; adds same issue at line 15 for uncategorized_category_id",
+     "trigger": "embed_category unset; defaults not stored",
+     "consequence": "migration crashes on most sites"
+    },
+    "material_differences": [
+     "B adds line-15 defect claim"
+    ],
+    "same": false,
+    "confidence": 0.65,
+    "reason": "B adds a separate unguarded lookup at line 15."
+   },
+   {
+    "pair": 12,
+    "a": {
+     "mechanism": "[0]['id'] IndexError on empty PG::Result",
+     "trigger": "embed_category never set or name mismatch",
+     "consequence": "abort before hosts copied; can't upgrade"
+    },
+    "b": {
+     "mechanism": "[0]['id'] on empty PG::Result",
+     "trigger": "never set embed_category, no site_settings row",
+     "consequence": "migration aborts; embeddable_hosts setting never carried over, lost at deploy"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.95,
+    "reason": "Same mechanism, trigger, consequence (line 9 vs 11 only wording)."
+   },
+   {
+    "pair": 13,
+    "a": {
+     "mechanism": "[0]['id'] IndexError on empty PG::Result",
+     "trigger": "never set or name mismatch",
+     "consequence": "abort before hosts copied"
+    },
+    "b": {
+     "mechanism": "[0] unconditionally on empty result",
+     "trigger": "never changed from '' default, no site_settings row",
+     "consequence": "IndexError, migration aborts on common default install"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.95,
+    "reason": "Same claim; B covers one of A's two triggers, subset of same issue."
+   },
+   {
+    "pair": 14,
+    "a": {
+     "mechanism": "[0]['id'] IndexError on empty result",
+     "trigger": "never set or name mismatch",
+     "consequence": "abort before hosts copied"
+    },
+    "b": {
+     "mechanism": "[0]['id'] on empty PG::Result",
+     "trigger": "never changed from default, no site_settings row",
+     "consequence": "IndexError aborts db:migrate for majority of upgrading sites; removal not safely migrated"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.95,
+    "reason": "Same mechanism/trigger/consequence."
+   },
+   {
+    "pair": 15,
+    "a": {
+     "mechanism": "[0]['id'] IndexError on empty result",
+     "trigger": "never set or name mismatch",
+     "consequence": "abort, default installs can't upgrade"
+    },
+    "b": {
+     "mechanism": "[0]['id'] on empty result",
+     "trigger": "embed_category never set, default not persisted",
+     "consequence": "IndexError aborts deploy for most installs; no edge-case handling or spec"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Equivalent claims; B adds only a coverage aside."
+   },
+   {
+    "pair": 16,
+    "a": {
+     "mechanism": "IndexError raised by [0]['id'] on empty PG::Result",
+     "trigger": "embed_category never set or name mismatch",
+     "consequence": "migration aborts before hosts copied"
+    },
+    "b": {
+     "mechanism": "NoMethodError on nil from unguarded indexing",
+     "trigger": "only stale/renamed category (not the unset default case)",
+     "consequence": "migration aborts, P1"
+    },
+    "material_differences": [
+     "Different exception type claimed (NoMethodError vs IndexError)",
+     "Different trigger emphasis (B excludes default-unset case)",
+     "Different severity P1 vs P0"
+    ],
+    "same": false,
+    "confidence": 0.75,
+    "reason": "Mechanisms conflict and B's trigger excludes A's primary default-unset case."
+   },
+   {
+    "pair": 17,
+    "a": {
+     "mechanism": "[0]['id'] IndexError on empty result",
+     "trigger": "never set or name mismatch",
+     "consequence": "abort before hosts copied; can't upgrade"
+    },
+    "b": {
+     "mechanism": "[0]['id'] IndexError on empty result; upstream guards with cmd_tuples > 0, this version doesn't",
+     "trigger": "never overridden or name case mismatch",
+     "consequence": "db:migrate aborts before carry-over; fails on majority"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Same claims; upstream-guard note is added context, not a new defect."
+   },
+   {
+    "pair": 18,
+    "a": {
+     "mechanism": "[0]['id'] IndexError on empty result",
+     "trigger": "never set or name mismatch",
+     "consequence": "abort before hosts copied"
+    },
+    "b": {
+     "mechanism": "same IndexError, runs unconditionally before host check",
+     "trigger": "never set to existing category name (fresh installs, non-embedding sites)",
+     "consequence": "db:migrate aborts, upgrade blocked"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Same mechanism, trigger, and consequence; ordering detail is same code path."
+   },
+   {
+    "pair": 19,
+    "a": {
+     "mechanism": "[0]['id'] IndexError on empty result",
+     "trigger": "never set or name mismatch",
+     "consequence": "abort before hosts copied"
+    },
+    "b": {
+     "mechanism": "same [0]['id'] IndexError; category_id == 0 fallback unreachable in that case",
+     "trigger": "never set or names no existing category",
+     "consequence": "migration aborts instead of taking fallback"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Equivalent; fallback-unreachable detail is consistent elaboration of same defect."
+   },
+   {
+    "pair": 20,
+    "a": {
+     "mechanism": "IndexError from [0]['id'] on empty PG::Result",
+     "trigger": "embed_category never set or name mismatch",
+     "consequence": "migration aborts, embed config not copied"
+    },
+    "b": {
+     "mechanism": "NoMethodError because [0]['id'].to_i on nil result; also line 15 fallback fails on fresh installs",
+     "trigger": "most installs lack embed_category row; persisted empty value fails join",
+     "consequence": "db:migrate deploy/upgrade blocker for majority"
+    },
+    "material_differences": [
+     "Different exception type (NoMethodError vs IndexError)",
+     "B adds a distinct fresh-install defect at line 15"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "Conflicting exception mechanism and additional line-15 claim."
+   }
+  ]
+ },
+ "usage": {
+  "glm-5.3-background": {
+   "input_tokens": 4235,
+   "cache_read_input_tokens": 384,
+   "cache_creation_input_tokens": 0,
+   "output_tokens": 2663,
+   "reasoning_output_tokens": 579,
+   "cost_usd": 0.0,
+   "total_tokens": 7861
+  }
+ },
+ "status": "complete",
+ "error_type": null,
+ "elapsed_s": 17.03589177131653
+}

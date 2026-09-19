@@ -1,0 +1,494 @@
+{
+ "url": "https://github.com/calcom/cal.com/pull/10967",
+ "pass_digest": "9c5f733ce7a3f996c90c67f262cc4a77e2b234bc415c197afa7c73477ad320be",
+ "request_sha256": "eec3e847a2599b17e861118595fc619395c95ecd42ebadf414f77396b5a17b16",
+ "request": {
+  "url": "https://github.com/calcom/cal.com/pull/10967",
+  "model": "glm-5.3-background",
+  "system": "You are clustering code review findings from one PR. Always respond with valid JSON.",
+  "prompt": "You are clustering code review findings from the same PR. For each PAIR below, decide whether the two findings describe the SAME underlying issue — same root cause in the same code location. Different wording is fine. A finding about a DIFFERENT defect in the same file or function is NOT the same issue. Severity or aspect differences of the same root cause ARE the same issue.\n\n\nFor THIS scoring pass, duplicate equivalence is stricter than sharing a root cause.\nYou must compare the COMPLETE MATERIAL CLAIMS, including mechanism, triggering\nconditions, execution path, and consequence. The same line or broad concern does\nnot establish equivalence. A report of wrong-category selection, a case/rename\nmismatch, a crash, and a silent fallback are different claims even at one lookup.\nAn inactive/unbound API concern and an alleged active user-facing failure differ.\nA compound report with an additional material claim does NOT equal its subset.\nDifferences only in wording, severity, or hedging do not create separate claims.\nIf the claimed mechanisms, triggers or consequences conflict, or one report adds\nan unsupported/different material factual claim, return same=false. You are NOT\nverifying which claim is true; do not repair or reinterpret either report to make\nthem match. If unsure whether their full claims are equivalent, return false.\n\nFor every numbered pair, extract what A and B actually CLAIM into mechanism,\ntrigger and consequence. Then list material_differences and give your equivalence\nverdict, confidence and reason. same=true requires no material differences.\nReturn ONLY this JSON object, with EVERY pair index exactly once:\n{\"pairs\":[{\"pair\":1,\"a\":{\"mechanism\":\"...\",\"trigger\":\"...\",\"consequence\":\"...\"},\"b\":{\"mechanism\":\"...\",\"trigger\":\"...\",\"consequence\":\"...\"},\"material_differences\":[],\"same\":true,\"confidence\":0.9,\"reason\":\"...\"}]}\n\nPAIRS:\nPAIR 1:\nA: N+1 credential lookup per reference on cancel in `handleCancelBooking.ts:~427`: the new per-reference loop adds `prisma.credential.findUnique` inside the `for (const reference of bookingCalendarReference)` loop, one query per teammate-host reference whose credential isn't in `bookingToDelete.user.credentials`; batchable with one `findMany`.\nB: packages/features/bookings/lib/handleCancelBooking.ts:433 — Sequential per-reference prisma.credential.findUnique and awaited getCalendar inside the reference loop (N+1) instead of batching credentials\n\nPAIR 2:\nA: N+1 credential lookup per reference on cancel in `handleCancelBooking.ts:~427`: the new per-reference loop adds `prisma.credential.findUnique` inside the `for (const reference of bookingCalendarReference)` loop, one query per teammate-host reference whose credential isn't in `bookingToDelete.user.credentials`; batchable with one `findMany`.\nB: Same N+1 pattern in handleCancelBooking: await prisma.credential.findUnique() per reference sequentially in packages/features/bookings/lib/handleCancelBooking.ts (~lines 420-437); additionally, in the no-credentialId branch, await getCalendar(credential) runs sequentially per credential per reference, multiplying work up to R×C sequential getCalendar calls\n\nPAIR 3:\nA: P3: handleCancelBooking pushes raw promises including undefined into apiDeletes — unobserved deletions multiplied per calendar reference, increasing silent orphan risk (packages/features/bookings/lib/handleCancelBooking.ts:~486)\nB: packages/features/bookings/lib/handleCancelBooking.ts:619 — Awaiting the apiDeletes array does not await its promises, so paid cancellations return before host-event deletion and never observe deletion failures\n\nPAIR 4:\nA: packages/features/bookings/lib/handleCancelBooking.ts:251-254 and 528-531 — the cancellation `evt.destinationCalendar` is rebuilt as `[bookingToDelete.destinationCalendar]` or `[bookingToDelete.user.destinationCalendar]` only, never re-including the other COLLECTIVE hosts' calendars the way `handleNewBooking.ts` (`teamDestinationCalendars`) does on create, so the cancel-path CalendarEvent is asymmetric with the create-path event for the same booking.\nB: packages/features/bookings/lib/handleCancelBooking.ts:251-254,528-531 — cancellation rebuilds `evt.destinationCalendar` as `bookingToDelete?.destinationCalendar ? [bookingToDelete?.destinationCalendar] : ...`, i.e. only the single persisted destination calendar is ever available at cancel/reschedule time, so calendar events created in the additional team destination calendars at booking time (see handleNewBooking.ts finding above) are never deleted/updated on cancellation, leaving orphaned events in team members' external calendars indefinitely (confidence 80, severity P1/high — direct downstream consequence of the connect-first-element bug, causes user-visible stale calendar entries with no cleanup path).\n\nPAIR 5:\nA: packages/features/bookings/lib/handleCancelBooking.ts:419 — No test covers deleting all calendar references for a multi-host collective booking.\nB: packages/features/bookings/lib/handleCancelBooking.ts:423 — No test covers cancelling a multi-host booking: for recurring bookings the loop re-runs, once per reference, the delete across all of the organizer's calendar credentials and each booking's first `_calendar` reference, so deletes repeat and other hosts' events are never deleted, and no assertion checks this (P2, conf 75; verbatim: `for (const reference of bookingCalendarReference) {`)\n\nPAIR 6:\nA: packages/features/bookings/lib/handleCancelBooking.ts:419 — No test covers deleting all calendar references for a multi-host collective booking.\nB: packages/features/bookings/lib/handleCancelBooking.ts:423 — No test for cancelling a recurring collective booking with multiple calendar references: the recurring-delete branch now runs once per reference, issuing duplicate deleteEvent calls per booking\n\nPAIR 7:\nA: packages/features/bookings/lib/handleCancelBooking.ts:419 — No test covers deleting all calendar references for a multi-host collective booking.\nB: packages/features/bookings/lib/handleCancelBooking.ts:423 — The per-reference cancel loop and DB credential fallback have no tests, and for recurring bookings the inner loop over all user credentials runs once per reference, which can issue duplicate deletes.\n\nPAIR 8:\nA: packages/features/bookings/lib/handleCancelBooking.ts:419 — No test covers deleting all calendar references for a multi-host collective booking.\nB: packages/features/bookings/lib/handleCancelBooking.ts:449 — No recurring collective cancellation test uses multiple calendar references, leaving the nested full-credential deletion loop to delete each remaining event once per host reference.\n\nPAIR 9:\nA: destinationCalendar type widened to array but persistence still stores only the first element: handleNewBooking.ts:1874-1877 connects only destinationCalendar[0], so collective members' calendars are never linked to the booking record; in-memory type and persisted model have diverged\nB: [Medium/data] packages/features/bookings/lib/handleNewBooking.ts:~1871-1877 — only `evt.destinationCalendar[0]` is connected to the booking and there is no schema migration to persist per-host destinations, so later flows that rebuild CalendarEvent from booking.destinationCalendar (confirm.handler.ts, paypal-webhook.ts, webhook.ts handlePaymentSuccess) create calendar events only on the first host's calendar, silently skipping all other hosts' destination calendars for collective bookings requiring payment/confirmation.\n\nPAIR 10:\nA: destinationCalendar type widened to array but persistence still stores only the first element: handleNewBooking.ts:1874-1877 connects only destinationCalendar[0], so collective members' calendars are never linked to the booking record; in-memory type and persisted model have diverged\nB: [Medium/data] packages/features/bookings/lib/handleNewBooking.ts:~1874 — booking record only connects `destinationCalendar[0]`, so downstream flows rebuilding evt from booking.destinationCalendar (paypal-webhook.ts, webhook.ts, confirm.handler, etc.) only see the first host's calendar, regressing collective paid/confirmed bookings to single-destination\n\nPAIR 11:\nA: destinationCalendar type widened to array but persistence still stores only the first element: handleNewBooking.ts:1874-1877 connects only destinationCalendar[0], so collective members' calendars are never linked to the booking record; in-memory type and persisted model have diverged\nB: Collective bookings persist only destinationCalendar[0] in handleNewBooking.ts (~1874), so the confirm handler and payment webhooks rebuild evt.destinationCalendar as a one-element array and create the calendar event only on the first host's calendar, silently dropping the other hosts' calendars on paid/confirmation flows\n\nPAIR 12:\nA: destinationCalendar type widened to array but persistence still stores only the first element: handleNewBooking.ts:1874-1877 connects only destinationCalendar[0], so collective members' calendars are never linked to the booking record; in-memory type and persisted model have diverged\nB: CalendarEvent.destinationCalendar became an array but only [0] is persisted on the booking (handleNewBooking.ts:1871-1875 connects `evt.destinationCalendar[0].id`): every consumer that reconstructs the event from the DB (cancel, reschedule, reminder, webhooks — all the [booking.destinationCalendar] wrapping sites in this diff) sees a one-element array while handleNewBooking built a multi-element one, so the data model and the runtime shape have permanently diverged invisibly to consumers.\n\nPAIR 13:\nA: destinationCalendar type widened to array but persistence still stores only the first element: handleNewBooking.ts:1874-1877 connects only destinationCalendar[0], so collective members' calendars are never linked to the booking record; in-memory type and persisted model have diverged\nB: Deferred-creation flows only ever see the first host's destination calendar: `handleNewBooking.ts` ~1871-1877 persists only `evt.destinationCalendar[0]` on the booking, and rebuild paths (`confirm.handler.ts` ~175, `paypal-webhook.ts` ~150, `payments/api/webhook.ts` ~119/~229, `editLocation.handler.ts`, `requestReschedule.handler.ts`, `deleteCredential.handler.ts`) construct the event from that single stored row — for collective multi-host bookings requiring confirmation or payment, hosts 2..N never get calendar events at all.\n\nPAIR 14:\nA: destinationCalendar type widened to array but persistence still stores only the first element: handleNewBooking.ts:1874-1877 connects only destinationCalendar[0], so collective members' calendars are never linked to the booking record; in-memory type and persisted model have diverged\nB: handleNewBooking.ts (~line 1878) only connects evt.destinationCalendar[0] when persisting the booking, so for COLLECTIVE events with multiple hosts only the first host's destination calendar is linked at the DB level, losing other hosts' associations\n\nPAIR 15:\nA: destinationCalendar type widened to array but persistence still stores only the first element: handleNewBooking.ts:1874-1877 connects only destinationCalendar[0], so collective members' calendars are never linked to the booking record; in-memory type and persisted model have diverged\nB: handleNewBooking.ts ~line 1871-1876: only destinationCalendar[0] is connected to the booking record, so downstream code (confirm, cancel, payments) only sees one calendar and may miss others when reconstructing evt\n\nPAIR 16:\nA: destinationCalendar type widened to array but persistence still stores only the first element: handleNewBooking.ts:1874-1877 connects only destinationCalendar[0], so collective members' calendars are never linked to the booking record; in-memory type and persisted model have diverged\nB: handleNewBooking.ts:1063 & 1877 — booking row connects only `evt.destinationCalendar[0].id`, so team members' destination calendars are not persisted and other hosts' calendar events are never updated or deleted on reschedule/cancel\n\nPAIR 17:\nA: destinationCalendar type widened to array but persistence still stores only the first element: handleNewBooking.ts:1874-1877 connects only destinationCalendar[0], so collective members' calendars are never linked to the booking record; in-memory type and persisted model have diverged\nB: handleNewBooking.ts:1874 — only `evt.destinationCalendar[0].id` is persisted on the booking row, so additional collective host destinations are unrecoverable on cancel/reschedule\n\nPAIR 18:\nA: destinationCalendar type widened to array but persistence still stores only the first element: handleNewBooking.ts:1874-1877 connects only destinationCalendar[0], so collective members' calendars are never linked to the booking record; in-memory type and persisted model have diverged\nB: Only the first destination calendar is persisted to the booking; other collective members' calendars are never stored, so cancellation/reschedule never updates or deletes their calendar events (handleNewBooking.ts:~1871-1875)\n\nPAIR 19:\nA: destinationCalendar type widened to array but persistence still stores only the first element: handleNewBooking.ts:1874-1877 connects only destinationCalendar[0], so collective members' calendars are never linked to the booking record; in-memory type and persisted model have diverged\nB: P2: handleNewBooking.ts:1874-1879 persists only destinationCalendar[0].id on the booking (single relation), so deferred-creation flows (paypal-webhook.ts:152, webhook.ts:101/:229, confirm.handler.ts:175) rebuild evt with only one calendar — for paid or requires-confirmation collective bookings only the first host's calendar event is created and later reschedules/cancels can never create or clean up the others\n\nPAIR 20:\nA: destinationCalendar type widened to array but persistence still stores only the first element: handleNewBooking.ts:1874-1877 connects only destinationCalendar[0], so collective members' calendars are never linked to the booking record; in-memory type and persisted model have diverged\nB: P2: Only first destination calendar connected to booking record — collective events risk orphaned calendar events for other hosts (packages/features/bookings/lib/handleNewBooking.ts:~1871-1876)\n",
+  "effort": "low",
+  "pairs": [
+   [
+    918,
+    1541
+   ],
+   [
+    918,
+    1887
+   ],
+   [
+    992,
+    1605
+   ],
+   [
+    1511,
+    1512
+   ],
+   [
+    1514,
+    1518
+   ],
+   [
+    1514,
+    1519
+   ],
+   [
+    1514,
+    1521
+   ],
+   [
+    1514,
+    1569
+   ],
+   [
+    26,
+    618
+   ],
+   [
+    26,
+    619
+   ],
+   [
+    26,
+    629
+   ],
+   [
+    26,
+    695
+   ],
+   [
+    26,
+    743
+   ],
+   [
+    26,
+    840
+   ],
+   [
+    26,
+    842
+   ],
+   [
+    26,
+    848
+   ],
+   [
+    26,
+    854
+   ],
+   [
+    26,
+    944
+   ],
+   [
+    26,
+    980
+   ],
+   [
+    26,
+    985
+   ]
+  ]
+ },
+ "parsed_response": {
+  "pairs": [
+   {
+    "pair": 1,
+    "a": {
+     "mechanism": "prisma.credential.findUnique inside per-reference loop; batchable with findMany",
+     "trigger": "cancel of booking with teammate-host references whose credential not already loaded",
+     "consequence": "N+1 sequential credential queries"
+    },
+    "b": {
+     "mechanism": "sequential per-reference prisma.credential.findUnique AND awaited getCalendar inside reference loop (N+1) instead of batching credentials",
+     "trigger": "same per-reference cancel loop",
+     "consequence": "N+1 for credentials plus sequential getCalendar calls"
+    },
+    "material_differences": [
+     "B adds a separate N+1/sequential-await claim about getCalendar inside the loop, which A does not claim",
+     "A specifies trigger condition (credential missing from bookingToDelete.user.credentials) absent in B"
+    ],
+    "same": false,
+    "confidence": 0.6,
+    "reason": "B is a compound report adding a getCalendar sequential-call claim beyond A's credential-lookup-only claim."
+   },
+   {
+    "pair": 2,
+    "a": {
+     "mechanism": "prisma.credential.findUnique inside per-reference loop; batchable with findMany",
+     "trigger": "per-reference cancel loop, credentials not preloaded",
+     "consequence": "N+1 credential queries"
+    },
+    "b": {
+     "mechanism": "per-reference findUnique PLUS, in no-credentialId branch, sequential await getCalendar per credential per reference",
+     "trigger": "same cancel loop",
+     "consequence": "N+1 credentials and up to R×C sequential getCalendar calls"
+    },
+    "material_differences": [
+     "B explicitly adds the R×C getCalendar multiplication claim not present in A"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "B is a compound report with an additional material claim (getCalendar R×C multiplication) beyond A's subset."
+   },
+   {
+    "pair": 3,
+    "a": {
+     "mechanism": "raw promises (including undefined) pushed into apiDeletes, never observed, multiplied per calendar reference",
+     "trigger": "cancel pushing deletions per reference",
+     "consequence": "unobserved deletions, silent orphan risk"
+    },
+    "b": {
+     "mechanism": "awaiting the apiDeletes array does not await its promises",
+     "trigger": "paid cancellation awaiting apiDeletes",
+     "consequence": "returns before host-event deletion; deletion failures never observed"
+    },
+    "material_differences": [
+     "A adds the claim that undefined values are pushed into the array",
+     "A claims multiplication per calendar reference; B claims early return for paid cancellations before deletion completes",
+     "different locations cited (~486 push vs ~619 await) with different consequence framing"
+    ],
+    "same": false,
+    "confidence": 0.55,
+    "reason": "Both concern unobserved apiDeletes promises, but A adds undefined-element and per-reference-multiplication claims, and B adds an early-return timing consequence A does not make."
+   },
+   {
+    "pair": 4,
+    "a": {
+     "mechanism": "cancel path rebuilds evt.destinationCalendar as single persisted calendar only, unlike create path's teamDestinationCalendars",
+     "trigger": "cancellation/reschedule rebuild at lines 251-254, 528-531",
+     "consequence": "cancel-path CalendarEvent asymmetric with create-path event; other collective hosts' calendars not re-included"
+    },
+    "b": {
+     "mechanism": "cancel rebuilds destinationCalendar from only the single persisted destination calendar",
+     "trigger": "same lines 251-254, 528-531",
+     "consequence": "events created in team destination calendars at booking time are never deleted, leaving orphaned events indefinitely"
+    },
+    "material_differences": [
+     "B asserts a stronger cause framing (persisted model only ever has one calendar) and an explicit orphaned-events consequence not stated by A"
+    ],
+    "same": true,
+    "confidence": 0.7,
+    "reason": "Same mechanism and trigger at the same lines; B's orphaned-events consequence follows directly from A's claim that other hosts' calendars are never re-included on cancel."
+   },
+   {
+    "pair": 5,
+    "a": {
+     "mechanism": "test gap: no test covers deleting all calendar references for multi-host collective booking",
+     "trigger": "handleCancelBooking multi-host cancel",
+     "consequence": "deletion across references unverified"
+    },
+    "b": {
+     "mechanism": "test gap plus alleged defect: recurring loop re-runs delete once per reference across organizer credentials, deletes repeat, other hosts' events never deleted, no assertion checks",
+     "trigger": "recurring multi-host booking cancellation",
+     "consequence": "duplicate deletes and missed host deletions untested"
+    },
+    "material_differences": [
+     "B ties the test gap to a recurring-booking duplicate-delete defect A does not mention",
+     "B claims specific faulty behavior (duplicate deletes, other hosts never deleted) as the untested behavior"
+    ],
+    "same": false,
+    "confidence": 0.6,
+    "reason": "Both are test gaps in the same area, but B centers on a recurring duplicate-delete defect claim absent from A."
+   },
+   {
+    "pair": 6,
+    "a": {
+     "mechanism": "test gap: no test for deleting all calendar references for multi-host collective booking",
+     "trigger": "multi-host collective cancel",
+     "consequence": "reference deletion untested"
+    },
+    "b": {
+     "mechanism": "test gap for recurring collective booking with multiple references; recurring-delete branch runs once per reference issuing duplicate deleteEvent calls",
+     "trigger": "recurring collective cancellation",
+     "consequence": "duplicate deleteEvent calls untested"
+    },
+    "material_differences": [
+     "B's untested defect is recurring-branch duplicate deleteEvent calls; A's is simply deletion of all references",
+     "B adds recurring-booking scope and duplicate-delete mechanism not in A"
+    ],
+    "same": false,
+    "confidence": 0.6,
+    "reason": "B names a different specific defect (recurring duplicate deletes) as the coverage gap."
+   },
+   {
+    "pair": 7,
+    "a": {
+     "mechanism": "test gap: no test for deleting all calendar references for multi-host collective booking",
+     "trigger": "multi-host collective cancel",
+     "consequence": "reference deletion untested"
+    },
+    "b": {
+     "mechanism": "test gaps for per-reference cancel loop AND DB credential fallback; recurring inner loop over all user credentials runs once per reference causing duplicate deletes",
+     "trigger": "recurring cancel with fallback credentials",
+     "consequence": "duplicate deletes possible, untested"
+    },
+    "material_differences": [
+     "B adds a separate test-gap claim about the DB credential fallback",
+     "B adds recurring duplicate-delete mechanism claim absent in A"
+    ],
+    "same": false,
+    "confidence": 0.65,
+    "reason": "B is a compound report covering additional code (credential fallback) and a recurring duplicate-delete claim."
+   },
+   {
+    "pair": 8,
+    "a": {
+     "mechanism": "test gap: no test for deleting all calendar references for multi-host collective booking",
+     "trigger": "multi-host collective cancel",
+     "consequence": "reference deletion untested"
+    },
+    "b": {
+     "mechanism": "test gap: no recurring collective cancellation test with multiple references; nested full-credential deletion loop deletes each remaining event once per host reference",
+     "trigger": "recurring collective cancel, line ~449",
+     "consequence": "per-reference duplicate deletion untested"
+    },
+    "material_differences": [
+     "B's gap is scoped to recurring bookings and a nested credential-loop duplicate-delete mechanism",
+     "B cites different line (449) and a different alleged faulty behavior than A"
+    ],
+    "same": false,
+    "confidence": 0.6,
+    "reason": "Different untested defect claims: A = all-reference deletion; B = recurring nested-credential-loop duplicate deletes."
+   },
+   {
+    "pair": 9,
+    "a": {
+     "mechanism": "handleNewBooking connects only destinationCalendar[0]; in-memory array type diverges from persisted single relation",
+     "trigger": "persisting a collective booking",
+     "consequence": "collective members' calendars never linked to booking record; type/model divergence"
+    },
+    "b": {
+     "mechanism": "only destinationCalendar[0] connected; no schema migration for per-host destinations",
+     "trigger": "collective bookings requiring payment/confirmation",
+     "consequence": "downstream flows (confirm.handler, paypal-webhook, webhook handlePaymentSuccess) create events only on first host's calendar, silently skipping other hosts"
+    },
+    "material_differences": [
+     "B adds a no-schema-migration claim",
+     "B adds specific downstream flow failure consequences (deferred creation only on first host's calendar) not claimed by A"
+    ],
+    "same": false,
+    "confidence": 0.6,
+    "reason": "Same root location, but B adds material claims about schema migration and downstream deferred-creation failures beyond A's divergence claim."
+   },
+   {
+    "pair": 10,
+    "a": {
+     "mechanism": "only destinationCalendar[0] connected; type/persisted model diverged",
+     "trigger": "persisting collective booking",
+     "consequence": "members' calendars never linked; divergence"
+    },
+    "b": {
+     "mechanism": "booking connects only destinationCalendar[0]",
+     "trigger": "downstream flows rebuilding evt from booking.destinationCalendar",
+     "consequence": "paypal-webhook/webhook/confirm only see first host's calendar; collective paid/confirmed bookings regress to single-destination"
+    },
+    "material_differences": [
+     "B adds a concrete downstream regression consequence (paid/confirmed flows see only first calendar) absent from A"
+    ],
+    "same": false,
+    "confidence": 0.6,
+    "reason": "B adds a specific downstream-failure claim beyond A's type-divergence claim."
+   },
+   {
+    "pair": 11,
+    "a": {
+     "mechanism": "only destinationCalendar[0] connected; type/model divergence",
+     "trigger": "persisting collective booking",
+     "consequence": "members' calendars never linked to booking"
+    },
+    "b": {
+     "mechanism": "only destinationCalendar[0] persisted",
+     "trigger": "confirm handler and payment webhooks rebuild evt",
+     "consequence": "calendar event created only on first host's calendar; other hosts' calendars silently dropped on paid/confirmation flows"
+    },
+    "material_differences": [
+     "B adds the downstream confirm/payment-webhook failure consequence not present in A"
+    ],
+    "same": false,
+    "confidence": 0.6,
+    "reason": "B adds specific downstream event-creation failure claims beyond A's subset."
+   },
+   {
+    "pair": 12,
+    "a": {
+     "mechanism": "type widened to array but only first element persisted; models diverged",
+     "trigger": "persisting collective booking",
+     "consequence": "members' calendars never linked; in-memory type and persisted model diverged"
+    },
+    "b": {
+     "mechanism": "destinationCalendar became array but only [0] persisted via connecting evt.destinationCalendar[0].id",
+     "trigger": "any consumer reconstructing event from DB",
+     "consequence": "consumers (cancel, reschedule, reminder, webhooks) see a one-element array; data model and runtime shape permanently diverged"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.7,
+    "reason": "Both claim the same mechanism (array type, only [0] persisted) and the same consequence (divergence between runtime shape and persisted model visible to consumers); B's consumer list is elaboration of A's divergence claim, not a new failure mode."
+   },
+   {
+    "pair": 13,
+    "a": {
+     "mechanism": "only destinationCalendar[0] connected; type/model divergence",
+     "trigger": "persisting collective booking",
+     "consequence": "members' calendars never linked to booking record"
+    },
+    "b": {
+     "mechanism": "only evt.destinationCalendar[0] persisted",
+     "trigger": "deferred-creation flows rebuilding event from single stored row (confirm.handler, paypal-webhook, payments webhooks, editLocation, requestReschedule, deleteCredential handlers)",
+     "consequence": "for multi-host bookings requiring confirmation/payment, hosts 2..N never get calendar events at all"
+    },
+    "material_differences": [
+     "B adds a broad list of specific rebuild paths and the consequence that hosts 2..N never get calendar events",
+     "A does not claim any downstream event-creation failure"
+    ],
+    "same": false,
+    "confidence": 0.6,
+    "reason": "B is a compound report adding downstream flow enumerations and a missing-event-creation consequence absent from A."
+   },
+   {
+    "pair": 14,
+    "a": {
+     "mechanism": "only destinationCalendar[0] connected; type/persisted model diverged",
+     "trigger": "persisting COLLECTIVE booking",
+     "consequence": "collective members' calendars never linked to booking record"
+    },
+    "b": {
+     "mechanism": "only evt.destinationCalendar[0] connected when persisting booking",
+     "trigger": "COLLECTIVE events with multiple hosts",
+     "consequence": "only first host's destination calendar linked at DB level; other hosts' associations lost"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "Identical mechanism, trigger, and consequence: only the first host's calendar is linked and other hosts' associations are lost."
+   },
+   {
+    "pair": 15,
+    "a": {
+     "mechanism": "only destinationCalendar[0] connected; type/persisted model diverged",
+     "trigger": "persisting collective booking",
+     "consequence": "members' calendars never linked to booking record"
+    },
+    "b": {
+     "mechanism": "only destinationCalendar[0] connected to booking record",
+     "trigger": "downstream code (confirm, cancel, payments) reconstructing evt",
+     "consequence": "downstream only sees one calendar and may miss others"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.65,
+    "reason": "Same core claim (only first calendar persisted/linked); B's downstream 'may miss others' is a hedged restatement of A's divergence consequence, not a new material failure claim."
+   },
+   {
+    "pair": 16,
+    "a": {
+     "mechanism": "only destinationCalendar[0] connected; type/persisted model diverged",
+     "trigger": "persisting collective booking",
+     "consequence": "members' calendars never linked to booking record"
+    },
+    "b": {
+     "mechanism": "booking row connects only evt.destinationCalendar[0].id (lines 1063 & 1877)",
+     "trigger": "team bookings persisted, then reschedule/cancel",
+     "consequence": "team members' calendars not persisted; other hosts' calendar events never updated or deleted on reschedule/cancel"
+    },
+    "material_differences": [
+     "B cites an additional code site (line 1063) not in A",
+     "B adds a concrete reschedule/cancel cleanup-failure consequence absent from A"
+    ],
+    "same": false,
+    "confidence": 0.55,
+    "reason": "B adds a second code location and a specific downstream cleanup-failure consequence beyond A's claims."
+   },
+   {
+    "pair": 17,
+    "a": {
+     "mechanism": "only destinationCalendar[0] connected; type/persisted model diverged",
+     "trigger": "persisting collective booking",
+     "consequence": "members' calendars never linked to booking record"
+    },
+    "b": {
+     "mechanism": "only evt.destinationCalendar[0].id persisted on booking row",
+     "trigger": "cancel/reschedule of collective booking",
+     "consequence": "additional collective host destinations unrecoverable on cancel/reschedule"
+    },
+    "material_differences": [
+     "B adds a cancel/reschedule unrecoverability consequence A does not state"
+    ],
+    "same": false,
+    "confidence": 0.55,
+    "reason": "B asserts an additional material consequence (destinations unrecoverable on cancel/reschedule) beyond A's divergence claim."
+   },
+   {
+    "pair": 18,
+    "a": {
+     "mechanism": "only destinationCalendar[0] connected; type/persisted model diverged",
+     "trigger": "persisting collective booking",
+     "consequence": "members' calendars never linked to booking record"
+    },
+    "b": {
+     "mechanism": "only first destination calendar persisted to booking",
+     "trigger": "persisting collective booking, later cancellation/reschedule",
+     "consequence": "other members' calendars never stored; cancellation/reschedule never updates or deletes their calendar events"
+    },
+    "material_differences": [
+     "B adds a specific cancel/reschedule cleanup-failure consequence not claimed by A"
+    ],
+    "same": false,
+    "confidence": 0.55,
+    "reason": "B adds a downstream cleanup-failure consequence beyond A's type-divergence claim."
+   },
+   {
+    "pair": 19,
+    "a": {
+     "mechanism": "only destinationCalendar[0] connected; type/persisted model diverged",
+     "trigger": "persisting collective booking",
+     "consequence": "members' calendars never linked; type/model divergence"
+    },
+    "b": {
+     "mechanism": "persists only destinationCalendar[0].id (single relation)",
+     "trigger": "deferred-creation flows (paypal-webhook, webhook, confirm.handler) for paid/confirmation collective bookings",
+     "consequence": "only first host's calendar event created; later reschedules/cancels can never create or clean up the others"
+    },
+    "material_differences": [
+     "B adds a single-relation schema detail and specific deferred-flow failure consequences (missing event creation, no cleanup) absent from A"
+    ],
+    "same": false,
+    "confidence": 0.6,
+    "reason": "B adds downstream deferred-flow failure claims beyond A's subset."
+   },
+   {
+    "pair": 20,
+    "a": {
+     "mechanism": "only destinationCalendar[0] connected; type/persisted model diverged",
+     "trigger": "persisting collective booking",
+     "consequence": "collective members' calendars never linked to booking record"
+    },
+    "b": {
+     "mechanism": "only first destination calendar connected to booking record",
+     "trigger": "persisting collective event",
+     "consequence": "collective events risk orphaned calendar events for other hosts"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.65,
+    "reason": "Same mechanism and location; B's hedged orphaned-events consequence is a direct restatement of A's claim that other hosts' calendars are never linked, not a new material claim."
+   }
+  ]
+ },
+ "usage": {
+  "glm-5.3-background": {
+   "input_tokens": 2618,
+   "cache_read_input_tokens": 384,
+   "cache_creation_input_tokens": 0,
+   "output_tokens": 3337,
+   "reasoning_output_tokens": 2788,
+   "cost_usd": 0.0,
+   "total_tokens": 9127
+  }
+ },
+ "status": "complete",
+ "error_type": null,
+ "elapsed_s": 36.154345989227295
+}

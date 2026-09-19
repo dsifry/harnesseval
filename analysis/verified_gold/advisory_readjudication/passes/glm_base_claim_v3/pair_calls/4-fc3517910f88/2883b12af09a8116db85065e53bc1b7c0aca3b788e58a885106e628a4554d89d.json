@@ -1,0 +1,501 @@
+{
+ "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/4",
+ "pass_digest": "9c5f733ce7a3f996c90c67f262cc4a77e2b234bc415c197afa7c73477ad320be",
+ "request_sha256": "2883b12af09a8116db85065e53bc1b7c0aca3b788e58a885106e628a4554d89d",
+ "request": {
+  "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/4",
+  "model": "glm-5.3-background",
+  "system": "You are clustering code review findings from one PR. Always respond with valid JSON.",
+  "prompt": "You are clustering code review findings from the same PR. For each PAIR below, decide whether the two findings describe the SAME underlying issue — same root cause in the same code location. Different wording is fine. A finding about a DIFFERENT defect in the same file or function is NOT the same issue. Severity or aspect differences of the same root cause ARE the same issue.\n\n\nFor THIS scoring pass, duplicate equivalence is stricter than sharing a root cause.\nYou must compare the COMPLETE MATERIAL CLAIMS, including mechanism, triggering\nconditions, execution path, and consequence. The same line or broad concern does\nnot establish equivalence. A report of wrong-category selection, a case/rename\nmismatch, a crash, and a silent fallback are different claims even at one lookup.\nAn inactive/unbound API concern and an alleged active user-facing failure differ.\nA compound report with an additional material claim does NOT equal its subset.\nDifferences only in wording, severity, or hedging do not create separate claims.\nIf the claimed mechanisms, triggers or consequences conflict, or one report adds\nan unsupported/different material factual claim, return same=false. You are NOT\nverifying which claim is true; do not repair or reinterpret either report to make\nthem match. If unsure whether their full claims are equivalent, return false.\n\nFor every numbered pair, extract what A and B actually CLAIM into mechanism,\ntrigger and consequence. Then list material_differences and give your equivalence\nverdict, confidence and reason. same=true requires no material differences.\nReturn ONLY this JSON object, with EVERY pair index exactly once:\n{\"pairs\":[{\"pair\":1,\"a\":{\"mechanism\":\"...\",\"trigger\":\"...\",\"consequence\":\"...\"},\"b\":{\"mechanism\":\"...\",\"trigger\":\"...\",\"consequence\":\"...\"},\"material_differences\":[],\"same\":true,\"confidence\":0.9,\"reason\":\"...\"}]}\n\nPAIRS:\nPAIR 1:\nA: app/controllers/embed_controller.rb:15 — every uncached embed request enqueues a `retrieve_topic` job and the loading page reloads every 30s, so a busy page with N viewers enqueues N jobs every 30 seconds with no dedup at enqueue time. (P2, conf 75)\nB: Every anonymous embed view enqueues a background job with no dedup (embed_controller.rb:11-12): Jobs.enqueue runs before throttle/existence check, so a hot link or misconfigured embeddable_host causes one Sidekiq job per visitor hit\n\nPAIR 2:\nA: app/controllers/embed_controller.rb:15 — every uncached embed request enqueues a `retrieve_topic` job and the loading page reloads every 30s, so a busy page with N viewers enqueues N jobs every 30 seconds with no dedup at enqueue time. (P2, conf 75)\nB: No enqueue-time dedupe and no negative caching on the retrieve path (app/controllers/embed_controller.rb:15, app/views/embed/loading.html.erb:8-10, lib/topic_retriever.rb:21-33): every embed impression enqueues a job, so a page whose topic can never be imported floods the Sidekiq queue with near-duplicate jobs whose only work is a failed setnx; the 60s throttle only applies inside job execution and is set before retrieval regardless of outcome, so permanently failing URLs (404, readability-empty, fetch error) are re-fetched up to once per minute indefinitely as long as they have viewers.\n\nPAIR 3:\nA: app/controllers/embed_controller.rb:15 — every uncached embed request enqueues a `retrieve_topic` job and the loading page reloads every 30s, so a busy page with N viewers enqueues N jobs every 30 seconds with no dedup at enqueue time. (P2, conf 75)\nB: P2: Unbounded Sidekiq job enqueue per page view in embed_controller.rb:15 — every request for a not-yet-imported URL unconditionally enqueues a retrieve_topic job with no dedup before enqueue; the 30-second auto-reload in loading.html.erb generates ~2 jobs/minute per visitor, and failed imports (retry: false) never resolve the loop, producing an unbounded stream of mostly-no-op jobs and Redis writes\n\nPAIR 4:\nA: app/controllers/embed_controller.rb:15 — every uncached embed request enqueues a `retrieve_topic` job and the loading page reloads every 30s, so a busy page with N viewers enqueues N jobs every 30 seconds with no dedup at enqueue time. (P2, conf 75)\nB: Public embed endpoint (embed_controller.rb:15) enqueues background jobs with no request-level rate limit; every miss triggers a remote fetch and permanent topic creation, with only a bypassable 60-second per-URL Redis throttle, a trivially spoofable Referer check, and the loading view reloading every 30s causing ~2 enqueues/minute per visitor forever for unresolvable URLs\n\nPAIR 5:\nA: app/controllers/embed_controller.rb:15 — every uncached embed request enqueues a `retrieve_topic` job and the loading page reloads every 30s, so a busy page with N viewers enqueues N jobs every 30 seconds with no dedup at enqueue time. (P2, conf 75)\nB: The unauthenticated /embed/best endpoint (embed_controller.rb:15) drives unbounded outbound fetches and topic creation — the only throttle is per-URL (60s), with no per-IP/global rate limit, so an attacker or crawler hitting distinct paths can flood the job queue with synchronous HTTP fetches and pollute the forum with garbage topics created from arbitrary 200-returning pages\n\nPAIR 6:\nA: app/controllers/embed_controller.rb:27 — The new `embeddable_host` setting is matched exactly against the referer host, so an embedding site served on both www/non-www or a non-default port is rejected and the setting takes only a single host.\nB: app/controllers/embed_controller.rb:27 — The referer host must exactly match embeddable_host, so `www.` subdomains, ports, and https/http variants fail, and the embed_url host is never checked against embeddable_host in the controller. Neither case is covered by specs. (P2, conf 50)\n\nPAIR 7:\nA: app/controllers/embed_controller.rb:27 — The new `embeddable_host` setting is matched exactly against the referer host, so an embedding site served on both www/non-www or a non-default port is rejected and the setting takes only a single host.\nB: embed_controller.rb referer check breaks embedding for any visitor whose browser suppresses the Referer header (privacy modes, Referrer-Policy: no-referrer, HTTPS→HTTP), returning an error page inside the iframe; security relies solely on a client-controlled header\n\nPAIR 8:\nA: app/controllers/embed_controller.rb:27 — The new `embeddable_host` setting is matched exactly against the referer host, so an embedding site served on both www/non-www or a non-default port is rejected and the setting takes only a single host.\nB: Referer-based gating (app/controllers/embed_controller.rb:26) fails for referer-less clients: browsers/extensions configured to suppress the Referer header (private modes, privacy tools) render a hard error inside the embed iframe instead of comments\n\nPAIR 9:\nA: feed_key in poll_feed.rb is dead code: never read or written, no If-Modified-Since/etag handling, so every run re-parses the full feed and the first poll imports the entire backlog\nB: poll_feed.rb:33-38 — hourly full re-import of entire feed with no per-item change detection; no SHA1 short-circuit, no limit/pagination on rss.items, no incremental cursor, causing hourly O(N) full scan, Nokogiri parses, and potentially N post revisions even when feed unchanged\n\nPAIR 10:\nA: app/jobs/scheduled/poll_feed.rb:29 — The poller downloads and parses the entire feed without a byte or item limit, so an oversized or growing feed can exhaust worker memory on every poll.\nB: app/jobs/scheduled/poll_feed.rb:31 — Iterating every feed item calls an import that performs a separate embed lookup, creating an unbounded N+1 database workload for large feeds.\n\nPAIR 11:\nA: app/jobs/scheduled/poll_feed.rb:29 — The poller downloads and parses the entire feed without a byte or item limit, so an oversized or growing feed can exhaust worker memory on every poll.\nB: app/jobs/scheduled/poll_feed.rb:31-37 — rss.items.each serially calls TopicEmbed.import (which itself runs PostCreator or PostRevisor) for every item with no batching or limit, so job duration grows unbounded with feed size and the same unbounded loop is also reachable synchronously via TopicRetriever#perform_retrieve on a request-triggered path\n\nPAIR 12:\nA: app/jobs/scheduled/poll_feed.rb:29 — The poller downloads and parses the entire feed without a byte or item limit, so an oversized or growing feed can exhaust worker memory on every poll.\nB: Feed poll (poll_feed.rb:31-37) iterates all feed items with no cap and a per-item query (N+1 shape): each iteration issues TopicEmbed.where(embed_url: url).first plus a SHA1 over full content and a Nokogiri parse, with no limit on item count and no conditional fetch\n\nPAIR 13:\nA: app/jobs/scheduled/poll_feed.rb:29 — The poller downloads and parses the entire feed without a byte or item limit, so an oversized or growing feed can exhaust worker memory on every poll.\nB: Neither the feed fetch (app/jobs/scheduled/poll_feed.rb:29) nor the article fetch (app/models/topic_embed.rb:34) sets an `open_timeout`/`read_timeout`, so an unresponsive feed or article host can wedge Sidekiq workers indefinitely\n\nPAIR 14:\nA: db/migrate/20131217174004_create_topic_embeds.rb:4 — topic_id and post_id are NOT NULL with no foreign keys or indexes, so orphaned embeds remain after topic/post deletion and there is no deletion hook in Topic/Post for topic_embeds.\nB: db/migrate/20131217174004_create_topic_embeds.rb:4 — topic_id and post_id get no index and no foreign key, so TopicEmbed#topic/#post lookups are seq scans and rows are orphaned when the topic or post is deleted\n\nPAIR 15:\nA: db/migrate/20131217174004_create_topic_embeds.rb:3 — P3/50: `create_table :topic_embeds, force: true` makes a re-run drop every imported embed mapping without warning, and the table's `topic_id`/`post_id` columns (`t.integer :topic_id, null: false` / `t.integer :post_id, null: false`) have no foreign keys or cleanup, so hard-deleting a post or topic leaves orphaned rows and `TopicEmbed.import` then calls `PostRevisor.new(embed.post)` with a nil post while `topic_id_for_embed` still returns the dead topic id.\nB: `force: true` in `db/migrate/20131217174004_create_topic_embeds.rb:4` silently drops any pre-existing table if the migration is re-run (redo, out-of-sync `schema_migrations`), and editing the already-released `db/migrate/20131223171005_create_top_topics.rb:2` means DBs that ran the original never see the change and diverge from fresh installs\n\nPAIR 16:\nA: The diff rewrites the existing Disqus importer — deleting the documented `--category/-c` option, dropping the `created_at: Date.parse(t[:created_at])` propagation, and replacing the unconditional PostCreator topic creation with `TopicEmbed.import_remote` — work traceable to no embed-URL requirement. Operators re-running `thor disqus:import -c Foo` hit an unknown-option error; all re-imports lose their original post dates and category placement; and any thread whose link is not an http(s) URL or whose page fetch fails now silently produces no topic at all where the old code always created one.\nB: The diff silently removes the public `--category/-c` CLI option and replaces the permalink-post creation with TopicEmbed.import_remote, changing what the existing disqus import command accepts and produces without any mention in the PR's stated objective. Existing operator scripts invoking `thor disqus import -c 'Some Category'` now abort with a Thor unknown-switch error, and even corrected invocations no longer create the '[Permalink](url)' post with category assignment — instead they fetch each Disqus thread's live URL over HTTP and import the scraped article, silently changing the imported data shape for every existing user of the task.\n\nPAIR 17:\nA: The diff rewrites the existing Disqus importer — deleting the documented `--category/-c` option, dropping the `created_at: Date.parse(t[:created_at])` propagation, and replacing the unconditional PostCreator topic creation with `TopicEmbed.import_remote` — work traceable to no embed-URL requirement. Operators re-running `thor disqus:import -c Foo` hit an unknown-option error; all re-imports lose their original post dates and category placement; and any thread whose link is not an http(s) URL or whose page fetch fails now silently produces no topic at all where the old code always created one.\nB: The disqus import was rewritten to call TopicEmbed.import_remote(user, t[:link]) instead of creating posts directly: the documented -c/--category option was deleted (thor errors on unknown options), threads whose link is not http(s) are silently skipped because import returns nil, and the first unreachable link raises inside open() and aborts the whole import mid-run. Operators running the previously documented `disqus import -c <category>` invocation get an unknown-option error, and anyone importing an export containing one dead or non-http link gets a partial, silently incomplete import with no report of which threads were dropped.\n\nPAIR 18:\nA: The diff rewrites the existing Disqus importer — deleting the documented `--category/-c` option, dropping the `created_at: Date.parse(t[:created_at])` propagation, and replacing the unconditional PostCreator topic creation with `TopicEmbed.import_remote` — work traceable to no embed-URL requirement. Operators re-running `thor disqus:import -c Foo` hit an unknown-option error; all re-imports lose their original post dates and category placement; and any thread whose link is not an http(s) URL or whose page fetch fails now silently produces no topic at all where the old code always created one.\nB: The existing Disqus import tool is rewritten to route through TopicEmbed.import_remote and its `--category` option is deleted outright — behavior changes to an existing user-facing tool not traceable to any embedding requirement in this diff. Existing automation invoking `thor disqus:import -c 'Category'` loses category assignment with no replacement, and imports now fetch each thread's link over HTTP and import the remote article body instead of building topics from the local Disqus XML — threads whose link is dead or non-http make import return nil so the thread and all its posts are silently skipped.\n\nPAIR 19:\nA: The diff rewrites the existing Disqus importer — deleting the documented `--category/-c` option, dropping the `created_at: Date.parse(t[:created_at])` propagation, and replacing the unconditional PostCreator topic creation with `TopicEmbed.import_remote` — work traceable to no embed-URL requirement. Operators re-running `thor disqus:import -c Foo` hit an unknown-option error; all re-imports lose their original post dates and category placement; and any thread whose link is not an http(s) URL or whose page fetch fails now silently produces no topic at all where the old code always created one.\nB: The rewritten Disqus import drops the created_at: Date.parse(t[:created_at]) argument the previous implementation passed, so TopicEmbed.import_remote creates every imported topic with the current timestamp instead of the original thread date. Anyone running the disqus import after this change gets an archive whose topics are all dated at import time; the chronological ordering of the imported discussions is destroyed and cannot be recovered without re-running the import against the original Disqus export.\n\nPAIR 20:\nA: The diff rewrites the existing Disqus importer — deleting the documented `--category/-c` option, dropping the `created_at: Date.parse(t[:created_at])` propagation, and replacing the unconditional PostCreator topic creation with `TopicEmbed.import_remote` — work traceable to no embed-URL requirement. Operators re-running `thor disqus:import -c Foo` hit an unknown-option error; all re-imports lose their original post dates and category placement; and any thread whose link is not an http(s) URL or whose page fetch fails now silently produces no topic at all where the old code always created one.\nB: [Low/api] lib/tasks/disqus.thor:114-117 — The --category option was removed with no deprecation or error message, silently breaking existing invocations that pass -c; the import also now requires a live network fetch per thread (import_remote), so previously working offline/dry-run-style imports can fail mid-run\n",
+  "effort": "low",
+  "pairs": [
+   [
+    473,
+    1087
+   ],
+   [
+    473,
+    1335
+   ],
+   [
+    473,
+    1388
+   ],
+   [
+    473,
+    1448
+   ],
+   [
+    473,
+    1699
+   ],
+   [
+    513,
+    514
+   ],
+   [
+    513,
+    1082
+   ],
+   [
+    513,
+    1455
+   ],
+   [
+    1098,
+    1426
+   ],
+   [
+    600,
+    608
+   ],
+   [
+    600,
+    621
+   ],
+   [
+    600,
+    1094
+   ],
+   [
+    600,
+    1331
+   ],
+   [
+    977,
+    978
+   ],
+   [
+    970,
+    1103
+   ],
+   [
+    289,
+    290
+   ],
+   [
+    289,
+    294
+   ],
+   [
+    289,
+    300
+   ],
+   [
+    289,
+    327
+   ],
+   [
+    289,
+    366
+   ]
+  ]
+ },
+ "parsed_response": {
+  "pairs": [
+   {
+    "pair": 1,
+    "a": {
+     "mechanism": "retrieve_topic job enqueued on every uncached embed request with no dedup at enqueue time; loading page auto-reloads every 30s",
+     "trigger": "busy embed page with N viewers, repeated reloads",
+     "consequence": "N jobs enqueued every 30 seconds, flooding the queue"
+    },
+    "b": {
+     "mechanism": "Jobs.enqueue runs before throttle/existence check, so each hit enqueues a job with no dedup",
+     "trigger": "hot link or misconfigured embeddable_host, each visitor hit",
+     "consequence": "one Sidekiq job per visitor hit, queue flooding"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.7,
+    "reason": "Both claim per-request enqueue with no dedup/throttle before enqueue causing queue flooding; reload detail is an amplifier of the same root cause."
+   },
+   {
+    "pair": 2,
+    "a": {
+     "mechanism": "per-request job enqueue with no dedup at enqueue, 30s reload",
+     "trigger": "uncached embed impressions",
+     "consequence": "N jobs every 30s"
+    },
+    "b": {
+     "mechanism": "no enqueue dedup AND no negative caching; 60s throttle only inside job execution, set before retrieval regardless of outcome",
+     "trigger": "permanently failing URLs (404, readability-empty, fetch error) with viewers",
+     "consequence": "failed setnx near-duplicate jobs flood queue and failed URLs re-fetched up to once per minute indefinitely"
+    },
+    "material_differences": [
+     "B adds negative-caching absence and in-job throttle semantics as separate mechanisms",
+     "B claims indefinite per-minute re-fetch of permanently failing URLs, a distinct consequence"
+    ],
+    "same": false,
+    "confidence": 0.85,
+    "reason": "B is a compound report with additional material claims (negative caching, throttle placement) beyond A's enqueue-flood claim."
+   },
+   {
+    "pair": 3,
+    "a": {
+     "mechanism": "per-uncached-request enqueue, no dedup, 30s auto-reload",
+     "trigger": "N viewers reloading",
+     "consequence": "N jobs every 30s"
+    },
+    "b": {
+     "mechanism": "unconditional enqueue per request for not-yet-imported URL, no dedup before enqueue; 30s reload; failed imports (retry: false) never resolve the loop",
+     "trigger": "any request plus auto-reload, including URLs that can never import",
+     "consequence": "~2 jobs/minute per visitor, unbounded stream of mostly-no-op jobs and Redis writes"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.75,
+    "reason": "B restates the same root cause (no enqueue-time dedup plus 30s reload) and the same flooding consequence; 'failed imports never resolve' is consistent with A's uncached-request loop."
+   },
+   {
+    "pair": 4,
+    "a": {
+     "mechanism": "per-request enqueue with no dedup; 30s reload",
+     "trigger": "viewers on an embed page",
+     "consequence": "N jobs every 30s"
+    },
+    "b": {
+     "mechanism": "no request-level rate limit; bypassable 60s per-URL throttle; spoofable Referer check; 30s reload",
+     "trigger": "attacker or any miss; unresolvable URLs",
+     "consequence": "remote fetch and permanent topic creation per miss; ~2 enqueues/min/visitor forever"
+    },
+    "material_differences": [
+     "B claims throttle bypassability and a spoofable Referer as additional mechanisms",
+     "B frames an attack/DoS consequence with topic creation per miss, not just duplicate jobs"
+    ],
+    "same": false,
+    "confidence": 0.8,
+    "reason": "B adds material security claims (bypassable throttle, spoofable Referer) absent from A."
+   },
+   {
+    "pair": 5,
+    "a": {
+     "mechanism": "duplicate job enqueue per viewer via 30s reload, no dedup",
+     "trigger": "same page viewed by many viewers repeatedly",
+     "consequence": "N jobs every 30s for that page's URL"
+    },
+    "b": {
+     "mechanism": "only per-URL (60s) throttle, no per-IP/global rate limit; varying paths defeats per-URL throttle",
+     "trigger": "attacker/crawler hitting distinct paths",
+     "consequence": "unbounded outbound fetches, queue flood, and garbage topic creation from arbitrary pages"
+    },
+    "material_differences": [
+     "Trigger differs: A is many viewers of one page; B is many distinct URLs/paths defeating per-URL throttle",
+     "B claims garbage topic pollution and per-IP rate-limit absence as separate mechanisms"
+    ],
+    "same": false,
+    "confidence": 0.85,
+    "reason": "Different triggering mechanism and consequence (single-URL duplicate jobs vs multi-URL throttle bypass and topic pollution)."
+   },
+   {
+    "pair": 6,
+    "a": {
+     "mechanism": "embeddable_host exact string match against referer host; only single host supported",
+     "trigger": "www/non-www variants or non-default ports",
+     "consequence": "legitimate embedding site rejected"
+    },
+    "b": {
+     "mechanism": "referer host must exactly match embeddable_host; also embed_url host never checked against embeddable_host in controller; no specs cover either",
+     "trigger": "www subdomains, ports, https/http variants",
+     "consequence": "variants fail the check; embed_url check absent"
+    },
+    "material_differences": [
+     "B adds a distinct claim that the embed_url host is never validated",
+     "B adds missing-spec coverage claim"
+    ],
+    "same": false,
+    "confidence": 0.75,
+    "reason": "Core exact-match rejection is shared, but B adds the separate material claim that embed_url is never checked and a spec-gap claim."
+   },
+   {
+    "pair": 7,
+    "a": {
+     "mechanism": "exact match of embeddable_host against referer host",
+     "trigger": "www/non-www or port variant of the same host",
+     "consequence": "legitimate embed site rejected"
+    },
+    "b": {
+     "mechanism": "gating relies solely on client-controlled Referer header",
+     "trigger": "browsers/privacy modes suppressing the Referer header entirely",
+     "consequence": "error page inside iframe for referer-less visitors"
+    },
+    "material_differences": [
+     "Trigger: host variant mismatch vs absent Referer header",
+     "Mechanism: A is exact-match string limitation; B is reliance on a client-controlled header being present"
+    ],
+    "same": false,
+    "confidence": 0.9,
+    "reason": "Different defects: A is exact-match brittleness; B is missing-Referer failure — different triggering conditions even at the same check."
+   },
+   {
+    "pair": 8,
+    "a": {
+     "mechanism": "exact match of embeddable_host against referer host",
+     "trigger": "www/non-www or port variant hosts",
+     "consequence": "legitimate embed site rejected"
+    },
+    "b": {
+     "mechanism": "referer-based gating fails when Referer is suppressed",
+     "trigger": "privacy modes/tools suppressing Referer",
+     "consequence": "hard error inside embed iframe instead of comments"
+    },
+    "material_differences": [
+     "Different trigger (host variant vs missing header)",
+     "Different affected population (misconfigured host matching vs referer-less clients)"
+    ],
+    "same": false,
+    "confidence": 0.9,
+    "reason": "Same line of code but materially different defect claims."
+   },
+   {
+    "pair": 9,
+    "a": {
+     "mechanism": "feed_key dead code; no If-Modified-Since/etag handling or per-item change detection",
+     "trigger": "every scheduled poll run",
+     "consequence": "full feed re-parsed every run; first poll imports entire backlog"
+    },
+    "b": {
+     "mechanism": "hourly full re-import with no per-item change detection, SHA1 short-circuit, limit, or incremental cursor",
+     "trigger": "hourly poll regardless of feed changes",
+     "consequence": "hourly O(N) scans, Nokogiri parses, potentially N revisions even when unchanged"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.7,
+    "reason": "Both claim the poll re-processes the entire feed on every run with no change detection/conditional fetch, same root cause."
+   },
+   {
+    "pair": 10,
+    "a": {
+     "mechanism": "entire feed downloaded and parsed with no byte/item limit",
+     "trigger": "oversized or growing feed",
+     "consequence": "worker memory exhaustion on every poll"
+    },
+    "b": {
+     "mechanism": "per-item embed lookup import inside the item loop",
+     "trigger": "large feed with many items",
+     "consequence": "unbounded N+1 database workload"
+    },
+    "material_differences": [
+     "Mechanism: download/parse size limit (memory) vs per-item DB queries (N+1)",
+     "Consequence: memory exhaustion vs DB workload"
+    ],
+    "same": false,
+    "confidence": 0.9,
+    "reason": "Different defects in the same function."
+   },
+   {
+    "pair": 11,
+    "a": {
+     "mechanism": "no byte or item limit on feed download/parse",
+     "trigger": "oversized feed",
+     "consequence": "memory exhaustion"
+    },
+    "b": {
+     "mechanism": "serial unbounded import per item (PostCreator/PostRevisor), no batching; also reachable via request-triggered perform_retrieve",
+     "trigger": "large feed",
+     "consequence": "unbounded job duration growth; same loop reachable synchronously"
+    },
+    "material_differences": [
+     "Consequence: memory exhaustion vs unbounded job duration",
+     "B adds synchronous request-path reachability as an extra claim"
+    ],
+    "same": false,
+    "confidence": 0.85,
+    "reason": "Both stem from lack of limits but claim different mechanisms and consequences."
+   },
+   {
+    "pair": 12,
+    "a": {
+     "mechanism": "no byte/item limit on feed download and parse",
+     "trigger": "oversized/growing feed",
+     "consequence": "memory exhaustion every poll"
+    },
+    "b": {
+     "mechanism": "uncapped item loop with per-item query, SHA1, and Nokogiri parse",
+     "trigger": "large feed",
+     "consequence": "N+1 query workload unbounded with feed size"
+    },
+    "material_differences": [
+     "Memory exhaustion vs N+1 query workload",
+     "Different mechanism (download size vs per-item work)"
+    ],
+    "same": false,
+    "confidence": 0.9,
+    "reason": "Different defects: A is unbounded download/parse memory; B is per-item DB/query scaling."
+   },
+   {
+    "pair": 13,
+    "a": {
+     "mechanism": "no size limit on feed download/parse",
+     "trigger": "oversized feed",
+     "consequence": "memory exhaustion on every poll"
+    },
+    "b": {
+     "mechanism": "no open_timeout/read_timeout on feed or article fetch",
+     "trigger": "unresponsive remote host",
+     "consequence": "Sidekiq workers wedged indefinitely"
+    },
+    "material_differences": [
+     "Missing size limit vs missing timeouts",
+     "Memory exhaustion vs worker hang"
+    ],
+    "same": false,
+    "confidence": 0.95,
+    "reason": "Entirely different missing safeguards with different consequences."
+   },
+   {
+    "pair": 14,
+    "a": {
+     "mechanism": "topic_id/post_id NOT NULL with no FKs, indexes, or deletion hooks",
+     "trigger": "topic/post deletion",
+     "consequence": "orphaned embed rows"
+    },
+    "b": {
+     "mechanism": "no index and no FK on topic_id/post_id",
+     "trigger": "TopicEmbed#topic/#post lookups and topic/post deletion",
+     "consequence": "seq scans on lookups and orphaned rows on deletion"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "Both claim missing FK/index with orphaning on deletion; B adds the seq-scan consequence of the same missing index, which is an aspect of the same root cause."
+   },
+   {
+    "pair": 15,
+    "a": {
+     "mechanism": "force:true drops table on re-run; plus no FKs/cleanup causing orphans and PostRevisor called with nil post",
+     "trigger": "migration re-run; hard-deleting post/topic",
+     "consequence": "embed mappings lost; orphaned rows causing nil post in PostRevisor and stale topic id"
+    },
+    "b": {
+     "mechanism": "force:true silently drops pre-existing table on re-run; editing already-released create_top_topics migration",
+     "trigger": "redo/out-of-sync schema_migrations; DBs that ran original migration",
+     "consequence": "data loss on re-run and schema divergence between old and fresh installs"
+    },
+    "material_differences": [
+     "A's second claim is orphan rows/nil-post bug; B's second claim is divergent released-migration editing — different material claims",
+     "B does not mention orphans or PostRevisor nil"
+    ],
+    "same": false,
+    "confidence": 0.75,
+    "reason": "They share only the force:true claim; each adds a different second material claim."
+   },
+   {
+    "pair": 16,
+    "a": {
+     "mechanism": "deletion of --category option, dropped created_at propagation, replacement with TopicEmbed.import_remote",
+     "trigger": "operators re-running thor disqus:import -c; threads with non-http links or failed fetches",
+     "consequence": "unknown-option error; loss of original dates and category placement; some threads produce no topic"
+    },
+    "b": {
+     "mechanism": "--category option removed; permalink-post creation replaced by import_remote fetching each thread's live URL",
+     "trigger": "existing invocations with -c; import of threads",
+     "consequence": "Thor unknown-switch error; no category assignment; scraped-article data shape instead of local XML; different imported data"
+    },
+    "material_differences": [
+     "A claims loss of original post dates (created_at), which B does not claim",
+     "A explicitly claims silently-no-topic for non-http/fetch-failure; B frames it as changed data shape"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "A is a compound report including the created_at-loss claim, an additional material claim absent from B."
+   },
+   {
+    "pair": 17,
+    "a": {
+     "mechanism": "--category deleted, created_at dropped, unconditional creation replaced by import_remote",
+     "trigger": "re-running with -c; non-http links or failed page fetches",
+     "consequence": "unknown-option error; dates/category lost; failed threads silently produce no topic"
+    },
+    "b": {
+     "mechanism": "import_remote called with t[:link]; -c option deleted; first unreachable link raises inside open()",
+     "trigger": "-c invocation; dead or non-http link anywhere in export",
+     "consequence": "unknown-option error; whole import aborts mid-run, partial silent import with no drop report"
+    },
+    "material_differences": [
+     "A claims fetch failure causes silent per-thread skip; B claims the first unreachable link raises and aborts the entire run — conflicting consequences",
+     "B adds abort-mid-run claim absent from A"
+    ],
+    "same": false,
+    "confidence": 0.85,
+    "reason": "The failure-behavior claims conflict (silent skip vs whole-run abort), and B adds an abort mechanism claim."
+   },
+   {
+    "pair": 18,
+    "a": {
+     "mechanism": "--category deleted, created_at dropped, PostCreator replaced by TopicEmbed.import_remote",
+     "trigger": "re-running with -c; non-http/dead-link threads",
+     "consequence": "unknown-option error; dates and category lost; such threads silently produce no topic"
+    },
+    "b": {
+     "mechanism": "import via TopicEmbed.import_remote; --category deleted outright",
+     "trigger": "automation invoking -c; threads with dead or non-http links",
+     "consequence": "loses category assignment; imports remote article body instead of local XML; dead/non-http links return nil so thread and posts silently skipped"
+    },
+    "material_differences": [
+     "A includes the created_at/timestamp-loss claim, which B does not make",
+     "A frames consequence as lost original dates plus category; B frames as changed data shape plus silent skips"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "Shared core, but A's compound includes the additional material claim of lost original post dates absent from B."
+   },
+   {
+    "pair": 19,
+    "a": {
+     "mechanism": "importer rewrite deleting --category, dropping created_at propagation, replacing PostCreator with import_remote",
+     "trigger": "re-running disqus import; non-http links / fetch failures",
+     "consequence": "-c error; dates and category lost; some threads produce no topic"
+    },
+    "b": {
+     "mechanism": "created_at: Date.parse argument dropped, so import_remote uses current timestamp",
+     "trigger": "running disqus import after change",
+     "consequence": "all topics dated at import time; chronological ordering destroyed, unrecoverable without re-import"
+    },
+    "material_differences": [
+     "A is a compound also claiming category-option breakage and silent thread drops, absent from B",
+     "B's sole claim is a subset of A's compound"
+    ],
+    "same": false,
+    "confidence": 0.75,
+    "reason": "B is a strict subset of A's compound report; per stricter equivalence, a compound with additional material claims does not equal its subset."
+   },
+   {
+    "pair": 20,
+    "a": {
+     "mechanism": "rewrite deleting --category, dropping created_at, replacing PostCreator with import_remote",
+     "trigger": "re-running -c; non-http links or failed fetches",
+     "consequence": "-c error; dates/category lost; failed threads silently produce no topic"
+    },
+    "b": {
+     "mechanism": "--category removed with no deprecation/error; import now requires live network fetch per thread",
+     "trigger": "existing invocations passing -c; offline/dry-run imports",
+     "consequence": "silently broken -c invocations; previously working imports can fail mid-run"
+    },
+    "material_differences": [
+     "A claims created_at loss and category loss as data consequences; B does not",
+     "B's 'fail mid-run' consequence differs from A's silent per-thread skip",
+     "B adds no-deprecation/no-error-message claim"
+    ],
+    "same": false,
+    "confidence": 0.75,
+    "reason": "Partial overlap on category removal, but each holds different additional material claims and their failure-mode descriptions differ."
+   }
+  ]
+ },
+ "usage": {
+  "glm-5.3-background": {
+   "input_tokens": 3285,
+   "cache_read_input_tokens": 384,
+   "cache_creation_input_tokens": 0,
+   "output_tokens": 3402,
+   "reasoning_output_tokens": 1950,
+   "cost_usd": 0.0,
+   "total_tokens": 9021
+  }
+ },
+ "status": "complete",
+ "error_type": null,
+ "elapsed_s": 28.32738208770752
+}

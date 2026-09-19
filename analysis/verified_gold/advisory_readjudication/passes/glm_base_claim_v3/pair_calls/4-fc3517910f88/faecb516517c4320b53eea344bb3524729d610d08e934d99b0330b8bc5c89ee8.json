@@ -1,0 +1,482 @@
+{
+ "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/4",
+ "pass_digest": "9c5f733ce7a3f996c90c67f262cc4a77e2b234bc415c197afa7c73477ad320be",
+ "request_sha256": "faecb516517c4320b53eea344bb3524729d610d08e934d99b0330b8bc5c89ee8",
+ "request": {
+  "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/4",
+  "model": "glm-5.3-background",
+  "system": "You are clustering code review findings from one PR. Always respond with valid JSON.",
+  "prompt": "You are clustering code review findings from the same PR. For each PAIR below, decide whether the two findings describe the SAME underlying issue — same root cause in the same code location. Different wording is fine. A finding about a DIFFERENT defect in the same file or function is NOT the same issue. Severity or aspect differences of the same root cause ARE the same issue.\n\n\nFor THIS scoring pass, duplicate equivalence is stricter than sharing a root cause.\nYou must compare the COMPLETE MATERIAL CLAIMS, including mechanism, triggering\nconditions, execution path, and consequence. The same line or broad concern does\nnot establish equivalence. A report of wrong-category selection, a case/rename\nmismatch, a crash, and a silent fallback are different claims even at one lookup.\nAn inactive/unbound API concern and an alleged active user-facing failure differ.\nA compound report with an additional material claim does NOT equal its subset.\nDifferences only in wording, severity, or hedging do not create separate claims.\nIf the claimed mechanisms, triggers or consequences conflict, or one report adds\nan unsupported/different material factual claim, return same=false. You are NOT\nverifying which claim is true; do not repair or reinterpret either report to make\nthem match. If unsure whether their full claims are equivalent, return false.\n\nFor every numbered pair, extract what A and B actually CLAIM into mechanism,\ntrigger and consequence. Then list material_differences and give your equivalence\nverdict, confidence and reason. same=true requires no material differences.\nReturn ONLY this JSON object, with EVERY pair index exactly once:\n{\"pairs\":[{\"pair\":1,\"a\":{\"mechanism\":\"...\",\"trigger\":\"...\",\"consequence\":\"...\"},\"b\":{\"mechanism\":\"...\",\"trigger\":\"...\",\"consequence\":\"...\"},\"material_differences\":[],\"same\":true,\"confidence\":0.9,\"reason\":\"...\"}]}\n\nPAIRS:\nPAIR 1:\nA: Every meaningful behavior of TopicRetriever is mocked in its own spec: all tests stub either perform_retrieve or retrieved_recently?, so the only real code exercised is the host comparison. The 60-second $redis.setnx/expire throttle and perform_retrieve's logic (bail if embed exists, run Jobs::PollFeed first when enabled, fetch_http's user lookup) have no coverage — a typo in the redis key, a dropped expire, or removing the exists?-check would not fail any spec.\nB: TopicRetriever spec stubs the very methods under test — stubbing retrieved_recently? and perform_retrieve means the Redis throttle (setnx/expire), the no_throttle: true staff path, the perform_retrieve bail-out when TopicEmbed.exists?, the RSS-first branch calling Jobs::PollFeed, and fetch_http's embed_by_username lookup/blank-user return are never exercised\n\nPAIR 2:\nA: No test coverage exists for TopicEmbed.import_remote, leaving the Readability-based remote-fetch/parsing logic untested\nB: P2: TopicEmbed.import_remote has no test at all (readability options, doc.title fallback)\n\nPAIR 3:\nA: No test coverage exists for TopicEmbed.import_remote, leaving the Readability-based remote-fetch/parsing logic untested\nB: TopicEmbed.import_remote (network fetch + readability extraction) completely untested — no test stubs an HTTP response to verify title fallback (opts[:title] || doc.title), the restricted tag/attribute whitelist, or error handling when open(url) fails, despite it being the primary retrieval mechanism for TopicRetriever#fetch_http and the Disqus import task\n\nPAIR 4:\nA: Jobs::RetrieveTopic is untested — no spec covers the InvalidParameters guard, the user lookup, or the no_throttle: user.try(:staff?) plumbing into TopicRetriever, which is the only place the staff throttle bypass is decided\nB: P2: New job Jobs::RetrieveTopic has no spec covering the Discourse::InvalidParameters raise on blank embed_url, the user lookup, and forwarding no_throttle: user.try(:staff?) (the security-relevant staff/non-staff throttle branch)\n\nPAIR 5:\nA: perform_retrieve synchronously executes the entire scheduled feed poll inline (`Jobs::PollFeed.new.execute({})`) on every retrieval miss, fetching and re-processing the whole feed to serve a single-URL request — implementation work not traceable to the 'retrieve this URL' requirement. With feed polling enabled, each first visit to any not-yet-imported page turns the retrieve_topic worker into a full feed fetch+parse+import cycle (in addition to the hourly schedule), so a slow or large feed multiplies worker latency and load scales with the number of distinct embedded pages.\nB: TopicRetriever#perform_retrieve calls `Jobs::PollFeed.new.execute({})` synchronously inside the RetrieveTopic background job, which re-downloads and re-imports the entire RSS feed on every embed miss. One anonymous page view of a not-yet-imported article triggers a full-feed fetch plus N TopicEmbed lookups/imports; a popular blog page with no topic yet turns each 60-second throttle window into a full-feed poll, hammering the publisher's server and the Discourse DB from web traffic; the shape should be an enqueue plus a targeted fetch, not a synchronous full poll per request.\n\nPAIR 6:\nA: perform_retrieve synchronously executes the entire scheduled feed poll inline (`Jobs::PollFeed.new.execute({})`) on every retrieval miss, fetching and re-processing the whole feed to serve a single-URL request — implementation work not traceable to the 'retrieve this URL' requirement. With feed polling enabled, each first visit to any not-yet-imported page turns the retrieve_topic worker into a full feed fetch+parse+import cycle (in addition to the hourly schedule), so a slow or large feed multiplies worker latency and load scales with the number of distinct embedded pages.\nB: TopicRetriever#perform_retrieve runs the full PollFeed synchronously inside every user-triggered RetrieveTopic job, throttled only per-URL for 60s and not at all for staff\n\nPAIR 7:\nA: The new specs cover only the settings gating and stub out the behavior the feature actually adds — poll_feed's URL fallback, entity unescaping and TopicEmbed.import call, plus TopicEmbed.import_remote and TopicRetriever#perform_retrieve/fetch_http, have zero coverage. A regression in the feed import loop (such as the nil-content crash or an escaping change) breaks feed importing with no failing spec, and because the job is scheduled with retry: false nothing in CI or production surfaces it until operators notice their feed silently stopped importing.\nB: The only new logic that is actually tested is the SiteSetting gate; `poll_feed`, `TopicEmbed.import_remote`, and TopicRetriever's perform_retrieve/fetch_http paths are entirely uncovered — the poll_feed spec stubs poll_feed out and the retriever spec stubs perform_retrieve out. A regression in feed parsing, URL absolutization, or the HTTP fetch path (e.g. the nil-content and scrub crashes above) ships undetected because no test in this diff exercises those code paths.\n\nPAIR 8:\nA: The new specs cover only the settings gating and stub out the behavior the feature actually adds — poll_feed's URL fallback, entity unescaping and TopicEmbed.import call, plus TopicEmbed.import_remote and TopicRetriever#perform_retrieve/fetch_http, have zero coverage. A regression in the feed import loop (such as the nil-content crash or an escaping change) breaks feed importing with no failing spec, and because the job is scheduled with retry: false nothing in CI or production surfaces it until operators notice their feed silently stopped importing.\nB: The only positive test stubs poll_feed itself (`poller.expects(:poll_feed).once`), so the parsing loop — nil content handling, the i.id URL fallback, the user lookup — has zero coverage. A regression in poll_feed's body (e.g., the nil-content NoMethodError) ships undetected because no spec ever executes it.\n\nPAIR 9:\nA: The new specs cover only the settings gating and stub out the behavior the feature actually adds — poll_feed's URL fallback, entity unescaping and TopicEmbed.import call, plus TopicEmbed.import_remote and TopicRetriever#perform_retrieve/fetch_http, have zero coverage. A regression in the feed import loop (such as the nil-content crash or an escaping change) breaks feed importing with no failing spec, and because the job is scheduled with retry: false nothing in CI or production surfaces it until operators notice their feed silently stopped importing.\nB: The only test that runs with the gating satisfied stubs poll_feed itself ('poller.expects(:poll_feed).once'), so the entire body of Jobs::PollFeed#poll_feed (SimpleRSS parsing, the url = i.id fallback for links not matching /^https?/, CGI.unescapeHTML(i.content.scrub), and the TopicEmbed.import call) is never executed by any test in this diff. A regression in poll_feed — e.g. a feed item whose link is blank and whose item has no id attribute raising NoMethodError, or content mangled before import — ships green; the spec file exists but only verifies that the three SiteSetting guards short-circuit execute, so operators get silent feed-import failures with a passing suite.\n\nPAIR 10:\nA: The new specs cover only the settings gating and stub out the behavior the feature actually adds — poll_feed's URL fallback, entity unescaping and TopicEmbed.import call, plus TopicEmbed.import_remote and TopicRetriever#perform_retrieve/fetch_http, have zero coverage. A regression in the feed import loop (such as the nil-content crash or an escaping change) breaks feed importing with no failing spec, and because the job is scheduled with retry: false nothing in CI or production surfaces it until operators notice their feed silently stopped importing.\nB: The PollFeed spec only asserts the three gating settings and that execute delegates to poll_feed; the parsing/import loop itself (link fallback to i.id, CGI.unescapeHTML, TopicEmbed.import per item) has zero test coverage. The per-item crash behavior and URL/title handling ship completely untested — which is exactly where the NoMethodError defects in poll_feed live — so any regression in the actual import logic passes CI silently.\n\nPAIR 11:\nA: The new specs cover only the settings gating and stub out the behavior the feature actually adds — poll_feed's URL fallback, entity unescaping and TopicEmbed.import call, plus TopicEmbed.import_remote and TopicRetriever#perform_retrieve/fetch_http, have zero coverage. A regression in the feed import loop (such as the nil-content crash or an escaping change) breaks feed importing with no failing spec, and because the job is scheduled with retry: false nothing in CI or production surfaces it until operators notice their feed silently stopped importing.\nB: The poll_feed spec only stubs poll_feed out and tests the three execute() gating flags; the actual import loop (SimpleRSS parsing, i.content/i.link handling, TopicEmbed.import wiring) is never exercised by any test in the diff. A regression in the item-processing loop — e.g. the nil-content crash, wrong URL fallback, or title pass-through — lands on an hourly production job with zero failing tests, and the admin discovers it only by noticing no posts appear.\n\nPAIR 12:\nA: The new specs cover only the settings gating and stub out the behavior the feature actually adds — poll_feed's URL fallback, entity unescaping and TopicEmbed.import call, plus TopicEmbed.import_remote and TopicRetriever#perform_retrieve/fetch_http, have zero coverage. A regression in the feed import loop (such as the nil-content crash or an escaping change) breaks feed importing with no failing spec, and because the job is scheduled with retry: false nothing in CI or production surfaces it until operators notice their feed silently stopped importing.\nB: The spec only stubs site settings and asserts the guard clause; the actual parse/import loop — the link/id fallback, CGI.unescapeHTML, and the TopicEmbed.import call — executes in no test in the diff. A regression in item handling (e.g., the i.content/i.link field mapping breaking on feeds without content:encoded) silently disables every feed import — the job runs hourly with retry: false and no spec fails, surfacing only as mysteriously empty embedded topics in production.\n\nPAIR 13:\nA: ruby-readability and simple-rss are added to the Gemfile but only Gemfile_rails4.lock is regenerated, leaving the default stack's committed lockfile (the very lock the _rails4 suffix implies exists) without either gem. Environments provisioning from the stale default lock never install the gems, so `require 'ruby-readability'` in TopicEmbed.import_remote and `require 'simple-rss'` in PollFeed raise LoadError at runtime, and frozen/deployment-mode bundle installs fail outright on the default stack.\nB: Lockfiles: only Gemfile_rails4.lock was regenerated — if the Rails 3 Gemfile.lock is still checked in it lacks ruby-readability/simple-rss/guess_html_encoding, so bundle install --deployment on that stack fails\n\nPAIR 14:\nA: ruby-readability and simple-rss are added to the Gemfile but only Gemfile_rails4.lock is regenerated, leaving the default stack's committed lockfile (the very lock the _rails4 suffix implies exists) without either gem. Environments provisioning from the stale default lock never install the gems, so `require 'ruby-readability'` in TopicEmbed.import_remote and `require 'simple-rss'` in PollFeed raise LoadError at runtime, and frozen/deployment-mode bundle installs fail outright on the default stack.\nB: Only Gemfile_rails4.lock regenerated: new gems (ruby-readability, guess_html_encoding, simple-rss) are added to the Gemfile but the sibling lockfile is now out of sync, so bundle install --deployment/CI for the other bundle fails and drifts\n\nPAIR 15:\nA: [Low/doc_defect] app/assets/javascripts/embed.js:7 — The snippet silently requires discourseUrl to end with '/' (otherwise the src becomes 'forum.comembed/best'); this contract is undocumented for integrators\nB: app/assets/javascripts/embed.js:6 — published snippet contract depends on undocumented globals and a discourseUrl that must end in a slash, otherwise the iframe URL is malformed\n\nPAIR 16:\nA: [Low/doc_defect] app/assets/javascripts/embed.js:7 — The snippet silently requires discourseUrl to end with '/' (otherwise the src becomes 'forum.comembed/best'); this contract is undocumented for integrators\nB: app/assets/javascripts/embed.js:7 — Embedders must set `discourseUrl` with a trailing slash or the iframe src becomes `hostembed/best`; this undocumented contract is easy to get wrong.\n\nPAIR 17:\nA: [Low/doc_defect] app/assets/javascripts/embed.js:7 — The snippet silently requires discourseUrl to end with '/' (otherwise the src becomes 'forum.comembed/best'); this contract is undocumented for integrators\nB: P3: New public `embed.js` snippet requires an undocumented trailing slash on `discourseUrl` — `discourseUrl + \"embed/best?...\"` produces `/embedbest` → 404 if `discourseUrl` lacks a trailing slash, with no validation or fallback, making the new public embed contract fragile with implicit preconditions (trailing slash, required `discourse-comments` element and globals) that silently produce broken embeds\n\nPAIR 18:\nA: The embed script is added to the asset tree with no route, no precompile registration, and no reference from any manifest or view in this diff, so nothing ships that makes embed.js retrievable by a third-party site in a production deployment. An operator who configures the new embedding settings cannot actually deploy the feature end-to-end — embed.js is absent from the precompiled asset manifest and 404s in production, and the diff contains no embed-code snippet or docs for site owners, leaving the new settings inert.\nB: embed.js and embed.css.scss are new top-level assets but nothing in the diff registers them in config.assets.precompile; Rails' default precompile list only covers application.js/application.css plus non-JS/CSS files, and the explicit extension Discourse maintains for admin.js et al. is not touched by this diff. In production (config.assets.compile = false) stylesheet_link_tag 'embed' in layouts/embed.html.erb raises AssetNotPrecompiledError so the embed page 500s, and /assets/embed.js — the URL external sites must script-tag to use the feature — returns 404; the embedding feature only works in development.\n\nPAIR 19:\nA: The embed script is added to the asset tree with no route, no precompile registration, and no reference from any manifest or view in this diff, so nothing ships that makes embed.js retrievable by a third-party site in a production deployment. An operator who configures the new embedding settings cannot actually deploy the feature end-to-end — embed.js is absent from the precompiled asset manifest and 404s in production, and the diff contains no embed-code snippet or docs for site owners, leaving the new settings inert.\nB: app/assets/javascripts/embed.js:5 — embed.js is not added to any asset precompile list in this change, so the script consumers are told to include would 404 in production\n\nPAIR 20:\nA: app/assets/javascripts/embed.js:12 — comments` is null when `#discourse-comments` is absent, throwing TypeError; `discourseUrl` must end with a slash or the iframe src is malformed\nB: Embed snippet contract is fragile (embed.js:1-9): throws uncaught TypeError if `#discourse-comments` doesn't exist, throws if discourseUrl/discourseEmbedUrl globals are missing, and string-concatenates discourseUrl without handling missing trailing slash, silently requesting the wrong URL\n",
+  "effort": "low",
+  "pairs": [
+   [
+    1088,
+    1723
+   ],
+   [
+    1343,
+    1384
+   ],
+   [
+    1343,
+    1709
+   ],
+   [
+    1138,
+    1374
+   ],
+   [
+    84,
+    207
+   ],
+   [
+    84,
+    1730
+   ],
+   [
+    158,
+    163
+   ],
+   [
+    158,
+    164
+   ],
+   [
+    158,
+    167
+   ],
+   [
+    158,
+    169
+   ],
+   [
+    158,
+    170
+   ],
+   [
+    158,
+    189
+   ],
+   [
+    267,
+    1323
+   ],
+   [
+    267,
+    1347
+   ],
+   [
+    378,
+    441
+   ],
+   [
+    378,
+    442
+   ],
+   [
+    378,
+    1399
+   ],
+   [
+    129,
+    222
+   ],
+   [
+    129,
+    437
+   ],
+   [
+    415,
+    1066
+   ]
+  ]
+ },
+ "parsed_response": {
+  "pairs": [
+   {
+    "pair": 1,
+    "a": {
+     "mechanism": "TopicRetriever spec stubs all its own behaviors (perform_retrieve, retrieved_recently?)",
+     "trigger": "running the spec suite",
+     "trigger_note": "",
+     "consequence": "redis throttle, exists? bail, PollFeed branch, fetch_http user lookup unexercised; regressions pass silently"
+    },
+    "b": {
+     "mechanism": "TopicRetriever spec stubs retrieved_recently? and perform_retrieve",
+     "trigger": "running the specs",
+     "consequence": "Redis throttle, staff no_throttle path, exists? bail-out, RSS-first branch, embed_by_username lookup never exercised"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Same claim: retriever spec stubs its own methods, same enumerated uncovered paths."
+   },
+   {
+    "pair": 2,
+    "a": {
+     "mechanism": "no tests for TopicEmbed.import_remote",
+     "trigger": "n/a",
+     "consequence": "Readability remote-fetch/parsing untested"
+    },
+    "b": {
+     "mechanism": "no tests for TopicEmbed.import_remote",
+     "trigger": "n/a",
+     "consequence": "readability options and doc.title fallback untested"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Same coverage-gap claim; B only names specifics of the same untested method."
+   },
+   {
+    "pair": 3,
+    "a": {
+     "mechanism": "no tests for import_remote",
+     "trigger": "n/a",
+     "consequence": "readability fetch/parsing untested"
+    },
+    "b": {
+     "mechanism": "import_remote untested",
+     "trigger": "n/a",
+     "consequence": "title fallback, tag/attribute whitelist, open(url) error handling unverified; notes it's the retrieval mechanism for fetch_http and Disqus task"
+    },
+    "material_differences": [
+     "B adds untested error-handling/whitelist claims and dependency claims not in A"
+    ],
+    "same": false,
+    "confidence": 0.75,
+    "reason": "B is a compound report with additional material claims beyond A's subset."
+   },
+   {
+    "pair": 4,
+    "a": {
+     "mechanism": "Jobs::RetrieveTopic has no spec",
+     "trigger": "n/a",
+     "consequence": "guard, user lookup, no_throttle staff plumbing untested"
+    },
+    "b": {
+     "mechanism": "Jobs::RetrieveTopic has no spec",
+     "trigger": "n/a",
+     "consequence": "InvalidParameters raise, user lookup, no_throttle staff forwarding untested"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.95,
+    "reason": "Identical claims in different wording."
+   },
+   {
+    "pair": 5,
+    "a": {
+     "mechanism": "perform_retrieve synchronously runs Jobs::PollFeed.new.execute({}) on every retrieval miss",
+     "trigger": "feed polling enabled + first visit to unimported page",
+     "consequence": "full feed fetch+parse+import per single-URL request; worker latency and load multiply"
+    },
+    "b": {
+     "mechanism": "perform_retrieve synchronously runs full PollFeed inside RetrieveTopic job",
+     "trigger": "anonymous view of not-yet-imported article per throttle window",
+     "consequence": "full-feed re-download and N lookups/imports per request, hammering publisher server and DB; should be enqueue+targeted fetch"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Same mechanism, trigger, and consequence; wording differs only."
+   },
+   {
+    "pair": 6,
+    "a": {
+     "mechanism": "perform_retrieve synchronously runs full PollFeed on every retrieval miss",
+     "trigger": "feed polling enabled, first visit to unimported page",
+     "consequence": "worker turned into full feed cycle; load scales with distinct pages"
+    },
+    "b": {
+     "mechanism": "full PollFeed run synchronously in every user-triggered RetrieveTopic job",
+     "trigger": "every miss; throttled per-URL 60s, not at all for staff",
+     "consequence": "excessive polling"
+    },
+    "material_differences": [
+     "B adds a distinct claim about staff bypassing the throttle entirely, absent from A"
+    ],
+    "same": false,
+    "confidence": 0.65,
+    "reason": "B adds a material triggering-condition claim (staff unthrottled) not present in A."
+   },
+   {
+    "pair": 7,
+    "a": {
+     "mechanism": "specs only test settings gating and stub poll_feed, perform_retrieve, fetch_http; import_remote uncovered",
+     "trigger": "regression in feed import loop",
+     "consequence": "silent failure, retry:false, operators notice feed stopped"
+    },
+    "b": {
+     "mechanism": "specs only test SiteSetting gate; poll_feed, import_remote, perform_retrieve/fetch_http uncovered",
+     "trigger": "regression in parsing/fetch paths",
+     "consequence": "ships undetected, no test exercises those paths"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "Same coverage-gap claims across the same set of methods."
+   },
+   {
+    "pair": 8,
+    "a": {
+     "mechanism": "specs cover only settings gating; poll_feed, import_remote, perform_retrieve/fetch_http uncovered",
+     "trigger": "regression in feed import loop",
+     "consequence": "silent import failure with retry:false"
+    },
+    "b": {
+     "mechanism": "only test stubs poll_feed; parsing loop (nil content, i.id fallback, user lookup) uncovered",
+     "trigger": "regression in poll_feed body",
+     "consequence": "nil-content NoMethodError ships undetected"
+    },
+    "material_differences": [
+     "B covers only poll_feed body while A additionally claims import_remote and retriever-path coverage gaps"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "B is a subset of A's compound report; scopes differ materially."
+   },
+   {
+    "pair": 9,
+    "a": {
+     "mechanism": "specs cover only settings gating; poll_feed, import_remote, retriever paths uncovered",
+     "trigger": "regression in feed import loop",
+     "consequence": "silent feed-import failure, retry:false"
+    },
+    "b": {
+     "mechanism": "poll_feed spec stubs poll_feed; body (SimpleRSS parsing, i.id fallback, CGI.unescapeHTML, TopicEmbed.import) never executed",
+     "trigger": "regression e.g. blank link/no id NoMethodError",
+     "consequence": "ships green, silent operator-facing failures"
+    },
+    "material_differences": [
+     "B omits A's claims about import_remote and perform_retrieve/fetch_http being uncovered"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "B is a narrower subset; A's compound scope is a material difference."
+   },
+   {
+    "pair": 10,
+    "a": {
+     "mechanism": "specs cover only settings gating; poll_feed, import_remote, retriever paths uncovered",
+     "trigger": "regression in feed import loop",
+     "consequence": "silent import failure"
+    },
+    "b": {
+     "mechanism": "PollFeed spec only asserts gating and delegation; parsing/import loop uncovered",
+     "trigger": "regression in per-item crash/URL/title handling",
+     "consequence": "regression passes CI silently"
+    },
+    "material_differences": [
+     "B omits A's claims about import_remote and retriever paths"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "Subset report; A's additional uncovered-path claims are material."
+   },
+   {
+    "pair": 11,
+    "a": {
+     "mechanism": "specs cover only settings gating; poll_feed, import_remote, retriever paths uncovered",
+     "trigger": "regression in feed import loop",
+     "consequence": "silent failure, admin notices no posts"
+    },
+    "b": {
+     "mechanism": "poll_feed spec stubs poll_feed; import loop never exercised",
+     "trigger": "regression in item-processing loop",
+     "consequence": "hourly job, zero failing tests, admin discovers via missing posts"
+    },
+    "material_differences": [
+     "B omits A's import_remote and retriever-path claims"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "B is a subset of A's compound coverage-gap report."
+   },
+   {
+    "pair": 12,
+    "a": {
+     "mechanism": "specs cover only settings gating; poll_feed, import_remote, retriever paths uncovered",
+     "trigger": "regression in feed import loop",
+     "consequence": "silent import failure"
+    },
+    "b": {
+     "mechanism": "spec only stubs settings and guard clause; parse/import loop unexecuted",
+     "trigger": "regression e.g. field mapping on feeds without content:encoded",
+     "consequence": "hourly retry:false job silently disables imports; empty embedded topics"
+    },
+    "material_differences": [
+     "B omits A's import_remote and retriever-path claims"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "Subset report; A's broader compound claims are material."
+   },
+   {
+    "pair": 13,
+    "a": {
+     "mechanism": "only Gemfile_rails4.lock regenerated; default lockfile missing ruby-readability and simple-rss",
+     "trigger": "provisioning from stale default lock / frozen bundle install",
+     "consequence": "LoadError at runtime on requires; deployment-mode bundle install fails"
+    },
+    "b": {
+     "mechanism": "only Gemfile_rails4.lock regenerated; Rails 3 lockfile missing the gems",
+     "trigger": "bundle install --deployment on that stack",
+     "consequence": "bundle install fails"
+    },
+    "material_differences": [
+     "A additionally claims runtime LoadError from requires, absent from B"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "B is a subset; A adds a distinct runtime-failure claim."
+   },
+   {
+    "pair": 14,
+    "a": {
+     "mechanism": "only rails4 lock regenerated; default lockfile missing ruby-readability and simple-rss",
+     "trigger": "provisioning / frozen bundle install",
+     "consequence": "LoadError at runtime; deployment installs fail"
+    },
+    "b": {
+     "mechanism": "only rails4 lock regenerated; sibling lockfile out of sync for ruby-readability, guess_html_encoding, simple-rss",
+     "trigger": "bundle install --deployment / CI",
+     "consequence": "install fails and lockfiles drift"
+    },
+    "material_differences": [
+     "B names guess_html_encoding as an affected gem, not mentioned in A; A claims runtime LoadError absent from B"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "Each report contains a material claim the other lacks."
+   },
+   {
+    "pair": 15,
+    "a": {
+     "mechanism": "embed.js requires discourseUrl ending in '/'",
+     "trigger": "discourseUrl without trailing slash",
+     "consequence": "malformed src; contract undocumented"
+    },
+    "b": {
+     "mechanism": "snippet depends on undocumented globals and a slash-terminated discourseUrl",
+     "trigger": "integrator misconfigures",
+     "consequence": "iframe URL malformed"
+    },
+    "material_differences": [
+     "B adds a distinct claim about undocumented globals"
+    ],
+    "same": false,
+    "confidence": 0.65,
+    "reason": "B adds a material claim (undocumented globals) beyond A's trailing-slash-only report."
+   },
+   {
+    "pair": 16,
+    "a": {
+     "mechanism": "embed.js requires trailing slash on discourseUrl",
+     "trigger": "missing trailing slash",
+     "consequence": "malformed src, undocumented contract"
+    },
+    "b": {
+     "mechanism": "trailing slash required or iframe src malformed",
+     "trigger": "missing trailing slash",
+     "consequence": "malformed src, undocumented, easy to get wrong"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.95,
+    "reason": "Identical claim, wording only differs."
+   },
+   {
+    "pair": 17,
+    "a": {
+     "mechanism": "undocumented trailing-slash requirement on discourseUrl",
+     "trigger": "discourseUrl lacking slash",
+     "consequence": "malformed src, undocumented"
+    },
+    "b": {
+     "mechanism": "trailing slash plus required discourse-comments element and globals are implicit preconditions with no validation",
+     "trigger": "any precondition violated",
+     "consequence": "/embedbest 404 and silently broken embeds"
+    },
+    "material_differences": [
+     "B adds required element and globals claims and a 404 consequence"
+    ],
+    "same": false,
+    "confidence": 0.75,
+    "reason": "B is a compound report with additional material claims."
+   },
+   {
+    "pair": 18,
+    "a": {
+     "mechanism": "embed.js added with no route, precompile registration, or manifest/view reference",
+     "trigger": "production deployment / operator configures embedding",
+     "consequence": "embed.js 404s, no snippet/docs shipped, settings inert"
+    },
+    "b": {
+     "mechanism": "embed.js/embed.css not in config.assets.precompile",
+     "trigger": "production with config.assets.compile=false",
+     "consequence": "stylesheet_link_tag 'embed' raises, embed page 500s; /assets/embed.js 404s; feature dev-only"
+    },
+    "material_differences": [
+     "B adds embed-page 500 via AssetNotPrecompiledError",
+     "A adds absence of docs/snippet and inert-settings claims"
+    ],
+    "same": false,
+    "confidence": 0.6,
+    "reason": "Each report contains a material consequence the other lacks (500 vs. missing docs)."
+   },
+   {
+    "pair": 19,
+    "a": {
+     "mechanism": "no route/precompile/manifest reference for embed.js",
+     "trigger": "production deployment",
+     "consequence": "embed.js 404s, no embed docs, settings inert"
+    },
+    "b": {
+     "mechanism": "embed.js not in any precompile list",
+     "trigger": "production",
+     "consequence": "script consumers include 404s in production"
+    },
+    "material_differences": [
+     "A adds no-docs/inert-settings claims absent from B"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "B is a subset of A's compound report."
+   },
+   {
+    "pair": 20,
+    "a": {
+     "mechanism": "comments null when #discourse-comments absent → TypeError; discourseUrl needs trailing slash",
+     "trigger": "missing element or missing slash",
+     "consequence": "uncaught TypeError or malformed iframe src"
+    },
+    "b": {
+     "mechanism": "TypeError on missing #discourse-comments, throws on missing discourseUrl/discourseEmbedUrl globals, unhandled slash concatenation",
+     "trigger": "missing element, missing globals, or missing slash",
+     "consequence": "uncaught errors or silently wrong URL"
+    },
+    "material_differences": [
+     "B adds a distinct claim that missing discourseUrl/discourseEmbedUrl globals throw"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "B adds an additional material triggering condition (missing globals throw) not in A."
+   }
+  ]
+ },
+ "usage": {
+  "glm-5.3-background": {
+   "input_tokens": 3375,
+   "cache_read_input_tokens": 384,
+   "cache_creation_input_tokens": 0,
+   "output_tokens": 2722,
+   "reasoning_output_tokens": 1082,
+   "cost_usd": 0.0,
+   "total_tokens": 7563
+  }
+ },
+ "status": "complete",
+ "error_type": null,
+ "elapsed_s": 19.058965921401978
+}

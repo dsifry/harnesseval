@@ -1,0 +1,485 @@
+{
+ "url": "https://github.com/calcom/cal.com/pull/10967",
+ "pass_digest": "9c5f733ce7a3f996c90c67f262cc4a77e2b234bc415c197afa7c73477ad320be",
+ "request_sha256": "dd7959da95198369e47d46ca1dc682ee245cdae67ad9c280fd86f208280167a4",
+ "request": {
+  "url": "https://github.com/calcom/cal.com/pull/10967",
+  "model": "glm-5.3-background",
+  "system": "You are clustering code review findings from one PR. Always respond with valid JSON.",
+  "prompt": "You are clustering code review findings from the same PR. For each PAIR below, decide whether the two findings describe the SAME underlying issue — same root cause in the same code location. Different wording is fine. A finding about a DIFFERENT defect in the same file or function is NOT the same issue. Severity or aspect differences of the same root cause ARE the same issue.\n\n\nFor THIS scoring pass, duplicate equivalence is stricter than sharing a root cause.\nYou must compare the COMPLETE MATERIAL CLAIMS, including mechanism, triggering\nconditions, execution path, and consequence. The same line or broad concern does\nnot establish equivalence. A report of wrong-category selection, a case/rename\nmismatch, a crash, and a silent fallback are different claims even at one lookup.\nAn inactive/unbound API concern and an alleged active user-facing failure differ.\nA compound report with an additional material claim does NOT equal its subset.\nDifferences only in wording, severity, or hedging do not create separate claims.\nIf the claimed mechanisms, triggers or consequences conflict, or one report adds\nan unsupported/different material factual claim, return same=false. You are NOT\nverifying which claim is true; do not repair or reinterpret either report to make\nthem match. If unsure whether their full claims are equivalent, return false.\n\nFor every numbered pair, extract what A and B actually CLAIM into mechanism,\ntrigger and consequence. Then list material_differences and give your equivalence\nverdict, confidence and reason. same=true requires no material differences.\nReturn ONLY this JSON object, with EVERY pair index exactly once:\n{\"pairs\":[{\"pair\":1,\"a\":{\"mechanism\":\"...\",\"trigger\":\"...\",\"consequence\":\"...\"},\"b\":{\"mechanism\":\"...\",\"trigger\":\"...\",\"consequence\":\"...\"},\"material_differences\":[],\"same\":true,\"confidence\":0.9,\"reason\":\"...\"}]}\n\nPAIRS:\nPAIR 1:\nA: CalendarService.ts updateEvent/deleteEvent dead fallback: in else branch externalCalendarId is falsy so find() never matches, expression always undefined, silently regressing calendar targeting to 'primary'/'undefined'\nB: Dead fallback in Google updateEvent/deleteEvent (CalendarService.ts ~lines 253, 312): destinationCalendar?.find(cal => cal.externalId === externalCalendarId)?.externalId is only evaluated when externalCalendarId is falsy so find compares against undefined and can never match, causing calendarId to be undefined and update/delete to fail after wasting OAuth token fetch and API round-trip\n\nPAIR 2:\nA: CalendarService.ts updateEvent/deleteEvent dead fallback: in else branch externalCalendarId is falsy so find() never matches, expression always undefined, silently regressing calendar targeting to 'primary'/'undefined'\nB: Dead-code fallback in Google `CalendarService.ts` updateEvent (253-256) and deleteEvent (314-317): the fallback branch only runs when `externalCalendarId` is falsy but then searches for a calendar whose `externalId === externalCalendarId` (a guaranteed null/undefined), so the find can never succeed and the API call is made with `calendarId: undefined` — booking references without a stored `externalCalendarId` (which this PR itself manufactures via the no-credentialId path in `createAllCalendarEvents`) can no longer be updated or deleted from Google, leaving stale/orphaned events after reschedule/cancel; the predicate should be `cal.credentialId === credentialId`\n\nPAIR 3:\nA: CalendarService.ts updateEvent/deleteEvent dead fallback: in else branch externalCalendarId is falsy so find() never matches, expression always undefined, silently regressing calendar targeting to 'primary'/'undefined'\nB: Google updateEvent/deleteEvent fallback is dead code: when externalCalendarId is falsy, find(cal => cal.externalId === externalCalendarId) always returns undefined, so legacy bookings without externalCalendarId target calendarId: undefined and can't be updated/deleted on destination calendar; delete path also lost the \"primary\" fallback\n\nPAIR 4:\nA: Sequential per-host calendar event creation in `createAllCalendarEvents` (`packages/core/EventManager.ts:~339–362`) replaces the previous parallel `Promise.all` execution, so external API round trips (Google/O365 insert, `getCalendar()` construction, possible OAuth token refresh) now run strictly serially, making booking-creation latency grow linearly with host count (a 5-host collective event can add multiple seconds of serial provider API latency with timeout risk); parallelize across destinations or document the sequencing rationale.\nB: Sequential, unbounded external calls in packages/core/EventManager.ts createAllCalendarEvents (~340-360): createEvent is awaited per destination inside a for...of with no Promise.all and no timeout on external API calls, so a single hung calendar API call blocks the entire booking request indefinitely and latency grows linearly with host count on collective events\n\nPAIR 5:\nA: packages/features/bookings/lib/handleCancelBooking.ts:449 — The recurring-cancel branch now runs once per calendar reference but always loops over the organizer's credentials and the first reference of each booking, so it repeats the same deletes N times (one rejection in Promise.all abandons the rest) and never deletes the other hosts' recurring events.\nB: packages/features/bookings/lib/handleCancelBooking.ts:449 — The recurring-cancel branch now sits inside the per-reference loop, so for a collective booking with N references it deletes events N times across only the organizer's credentials and never uses the other hosts' credentials; neither the multi-host cancel nor the DB credential fallback is tested.\n\nPAIR 6:\nA: packages/features/bookings/lib/handleCancelBooking.ts:449 — The recurring-cancel branch now runs once per calendar reference but always loops over the organizer's credentials and the first reference of each booking, so it repeats the same deletes N times (one rejection in Promise.all abandons the rest) and never deletes the other hosts' recurring events.\nB: packages/features/bookings/lib/handleCancelBooking.ts:453 — Recurring cancellation now iterates every calendar reference but always deletes each updated booking's first reference through every user credential, causing cross-calendar deletes and leaving secondary events behind.\n\nPAIR 7:\nA: packages/features/bookings/lib/handleCancelBooking.ts:449 — The recurring-cancel branch now runs once per calendar reference but always loops over the organizer's credentials and the first reference of each booking, so it repeats the same deletes N times (one rejection in Promise.all abandons the rest) and never deletes the other hosts' recurring events.\nB: packages/features/bookings/lib/handleCancelBooking.ts:454 — Recurring cancellation selects only the first calendar reference for every occurrence while iterating every host reference, so multi-host events can leave calendars undeleted and repeatedly target the wrong credential.\n\nPAIR 8:\nA: packages/features/bookings/lib/handleCancelBooking.ts:449 — The recurring-cancel branch now runs once per calendar reference but always loops over the organizer's credentials and the first reference of each booking, so it repeats the same deletes N times (one rejection in Promise.all abandons the rest) and never deletes the other hosts' recurring events.\nB: packages/features/bookings/lib/handleCancelBooking.ts:454 — Recurring cancellation still selects only each updated booking's first calendar reference while the new outer loop repeats all credentials, so secondary host events are missed or deleted with the wrong credential.\n\nPAIR 9:\nA: packages/features/bookings/lib/handleNewBooking.ts:736 — the rewritten dynamic-user `loadUsers` branch no longer selects `organization: { slug }`, but the hosts branch (line 321) and `IsFixedAwareUser` (line 355) still expect it, so `users` passed to `ensureAvailableUsers` at line 867 has no organization for dynamic bookings and either fails type-checking or yields undefined `organization.slug` at runtime. (P2, conf 50)\nB: packages/features/bookings/lib/handleNewBooking.ts:755 — loadUsers returns eventType.users without the old `|| []` fallback and drops the `organization` select for dynamic users, so users may be undefined or lack organization.slug.\n\nPAIR 10:\nA: packages/features/bookings/lib/handleNewBooking.ts:736 — the rewritten dynamic-user `loadUsers` branch no longer selects `organization: { slug }`, but the hosts branch (line 321) and `IsFixedAwareUser` (line 355) still expect it, so `users` passed to `ensureAvailableUsers` at line 867 has no organization for dynamic bookings and either fails type-checking or yields undefined `organization.slug` at runtime. (P2, conf 50)\nB: packages/features/bookings/lib/handleNewBooking.ts:760 — The loadUsers rewrite silently changes behavior for non-collective and dynamic bookings. It drops the `organization: { slug }` select that IsFixedAwareUser declares, and it converts every non-Prisma/HttpError failure into a generic 500 \"Unable to load users\", hiding the original error (P2, conf 50; verbatim: `throw new HttpError({ statusCode: 500, message: \"Unable to load users\" });`)\n\nPAIR 11:\nA: packages/features/bookings/lib/handleNewBooking.ts:736 — the rewritten dynamic-user `loadUsers` branch no longer selects `organization: { slug }`, but the hosts branch (line 321) and `IsFixedAwareUser` (line 355) still expect it, so `users` passed to `ensureAvailableUsers` at line 867 has no organization for dynamic bookings and either fails type-checking or yields undefined `organization.slug` at runtime. (P2, conf 50)\nB: packages/features/bookings/lib/handleNewBooking.ts:761 — The loadUsers rewrite turns an empty or invalid dynamicUserList (a plain Error) into a generic 500 \"Unable to load users\", and drops `organization.slug` from the dynamic-user select even though IsFixedAwareUser requires it.\n\nPAIR 12:\nA: packages/features/bookings/lib/handleNewBooking.ts:736 — the rewritten dynamic-user `loadUsers` branch no longer selects `organization: { slug }`, but the hosts branch (line 321) and `IsFixedAwareUser` (line 355) still expect it, so `users` passed to `ensureAvailableUsers` at line 867 has no organization for dynamic bookings and either fails type-checking or yields undefined `organization.slug` at runtime. (P2, conf 50)\nB: packages/features/bookings/lib/handleNewBooking.ts:762 — The catch rewraps `PrismaClientKnownRequestError` as 400 and everything else as an opaque 500 'Unable to load users', discarding the original message; the new empty `dynamicUserList` check throws a plain Error and becomes a 500 instead of the intended 400\n\nPAIR 13:\nA: Scope drift: the loadUsers rewrite (a) silently removes `organization: { select: { slug: true } }` from the dynamic-user Prisma select and (b) wraps the whole loader in a catch that converts every non-HttpError failure into a 500 'Unable to load users' — neither is traceable to the destinationCalendar intent. Dynamic collective bookings lose user.organization on every loaded user, so any downstream consumer of user.organization.slug (org-branded handling on the booking path) now sees undefined; additionally, transient Prisma errors that previously surfaced with their real message now return a generic 500, changing API error behavior on an untouched requirement.\nB: loadUsers catch swallows the original error without logging: the thrown HttpError has no cause and no logger.error is called, making production 500s undiagnosable, and PrismaClientKnownRequestError is blanket-mapped to 400, misclassifying server-side failures as client errors\n\nPAIR 14:\nA: Scope drift: the loadUsers rewrite (a) silently removes `organization: { select: { slug: true } }` from the dynamic-user Prisma select and (b) wraps the whole loader in a catch that converts every non-HttpError failure into a 500 'Unable to load users' — neither is traceable to the destinationCalendar intent. Dynamic collective bookings lose user.organization on every loaded user, so any downstream consumer of user.organization.slug (org-branded handling on the booking path) now sees undefined; additionally, transient Prisma errors that previously surfaced with their real message now return a generic 500, changing API error behavior on an untouched requirement.\nB: loadUsers rewrite drops organization.slug select and swallows errors into generic 500 — unrelated churn increasing regression surface\n\nPAIR 15:\nA: createEvent (and the createAttendees/updateEvent/deleteEvent fallbacks) read only destinationCalendar[0]'s externalId, so for a multi-host collective event every per-credential call targets the first host's Lark calendar regardless of which member's credential is authenticated. A collective booking with two Lark hosts makes host B's authenticated createEvent call write to host A's calendarId (failing or duplicating) while host B's destination calendar never receives the event — the multi-host fix is implemented only for Google.\nB: createEvent always uses the first destinationCalendar entry's externalId as the Lark calendarId rather than the entry matching the invoked credential, so non-first Lark hosts on a collective event target the first host's calendar with their own token. Collective bookings with more than one Lark host fail event creation for every host after the first (Lark rejects the foreign calendarId), so those hosts' calendars never receive the event while the booking proceeds as successful.\n\nPAIR 16:\nA: createEvent (and the createAttendees/updateEvent/deleteEvent fallbacks) read only destinationCalendar[0]'s externalId, so for a multi-host collective event every per-credential call targets the first host's Lark calendar regardless of which member's credential is authenticated. A collective booking with two Lark hosts makes host B's authenticated createEvent call write to host A's calendarId (failing or duplicating) while host B's destination calendar never receives the event — the multi-host fix is implemented only for Google.\nB: createEvent builds eventsUrl from mainHostDestinationCalendar (evt.destinationCalendar[0], the organizer's or event-type's calendar) regardless of which host's credential is running, so a member host's Microsoft token is pointed at the organizer's calendar path. Collective bookings with multiple Office 365 hosts fail for every non-first host (/me/calendars/{organizerCalendarId}/events returns 404 for the member's token), leaving member calendars without the event while the booking is reported as confirmed.\n\nPAIR 17:\nA: createEvent (and the createAttendees/updateEvent/deleteEvent fallbacks) read only destinationCalendar[0]'s externalId, so for a multi-host collective event every per-credential call targets the first host's Lark calendar regardless of which member's credential is authenticated. A collective booking with two Lark hosts makes host B's authenticated createEvent call write to host A's calendarId (failing or duplicating) while host B's destination calendar never receives the event — the multi-host fix is implemented only for Google.\nB: createEvent derives eventsUrl from the first destinationCalendar entry regardless of which host's credential the service instance was constructed with, so for a collective event every non-first Office365 host's event is created against the first host's calendar id using their own token. On a collective booking with multiple Office365 hosts, every host after the first has their event created via /me/calendars/<first host's externalId>/events authenticated with their own token, which Microsoft Graph rejects with 404 — their calendars silently end up with no event while the booking is reported as created.\n\nPAIR 18:\nA: createEvent (and the createAttendees/updateEvent/deleteEvent fallbacks) read only destinationCalendar[0]'s externalId, so for a multi-host collective event every per-credential call targets the first host's Lark calendar regardless of which member's credential is authenticated. A collective booking with two Lark hosts makes host B's authenticated createEvent call write to host A's calendarId (failing or duplicating) while host B's destination calendar never receives the event — the multi-host fix is implemented only for Google.\nB: Lark createEvent (and identically createAttendees, updateEvent, deleteEvent in this file) resolves calendarId from `destinationCalendar[0]`, the main host's calendar, rather than from the destination belonging to the credential performing the call. For collective bookings with more than one host, every non-first host's Lark credential receives the main host's calendar externalId, so those create/update/delete calls target a wrong or nonexistent calendar and the extra hosts' calendar events silently fail.\n\nPAIR 19:\nA: createEvent (and the createAttendees/updateEvent/deleteEvent fallbacks) read only destinationCalendar[0]'s externalId, so for a multi-host collective event every per-credential call targets the first host's Lark calendar regardless of which member's credential is authenticated. A collective booking with two Lark hosts makes host B's authenticated createEvent call write to host A's calendarId (failing or duplicating) while host B's destination calendar never receives the event — the multi-host fix is implemented only for Google.\nB: Lark createEvent uses `destinationCalendar[0].externalId` regardless of which credential is creating, so member credentials address the main host's Lark calendar ID instead of their own destination. Collective bookings with multiple Lark hosts either fail per-member (no access to the main host's calendar, error swallowed) or, if the calendar is shared, create duplicate events on the main host's calendar instead of one event per host.\n\nPAIR 20:\nA: createEvent (and the createAttendees/updateEvent/deleteEvent fallbacks) read only destinationCalendar[0]'s externalId, so for a multi-host collective event every per-credential call targets the first host's Lark calendar regardless of which member's credential is authenticated. A collective booking with two Lark hosts makes host B's authenticated createEvent call write to host A's calendarId (failing or duplicating) while host B's destination calendar never receives the event — the multi-host fix is implemented only for Google.\nB: LarkCalendarService.createEvent (and createAttendees at 161-166, updateEvent at 189-194, deleteEvent at 234-239) ignores the new per-credential routing and always uses event.destinationCalendar[0], so every destination other than the first is created against the organizer's calendar id. When EventManager processes a secondary Lark host's destination for a collective booking, the Lark API is called with the first host's (possibly Google or another user's) externalId, the call fails and is swallowed by CalendarManager's catch, and that host silently never receives the calendar event — the exact multi-host scenario this PR claims to fix.\n",
+  "effort": "low",
+  "pairs": [
+   [
+    704,
+    734
+   ],
+   [
+    704,
+    737
+   ],
+   [
+    704,
+    814
+   ],
+   [
+    1894,
+    1896
+   ],
+   [
+    1581,
+    1583
+   ],
+   [
+    1581,
+    1591
+   ],
+   [
+    1581,
+    1599
+   ],
+   [
+    1581,
+    1600
+   ],
+   [
+    1738,
+    1740
+   ],
+   [
+    1738,
+    1746
+   ],
+   [
+    1738,
+    1749
+   ],
+   [
+    1738,
+    1750
+   ],
+   [
+    413,
+    896
+   ],
+   [
+    413,
+    900
+   ],
+   [
+    194,
+    196
+   ],
+   [
+    194,
+    197
+   ],
+   [
+    194,
+    201
+   ],
+   [
+    194,
+    361
+   ],
+   [
+    194,
+    362
+   ],
+   [
+    194,
+    368
+   ]
+  ]
+ },
+ "parsed_response": {
+  "pairs": [
+   {
+    "pair": 1,
+    "a": {
+     "mechanism": "In CalendarService.ts updateEvent/deleteEvent else branch, externalCalendarId is falsy so find(cal => cal.externalId === externalCalendarId) never matches; expression always undefined",
+     "trigger": "update/delete on a booking whose externalCalendarId is falsy",
+     "consequence": "calendarId undefined, silently regressing calendar targeting to 'primary'/'undefined'"
+    },
+    "b": {
+     "mechanism": "Same dead fallback in Google updateEvent/deleteEvent: find compares externalId against falsy externalCalendarId, never matches",
+     "trigger": "update/delete with falsy externalCalendarId",
+     "consequence": "calendarId undefined, update/delete fails after wasted OAuth token fetch and API round-trip"
+    },
+    "material_differences": [
+     "B adds wasted OAuth token fetch / API round-trip detail; A frames consequence as silent targeting regression while B frames it as failure — same undefined-calendarId root and path"
+    ],
+    "same": true,
+    "confidence": 0.55,
+    "reason": "Same mechanism, location, and trigger; consequence wording differs (silent regression vs failure) but both derive from calendarId being undefined via the same dead fallback."
+   },
+   {
+    "pair": 2,
+    "a": {
+     "mechanism": "Dead fallback in CalendarService.ts updateEvent/deleteEvent else branch: externalCalendarId falsy so find never matches, expression always undefined",
+     "trigger": "update/delete when externalCalendarId is falsy",
+     "consequence": "calendarId undefined, silent regression of calendar targeting"
+    },
+    "b": {
+     "mechanism": "Same dead fallback in updateEvent (253-256) and deleteEvent (314-317): find against falsy externalCalendarId can never succeed, predicate should be credentialId match",
+     "trigger": "Booking references without stored externalCalendarId, which B claims this PR manufactures via the no-credentialId path in createAllCalendarEvents",
+     "consequence": "legacy/no-externalCalendarId bookings can no longer be updated/deleted, leaving stale/orphaned events"
+    },
+    "material_differences": [
+     "B adds trigger attribution to createAllCalendarEvents no-credentialId path",
+     "B adds proposed fix (cal.credentialId === credentialId) and orphaned-events consequence framing"
+    ],
+    "same": true,
+    "confidence": 0.5,
+    "reason": "Core mechanism, code location, and consequence (calendarId undefined, update/delete broken) match; B's additions elaborate the trigger and fix for the same root cause."
+   },
+   {
+    "pair": 3,
+    "a": {
+     "mechanism": "Dead fallback in updateEvent/deleteEvent: falsy externalCalendarId means find never matches, expression always undefined",
+     "trigger": "update/delete with falsy externalCalendarId",
+     "consequence": "silent regression of calendar targeting to 'primary'/'undefined'"
+    },
+    "b": {
+     "mechanism": "Same dead fallback in updateEvent/deleteEvent; find always returns undefined for falsy externalCalendarId",
+     "trigger": "legacy bookings without externalCalendarId",
+     "consequence": "can't update/delete on destination calendar; delete path also lost the 'primary' fallback"
+    },
+    "material_differences": [
+     "B adds an additional claim that the delete path lost the 'primary' fallback, which A does not make (A instead implies primary targeting behavior)"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "B is a compound report adding a distinct material claim (lost 'primary' fallback on delete) not present in A, and the consequence framing conflicts with A's 'primary/undefined' regression claim."
+   },
+   {
+    "pair": 4,
+    "a": {
+     "mechanism": "createAllCalendarEvents now awaits per-host createEvent serially (replacing Promise.all)",
+     "trigger": "collective bookings with multiple hosts",
+     "consequence": "linear latency growth with host count, multiple seconds of serial provider API latency with timeout risk"
+    },
+    "b": {
+     "mechanism": "per-destination awaited createEvent inside for...of, no Promise.all, no timeout on external calls",
+     "trigger": "collective events with multiple destinations",
+     "consequence": "linear latency growth; single hung API call blocks booking request indefinitely"
+    },
+    "material_differences": [
+     "B adds explicit no-timeout/indefinite-blocking claim; A only says 'timeout risk'"
+    ],
+    "same": true,
+    "confidence": 0.75,
+    "reason": "Same mechanism (serial awaits replacing Promise.all) and trigger; B's indefinite-block claim is an elaboration of A's timeout-risk consequence on the same path."
+   },
+   {
+    "pair": 5,
+    "a": {
+     "mechanism": "Recurring-cancel branch runs once per calendar reference but loops organizer's credentials and first reference of each booking, repeating same deletes N times; one Promise.all rejection abandons rest",
+     "trigger": "recurring cancel of multi-reference booking",
+     "consequence": "repeated deletes, other hosts' recurring events never deleted"
+    },
+    "b": {
+     "mechanism": "Recurring-cancel branch inside per-reference loop deletes N times across only organizer's credentials, never using other hosts' credentials",
+     "trigger": "collective booking with N references",
+     "consequence": "repeated deletes; other hosts' events not deleted; also notes lack of tests"
+    },
+    "material_differences": [
+     "B adds an untested-coverage observation, not a behavioral claim"
+    ],
+    "same": true,
+    "confidence": 0.7,
+    "reason": "Same mechanism, trigger, and consequence; B's testing note is not a different material behavioral claim."
+   },
+   {
+    "pair": 6,
+    "a": {
+     "mechanism": "Recurring-cancel branch runs per reference but uses organizer's credentials and first reference of each booking, repeating deletes N times",
+     "trigger": "recurring cancel with multiple references",
+     "consequence": "duplicate deletes; other hosts' recurring events never deleted"
+    },
+    "b": {
+     "mechanism": "Recurring cancel iterates every reference but deletes each booking's first reference through every user credential",
+     "trigger": "recurring cancellation",
+     "consequence": "cross-calendar (wrong-credential) deletes and secondary events left behind"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.7,
+    "reason": "Same mechanism (per-reference loop with first-reference/organizer-credential targeting) and consequences (repeated wrong deletes, secondary/other-host events left)."
+   },
+   {
+    "pair": 7,
+    "a": {
+     "mechanism": "Recurring-cancel branch runs per reference but loops organizer's credentials and first reference of each booking, repeating deletes N times",
+     "trigger": "recurring cancel with multiple references",
+     "consequence": "duplicate deletes; other hosts' events never deleted"
+    },
+    "b": {
+     "mechanism": "Recurring cancel selects only first calendar reference per occurrence while iterating every host reference",
+     "trigger": "multi-host recurring booking",
+     "consequence": "host calendars undeleted; repeatedly wrong credential targeted"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.7,
+    "reason": "Same mechanism and consequences described with different wording."
+   },
+   {
+    "pair": 8,
+    "a": {
+     "mechanism": "Recurring-cancel branch runs per reference but loops organizer's credentials and first reference of each booking, repeating deletes N times",
+     "trigger": "recurring cancel with multiple references",
+     "consequence": "duplicate deletes; other hosts' events never deleted"
+    },
+    "b": {
+     "mechanism": "Recurring cancel selects only each updated booking's first calendar reference while new outer loop repeats all credentials",
+     "trigger": "multi-host recurring cancel",
+     "consequence": "secondary host events missed or deleted with wrong credential"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.7,
+    "reason": "Same mechanism and consequence; wording differs only."
+   },
+   {
+    "pair": 9,
+    "a": {
+     "mechanism": "loadUsers dynamic-user branch drops organization: { slug } select while hosts branch and IsFixedAwareUser expect it",
+     "trigger": "dynamic bookings",
+     "consequence": "users lack organization; type-check failure or undefined organization.slug at runtime"
+    },
+    "b": {
+     "mechanism": "loadUsers returns eventType.users without old `|| []` fallback and drops organization select",
+     "trigger": "loadUsers execution for dynamic users",
+     "consequence": "users may be undefined or lack organization.slug"
+    },
+    "material_differences": [
+     "B adds a separate claim that removal of the `|| []` fallback can make users itself undefined"
+    ],
+    "same": false,
+    "confidence": 0.65,
+    "reason": "B is compound: it adds a distinct material claim (missing `|| []` fallback causing undefined users) not present in A."
+   },
+   {
+    "pair": 10,
+    "a": {
+     "mechanism": "loadUsers dynamic-user branch drops organization select that IsFixedAwareUser and hosts branch expect",
+     "trigger": "dynamic bookings",
+     "consequence": "no organization on users; type-check failure or undefined organization.slug"
+    },
+    "b": {
+     "mechanism": "loadUsers rewrite drops organization select and converts every non-Prisma/HttpError failure into generic 500 'Unable to load users'",
+     "trigger": "dynamic bookings and any loader failure",
+     "consequence": "missing organization.slug; original errors hidden behind generic 500"
+    },
+    "material_differences": [
+     "B adds a distinct error-wrapping claim (generic 500 hiding original error) not in A"
+    ],
+    "same": false,
+    "confidence": 0.65,
+    "reason": "B adds a separate material defect claim (error rewriting to opaque 500) beyond A's organization-select claim."
+   },
+   {
+    "pair": 11,
+    "a": {
+     "mechanism": "loadUsers dynamic-user branch drops organization select expected by IsFixedAwareUser",
+     "trigger": "dynamic bookings",
+     "consequence": "undefined organization.slug / type failure"
+    },
+    "b": {
+     "mechanism": "loadUsers turns empty/invalid dynamicUserList plain Error into generic 500 and drops organization.slug select",
+     "trigger": "empty dynamicUserList or dynamic booking load",
+     "consequence": "wrong 500 for an empty list; missing organization.slug"
+    },
+    "material_differences": [
+     "B adds distinct claim that empty dynamicUserList becomes a 500 instead of intended 400"
+    ],
+    "same": false,
+    "confidence": 0.65,
+    "reason": "B is compound with an additional material claim about error classification of empty dynamicUserList not present in A."
+   },
+   {
+    "pair": 12,
+    "a": {
+     "mechanism": "loadUsers dynamic-user branch drops organization select",
+     "trigger": "dynamic bookings",
+     "consequence": "undefined organization.slug / type failure"
+    },
+    "b": {
+     "mechanism": "catch rewraps PrismaClientKnownRequestError as 400 and everything else as opaque 500, discarding original message; empty dynamicUserList check throws plain Error becoming 500 not 400",
+     "trigger": "loader failures and empty dynamicUserList",
+     "consequence": "misclassified error codes and lost error messages"
+    },
+    "material_differences": [
+     "B concerns error handling only; A concerns the organization select only — different defects in the same function"
+    ],
+    "same": false,
+    "confidence": 0.85,
+    "reason": "The two reports describe different defects in loadUsers: A the dropped organization select, B the error rewrapping/classification."
+   },
+   {
+    "pair": 13,
+    "a": {
+     "mechanism": "loadUsers rewrite drops organization select and wraps all non-HttpError failures in a generic 500 'Unable to load users'",
+     "trigger": "dynamic collective bookings and transient Prisma errors",
+     "consequence": "user.organization.slug undefined downstream; generic 500 replaces real Prisma error messages"
+    },
+    "b": {
+     "mechanism": "catch swallows original error without logging (no cause, no logger.error) and blanket-maps PrismaClientKnownRequestError to 400",
+     "trigger": "production loadUsers failures",
+     "consequence": "undecipherable 500s; server-side failures misclassified as 400 client errors"
+    },
+    "material_differences": [
+     "B does not claim the dropped organization select",
+     "B claims Prisma errors map to 400 while A claims they map to 500 — conflicting consequence",
+     "B adds no-logging claim"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "Conflicting claims about error mapping (400 vs 500 for Prisma errors) and B omits A's organization-select claim; different material claims."
+   },
+   {
+    "pair": 14,
+    "a": {
+     "mechanism": "loadUsers rewrite drops organization.slug select and swallows errors into generic 500",
+     "trigger": "dynamic collective bookings and any loader failure",
+     "consequence": "organization.slug undefined downstream; generic 500 changes error behavior"
+    },
+    "b": {
+     "mechanism": "loadUsers rewrite drops organization.slug select and swallows errors into generic 500",
+     "trigger": "loadUsers execution",
+     "consequence": "unrelated churn increasing regression surface"
+    },
+    "material_differences": [
+     "B's consequence framing is vaguer but does not add or conflict with a material claim"
+    ],
+    "same": true,
+    "confidence": 0.7,
+    "reason": "B's claims are a subset of A's (drop org slug select, generic 500 swallow); no conflicting or additional material claims."
+   },
+   {
+    "pair": 15,
+    "a": {
+     "mechanism": "Lark createEvent/createAttendees/updateEvent/deleteEvent read only destinationCalendar[0].externalId, so every per-credential call targets first host's calendar",
+     "trigger": "collective booking with multiple Lark hosts",
+     "consequence": "host B's call writes to host A's calendarId (failing or duplicating); host B's calendar never receives the event"
+    },
+    "b": {
+     "mechanism": "createEvent always uses first destinationCalendar entry's externalId rather than entry matching the invoked credential",
+     "trigger": "collective booking with more than one Lark host",
+     "consequence": "non-first hosts fail event creation (Lark rejects foreign calendarId); their calendars never receive the event while booking proceeds as successful"
+    },
+    "material_differences": [
+     "B covers createEvent only (subset of A's methods); A says 'failing or duplicating' while B says specifically failing"
+    ],
+    "same": true,
+    "confidence": 0.75,
+    "reason": "Same mechanism, trigger, and consequence for Lark; B's narrower method scope and specific failure mode are not conflicting additional claims."
+   },
+   {
+    "pair": 16,
+    "a": {
+     "mechanism": "Lark service methods read destinationCalendar[0].externalId, targeting first Lark host's calendar with any member's credential",
+     "trigger": "collective booking with two Lark hosts",
+     "consequence": "wrong Lark calendar targeted; host B's calendar never receives event"
+    },
+    "b": {
+     "mechanism": "Office365 createEvent builds eventsUrl from destinationCalendar[0] (organizer's calendar) regardless of host credential",
+     "trigger": "collective booking with multiple Office 365 hosts",
+     "consequence": "member token gets 404 on organizer's calendar path; member calendars lack event while booking confirmed"
+    },
+    "material_differences": [
+     "Different provider/code location: Lark service vs Office365 service"
+    ],
+    "same": false,
+    "confidence": 0.8,
+    "reason": "Same broad pattern but different service files (LarkCalendarService vs Office365) — different code locations and defects."
+   },
+   {
+    "pair": 17,
+    "a": {
+     "mechanism": "Lark service methods use destinationCalendar[0].externalId regardless of credential",
+     "trigger": "collective booking with two Lark hosts",
+     "consequence": "wrong Lark calendar targeted; host B never receives event"
+    },
+    "b": {
+     "mechanism": "Office365 createEvent derives eventsUrl from first destinationCalendar entry regardless of host credential",
+     "trigger": "collective booking with multiple Office365 hosts",
+     "consequence": "Graph 404 for non-first hosts; calendars silently empty while booking reported created"
+    },
+    "material_differences": [
+     "Different provider/code location: Lark vs Office365"
+    ],
+    "same": false,
+    "confidence": 0.8,
+    "reason": "Different service implementations (Lark vs Office 365); analogous pattern is not the same code location/defect."
+   },
+   {
+    "pair": 18,
+    "a": {
+     "mechanism": "Lark createEvent and fallbacks resolve calendarId from destinationCalendar[0] instead of credential's own destination",
+     "trigger": "multi-host collective booking",
+     "consequence": "host B targets host A's calendar (failing or duplicating); B's calendar never receives event"
+    },
+    "b": {
+     "mechanism": "Lark createEvent/createAttendees/updateEvent/deleteEvent resolve calendarId from destinationCalendar[0] rather than the credential's destination",
+     "trigger": "collective booking with more than one host",
+     "consequence": "non-first hosts target wrong/nonexistent calendar; extra hosts' events silently fail"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.75,
+    "reason": "Same mechanism, methods, trigger, and consequence in the same Lark service."
+   },
+   {
+    "pair": 19,
+    "a": {
+     "mechanism": "Lark createEvent uses destinationCalendar[0].externalId regardless of credential",
+     "trigger": "collective booking with two Lark hosts",
+     "consequence": "host B writes to host A's calendar (failing or duplicating); B's calendar never receives event"
+    },
+    "b": {
+     "mechanism": "Lark createEvent uses destinationCalendar[0].externalId regardless of creating credential",
+     "trigger": "collective booking with multiple Lark hosts",
+     "consequence": "member credentials address main host's calendar: fail per-member (error swallowed) or duplicate events if calendar shared"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.75,
+    "reason": "Same mechanism and trigger; both describe failure or duplication outcomes for non-first Lark hosts."
+   },
+   {
+    "pair": 20,
+    "a": {
+     "mechanism": "Lark createEvent and createAttendees/updateEvent/deleteEvent fallbacks read only destinationCalendar[0].externalId",
+     "trigger": "collective booking with two Lark hosts",
+     "consequence": "host B's call targets host A's calendarId, failing or duplicating; B's calendar never receives the event"
+    },
+    "b": {
+     "mechanism": "LarkCalendarService createEvent/createAttendees/updateEvent/deleteEvent ignore per-credential routing, always use destinationCalendar[0]",
+     "trigger": "EventManager processing secondary Lark host's destination on collective booking",
+     "consequence": "Lark API called with first host's externalId, fails, swallowed by CalendarManager's catch; host silently never receives the event"
+    },
+    "material_differences": [
+     "B adds that the failure is swallowed by CalendarManager's catch — elaboration of A's 'failing' outcome"
+    ],
+    "same": true,
+    "confidence": 0.7,
+    "reason": "Same methods, mechanism, trigger, and consequence in the same Lark service; B's catch-swallow detail elaborates the same failure path."
+   }
+  ]
+ },
+ "usage": {
+  "glm-5.3-background": {
+   "input_tokens": 3604,
+   "cache_read_input_tokens": 384,
+   "cache_creation_input_tokens": 0,
+   "output_tokens": 3560,
+   "reasoning_output_tokens": 1949,
+   "cost_usd": 0.0,
+   "total_tokens": 9497
+  }
+ },
+ "status": "complete",
+ "error_type": null,
+ "elapsed_s": 26.350911140441895
+}

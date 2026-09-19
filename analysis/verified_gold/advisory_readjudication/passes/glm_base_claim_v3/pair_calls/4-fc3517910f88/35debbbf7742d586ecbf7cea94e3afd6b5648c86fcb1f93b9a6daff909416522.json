@@ -1,0 +1,497 @@
+{
+ "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/4",
+ "pass_digest": "9c5f733ce7a3f996c90c67f262cc4a77e2b234bc415c197afa7c73477ad320be",
+ "request_sha256": "35debbbf7742d586ecbf7cea94e3afd6b5648c86fcb1f93b9a6daff909416522",
+ "request": {
+  "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/4",
+  "model": "glm-5.3-background",
+  "system": "You are clustering code review findings from one PR. Always respond with valid JSON.",
+  "prompt": "You are clustering code review findings from the same PR. For each PAIR below, decide whether the two findings describe the SAME underlying issue — same root cause in the same code location. Different wording is fine. A finding about a DIFFERENT defect in the same file or function is NOT the same issue. Severity or aspect differences of the same root cause ARE the same issue.\n\n\nFor THIS scoring pass, duplicate equivalence is stricter than sharing a root cause.\nYou must compare the COMPLETE MATERIAL CLAIMS, including mechanism, triggering\nconditions, execution path, and consequence. The same line or broad concern does\nnot establish equivalence. A report of wrong-category selection, a case/rename\nmismatch, a crash, and a silent fallback are different claims even at one lookup.\nAn inactive/unbound API concern and an alleged active user-facing failure differ.\nA compound report with an additional material claim does NOT equal its subset.\nDifferences only in wording, severity, or hedging do not create separate claims.\nIf the claimed mechanisms, triggers or consequences conflict, or one report adds\nan unsupported/different material factual claim, return same=false. You are NOT\nverifying which claim is true; do not repair or reinterpret either report to make\nthem match. If unsure whether their full claims are equivalent, return false.\n\nFor every numbered pair, extract what A and B actually CLAIM into mechanism,\ntrigger and consequence. Then list material_differences and give your equivalence\nverdict, confidence and reason. same=true requires no material differences.\nReturn ONLY this JSON object, with EVERY pair index exactly once:\n{\"pairs\":[{\"pair\":1,\"a\":{\"mechanism\":\"...\",\"trigger\":\"...\",\"consequence\":\"...\"},\"b\":{\"mechanism\":\"...\",\"trigger\":\"...\",\"consequence\":\"...\"},\"material_differences\":[],\"same\":true,\"confidence\":0.9,\"reason\":\"...\"}]}\n\nPAIRS:\nPAIR 1:\nA: lib/topic_retriever.rb:41 — perform_retrieve calls `Jobs::PollFeed.new.execute({})` synchronously inline inside the RetrieveTopic job, so a slow/hanging feed_polling_url (open-uri, no timeout) blocks this request-triggered job too, compounding failure surface beyond the scheduled job. confidence=75 severity=P2\nB: Synchronous `Jobs::PollFeed.new.execute({})` inside the retrieve job (lib/topic_retriever.rb:37-39) re-downloads and re-imports the entire feed on every embed hit for a missing URL, ignoring its own schedule/last-modified tracking (`feed_key` is defined but never used, so the 'modified' sentinel is dead code), hammering the source site and stalling sidekiq workers\n\nPAIR 2:\nA: lib/topic_retriever.rb:41 — perform_retrieve calls `Jobs::PollFeed.new.execute({})` synchronously inline inside the RetrieveTopic job, so a slow/hanging feed_polling_url (open-uri, no timeout) blocks this request-triggered job too, compounding failure surface beyond the scheduled job. confidence=75 severity=P2\nB: topic_retriever.rb:41 every miss for a new URL synchronously runs a full RSS fetch-and-import of the entire feed, which is attacker-triggerable\n\nPAIR 3:\nA: lib/topic_retriever.rb:44-49 — `perform_retrieve` calls `Jobs::PollFeed.new.execute({})` to opportunistically pull the whole RSS feed on every uncached embed request without checking `SiteSetting.feed_polling_url.present?` first, so if feed_polling_enabled is on but URL is blank this silently no-ops deep inside PollFeed rather than being validated at the call site, and the whole feed is re-fetched synchronously per cold visitor request instead of only the target article.\nB: TopicRetriever executes the scheduled PollFeed job inline per embed request (lib/topic_retriever.rb:41 calls Jobs::PollFeed.new.execute({})), bypassing Sidekiq; because the throttle key is per embed URL (retrieved:#{@embed_url}) rather than per feed, a site with k embedded articles can trigger up to k full feed fetches plus N import attempts per minute instead of the intended hourly poll, and any PollFeed exception now also fails RetrieveTopic with its retries re-polling the feed — this job-layer coupling should be an enqueue or a check against cached feed data, not an inline execute\n\nPAIR 4:\nA: spec/controllers/embed_controller_spec.rb:40 — the no-embed test mocks `TopicRetriever.expects(:new)` with no argument matcher and never checks that the 'loading' template is rendered, so passing the wrong embed_url, dropping the `no_throttle: user.try(:staff?)` flag in retrieve_topic.rb:17, or rendering best instead of loading all still pass (P2, confidence 75).\nB: spec/controllers/embed_controller_spec.rb:40 — The spec expects TopicRetriever.new/retrieve to be called synchronously, but app/controllers/embed_controller.rb:15 only enqueues Jobs::RetrieveTopic, so the \"no previous embed\" path has no valid verification and the test fails or proves nothing. (P1, conf 75)\n\nPAIR 5:\nA: spec/controllers/embed_controller_spec.rb:40 — the no-embed test mocks `TopicRetriever.expects(:new)` with no argument matcher and never checks that the 'loading' template is rendered, so passing the wrong embed_url, dropping the `no_throttle: user.try(:staff?)` flag in retrieve_topic.rb:17, or rendering best instead of loading all still pass (P2, confidence 75).\nB: spec/controllers/embed_controller_spec.rb:40 — the spec mocks `TopicRetriever.new` and passes only because `queue_jobs` is `test: false` so `Jobs.enqueue` runs RetrieveTopic inline; it never asserts `render 'loading'`, the enqueued `user_id`/`embed_url` args, or the staff `no_throttle` flag, and it breaks spuriously if jobs are ever queued in test (P3, conf 75)\n\nPAIR 6:\nA: spec/controllers/embed_controller_spec.rb:40 — the no-embed test mocks `TopicRetriever.expects(:new)` with no argument matcher and never checks that the 'loading' template is rendered, so passing the wrong embed_url, dropping the `no_throttle: user.try(:staff?)` flag in retrieve_topic.rb:17, or rendering best instead of loading all still pass (P2, confidence 75).\nB: spec/controllers/embed_controller_spec.rb:40-45 — \"tells the topic retriever to work\" mocks `TopicRetriever.new` and `retrieve`, meaning the interaction between EmbedController#best and TopicRetriever's real retrieval side effects (job enqueue timing, redis throttle) is never checked end-to-end; confidence 80, severity P2.\n\nPAIR 7:\nA: spec/controllers/embed_controller_spec.rb:40 — the no-embed test mocks `TopicRetriever.expects(:new)` with no argument matcher and never checks that the 'loading' template is rendered, so passing the wrong embed_url, dropping the `no_throttle: user.try(:staff?)` flag in retrieve_topic.rb:17, or rendering best instead of loading all still pass (P2, confidence 75).\nB: spec/controllers/embed_controller_spec.rb:40-46 — the \"tells the topic retriever to work\" test stubs `TopicRetriever.expects(:new).returns(retriever)` and only asserts `retriever.expects(:retrieve)` was called, so it verifies a job enqueued a call to `TopicRetriever#retrieve` but never exercises `invalid_host?`, `retrieved_recently?`, or `perform_retrieve` — none of which run in this test\n\nPAIR 8:\nA: spec/controllers/embed_controller_spec.rb:40 — the no-embed test mocks `TopicRetriever.expects(:new)` with no argument matcher and never checks that the 'loading' template is rendered, so passing the wrong embed_url, dropping the `no_throttle: user.try(:staff?)` flag in retrieve_topic.rb:17, or rendering best instead of loading all still pass (P2, confidence 75).\nB: `spec/controllers/embed_controller_spec.rb:41-46` asserts `TopicRetriever.expects(:new)`/`retrieve` while the controller enqueues `Jobs.enqueue(:retrieve_topic, ...)`, passing only incidentally and never covering the job-argument contract; there is no spec for `Jobs::RetrieveTopic`\n\nPAIR 9:\nA: spec/controllers/embed_controller_spec.rb:40 — the no-embed test mocks `TopicRetriever.expects(:new)` with no argument matcher and never checks that the 'loading' template is rendered, so passing the wrong embed_url, dropping the `no_throttle: user.try(:staff?)` flag in retrieve_topic.rb:17, or rendering best instead of loading all still pass (P2, confidence 75).\nB: spec/controllers/embed_controller_spec.rb:42 — Test relies on Jobs.enqueue executing Jobs::RetrieveTopic inline (queue_jobs test:false) to satisfy TopicRetriever.expects(:new); it is implicitly coupled to that setting and never asserts that the job was enqueued with user_id/embed_url or that no_throttle is derived from staff.\n\nPAIR 10:\nA: spec/controllers/embed_controller_spec.rb:40 — the no-embed test mocks `TopicRetriever.expects(:new)` with no argument matcher and never checks that the 'loading' template is rendered, so passing the wrong embed_url, dropping the `no_throttle: user.try(:staff?)` flag in retrieve_topic.rb:17, or rendering best instead of loading all still pass (P2, confidence 75).\nB: spec/controllers/embed_controller_spec.rb:42 — The new controller spec requires a synchronous `TopicRetriever.new(...).retrieve` call, but the controller now calls only `Jobs.enqueue`, so this test deterministically fails.\n\nPAIR 11:\nA: spec/controllers/embed_controller_spec.rb:40 — the no-embed test mocks `TopicRetriever.expects(:new)` with no argument matcher and never checks that the 'loading' template is rendered, so passing the wrong embed_url, dropping the `no_throttle: user.try(:staff?)` flag in retrieve_topic.rb:17, or rendering best instead of loading all still pass (P2, confidence 75).\nB: spec/controllers/embed_controller_spec.rb:42-45 — The spec expects synchronous `TopicRetriever` instantiation and invocation even though the implementation enqueues `:retrieve_topic`, so it fails and does not test the actual asynchronous behavior.\n\nPAIR 12:\nA: spec/controllers/embed_controller_spec.rb:40 — the no-embed test mocks `TopicRetriever.expects(:new)` with no argument matcher and never checks that the 'loading' template is rendered, so passing the wrong embed_url, dropping the `no_throttle: user.try(:staff?)` flag in retrieve_topic.rb:17, or rendering best instead of loading all still pass (P2, confidence 75).\nB: spec/controllers/embed_controller_spec.rb:43 — P1 confidence 100: The assertion `TopicRetriever.expects(:new).returns(retriever)` fails whenever the no-embed branch runs because `EmbedController#best` enqueues `Jobs.enqueue(:retrieve_topic, user_id: current_user.try(:id), embed_url: embed_url)` instead, so the changed controller spec cannot verify the asynchronous retrieval behavior it claims to cover.\n\nPAIR 13:\nA: spec/controllers/embed_controller_spec.rb:40 — the no-embed test mocks `TopicRetriever.expects(:new)` with no argument matcher and never checks that the 'loading' template is rendered, so passing the wrong embed_url, dropping the `no_throttle: user.try(:staff?)` flag in retrieve_topic.rb:17, or rendering best instead of loading all still pass (P2, confidence 75).\nB: spec/controllers/embed_controller_spec.rb:43 — The new controller test expects a direct TopicRetriever call even though the action enqueues :retrieve_topic, so the test fails instead of verifying the delivered job.\n\nPAIR 14:\nA: spec/controllers/embed_controller_spec.rb:40 — the no-embed test mocks `TopicRetriever.expects(:new)` with no argument matcher and never checks that the 'loading' template is rendered, so passing the wrong embed_url, dropping the `no_throttle: user.try(:staff?)` flag in retrieve_topic.rb:17, or rendering best instead of loading all still pass (P2, confidence 75).\nB: spec/controllers/embed_controller_spec.rb:43 — The no-embed example expects the removed synchronous TopicRetriever call, so it fails against the new enqueue path and never verifies the loading response or job arguments.\n\nPAIR 15:\nA: spec/controllers/embed_controller_spec.rb:47-51 — \"creates a topic view when a topic_id is found\" only asserts `TopicView.expects(:new).with(123, nil, {best: 5})` was called; it never renders the view, checks the response body, or verifies `@topic_view` is assigned/rendered, so the actual embed-rendering path is unverified; confidence 90, severity P1.\nB: spec/controllers/embed_controller_spec.rb:48-52 ('creates a topic view when a topic_id is found') only proves TopicView.new receives {best: 5}; whether TopicView honors, ignores, or chokes on the best option is never verified, so embeds could render the wrong posts with a green suite.\n\nPAIR 16:\nA: spec/jobs/poll_feed_spec.rb:35 — [P1, confidence 100] `poller.expects(:poll_feed).once` replaces the unit under test in the only enabled-path example, so malformed feeds, link-to-id fallback, HTML decoding, and `TopicEmbed.import` argument regressions all pass this suite; although isolating feed I/O is reasonable, stubbing `SimpleRSS.parse` would preserve isolation while exercising `poll_feed`, so the mock does not survive the rebuttal gate.\nB: spec/jobs/poll_feed_spec.rb:35 — `poller.expects(:poll_feed).once` stubs the only real logic in the job, so RSS parsing, the fallback from `i.link` to `i.id` for non-http links, `CGI.unescapeHTML(i.content.scrub)`, and the blank-user early return in app/jobs/scheduled/poll_feed.rb:26-38 are untested (P2, confidence 100).\n\nPAIR 17:\nA: spec/models/topic_embed_spec.rb:34 — `post.cooked.start_with?(\"hello world new post <a href=\\\"http://eviltrout.com/hello\\\">hello</a> <img src=\\\"http://eviltrout.com/images/wat.jpg\\\">\").should be_true` couples the test to Nokogiri's exact serialization and one root-relative shape, so semantically equivalent serializer changes fail while protocol-relative, query-relative, fragment, and non-default-port URL behavior remains unchecked; although one integration assertion usefully covers both tags, asserting parsed attributes separately removes the serialization dependency and exposes the missing cases.\nB: spec/models/topic_embed_spec.rb:34 — absolutize_urls is tested only for a default-port http URL; the non-80/443 port prefix branch (topic_embed.rb:59) and multi-slash stripping are untested (P3, conf 75)\n\nPAIR 18:\nA: spec/models/topic_embed_spec.rb:34 — `post.cooked.start_with?(\"hello world new post <a href=\\\"http://eviltrout.com/hello\\\">hello</a> <img src=\\\"http://eviltrout.com/images/wat.jpg\\\">\").should be_true` couples the test to Nokogiri's exact serialization and one root-relative shape, so semantically equivalent serializer changes fail while protocol-relative, query-relative, fragment, and non-default-port URL behavior remains unchecked; although one integration assertion usefully covers both tags, asserting parsed attributes separately removes the serialization dependency and exposes the missing cases.\nB: TopicEmbed.absolutize_urls edge cases untested: non-standard-port branch, URLs without <a>/<img> tags, and href leading-slash collapse (spec/models/topic_embed_spec.rb:24-35)\n\nPAIR 19:\nA: spec/models/topic_embed_spec.rb:39 — The update test asserts only `post.cooked.should =~ /new contents/` and never verifies `app/models/topic_embed.rb:37`'s `embed.update_column(:content_sha1, content_sha1)`, so a stale fingerprint passes the suite and causes the same feed item to be revised on every poll .\nB: spec/models/topic_embed_spec.rb:39 — The update test asserts only that cooked changed; it does not assert content_sha1 was updated, that no duplicate topic/TopicEmbed row was created, or that identical content skips the revision\n\nPAIR 20:\nA: spec/models/topic_embed_spec.rb:39 — The update test asserts only `post.cooked.should =~ /new contents/` and never verifies `app/models/topic_embed.rb:37`'s `embed.update_column(:content_sha1, content_sha1)`, so a stale fingerprint passes the suite and causes the same feed item to be revised on every poll .\nB: spec/models/topic_embed_spec.rb:40 — `post = TopicEmbed.import(user, url, title, \"muhahaha new contents!\")` asserts only rendered content and never checks that `content_sha1` advances or that a repeated identical import skips revision, so a broken deduplication contract repeatedly rewrites posts while this example passes; although output verification covers the visible first update, it does not cover the hash state that controls every later update.\n",
+  "effort": "low",
+  "pairs": [
+   [
+    1298,
+    1682
+   ],
+   [
+    1298,
+    1727
+   ],
+   [
+    1308,
+    1722
+   ],
+   [
+    1538,
+    1539
+   ],
+   [
+    1538,
+    1540
+   ],
+   [
+    1538,
+    1542
+   ],
+   [
+    1538,
+    1544
+   ],
+   [
+    1538,
+    1548
+   ],
+   [
+    1538,
+    1550
+   ],
+   [
+    1538,
+    1552
+   ],
+   [
+    1538,
+    1554
+   ],
+   [
+    1538,
+    1558
+   ],
+   [
+    1538,
+    1563
+   ],
+   [
+    1538,
+    1566
+   ],
+   [
+    1570,
+    1572
+   ],
+   [
+    1622,
+    1630
+   ],
+   [
+    1643,
+    1644
+   ],
+   [
+    1643,
+    1705
+   ],
+   [
+    1653,
+    1654
+   ],
+   [
+    1653,
+    1655
+   ]
+  ]
+ },
+ "parsed_response": {
+  "pairs": [
+   {
+    "pair": 1,
+    "a": {
+     "mechanism": "synchronous inline PollFeed.execute inside RetrieveTopic job",
+     "trigger": "slow/hanging feed_polling_url fetch without timeout",
+     "consequence": "blocks the request-triggered retrieve job, compounding failure surface"
+    },
+    "b": {
+     "mechanism": "synchronous PollFeed.execute per embed miss",
+     "trigger": "every embed hit for a missing URL",
+     "consequence": "re-downloads/re-imports whole feed, ignores schedule/last-modified tracking, dead feed_key/modified sentinel, hammers source, stalls sidekiq"
+    },
+    "material_differences": [
+     "B adds claim that schedule/last-modified tracking is ignored and feed_key/modified sentinel is dead code",
+     "B claims hammering source site / re-import per hit; A claims blocking risk"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "B adds additional material claims (dead sentinel, schedule bypass) beyond A's blocking concern."
+   },
+   {
+    "pair": 2,
+    "a": {
+     "mechanism": "synchronous inline PollFeed.execute inside RetrieveTopic job",
+     "trigger": "slow/hanging feed_polling_url fetch without timeout",
+     "consequence": "blocks request-triggered job, compounding failure surface"
+    },
+    "b": {
+     "mechanism": "synchronous full RSS fetch-and-import on every miss",
+     "trigger": "every miss for a new URL",
+     "consequence": "attacker-triggerable full feed fetch"
+    },
+    "material_differences": [
+     "A focuses on blocking/timeout consequence; B on attacker-triggerable full feed fetch; same root (sync full feed fetch per miss) but consequences differ materially"
+    ],
+    "same": false,
+    "confidence": 0.6,
+    "reason": "Trigger/mechanism overlap but claimed consequences differ (blocking job vs attacker-triggerable load); B's 'attacker-triggerable' is an added claim."
+   },
+   {
+    "pair": 3,
+    "a": {
+     "mechanism": "PollFeed called without checking SiteSetting.feed_polling_url.present?",
+     "trigger": "feed_polling_enabled on but URL blank",
+     "consequence": "silent no-op deep in PollFeed; full feed re-fetched synchronously per cold request instead of only target article"
+    },
+    "b": {
+     "mechanism": "inline PollFeed execute bypassing Sidekiq with per-embed-URL throttle key",
+     "trigger": "site with k embedded articles",
+     "consequence": "k full feed fetches plus N import attempts per minute instead of hourly poll; PollFeed exception fails RetrieveTopic with retries re-polling"
+    },
+    "material_differences": [
+     "A's primary claim is missing present? check/silent no-op and per-request full feed fetch vs only target article",
+     "B claims throttle key scoping, k fetches/min, exception coupling to job retries"
+    ],
+    "same": false,
+    "confidence": 0.8,
+    "reason": "Different material claims about mechanism and consequence; only the inline execute line is shared."
+   },
+   {
+    "pair": 4,
+    "a": {
+     "mechanism": "mock TopicRetriever.expects(:new) with no arg matcher and no loading template assertion",
+     "trigger": "any of several regressions (wrong embed_url, dropped no_throttle, wrong render)",
+     "consequence": "test passes despite regressions"
+    },
+    "b": {
+     "mechanism": "test expects synchronous call but controller only enqueues job",
+     "trigger": "controller enqueues Jobs::RetrieveTopic",
+     "consequence": "test fails or proves nothing"
+    },
+    "material_differences": [
+     "A claims test falsely passes (missing assertions); B claims test fails (synchronous expectation vs enqueue)",
+     "Conflicting consequences: pass vs fail"
+    ],
+    "same": false,
+    "confidence": 0.85,
+    "reason": "A and B claim opposite test outcomes; conflicting material claims."
+   },
+   {
+    "pair": 5,
+    "a": {
+     "mechanism": "mock with no arg matcher, no loading template check",
+     "trigger": "regressions like wrong embed_url, dropped no_throttle, wrong render",
+     "consequence": "test passes despite them"
+    },
+    "b": {
+     "mechanism": "mock plus reliance on queue_jobs test:false running job inline",
+     "trigger": "test env",
+     "consequence": "passes only incidentally, never asserts loading render/user_id/embed_url args/no_throttle; breaks if jobs queued"
+    },
+    "material_differences": [
+     "B adds mechanism claim: pass depends on queue_jobs test:false running RetrieveTopic inline",
+     "A claims test currently passes wrongly; B agrees it passes but adds implicit coupling claim"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "B adds a material mechanism claim (incidental pass via queue_jobs setting) not in A; otherwise overlapping missing-assertion claims."
+   },
+   {
+    "pair": 6,
+    "a": {
+     "mechanism": "mock TopicRetriever, no arg matcher, no loading assertion",
+     "trigger": "regressions in embed_url/no_throttle/render",
+     "consequence": "test passes despite them"
+    },
+    "b": {
+     "mechanism": "mocking TopicRetriever.new and retrieve means interaction with real retrieval side effects is never end-to-end tested",
+     "trigger": "running test",
+     "consequence": "job enqueue timing and redis throttle unchecked"
+    },
+    "material_differences": [
+     "B frames as end-to-end/interaction coverage gap, not false-pass of specific regressions",
+     "B mentions job enqueue timing and redis throttle, A mentions embed_url/no_throttle/loading render"
+    ],
+    "same": false,
+    "confidence": 0.75,
+    "reason": "B's coverage-gap claim about enqueue timing/redis throttle differs materially from A's specific false-pass regressions."
+   },
+   {
+    "pair": 7,
+    "a": {
+     "mechanism": "mock with no arg matcher, no loading assertion",
+     "trigger": "regressions in embed_url/no_throttle/render",
+     "consequence": "passes despite them"
+    },
+    "b": {
+     "mechanism": "test stubs TopicRetriever and asserts retrieve was called; never exercises invalid_host?, retrieved_recently?, perform_retrieve",
+     "trigger": "running test",
+     "consequence": "those methods untested"
+    },
+    "material_differences": [
+     "B claims different untested units (invalid_host?, retrieved_recently?, perform_retrieve) vs A's controller-level assertions"
+    ],
+    "same": false,
+    "confidence": 0.8,
+    "reason": "Different specific coverage claims; only general 'mocked retriever' overlap."
+   },
+   {
+    "pair": 8,
+    "a": {
+     "mechanism": "mock with no arg matcher, no loading assertion",
+     "trigger": "regressions in embed_url/no_throttle/render",
+     "consequence": "passes despite them"
+    },
+    "b": {
+     "mechanism": "spec asserts TopicRetriever.new/retrieve while controller enqueues job, passing incidentally; no spec for Jobs::RetrieveTopic",
+     "trigger": "running test",
+     "consequence": "job-argument contract uncovered, no RetrieveTopic job spec"
+    },
+    "material_differences": [
+     "B adds claim that Jobs::RetrieveTopic has no spec at all",
+     "B claims incidental pass via inline job execution, not just missing assertions"
+    ],
+    "same": false,
+    "confidence": 0.75,
+    "reason": "B adds material claims about job-argument contract and missing job spec."
+   },
+   {
+    "pair": 9,
+    "a": {
+     "mechanism": "mock with no arg matcher, no loading assertion",
+     "trigger": "regressions in embed_url/no_throttle/render",
+     "consequence": "passes despite them"
+    },
+    "b": {
+     "mechanism": "relies on Jobs.enqueue running inline via queue_jobs test:false; never asserts enqueued user_id/embed_url/no_throttle",
+     "trigger": "test env setting",
+     "consequence": "implicitly coupled to setting, job args unasserted"
+    },
+    "material_differences": [
+     "B adds mechanism: dependence on queue_jobs test:false to satisfy the expectation",
+     "B focuses on unasserted job args; A on loading render/embed_url matcher"
+    ],
+    "same": false,
+    "confidence": 0.75,
+    "reason": "B adds material mechanism claim about queue_jobs coupling."
+   },
+   {
+    "pair": 10,
+    "a": {
+     "mechanism": "mock with no arg matcher, no loading assertion",
+     "trigger": "regressions in embed_url/no_throttle/render",
+     "consequence": "passes despite them"
+    },
+    "b": {
+     "mechanism": "spec requires synchronous call but controller only enqueues",
+     "trigger": "running test",
+     "consequence": "test deterministically fails"
+    },
+    "material_differences": [
+     "A: test passes wrongly; B: test fails deterministically"
+    ],
+    "same": false,
+    "confidence": 0.85,
+    "reason": "Conflicting outcome claims."
+   },
+   {
+    "pair": 11,
+    "a": {
+     "mechanism": "mock with no arg matcher, no loading assertion",
+     "trigger": "regressions in embed_url/no_throttle/render",
+     "consequence": "passes despite them"
+    },
+    "b": {
+     "mechanism": "spec expects synchronous call, implementation enqueues",
+     "trigger": "running test",
+     "consequence": "test fails, asynchronous behavior untested"
+    },
+    "material_differences": [
+     "A: false pass; B: test fails"
+    ],
+    "same": false,
+    "confidence": 0.85,
+    "reason": "Conflicting outcome claims."
+   },
+   {
+    "pair": 12,
+    "a": {
+     "mechanism": "mock with no arg matcher, no loading assertion",
+     "trigger": "regressions",
+     "consequence": "passes despite them"
+    },
+    "b": {
+     "mechanism": "TopicRetriever.expects(:new) fails because controller enqueues job",
+     "trigger": "no-embed branch",
+     "consequence": "spec fails, cannot verify async retrieval"
+    },
+    "material_differences": [
+     "A: false pass; B: assertion fails"
+    ],
+    "same": false,
+    "confidence": 0.85,
+    "reason": "Conflicting outcomes."
+   },
+   {
+    "pair": 13,
+    "a": {
+     "mechanism": "mock with no arg matcher, no loading assertion",
+     "trigger": "regressions",
+     "consequence": "passes despite them"
+    },
+    "b": {
+     "mechanism": "test expects direct call, action enqueues job",
+     "trigger": "running test",
+     "consequence": "test fails, delivered job not verified"
+    },
+    "material_differences": [
+     "A: false pass; B: fails"
+    ],
+    "same": false,
+    "confidence": 0.85,
+    "reason": "Conflicting outcomes."
+   },
+   {
+    "pair": 14,
+    "a": {
+     "mechanism": "mock with no arg matcher, no loading assertion",
+     "trigger": "regressions in embed_url/no_throttle/render",
+     "consequence": "passes despite them"
+    },
+    "b": {
+     "mechanism": "no-embed example expects removed synchronous call",
+     "trigger": "new enqueue path",
+     "consequence": "test fails; loading response and job args never verified"
+    },
+    "material_differences": [
+     "A: passes despite regressions; B: fails against new path"
+    ],
+    "same": false,
+    "confidence": 0.85,
+    "reason": "Conflicting outcome claims, though both note loading/job-args unverified."
+   },
+   {
+    "pair": 15,
+    "a": {
+     "mechanism": "test only asserts TopicView.new called with {best: 5}; never renders/assigns @topic_view",
+     "trigger": "topic_id found path",
+     "consequence": "embed-rendering path unverified"
+    },
+    "b": {
+     "mechanism": "test only proves TopicView.new receives {best: 5}",
+     "trigger": "same path",
+     "consequence": "whether TopicView honors/ignores/chokes on best option is unverified; wrong posts could render with green suite"
+    },
+    "material_differences": [
+     "B frames consequence as TopicView's handling of best option; A as overall render path unverified — same core claim: only constructor mock asserted, rendering unverified"
+    ],
+    "same": true,
+    "confidence": 0.8,
+    "reason": "Same location and same material claim: only constructor invocation asserted, rendering behavior unverified; wording differs."
+   },
+   {
+    "pair": 16,
+    "a": {
+     "mechanism": "poller.expects(:poll_feed).once stubs the unit under test",
+     "trigger": "enabled-path example",
+     "consequence": "malformed feeds, link-to-id fallback, HTML decoding, import arg regressions pass; suggests stubbing SimpleRSS.parse instead"
+    },
+    "b": {
+     "mechanism": "same mock stubs the only real logic",
+     "trigger": "same example",
+     "consequence": "RSS parsing, link/id fallback, CGI.unescapeHTML(scrub), blank-user early return untested"
+    },
+    "material_differences": [
+     "A lists import argument regressions; B lists blank-user early return — overlapping but slightly different enumerated gaps; same root mechanism"
+    ],
+    "same": true,
+    "confidence": 0.8,
+    "reason": "Same mechanism (mocking poll_feed stubs unit under test) and substantially same untested-logic claim."
+   },
+   {
+    "pair": 17,
+    "a": {
+     "mechanism": "start_with? assertion couples test to exact Nokogiri serialization; protocol-relative, query-relative, fragment, non-default-port unchecked",
+     "trigger": "serializer changes / URL variants",
+     "consequence": "semantically equivalent changes fail; edge cases unchecked"
+    },
+    "b": {
+     "mechanism": "absolutize_urls tested only for default-port http; non-80/443 port branch and multi-slash stripping untested",
+     "trigger": "port variants / multi-slash",
+     "consequence": "branches untested"
+    },
+    "material_differences": [
+     "A adds serialization-coupling false-failure claim; B adds multi-slash stripping claim"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "Overlapping missing-coverage claims but each adds different material claims (serialization coupling vs multi-slash)."
+   },
+   {
+    "pair": 18,
+    "a": {
+     "mechanism": "start_with? couples to exact serialization; protocol/query/fragment/port variants unchecked",
+     "trigger": "serializer or URL changes",
+     "consequence": "equivalent changes fail; edge cases unchecked"
+    },
+    "b": {
+     "mechanism": "edge cases untested: non-standard-port branch, URLs without a/img tags, href leading-slash collapse",
+     "trigger": "edge-case inputs",
+     "consequence": "untested"
+    },
+    "material_differences": [
+     "A adds serialization-coupling false-failure claim; B adds missing a/img tags claim"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "Each report adds distinct material coverage claims; A's serialization-coupling mechanism not in B."
+   },
+   {
+    "pair": 19,
+    "a": {
+     "mechanism": "update test never verifies content_sha1 update_column",
+     "trigger": "stale fingerprint",
+     "consequence": "same feed item revised on every poll"
+    },
+    "b": {
+     "mechanism": "update test asserts only cooked change",
+     "trigger": "same",
+     "consequence": "content_sha1 not asserted, duplicate topic/TopicEmbed row not asserted, identical content skipping revision not tested"
+    },
+    "material_differences": [
+     "B adds duplicate-row claim"
+    ],
+    "same": false,
+    "confidence": 0.65,
+    "reason": "Same core claim (content_sha1 unasserted, repeat revision untested) but B adds duplicate row creation claim; borderline — B is a superset with an extra material claim, so false under strict rules."
+   },
+   {
+    "pair": 20,
+    "a": {
+     "mechanism": "update test never verifies content_sha1 update_column",
+     "trigger": "stale fingerprint",
+     "consequence": "same feed item revised on every poll"
+    },
+    "b": {
+     "mechanism": "test asserts only rendered content; never checks content_sha1 advances or identical import skips revision",
+     "trigger": "repeated identical import",
+     "consequence": "broken dedup repeatedly rewrites posts while test passes"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "Same mechanism (content_sha1 not asserted) and same consequence (repeated revision/rewrite of same content)."
+   }
+  ]
+ },
+ "usage": {
+  "glm-5.3-background": {
+   "input_tokens": 3366,
+   "cache_read_input_tokens": 384,
+   "cache_creation_input_tokens": 0,
+   "output_tokens": 2934,
+   "reasoning_output_tokens": 1,
+   "cost_usd": 0.0,
+   "total_tokens": 6685
+  }
+ },
+ "status": "complete",
+ "error_type": null,
+ "elapsed_s": 18.128762245178223
+}

@@ -1,0 +1,494 @@
+{
+ "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/10",
+ "pass_digest": "9c5f733ce7a3f996c90c67f262cc4a77e2b234bc415c197afa7c73477ad320be",
+ "request_sha256": "fbae8baee24290e2a717c6aa6c71c1356e6341f80e0cf295a3709d8319f3ad67",
+ "request": {
+  "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/10",
+  "model": "glm-5.3-background",
+  "system": "You are clustering code review findings from one PR. Always respond with valid JSON.",
+  "prompt": "You are clustering code review findings from the same PR. For each PAIR below, decide whether the two findings describe the SAME underlying issue — same root cause in the same code location. Different wording is fine. A finding about a DIFFERENT defect in the same file or function is NOT the same issue. Severity or aspect differences of the same root cause ARE the same issue.\n\n\nFor THIS scoring pass, duplicate equivalence is stricter than sharing a root cause.\nYou must compare the COMPLETE MATERIAL CLAIMS, including mechanism, triggering\nconditions, execution path, and consequence. The same line or broad concern does\nnot establish equivalence. A report of wrong-category selection, a case/rename\nmismatch, a crash, and a silent fallback are different claims even at one lookup.\nAn inactive/unbound API concern and an alleged active user-facing failure differ.\nA compound report with an additional material claim does NOT equal its subset.\nDifferences only in wording, severity, or hedging do not create separate claims.\nIf the claimed mechanisms, triggers or consequences conflict, or one report adds\nan unsupported/different material factual claim, return same=false. You are NOT\nverifying which claim is true; do not repair or reinterpret either report to make\nthem match. If unsure whether their full claims are equivalent, return false.\n\nFor every numbered pair, extract what A and B actually CLAIM into mechanism,\ntrigger and consequence. Then list material_differences and give your equivalence\nverdict, confidence and reason. same=true requires no material differences.\nReturn ONLY this JSON object, with EVERY pair index exactly once:\n{\"pairs\":[{\"pair\":1,\"a\":{\"mechanism\":\"...\",\"trigger\":\"...\",\"consequence\":\"...\"},\"b\":{\"mechanism\":\"...\",\"trigger\":\"...\",\"consequence\":\"...\"},\"material_differences\":[],\"same\":true,\"confidence\":0.9,\"reason\":\"...\"}]}\n\nPAIRS:\nPAIR 1:\nA: EmbeddableHost.host_allowed?(request.referer) replaces the previously in-process-cached SiteSetting read with an uncached database query (WHERE lower(host) = ?, which no existing index supports — the migration creates none, and a plain b-tree on host would not even serve the lower() predicate) executed on every single embed comments request. Every page view on every embedding site now adds a sequential-scan query per request on a hot path the old code served from memory with zero database round-trips; high-traffic embedding hosts multiply database load, and the load is invisible until N grows.\nB: `ensure_embeddable` now calls `EmbeddableHost.host_allowed?`, which executes an uncached `SELECT ... WHERE lower(host) = ?` query on every request, replacing the previous in-memory cached site-setting comparison. Forums with heavy embedding traffic gain one database round-trip per embedded pageview on /embed/comments and /embed/count — a path that previously cost zero queries — and `lower(host) = ?` cannot use a plain index on host (the new migration creates none), so the lookup is always a sequential scan; under embed-traffic spikes this adds measurable database load.\n\nPAIR 2:\nA: EmbeddableHost.host_allowed?(request.referer) replaces the previously in-process-cached SiteSetting read with an uncached database query (WHERE lower(host) = ?, which no existing index supports — the migration creates none, and a plain b-tree on host would not even serve the lower() predicate) executed on every single embed comments request. Every page view on every embedding site now adds a sequential-scan query per request on a hot path the old code served from memory with zero database round-trips; high-traffic embedding hosts multiply database load, and the load is invisible until N grows.\nB: ensure_embeddable replaces an in-memory cached SiteSetting check with a live DB query (EmbeddableHost.host_allowed?) on every embed request, with no caching layer added. High-traffic embedded comment widgets now add a DB round-trip per request that previously hit the cached settings object; a slow or saturated DB now degrades the embed endpoint, which is fetched cross-origin on third-party pages.\n\nPAIR 3:\nA: EmbeddableHost.host_allowed?(request.referer) replaces the previously in-process-cached SiteSetting read with an uncached database query (WHERE lower(host) = ?, which no existing index supports — the migration creates none, and a plain b-tree on host would not even serve the lower() predicate) executed on every single embed comments request. Every page view on every embedding site now adds a sequential-scan query per request on a hot path the old code served from memory with zero database round-trips; high-traffic embedding hosts multiply database load, and the load is invisible until N grows.\nB: No index is created on embeddable_hosts.host, and EmbeddableHost.record_for_host performs a full-table `lower(host) = ?` query on every embed request (ensure_embeddable) and every TopicEmbed.import. Each embedded-comments page load triggers an unindexed case-insensitive scan of embeddable_hosts; with a large hosts table this adds latency to the embed widget hot path.\n\nPAIR 4:\nA: EmbeddableHost.host_allowed?(request.referer) replaces the previously in-process-cached SiteSetting read with an uncached database query (WHERE lower(host) = ?, which no existing index supports — the migration creates none, and a plain b-tree on host would not even serve the lower() predicate) executed on every single embed comments request. Every page view on every embedding site now adds a sequential-scan query per request on a hot path the old code served from memory with zero database round-trips; high-traffic embedding hosts multiply database load, and the load is invisible until N grows.\nB: `record_for_host` runs `where(\"lower(host) = ?\", host).first` on every embed request, replacing the old `SiteSetting.allows_embeddable_host?` read that was served from Discourse's per-process settings cache, and the migration creates no index on `host` (which the `lower()` wrap would defeat anyway). Every pageview of every externally embedding site now incurs a per-request sequential-scan DB query on the /embed/comments hot path — externally driven traffic the forum cannot throttle — so database load scales with third-party pageviews where it previously scaled at zero.\n\nPAIR 5:\nA: EmbeddableHost.host_allowed?(request.referer) replaces the previously in-process-cached SiteSetting read with an uncached database query (WHERE lower(host) = ?, which no existing index supports — the migration creates none, and a plain b-tree on host would not even serve the lower() predicate) executed on every single embed comments request. Every page view on every embedding site now adds a sequential-scan query per request on a hot path the old code served from memory with zero database round-trips; high-traffic embedding hosts multiply database load, and the load is invisible until N grows.\nB: The embed allowlist check moved from an in-memory cached SiteSetting to an unconditional per-request DB query (EmbeddableHost.host_allowed? -> where(lower(host) = ?)) on the public, unauthenticated, high-traffic /embed/comments path, and the LOWER(host) predicate is non-sargable so no index on host can serve it. Every comment-iframe request from every embedded site now costs a full-table scan on embeddable_hosts; a site with heavy embedding traffic pays a DB roundtrip per request where the previous design served the answer from the cached settings object, and the table will grow one row per host with no caching layer to absorb it.\n\nPAIR 6:\nA: EmbeddableHost.host_allowed?(request.referer) replaces the previously in-process-cached SiteSetting read with an uncached database query (WHERE lower(host) = ?, which no existing index supports — the migration creates none, and a plain b-tree on host would not even serve the lower() predicate) executed on every single embed comments request. Every page view on every embedding site now adds a sequential-scan query per request on a hot path the old code served from memory with zero database round-trips; high-traffic embedding hosts multiply database load, and the load is invisible until N grows.\nB: EmbeddableHost.host_allowed? performs a DB query (where(\"lower(host) = ?\") on every call in ensure_embeddable, topic retriever, and topic embed, replacing a previously free in-memory SiteSetting lookup on a high-traffic unauthenticated path\n\nPAIR 7:\nA: EmbeddableHost.host_allowed?(request.referer) replaces the previously in-process-cached SiteSetting read with an uncached database query (WHERE lower(host) = ?, which no existing index supports — the migration creates none, and a plain b-tree on host would not even serve the lower() predicate) executed on every single embed comments request. Every page view on every embedding site now adds a sequential-scan query per request on a hot path the old code served from memory with zero database round-trips; high-traffic embedding hosts multiply database load, and the load is invisible until N grows.\nB: host_allowed? runs an uncacheable lower(host) = ? SQL lookup per embed request, replacing the memoized site setting check and adding per-view DB cost on a hot path\n\nPAIR 8:\nA: EmbeddableHost.host_allowed?(request.referer) replaces the previously in-process-cached SiteSetting read with an uncached database query (WHERE lower(host) = ?, which no existing index supports — the migration creates none, and a plain b-tree on host would not even serve the lower() predicate) executed on every single embed comments request. Every page view on every embedding site now adds a sequential-scan query per request on a hot path the old code served from memory with zero database round-trips; high-traffic embedding hosts multiply database load, and the load is invisible until N grows.\nB: New DB query on hot embed path (EmbeddableHost lookup in ensure_embeddable) per request with no index on host and lower(host) = ? query causes a full table scan per request on a high-traffic public endpoint, regressing from cached SiteSetting behavior\n\nPAIR 9:\nA: EmbeddableHost.host_allowed?(request.referer) replaces the previously in-process-cached SiteSetting read with an uncached database query (WHERE lower(host) = ?, which no existing index supports — the migration creates none, and a plain b-tree on host would not even serve the lower() predicate) executed on every single embed comments request. Every page view on every embedding site now adds a sequential-scan query per request on a hot path the old code served from memory with zero database round-trips; high-traffic embedding hosts multiply database load, and the load is invisible until N grows.\nB: The hot-path host lookup query is unindexable as written: the migration creates no index on `host`, and the query `lower(host) = ?` cannot use a plain index anyway (would need a functional index on `lower(host)`), guaranteeing a sequential scan on every embed request; fix by normalizing the stored host to lowercase in `before_validation`, adding `add_index :embeddable_hosts, :host`, and querying `where(host: uri.host)`.\n\nPAIR 10:\nA: EmbeddableHost.host_allowed?(request.referer) replaces the previously in-process-cached SiteSetting read with an uncached database query (WHERE lower(host) = ?, which no existing index supports — the migration creates none, and a plain b-tree on host would not even serve the lower() predicate) executed on every single embed comments request. Every page view on every embedding site now adds a sequential-scan query per request on a hot path the old code served from memory with zero database round-trips; high-traffic embedding hosts multiply database load, and the load is invisible until N grows.\nB: The lower(host) query cannot be served by a plain index on host, and the migration creates no index at all, forcing full table scans\n\nPAIR 11:\nA: `ensure_embeddable` now calls `EmbeddableHost.host_allowed?`, which executes an uncached `SELECT ... WHERE lower(host) = ?` query on every request, replacing the previous in-memory cached site-setting comparison. Forums with heavy embedding traffic gain one database round-trip per embedded pageview on /embed/comments and /embed/count — a path that previously cost zero queries — and `lower(host) = ?` cannot use a plain index on host (the new migration creates none), so the lookup is always a sequential scan; under embed-traffic spikes this adds measurable database load.\nB: ensure_embeddable replaces an in-memory cached SiteSetting check with a live DB query (EmbeddableHost.host_allowed?) on every embed request, with no caching layer added. High-traffic embedded comment widgets now add a DB round-trip per request that previously hit the cached settings object; a slow or saturated DB now degrades the embed endpoint, which is fetched cross-origin on third-party pages.\n\nPAIR 12:\nA: `ensure_embeddable` now calls `EmbeddableHost.host_allowed?`, which executes an uncached `SELECT ... WHERE lower(host) = ?` query on every request, replacing the previous in-memory cached site-setting comparison. Forums with heavy embedding traffic gain one database round-trip per embedded pageview on /embed/comments and /embed/count — a path that previously cost zero queries — and `lower(host) = ?` cannot use a plain index on host (the new migration creates none), so the lookup is always a sequential scan; under embed-traffic spikes this adds measurable database load.\nB: No index is created on embeddable_hosts.host, and EmbeddableHost.record_for_host performs a full-table `lower(host) = ?` query on every embed request (ensure_embeddable) and every TopicEmbed.import. Each embedded-comments page load triggers an unindexed case-insensitive scan of embeddable_hosts; with a large hosts table this adds latency to the embed widget hot path.\n\nPAIR 13:\nA: `ensure_embeddable` now calls `EmbeddableHost.host_allowed?`, which executes an uncached `SELECT ... WHERE lower(host) = ?` query on every request, replacing the previous in-memory cached site-setting comparison. Forums with heavy embedding traffic gain one database round-trip per embedded pageview on /embed/comments and /embed/count — a path that previously cost zero queries — and `lower(host) = ?` cannot use a plain index on host (the new migration creates none), so the lookup is always a sequential scan; under embed-traffic spikes this adds measurable database load.\nB: `record_for_host` runs `where(\"lower(host) = ?\", host).first` on every embed request, replacing the old `SiteSetting.allows_embeddable_host?` read that was served from Discourse's per-process settings cache, and the migration creates no index on `host` (which the `lower()` wrap would defeat anyway). Every pageview of every externally embedding site now incurs a per-request sequential-scan DB query on the /embed/comments hot path — externally driven traffic the forum cannot throttle — so database load scales with third-party pageviews where it previously scaled at zero.\n\nPAIR 14:\nA: `ensure_embeddable` now calls `EmbeddableHost.host_allowed?`, which executes an uncached `SELECT ... WHERE lower(host) = ?` query on every request, replacing the previous in-memory cached site-setting comparison. Forums with heavy embedding traffic gain one database round-trip per embedded pageview on /embed/comments and /embed/count — a path that previously cost zero queries — and `lower(host) = ?` cannot use a plain index on host (the new migration creates none), so the lookup is always a sequential scan; under embed-traffic spikes this adds measurable database load.\nB: The embed allowlist check moved from an in-memory cached SiteSetting to an unconditional per-request DB query (EmbeddableHost.host_allowed? -> where(lower(host) = ?)) on the public, unauthenticated, high-traffic /embed/comments path, and the LOWER(host) predicate is non-sargable so no index on host can serve it. Every comment-iframe request from every embedded site now costs a full-table scan on embeddable_hosts; a site with heavy embedding traffic pays a DB roundtrip per request where the previous design served the answer from the cached settings object, and the table will grow one row per host with no caching layer to absorb it.\n\nPAIR 15:\nA: `ensure_embeddable` now calls `EmbeddableHost.host_allowed?`, which executes an uncached `SELECT ... WHERE lower(host) = ?` query on every request, replacing the previous in-memory cached site-setting comparison. Forums with heavy embedding traffic gain one database round-trip per embedded pageview on /embed/comments and /embed/count — a path that previously cost zero queries — and `lower(host) = ?` cannot use a plain index on host (the new migration creates none), so the lookup is always a sequential scan; under embed-traffic spikes this adds measurable database load.\nB: EmbeddableHost.host_allowed? performs a DB query (where(\"lower(host) = ?\") on every call in ensure_embeddable, topic retriever, and topic embed, replacing a previously free in-memory SiteSetting lookup on a high-traffic unauthenticated path\n\nPAIR 16:\nA: `ensure_embeddable` now calls `EmbeddableHost.host_allowed?`, which executes an uncached `SELECT ... WHERE lower(host) = ?` query on every request, replacing the previous in-memory cached site-setting comparison. Forums with heavy embedding traffic gain one database round-trip per embedded pageview on /embed/comments and /embed/count — a path that previously cost zero queries — and `lower(host) = ?` cannot use a plain index on host (the new migration creates none), so the lookup is always a sequential scan; under embed-traffic spikes this adds measurable database load.\nB: host_allowed? runs an uncacheable lower(host) = ? SQL lookup per embed request, replacing the memoized site setting check and adding per-view DB cost on a hot path\n\nPAIR 17:\nA: `ensure_embeddable` now calls `EmbeddableHost.host_allowed?`, which executes an uncached `SELECT ... WHERE lower(host) = ?` query on every request, replacing the previous in-memory cached site-setting comparison. Forums with heavy embedding traffic gain one database round-trip per embedded pageview on /embed/comments and /embed/count — a path that previously cost zero queries — and `lower(host) = ?` cannot use a plain index on host (the new migration creates none), so the lookup is always a sequential scan; under embed-traffic spikes this adds measurable database load.\nB: New DB query on hot embed path (EmbeddableHost lookup in ensure_embeddable) per request with no index on host and lower(host) = ? query causes a full table scan per request on a high-traffic public endpoint, regressing from cached SiteSetting behavior\n\nPAIR 18:\nA: `ensure_embeddable` now calls `EmbeddableHost.host_allowed?`, which executes an uncached `SELECT ... WHERE lower(host) = ?` query on every request, replacing the previous in-memory cached site-setting comparison. Forums with heavy embedding traffic gain one database round-trip per embedded pageview on /embed/comments and /embed/count — a path that previously cost zero queries — and `lower(host) = ?` cannot use a plain index on host (the new migration creates none), so the lookup is always a sequential scan; under embed-traffic spikes this adds measurable database load.\nB: The hot-path host lookup query is unindexable as written: the migration creates no index on `host`, and the query `lower(host) = ?` cannot use a plain index anyway (would need a functional index on `lower(host)`), guaranteeing a sequential scan on every embed request; fix by normalizing the stored host to lowercase in `before_validation`, adding `add_index :embeddable_hosts, :host`, and querying `where(host: uri.host)`.\n\nPAIR 19:\nA: `ensure_embeddable` now calls `EmbeddableHost.host_allowed?`, which executes an uncached `SELECT ... WHERE lower(host) = ?` query on every request, replacing the previous in-memory cached site-setting comparison. Forums with heavy embedding traffic gain one database round-trip per embedded pageview on /embed/comments and /embed/count — a path that previously cost zero queries — and `lower(host) = ?` cannot use a plain index on host (the new migration creates none), so the lookup is always a sequential scan; under embed-traffic spikes this adds measurable database load.\nB: The lower(host) query cannot be served by a plain index on host, and the migration creates no index at all, forcing full table scans\n\nPAIR 20:\nA: ensure_embeddable replaces an in-memory cached SiteSetting check with a live DB query (EmbeddableHost.host_allowed?) on every embed request, with no caching layer added. High-traffic embedded comment widgets now add a DB round-trip per request that previously hit the cached settings object; a slow or saturated DB now degrades the embed endpoint, which is fetched cross-origin on third-party pages.\nB: No index is created on embeddable_hosts.host, and EmbeddableHost.record_for_host performs a full-table `lower(host) = ?` query on every embed request (ensure_embeddable) and every TopicEmbed.import. Each embedded-comments page load triggers an unindexed case-insensitive scan of embeddable_hosts; with a large hosts table this adds latency to the embed widget hot path.\n",
+  "effort": "low",
+  "pairs": [
+   [
+    25,
+    32
+   ],
+   [
+    25,
+    37
+   ],
+   [
+    25,
+    50
+   ],
+   [
+    25,
+    56
+   ],
+   [
+    25,
+    81
+   ],
+   [
+    25,
+    1253
+   ],
+   [
+    25,
+    1300
+   ],
+   [
+    25,
+    1390
+   ],
+   [
+    25,
+    1676
+   ],
+   [
+    25,
+    1679
+   ],
+   [
+    32,
+    37
+   ],
+   [
+    32,
+    50
+   ],
+   [
+    32,
+    56
+   ],
+   [
+    32,
+    81
+   ],
+   [
+    32,
+    1253
+   ],
+   [
+    32,
+    1300
+   ],
+   [
+    32,
+    1390
+   ],
+   [
+    32,
+    1676
+   ],
+   [
+    32,
+    1679
+   ],
+   [
+    37,
+    50
+   ]
+  ]
+ },
+ "parsed_response": {
+  "pairs": [
+   {
+    "pair": 1,
+    "a": {
+     "mechanism": "host_allowed? runs uncached lower(host)=? DB query replacing cached SiteSetting; no index supports predicate",
+     "trigger": "every embed comments request",
+     "consequence": "per-request sequential scan, DB load scales with embedding pageviews"
+    },
+    "b": {
+     "mechanism": "ensure_embeddable calls host_allowed? with uncached lower(host)=? query replacing cached setting; plain index on host unusable, migration adds none",
+     "trigger": "every request on /embed/comments and /embed/count",
+     "consequence": "per-pageview DB round-trip and sequential scan, measurable DB load under spikes"
+    },
+    "material_differences": [
+     "B additionally names /embed/count endpoint; minor path elaboration, not a conflicting claim"
+    ],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "Both report identical mechanism: uncached non-sargable lower(host) query per embed request replacing cached SiteSetting, no index, sequential scan, DB load on hot path."
+   },
+   {
+    "pair": 2,
+    "a": {
+     "mechanism": "uncached lower(host)=? query, no supporting index, replacing cached SiteSetting read",
+     "trigger": "every embed comments request",
+     "consequence": "per-request sequential scan; DB load multiplies with embedding traffic"
+    },
+    "b": {
+     "mechanism": "live DB query per embed request replacing cached SiteSetting check, no caching layer",
+     "trigger": "high-traffic embed requests",
+     "consequence": "DB round-trip per request; slow/saturated DB now degrades the cross-origin embed endpoint"
+    },
+    "material_differences": [
+     "B omits the non-sargable lower()/missing-index sequential-scan mechanism entirely",
+     "B adds a distinct consequence claim: endpoint degradation under slow/saturated DB, tied to cross-origin fetching"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "A is a compound report (uncaching + unindexable predicate) while B asserts only the uncaching plus a different degradation consequence; per strict rules a compound report does not equal its subset and consequences differ."
+   },
+   {
+    "pair": 3,
+    "a": {
+     "mechanism": "uncached lower(host)=? query per embed comments request, no index, sequential scan",
+     "trigger": "every embed comments request / pageview on embedding sites",
+     "consequence": "per-request sequential scan, DB load multiplies"
+    },
+    "b": {
+     "mechanism": "record_for_host performs unindexed full-table lower(host)=? scan; no index created",
+     "trigger": "every embed request (ensure_embeddable) AND every TopicEmbed.import",
+     "consequence": "per-page load scan; latency grows with large hosts table"
+    },
+    "material_differences": [
+     "B adds an additional trigger path (TopicEmbed.import) absent from A",
+     "B frames consequence as latency with large table rather than aggregate DB load"
+    ],
+    "same": false,
+    "confidence": 0.65,
+    "reason": "B is a compound report adding an extra execution path (TopicEmbed.import) not claimed by A; compound does not equal its subset."
+   },
+   {
+    "pair": 4,
+    "a": {
+     "mechanism": "uncached lower(host)=? query, no index (plain b-tree defeated by lower()), replacing cached SiteSetting read",
+     "trigger": "every page view on every embedding site (/embed/comments)",
+     "consequence": "per-request sequential scan; DB load scales with third-party pageviews from zero"
+    },
+    "b": {
+     "mechanism": "record_for_host runs where(lower(host)=?) per embed request replacing cached allows_embeddable_host?; migration creates no index, lower() defeats it",
+     "trigger": "every pageview of externally embedding sites on /embed/comments",
+     "consequence": "per-request sequential-scan query; DB load scales with unthrottleable third-party pageviews where previously zero"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Mechanism, trigger, and consequence match exactly across wording."
+   },
+   {
+    "pair": 5,
+    "a": {
+     "mechanism": "uncached lower(host)=? query, no supporting index, replacing cached SiteSetting read",
+     "trigger": "every embed comments request",
+     "consequence": "per-request sequential scan; DB load multiplies with embedding traffic"
+    },
+    "b": {
+     "mechanism": "unconditional per-request lower(host)=? query on public /embed/comments replacing cached SiteSetting; LOWER non-sargable, no index can serve it",
+     "trigger": "every comment-iframe request from every embedded site",
+     "consequence": "full-table scan per request; DB round-trip where cached before; table grows per host with no caching layer"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "Same claims: uncached non-sargable per-request query replacing cached setting, sequential scan, load scaling with external traffic; B's 'unauthenticated' and table-growth remarks are elaborations of the same claims."
+   },
+   {
+    "pair": 6,
+    "a": {
+     "mechanism": "uncached lower(host)=? query per embed request replacing cached SiteSetting; no supporting index → sequential scan",
+     "trigger": "every embed comments request",
+     "consequence": "per-request sequential scan; DB load multiplies"
+    },
+    "b": {
+     "mechanism": "host_allowed? DB query on every call",
+     "trigger": "ensure_embeddable, topic retriever, AND topic embed call sites",
+     "consequence": "per-view DB cost on high-traffic unauthenticated path replacing free cached lookup"
+    },
+    "material_differences": [
+     "B adds two additional call-site trigger paths (topic retriever, topic embed) not in A",
+     "B omits the missing-index/sequential-scan mechanism"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "B is compound with extra trigger paths and omits the index/seqscan mechanism; claims are not equivalent under strict comparison."
+   },
+   {
+    "pair": 7,
+    "a": {
+     "mechanism": "uncached lower(host)=? query replacing cached SiteSetting; no index supports predicate → sequential scan",
+     "trigger": "every embed comments request",
+     "consequence": "per-request sequential scan; DB load multiplies with traffic"
+    },
+    "b": {
+     "mechanism": "uncacheable lower(host)=? SQL lookup per embed request replacing memoized site setting",
+     "trigger": "per embed request",
+     "consequence": "per-view DB cost on hot path"
+    },
+    "material_differences": [
+     "B omits the missing-index/non-sargable sequential-scan mechanism, A's central secondary claim"
+    ],
+    "same": false,
+    "confidence": 0.6,
+    "reason": "B is a subset lacking the index/sequential-scan material claim; compound report does not equal its subset."
+   },
+   {
+    "pair": 8,
+    "a": {
+     "mechanism": "uncached lower(host)=? query replacing cached SiteSetting; no supporting index → sequential scan",
+     "trigger": "every embed comments request",
+     "consequence": "per-request sequential scan; DB load multiplies"
+    },
+    "b": {
+     "mechanism": "new EmbeddableHost DB query per request on hot embed path; no index on host and lower(host)=? causes full table scan; regression from cached SiteSetting",
+     "trigger": "per request on high-traffic public embed endpoint",
+     "consequence": "full table scan per request, regression from cached behavior"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "All material claims match: uncached query, no index, non-sargable predicate, per-request scan, regression from cache."
+   },
+   {
+    "pair": 9,
+    "a": {
+     "mechanism": "uncached lower(host)=? query replacing cached SiteSetting read; no index supports predicate → sequential scan",
+     "trigger": "every embed comments request",
+     "consequence": "per-request sequential scan; DB load multiplies"
+    },
+    "b": {
+     "mechanism": "hot-path lookup unindexable: migration creates no index on host and lower(host)=? can't use plain index, guaranteeing sequential scan; fix via lowercase normalization + index + where(host:)",
+     "trigger": "every embed request",
+     "consequence": "sequential scan on every embed request"
+    },
+    "material_differences": [
+     "B omits A's central regression-from-cached-SiteSetting mechanism",
+     "B adds a concrete fix/implementation prescription not asserted by A"
+    ],
+    "same": false,
+    "confidence": 0.55,
+    "reason": "Both center on unindexed lower() scans, but B drops the cached-setting regression claim and adds a remediation plan; under strict subset rules the claims are not fully equivalent."
+   },
+   {
+    "pair": 10,
+    "a": {
+     "mechanism": "uncached lower(host)=? query replacing cached SiteSetting; no index → sequential scan",
+     "trigger": "every embed comments request",
+     "consequence": "per-request sequential scan; DB load multiplies"
+    },
+    "b": {
+     "mechanism": "lower(host) query can't use plain index; migration creates no index",
+     "trigger": "not specified (implied per query)",
+     "consequence": "full table scans"
+    },
+    "material_differences": [
+     "B omits the cached-SiteSetting regression mechanism",
+     "B omits the per-request hot-path trigger/frequency and load-scaling consequence"
+    ],
+    "same": false,
+    "confidence": 0.65,
+    "reason": "B is a bare subset covering only indexability; A's uncaching-regression and per-request-load claims are absent."
+   },
+   {
+    "pair": 11,
+    "a": {
+     "mechanism": "uncached lower(host)=? query in host_allowed?; plain index unusable, migration adds none → sequential scan",
+     "trigger": "every request on /embed/comments and /embed/count",
+     "consequence": "per-pageview DB round-trip, measurable DB load under spikes"
+    },
+    "b": {
+     "mechanism": "live DB query per embed request replacing cached SiteSetting check, no caching layer",
+     "trigger": "high-traffic embed requests",
+     "consequence": "DB round-trip per request; slow/saturated DB degrades cross-origin embed endpoint"
+    },
+    "material_differences": [
+     "B omits the non-sargable/missing-index sequential-scan mechanism",
+     "B adds distinct consequence: endpoint degradation under slow/saturated DB"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "B lacks A's index/seqscan mechanism and asserts a different degradation consequence; compound does not equal subset."
+   },
+   {
+    "pair": 12,
+    "a": {
+     "mechanism": "uncached lower(host)=? query; plain index unusable, migration adds none → sequential scan",
+     "trigger": "every request on /embed/comments and /embed/count",
+     "consequence": "per-pageview DB round-trip, measurable DB load under spikes"
+    },
+    "b": {
+     "mechanism": "record_for_host performs unindexed full-table lower(host)=? scan; no index created",
+     "trigger": "every embed request (ensure_embeddable) AND every TopicEmbed.import",
+     "consequence": "per-page-load scan; latency grows with large hosts table"
+    },
+    "material_differences": [
+     "B adds TopicEmbed.import as an additional trigger path",
+     "B frames consequence as latency with large table rather than traffic-driven load"
+    ],
+    "same": false,
+    "confidence": 0.65,
+    "reason": "B adds an extra execution path (TopicEmbed.import); compound report does not equal its subset."
+   },
+   {
+    "pair": 13,
+    "a": {
+     "mechanism": "uncached lower(host)=? query in host_allowed?; plain index unusable, migration adds none → sequential scan",
+     "trigger": "every request on /embed/comments and /embed/count",
+     "consequence": "per-pageview DB round-trip, measurable DB load under spikes"
+    },
+    "b": {
+     "mechanism": "record_for_host runs lower(host)=? per embed request replacing cached allows_embeddable_host?; no index, lower() defeats it",
+     "trigger": "every pageview of externally embedding sites on /embed/comments",
+     "consequence": "per-request sequential scan; DB load scales with unthrottleable third-party pageviews, previously zero"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "Mechanism, trigger, and consequence match; wording differs only."
+   },
+   {
+    "pair": 14,
+    "a": {
+     "mechanism": "uncached lower(host)=? query in host_allowed?; plain index unusable, migration adds none → sequential scan",
+     "trigger": "every request on /embed/comments and /embed/count",
+     "consequence": "per-pageview DB round-trip, measurable DB load under spikes"
+    },
+    "b": {
+     "mechanism": "unconditional per-request lower(host)=? query on public /embed/comments replacing cached SiteSetting; LOWER non-sargable, no index can serve it",
+     "trigger": "every comment-iframe request from every embedded site",
+     "consequence": "full-table scan per request; DB round-trip per request where cached before; table grows per host, no caching layer"
+    },
+    "material_differences": [
+     "A also names /embed/count; B names only /embed/comments — minor endpoint scope difference, same hot path"
+    ],
+    "same": true,
+    "confidence": 0.8,
+    "reason": "All core claims match; B's endpoint scope is slightly narrower but the mechanism and consequence are the same."
+   },
+   {
+    "pair": 15,
+    "a": {
+     "mechanism": "uncached lower(host)=? query in host_allowed?; plain index unusable, migration adds none → sequential scan",
+     "trigger": "every request on /embed/comments and /embed/count",
+     "consequence": "per-pageview DB round-trip, measurable DB load under spikes"
+    },
+    "b": {
+     "mechanism": "host_allowed? DB query on every call",
+     "trigger": "ensure_embeddable, topic retriever, AND topic embed call sites",
+     "consequence": "per-view DB cost on high-traffic unauthenticated path replacing free cached lookup"
+    },
+    "material_differences": [
+     "B adds extra call-site trigger paths (topic retriever, topic embed)",
+     "B omits the missing-index/sequential-scan mechanism"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "B is compound with extra trigger paths and omits A's index/seqscan mechanism; not equivalent under strict rules."
+   },
+   {
+    "pair": 16,
+    "a": {
+     "mechanism": "uncached lower(host)=? query in host_allowed?; plain index unusable, migration adds none → sequential scan",
+     "trigger": "every request on /embed/comments and /embed/count",
+     "consequence": "per-pageview DB round-trip, measurable DB load under spikes"
+    },
+    "b": {
+     "mechanism": "uncacheable lower(host)=? SQL lookup per embed request replacing memoized site setting",
+     "trigger": "per embed request",
+     "consequence": "per-view DB cost on hot path"
+    },
+    "material_differences": [
+     "B omits the missing-index/non-sargable sequential-scan mechanism"
+    ],
+    "same": false,
+    "confidence": 0.6,
+    "reason": "B is a subset lacking A's index/sequential-scan claim."
+   },
+   {
+    "pair": 17,
+    "a": {
+     "mechanism": "uncached lower(host)=? query in host_allowed?; plain index unusable, migration adds none → sequential scan",
+     "trigger": "every request on /embed/comments and /embed/count",
+     "consequence": "per-pageview DB round-trip, measurable DB load under spikes"
+    },
+    "b": {
+     "mechanism": "new EmbeddableHost DB query per request on hot embed path; no index on host, lower(host)=? full table scan; regression from cached SiteSetting",
+     "trigger": "per request on high-traffic public endpoint",
+     "consequence": "full table scan per request, regression from cached behavior"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "All material claims align: uncached query, no index, seqscan, regression from cached setting, per-request hot path."
+   },
+   {
+    "pair": 18,
+    "a": {
+     "mechanism": "uncached lower(host)=? query in host_allowed?; plain index unusable, migration adds none → sequential scan",
+     "trigger": "every request on /embed/comments and /embed/count",
+     "consequence": "per-pageview DB round-trip, measurable DB load under spikes"
+    },
+    "b": {
+     "mechanism": "lookup unindexable: migration creates no index on host, lower(host)=? can't use plain index → guaranteed sequential scan; fix via before_validation lowercase normalization + add_index + where(host:)",
+     "trigger": "every embed request",
+     "consequence": "sequential scan on every embed request"
+    },
+    "material_differences": [
+     "B omits A's regression-from-cached-SiteSetting mechanism",
+     "B adds a remediation prescription (normalization + index + query change) not asserted by A"
+    ],
+    "same": false,
+    "confidence": 0.55,
+    "reason": "B covers only the indexability subset and adds a fix plan; A's uncaching-regression claim is absent from B."
+   },
+   {
+    "pair": 19,
+    "a": {
+     "mechanism": "uncached lower(host)=? query in host_allowed?; plain index unusable, migration adds none → sequential scan",
+     "trigger": "every request on /embed/comments and /embed/count",
+     "consequence": "per-pageview DB round-trip, measurable DB load under spikes"
+    },
+    "b": {
+     "mechanism": "lower(host) can't use plain index; migration creates no index",
+     "trigger": "not specified",
+     "consequence": "full table scans"
+    },
+    "material_differences": [
+     "B omits the cached-SiteSetting regression mechanism",
+     "B omits per-request hot-path trigger and DB-load-scaling consequence"
+    ],
+    "same": false,
+    "confidence": 0.65,
+    "reason": "B is a bare indexability subset without the uncaching/regression and per-request load claims."
+   },
+   {
+    "pair": 20,
+    "a": {
+     "mechanism": "live DB query (host_allowed?) per embed request replacing cached SiteSetting check, no caching layer",
+     "trigger": "high-traffic embed requests",
+     "consequence": "DB round-trip per request; slow/saturated DB degrades cross-origin embed endpoint"
+    },
+    "b": {
+     "mechanism": "record_for_host performs unindexed full-table lower(host)=? scan; no index created",
+     "trigger": "every embed request (ensure_embeddable) AND every TopicEmbed.import",
+     "consequence": "per-page-load scan; latency grows with large hosts table"
+    },
+    "material_differences": [
+     "A omits index/sequential-scan mechanism that B asserts",
+     "B adds TopicEmbed.import trigger path not in A",
+     "A asserts a slow-DB endpoint-degradation consequence absent from B"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "Each report contains material claims the other lacks (index/seqscan + extra trigger in B; slow-DB degradation in A); claims are not equivalent."
+   }
+  ]
+ },
+ "usage": {
+  "glm-5.3-background": {
+   "input_tokens": 4158,
+   "cache_read_input_tokens": 384,
+   "cache_creation_input_tokens": 0,
+   "output_tokens": 3580,
+   "reasoning_output_tokens": 2916,
+   "cost_usd": 0.0,
+   "total_tokens": 11038
+  }
+ },
+ "status": "complete",
+ "error_type": null,
+ "elapsed_s": 29.054972887039185
+}

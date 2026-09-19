@@ -1,0 +1,472 @@
+{
+ "url": "https://github.com/calcom/cal.com/pull/11059",
+ "pass_digest": "9c5f733ce7a3f996c90c67f262cc4a77e2b234bc415c197afa7c73477ad320be",
+ "request_sha256": "76d70ca5a1cb518d70b3fcb65176ab0050c09abf95e86aa1454184e891dc2cd2",
+ "request": {
+  "url": "https://github.com/calcom/cal.com/pull/11059",
+  "model": "glm-5.3-background",
+  "system": "You are clustering code review findings from one PR. Always respond with valid JSON.",
+  "prompt": "You are clustering code review findings from the same PR. For each PAIR below, decide whether the two findings describe the SAME underlying issue — same root cause in the same code location. Different wording is fine. A finding about a DIFFERENT defect in the same file or function is NOT the same issue. Severity or aspect differences of the same root cause ARE the same issue.\n\n\nFor THIS scoring pass, duplicate equivalence is stricter than sharing a root cause.\nYou must compare the COMPLETE MATERIAL CLAIMS, including mechanism, triggering\nconditions, execution path, and consequence. The same line or broad concern does\nnot establish equivalence. A report of wrong-category selection, a case/rename\nmismatch, a crash, and a silent fallback are different claims even at one lookup.\nAn inactive/unbound API concern and an alleged active user-facing failure differ.\nA compound report with an additional material claim does NOT equal its subset.\nDifferences only in wording, severity, or hedging do not create separate claims.\nIf the claimed mechanisms, triggers or consequences conflict, or one report adds\nan unsupported/different material factual claim, return same=false. You are NOT\nverifying which claim is true; do not repair or reinterpret either report to make\nthem match. If unsure whether their full claims are equivalent, return false.\n\nFor every numbered pair, extract what A and B actually CLAIM into mechanism,\ntrigger and consequence. Then list material_differences and give your equivalence\nverdict, confidence and reason. same=true requires no material differences.\nReturn ONLY this JSON object, with EVERY pair index exactly once:\n{\"pairs\":[{\"pair\":1,\"a\":{\"mechanism\":\"...\",\"trigger\":\"...\",\"consequence\":\"...\"},\"b\":{\"mechanism\":\"...\",\"trigger\":\"...\",\"consequence\":\"...\"},\"material_differences\":[],\"same\":true,\"confidence\":0.9,\"reason\":\"...\"}]}\n\nPAIRS:\nPAIR 1:\nA: The fetch to CALCOM_CREDENTIAL_SYNC_ENDPOINT sends no authentication header, no Content-Type, and no timeout or error handling; the sync response is also a parallel hand-maintained contract with the webhook handler on the other side, with no shared schema as a single source of truth. Any operator who exposes the sync endpoint (as .env.example instructs) has an unauthenticated POST accepting calcomUserId/appSlug; and because the request/response shape exists only as comments in two files, the next edit to one side (e.g. adding the webhook secret header) drifts silently from the other, failing at runtime only during a live token refresh in a booking flow.\nB: The sync-endpoint fetch sends no authentication of any kind (no secret, no header) and consumes the response as plaintext tokens, while the inbound webhook path encrypts the same keys with AES-256. Anyone who can reach CALCOM_CREDENTIAL_SYNC_ENDPOINT can POST {calcomUserId, appSlug} and receive live OAuth access tokens for arbitrary users, and the tokens cross the wire with no application-layer encryption — contradicting the confidentiality posture the inbound encryption establishes.\n\nPAIR 2:\nA: The findFirst-then-create/update sequence has no concurrency guard or idempotency key, so two in-flight deliveries of the same webhook both take the create branch. A webhook retried while the first delivery is still in flight (senders retry on timeout and this handler has no dedup) creates duplicate (userId, appId) credential rows; later findFirst returns an arbitrary row, so updates can land on a different credential than the one the app reads, leaving stale keys flapping.\nB: The findFirst-then-create sequence runs without a transaction and Credential has no unique constraint on (userId, appId), so two concurrent syncs both take the create path, and the unordered findFirst thereafter updates a nondeterministic row. Overlapping initial syncs create duplicate credentials for the same user and app, and later syncs update only one of them, leaving a stale credential that booking flows can still select - producing intermittent 401s that survive every re-sync.\n\nPAIR 3:\nA: The findFirst-then-create/update sequence has no concurrency guard or idempotency key, so two in-flight deliveries of the same webhook both take the create branch. A webhook retried while the first delivery is still in flight (senders retry on timeout and this handler has no dedup) creates duplicate (userId, appId) credential rows; later findFirst returns an arbitrary row, so updates can land on a different credential than the one the app reads, leaving stale keys flapping.\nB: The webhook implements create-or-update as a findFirst followed by create/update with no transaction and no unique constraint on Credential(userId, appId), so two concurrent deliveries for the same user+app both miss in findFirst and both execute create. Duplicate (userId, appId) credential rows are created — the codebase's own createOAuthAppCredential uses deleteMany-before-create precisely because no unique index exists — after which app-credential lookups return ambiguous rows, and the webhook's findFirst (no orderBy) updates an arbitrary one of the duplicates while a stale sibling keeps serving bookings; webhook delivery semantics make concurrent retries the normal case, not an edge case.\n\nPAIR 4:\nA: The findFirst-then-create/update sequence has no concurrency guard or idempotency key, so two in-flight deliveries of the same webhook both take the create branch. A webhook retried while the first delivery is still in flight (senders retry on timeout and this handler has no dedup) creates duplicate (userId, appId) credential rows; later findFirst returns an arbitrary row, so updates can land on a different credential than the one the app reads, leaving stale keys flapping.\nB: Find-then-create race in the webhook (findFirst → update/create without a unique constraint or transaction) means two concurrent webhooks for the same user+app can both take the create branch, leaving duplicate credentials\n\nPAIR 5:\nA: The findFirst-then-create/update sequence has no concurrency guard or idempotency key, so two in-flight deliveries of the same webhook both take the create branch. A webhook retried while the first delivery is still in flight (senders retry on timeout and this handler has no dedup) creates duplicate (userId, appId) credential rows; later findFirst returns an arbitrary row, so updates can land on a different credential than the one the app reads, leaving stale keys flapping.\nB: Webhook handler findFirst-then-create without transaction or unique constraint on (userId, appId) allows concurrent webhook deliveries to create duplicate credentials\n\nPAIR 6:\nA: The function name and parameter promise schema-pluggability but in sharing mode the caller-provided schema is discarded entirely (minimumTokenResponseSchema wins), a parallel hidden branch that contradicts the signature contract `parseRefreshTokenResponse(response, schema)`. The next developer adding expiry/refresh_token validation to a per-app schema will see their validation silently ignored on shared deployments, and failures that the schema would have caught (missing expiry) pass green while the stored credential is unusable — a stand-in guard that goes green while the real contract is broken.\nB: When credential sync is enabled the schema validation is downgraded from the app-specific token schema (googleCredentialSchema, zoomRefreshedTokenSchema, refreshTokenResponseSchema) to a nearly unconstrained minimum schema. Self-hosters who enable sync lose all type validation of provider tokens; a subtly wrong sync response is persisted as a credential and surfaces later as mysterious per-app failures that non-sync users can never hit.\n\nPAIR 7:\nA: The function name and parameter promise schema-pluggability but in sharing mode the caller-provided schema is discarded entirely (minimumTokenResponseSchema wins), a parallel hidden branch that contradicts the signature contract `parseRefreshTokenResponse(response, schema)`. The next developer adding expiry/refresh_token validation to a per-app schema will see their validation silently ignored on shared deployments, and failures that the schema would have caught (missing expiry) pass green while the stored credential is unusable — a stand-in guard that goes green while the real contract is broken.\nB: Credential-sharing mode replaces app-specific schemas with the minimum schema, so tokens from the remote sync endpoint are stored into user credentials without app-specific validation, enabling credential data injection\n\nPAIR 8:\nA: The handler resolves reqBody.userId — the calling instance's user id — directly against the local user table with no cross-instance identity mapping or scoping beyond the shared secret. On any deployment whose local user ids do not mirror the parent's id space, synced credentials are attached to an unrelated local user, so that user's bookings and meetings silently route through a stranger's calendar/video account.\nB: The handler trusts the parent's raw numeric userId to identify the local user (the schema comment says 'UserId of the cal.com user') with no cross-instance identity mapping or verification such as an email check. Unless the child instance's user id space is kept identical to cal.com's, the webhook delivers one cal.com user's OAuth credentials to the local user holding the same numeric id — a different person — who then books meetings through another user's calendar; any user created or deleted on either side diverges the id spaces and nothing in the design detects it.\n\nPAIR 9:\nA: The helper's return value is a union of a raw fetch Response (sharing branch) and whatever the provider-specific refreshFunction returns, with refreshFunction typed `() => any`, so TypeScript cannot flag call sites that consume the two branches differently. Four call sites (google, hubspot, zoho-bigin, zohocrm) compiled while reading token fields or .data off a fetch Response; the next app converted to this helper will repeat the same mistake unless the two branches are split into separately-typed functions.\nB: refreshOAuthTokens erases the return type with () => any, hiding that sync mode returns a raw fetch Response while callers expect provider-specific types (HubspotToken, axios tokenInfo with .data), causing type-boundary leaks at all 8 call sites\n\nPAIR 10:\nA: The helper's return value is a union of a raw fetch Response (sharing branch) and whatever the provider-specific refreshFunction returns, with refreshFunction typed `() => any`, so TypeScript cannot flag call sites that consume the two branches differently. Four call sites (google, hubspot, zoho-bigin, zohocrm) compiled while reading token fields or .data off a fetch Response; the next app converted to this helper will repeat the same mistake unless the two branches are split into separately-typed functions.\nB: refreshOAuthTokens returns a raw fetch Response in shared mode but callers expect axios/SDK-shaped responses, causing TypeError crashes in zoho-bigin/zohocrm, false typing in hubspot, and .data access failures in google\n\nPAIR 11:\nA: The helper's return value is a union of a raw fetch Response (sharing branch) and whatever the provider-specific refreshFunction returns, with refreshFunction typed `() => any`, so TypeScript cannot flag call sites that consume the two branches differently. Four call sites (google, hubspot, zoho-bigin, zohocrm) compiled while reading token fields or .data off a fetch Response; the next app converted to this helper will repeat the same mistake unless the two branches are split into separately-typed functions.\nB: refreshOAuthTokens returns a raw fetch Response in sync mode but Zoho Bigin, ZohoCRM, Hubspot, and Google callers access .data, causing TypeError crashes or undefined token fields\n\nPAIR 12:\nA: The helper's return value is a union of a raw fetch Response (sharing branch) and whatever the provider-specific refreshFunction returns, with refreshFunction typed `() => any`, so TypeScript cannot flag call sites that consume the two branches differently. Four call sites (google, hubspot, zoho-bigin, zohocrm) compiled while reading token fields or .data off a fetch Response; the next app converted to this helper will repeat the same mistake unless the two branches are split into separately-typed functions.\nB: refreshOAuthTokens returns a raw fetch Response in sync mode, but zoho/zoho-bigin fallbacks use axios and read tokenInfo.data.error / tokenInfo.data.expiryDate — a fetch Response has no .data, so error detection silently misbehaves and garbage expiry values get persisted\n\nPAIR 13:\nA: The helper's return value is a union of a raw fetch Response (sharing branch) and whatever the provider-specific refreshFunction returns, with refreshFunction typed `() => any`, so TypeScript cannot flag call sites that consume the two branches differently. Four call sites (google, hubspot, zoho-bigin, zohocrm) compiled while reading token fields or .data off a fetch Response; the next app converted to this helper will repeat the same mistake unless the two branches are split into separately-typed functions.\nB: refreshOAuthTokens returns the raw fetch Response object and no call site ever calls .json() on it: Google and Zoho CRM/Bigin crash with TypeError (a Response has no .data), HubSpot silently persists NaN expiry dates, Lark's handleLarkError misparses the sync payload, and Webex's schema parse rejects it, so the sync feature crashes or stores garbage for most apps\n\nPAIR 14:\nA: The helper's return value is a union of a raw fetch Response (sharing branch) and whatever the provider-specific refreshFunction returns, with refreshFunction typed `() => any`, so TypeScript cannot flag call sites that consume the two branches differently. Four call sites (google, hubspot, zoho-bigin, zohocrm) compiled while reading token fields or .data off a fetch Response; the next app converted to this helper will repeat the same mistake unless the two branches are split into separately-typed functions.\nB: The `() => any` return signature on refreshOAuthTokens hides the return-type mismatch from the type checker\n\nPAIR 15:\nA: The office365video refresh passes appSlug \"msteams\", which is not the app's store slug (office365video), while every other call site in this diff passes the app's real slug (google-calendar, hubspot, zoomvideo, webex, zoho-bigin, zohocrm, lark-calendar, office365-calendar). A parent app that keys its sync endpoint on Cal.com app slugs — as the webhook's own app lookup and the other eight call sites imply — cannot resolve \"msteams\", so MS Teams token sync fails while all other apps sync, silently degrading the Teams integration on credential-sync instances.\nB: office365video identifies itself to the sync endpoint as appSlug 'msteams' while its app-store slug — the appId the credential webhook writes credentials under, and the key a parent app matching cal.com slugs must dispatch on — is 'msteams-video'. The two halves of the sync protocol name the same app differently: a parent app keying handlers on cal.com's canonical slugs cannot match Teams refresh requests, and a Teams credential created by the webhook (appId 'msteams-video') is never paired with its 'msteams' refresh request — MS Teams sync never works.\n\nPAIR 16:\nA: The office365video refresh passes appSlug \"msteams\", which is not the app's store slug (office365video), while every other call site in this diff passes the app's real slug (google-calendar, hubspot, zoomvideo, webex, zoho-bigin, zohocrm, lark-calendar, office365-calendar). A parent app that keys its sync endpoint on Cal.com app slugs — as the webhook's own app lookup and the other eight call sites imply — cannot resolve \"msteams\", so MS Teams token sync fails while all other apps sync, silently degrading the Teams integration on credential-sync instances.\nB: refreshOAuthTokens is passed the appSlug \"msteams\" but the corresponding office365calendar service uses \"office365-calendar\" while both use the same parent-application credential store, creating two slugs for what the parent app must treat as one Microsoft integration with one set of app keys. A parent application syncing Microsoft credentials sees the same user's Microsoft credential under two different slugs, so syncing 'office365-calendar' does not cover the msteams video path and vice versa — MS Teams video calls fail to refresh in sharing mode.\n\nPAIR 17:\nA: The office365video refresh passes appSlug \"msteams\", which is not the app's store slug (office365video), while every other call site in this diff passes the app's real slug (google-calendar, hubspot, zoomvideo, webex, zoho-bigin, zohocrm, lark-calendar, office365-calendar). A parent app that keys its sync endpoint on Cal.com app slugs — as the webhook's own app lookup and the other eight call sites imply — cannot resolve \"msteams\", so MS Teams token sync fails while all other apps sync, silently degrading the Teams integration on credential-sync instances.\nB: office365video sends appSlug 'msteams', which doesn't match its app-store slug 'office365video' that the credential-sync webhook validates against prisma.app, so the parent app can't correlate the refresh request with the credential it pushed and the reverse webhook would 404 on msteams\n\nPAIR 18:\nA: The secret lookup uses process.env.CALCOM_WEBHOOK_HEADER_NAME verbatim while Node lowercases all incoming header names, and the failed lookup is reported as 'Invalid webhook secret'. A deployer who sets the header name with any uppercase character (e.g. 'Calcom-Webhook-Secret') receives a permanent 403 'Invalid webhook secret' for every sync call and debugs the secret value instead of the header-name casing; lowercasing the env read would remove the trap.\nB: CALCOM_WEBHOOK_HEADER_NAME used unvalidated as header lookup without .toLowerCase(), silently failing all requests if env var contains whitespace or caps\n\nPAIR 19:\nA: The webhook endpoint gates only on APP_CREDENTIAL_SHARING_ENABLED (i.e. CALCOM_WEBHOOK_SECRET + CALCOM_APP_CREDENTIAL_ENCRYPTION_KEY) while every consumer of the sync feature (refreshOAuthTokens, parseRefreshTokenResponse) additionally requires CALCOM_CREDENTIAL_SYNC_ENDPOINT, leaving the two gates of the same feature out of sync. A self-hosted operator who sets the webhook secret and encryption key but no sync endpoint gets a live, writable credential-injection webhook while their own instance never participates in token refresh — credentials injected by the parent will sit and rot as tokens expire with no local refresh path, and the half-enabled state is invisible in .env.example's setup instructions.\nB: APP_CREDENTIAL_SHARING_ENABLED gates the feature on only CALCOM_WEBHOOK_SECRET and CALCOM_APP_CREDENTIAL_ENCRYPTION_KEY, omitting the sibling flag CALCOM_CREDENTIAL_SYNC_ENDPOINT that refreshOAuthTokens additionally requires, leaving two inconsistent definitions of \"enabled\" on the same touched credential path. A self-hoster who sets the webhook secret and encryption key but not (or mis-spells) the sync endpoint gets the webhook endpoint active (accepting and overwriting credentials for any user id) while token refresh silently falls back to the provider endpoint — i.e., the feature appears enabled in one half of the path and disabled in the other, with no validation or error telling the operator which flag is missing.\n\nPAIR 20:\nA: The webhook endpoint gates only on APP_CREDENTIAL_SHARING_ENABLED (i.e. CALCOM_WEBHOOK_SECRET + CALCOM_APP_CREDENTIAL_ENCRYPTION_KEY) while every consumer of the sync feature (refreshOAuthTokens, parseRefreshTokenResponse) additionally requires CALCOM_CREDENTIAL_SYNC_ENDPOINT, leaving the two gates of the same feature out of sync. A self-hosted operator who sets the webhook secret and encryption key but no sync endpoint gets a live, writable credential-injection webhook while their own instance never participates in token refresh — credentials injected by the parent will sit and rot as tokens expire with no local refresh path, and the half-enabled state is invisible in .env.example's setup instructions.\nB: `APP_CREDENTIAL_SHARING_ENABLED` gate (WEBHOOK_SECRET && ENCRYPTION_KEY) diverges from runtime requirements (also needs CALCOM_CREDENTIAL_SYNC_ENDPOINT and CALCOM_WEBHOOK_HEADER_NAME), with no startup validation or health check, so misconfiguration only fails at runtime in booking flows\n",
+  "effort": "low",
+  "pairs": [
+   [
+    119,
+    191
+   ],
+   [
+    121,
+    455
+   ],
+   [
+    121,
+    506
+   ],
+   [
+    121,
+    825
+   ],
+   [
+    121,
+    2007
+   ],
+   [
+    128,
+    204
+   ],
+   [
+    128,
+    801
+   ],
+   [
+    133,
+    463
+   ],
+   [
+    139,
+    1830
+   ],
+   [
+    139,
+    1838
+   ],
+   [
+    139,
+    1842
+   ],
+   [
+    139,
+    1845
+   ],
+   [
+    139,
+    1851
+   ],
+   [
+    139,
+    1942
+   ],
+   [
+    157,
+    346
+   ],
+   [
+    157,
+    391
+   ],
+   [
+    157,
+    926
+   ],
+   [
+    182,
+    792
+   ],
+   [
+    194,
+    214
+   ],
+   [
+    194,
+    609
+   ]
+  ]
+ },
+ "parsed_response": {
+  "pairs": [
+   {
+    "pair": 1,
+    "a": {
+     "mechanism": "Sync fetch has no auth header/Content-Type/timeout and the request/response contract is hand-maintained in parallel with the webhook handler",
+     "trigger": "Operator exposes sync endpoint; either side of the contract is edited",
+     "consequence": "Unauthenticated POST accepted; contract drift causes silent runtime failure during live token refresh in booking flows"
+    },
+    "b": {
+     "mechanism": "Sync fetch sends no authentication and consumes/plaintext-transmits tokens while inbound path uses AES-256",
+     "trigger": "Anyone who can reach CALCOM_CREDENTIAL_SYNC_ENDPOINT POSTs calcomUserId/appSlug",
+     "consequence": "Attacker receives live OAuth tokens for arbitrary users with no application-layer encryption"
+    },
+    "material_differences": [
+     "A's core claim is parallel-contract drift causing silent sync failures; B's core claim is active token exfiltration/plaintext exposure",
+     "A does not claim tokens are returned to arbitrary requesters; B does not claim schema drift"
+    ],
+    "same": false,
+    "confidence": 0.85,
+    "reason": "Both note missing auth on the fetch, but the material claims diverge: A reports a maintenance/drift defect, B reports an active confidentiality/token-theft failure with a different mechanism and consequence."
+   },
+   {
+    "pair": 2,
+    "a": {
+     "mechanism": "findFirst-then-create/update with no concurrency guard or idempotency key; both deliveries take create branch",
+     "trigger": "Webhook retried while first delivery in flight",
+     "consequence": "Duplicate (userId, appId) rows; later findFirst returns arbitrary row, updates land on wrong credential, stale keys flapping"
+    },
+    "b": {
+     "mechanism": "findFirst-then-create without transaction and no unique constraint on (userId, appId); both take create path; unordered findFirst updates nondeterministic row",
+     "trigger": "Overlapping initial syncs",
+     "consequence": "Duplicate credentials; later syncs update only one, stale credential serves bookings, intermittent 401s survive re-sync"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Same root cause (find-then-create race, no transaction/unique constraint/idempotency), same trigger (concurrent/retried deliveries), same consequence (duplicates, arbitrary findFirst updates, stale credential used by bookings)."
+   },
+   {
+    "pair": 3,
+    "a": {
+     "mechanism": "findFirst-then-create/update with no concurrency guard; both deliveries create",
+     "trigger": "Retried webhook while first in flight",
+     "consequence": "Duplicate rows; arbitrary findFirst updates wrong credential; stale keys flapping"
+    },
+    "b": {
+     "mechanism": "findFirst→create/update with no transaction and no unique constraint; deleteMany-before-create in createOAuthAppCredential proves no unique index; concurrent deliveries both create",
+     "trigger": "Concurrent webhook deliveries (normal per delivery semantics)",
+     "consequence": "Duplicate (userId,appId) rows; ambiguous lookups; findFirst updates arbitrary duplicate while stale sibling serves bookings"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Identical root cause, trigger, and consequence; B only adds supporting evidence (deleteMany-before-create) for the same claim."
+   },
+   {
+    "pair": 4,
+    "a": {
+     "mechanism": "findFirst-then-create/update with no concurrency guard/idempotency; both take create branch",
+     "trigger": "Webhook retried while first in flight",
+     "consequence": "Duplicate credential rows; updates land on different credential than app reads, stale keys flapping"
+    },
+    "b": {
+     "mechanism": "find-then-create race without unique constraint or transaction",
+     "trigger": "Two concurrent webhooks for same user+app",
+     "consequence": "Both take create branch, duplicate credentials"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "B is a compressed restatement of the same race, trigger, and duplicate-row consequence."
+   },
+   {
+    "pair": 5,
+    "a": {
+     "mechanism": "findFirst-then-create/update with no concurrency guard/idempotency",
+     "trigger": "Retried webhook while first in flight",
+     "consequence": "Duplicate credential rows; arbitrary findFirst updates; stale keys flapping"
+    },
+    "b": {
+     "mechanism": "findFirst-then-create without transaction or unique constraint on (userId, appId)",
+     "trigger": "Concurrent webhook deliveries",
+     "consequence": "Duplicate credentials created"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Same defect: same code path, same race trigger, same duplicate-row consequence; B is a shorter summary."
+   },
+   {
+    "pair": 6,
+    "a": {
+     "mechanism": "Caller-provided schema discarded in sharing mode; minimumTokenResponseSchema wins, contradicting signature contract",
+     "trigger": "Sharing mode enabled; per-app schema validation expected",
+     "consequence": "Per-app validation silently ignored; missing-expiry failures pass green; stored credential unusable"
+    },
+    "b": {
+     "mechanism": "Sync-enabled mode downgrades validation from app-specific schemas to nearly unconstrained minimum schema",
+     "trigger": "Self-hosters enable sync",
+     "consequence": "Wrong sync response persisted as credential; mysterious per-app failures later"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "Same root cause (schema replaced by minimum schema in sharing mode) and same consequence (unvalidated token data persisted, failures surface later)."
+   },
+   {
+    "pair": 7,
+    "a": {
+     "mechanism": "Caller-provided schema discarded in sharing mode; minimumTokenResponseSchema wins",
+     "trigger": "Sharing/sync mode enabled",
+     "consequence": "Per-app validation silently ignored; missing-expiry failures pass green while stored credential unusable"
+    },
+    "b": {
+     "mechanism": "Sharing mode replaces app-specific schemas with minimum schema",
+     "trigger": "Tokens from remote sync endpoint",
+     "consequence": "Stored without app-specific validation, enabling credential data injection"
+    },
+    "material_differences": [
+     "B frames the consequence as an attacker-relevant credential data injection; A frames it as silent validation loss producing unusable credentials",
+     "A emphasizes the API-contract/developer-experience violation; B claims an injection vulnerability"
+    ],
+    "same": false,
+    "confidence": 0.6,
+    "reason": "Same mechanism, but B asserts a materially different consequence (credential data injection / security exposure) not claimed by A, which reports validation loss and unusable credentials."
+   },
+   {
+    "pair": 8,
+    "a": {
+     "mechanism": "reqBody.userId (parent's user id) resolved directly against local user table with no cross-instance mapping",
+     "trigger": "Deployment whose local user ids don't mirror parent's id space",
+     "consequence": "Synced credentials attached to unrelated local user; bookings route through stranger's account"
+    },
+    "b": {
+     "mechanism": "Parent's raw numeric userId trusted with no identity mapping/verification",
+     "trigger": "Child instance's id space differs from cal.com's (user created/deleted diverges ids)",
+     "consequence": "One user's OAuth credentials delivered to a different local user; bookings through another user's calendar; nothing detects divergence"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Identical mechanism (raw userId trusted, no cross-instance mapping), same trigger, same consequence (credentials attached to a different person, their bookings use stranger's account)."
+   },
+   {
+    "pair": 9,
+    "a": {
+     "mechanism": "Union return type (fetch Response vs provider refreshFunction result) with refreshFunction typed () => any hides mismatched consumption",
+     "trigger": "Call sites consume two branches differently",
+     "consequence": "Four call sites (google, hubspot, zoho-bigin, zohocrm) compiled while mis-reading Response; future apps repeat mistake"
+    },
+    "b": {
+     "mechanism": "refreshOAuthTokens erases return type with () => any; sync mode returns raw Response vs expected provider types",
+     "trigger": "All call sites",
+     "consequence": "Type-boundary leaks at all 8 call sites"
+    },
+    "material_differences": [
+     "A claims four call sites exhibit the mis-consumption; B claims all 8 call sites have type-boundary leaks"
+    ],
+    "same": false,
+    "confidence": 0.6,
+    "reason": "Same core typing defect, but the two reports make conflicting factual claims about scope (4 affected sites vs all 8), a material difference in claimed impact."
+   },
+   {
+    "pair": 10,
+    "a": {
+     "mechanism": "Union return type with () => any hides that sharing branch returns fetch Response; call sites read token fields/.data off it",
+     "trigger": "Sharing branch taken; call sites consume as provider type",
+     "consequence": "Four sites (google, hubspot, zoho-bigin, zohocrm) mis-read Response; future apps repeat mistake"
+    },
+    "b": {
+     "mechanism": "Shared mode returns raw fetch Response but callers expect axios/SDK shapes",
+     "trigger": "Same call sites in shared/sync mode",
+     "consequence": "TypeError crashes in zoho-bigin/zohocrm, false typing hubspot, .data access failures in google"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.75,
+    "reason": "B states the runtime manifestation of A's exact claim: same four apps, same mis-consumption of fetch Response, same mechanism (type erasure hiding mismatch)."
+   },
+   {
+    "pair": 11,
+    "a": {
+     "mechanism": "Union return type with () => any; sharing branch returns fetch Response consumed as provider shape",
+     "trigger": "Sharing branch at four call sites",
+     "consequence": "Mis-reading token fields/.data off Response at google, hubspot, zoho-bigin, zohocrm"
+    },
+    "b": {
+     "mechanism": "Sync mode returns raw fetch Response; Zoho Bigin, ZohoCRM, Hubspot, Google callers access .data",
+     "trigger": "Sync mode",
+     "consequence": "TypeError crashes or undefined token fields"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.8,
+    "reason": "Same apps, same mechanism, same consequence — B is a restatement with explicit crash wording."
+   },
+   {
+    "pair": 12,
+    "a": {
+     "mechanism": "Union return type with () => any; sharing branch returns fetch Response; call sites read .data/token fields off it",
+     "trigger": "Sharing/sync branch",
+     "consequence": "zoho-bigin/zohocrm among four sites mis-read Response, causing wrong consumption and unusable data"
+    },
+    "b": {
+     "mechanism": "Sync mode returns raw fetch Response but zoho/zoho-bigin axios fallbacks read tokenInfo.data.error / tokenInfo.data.expiryDate",
+     "trigger": "Sync mode at zoho call sites",
+     "consequence": "Error detection silently misbehaves; garbage expiry values persisted"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.7,
+    "reason": "B elaborates the same defect A claims for the same sites (reading .data off a fetch Response), with the consequence being the same mis-consumption producing bad persisted values."
+   },
+   {
+    "pair": 13,
+    "a": {
+     "mechanism": "Union return type with () => any; sharing branch returns fetch Response consumed incorrectly",
+     "trigger": "Sharing branch at four sites (google, hubspot, zoho-bigin, zohocrm)",
+     "consequence": "Mis-reads at those four sites; future apps repeat mistake"
+    },
+    "b": {
+     "mechanism": "Raw fetch Response returned, never .json()'d",
+     "trigger": "Google, Zoho CRM/Bigin, HubSpot, Lark, Webex call sites",
+     "consequence": "TypeErrors at Google/Zoho, HubSpot NaN expiry persisted, Lark handleLarkError misparses, Webex schema rejects — crashes or garbage for most apps"
+    },
+    "material_differences": [
+     "B adds material claims about Lark and Webex failures not present in A",
+     "B adds HubSpot NaN-expiry persistence claim not in A",
+     "B scopes to 'most apps' beyond A's four sites"
+    ],
+    "same": false,
+    "confidence": 0.75,
+    "reason": "B is a compound report adding new failing call sites (Lark, Webex) and new consequences beyond A's claims; compound reports do not equal their subsets."
+   },
+   {
+    "pair": 14,
+    "a": {
+     "mechanism": "Union return type with refreshFunction typed () => any hides mismatched branch consumption",
+     "trigger": "Call sites consume Response vs provider shape",
+     "consequence": "Four sites compiled while mis-reading; type checker silent"
+    },
+    "b": {
+     "mechanism": "() => any return signature hides the return-type mismatch from the type checker",
+     "trigger": "Type checking of refreshOAuthTokens call sites",
+     "consequence": "Mismatch not flagged"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.7,
+    "reason": "B is a compressed restatement of A's core claim — the () => any typing hides the return-type mismatch — with no additional or conflicting material claims."
+   },
+   {
+    "pair": 15,
+    "a": {
+     "mechanism": "office365video passes appSlug 'msteams', not its store slug 'office365video'; parent keying on Cal.com slugs can't resolve it",
+     "trigger": "Teams refresh request on credential-sync instance",
+     "consequence": "Parent can't resolve 'msteams'; MS Teams token sync fails while other apps sync, silent degradation"
+    },
+    "b": {
+     "mechanism": "office365video sends 'msteams' but its app-store slug (appId webhook writes) is 'msteams-video'; parent keying on canonical slugs can't match",
+     "trigger": "Teams refresh request vs webhook-written credential",
+     "consequence": "Refresh request never paired with its credential; MS Teams sync never works"
+    },
+    "material_differences": [
+     "A claims the canonical slug is 'office365video'; B claims it is 'msteams-video' — conflicting factual claims about the correct identifier"
+    ],
+    "same": false,
+    "confidence": 0.55,
+    "reason": "Both claim the 'msteams' appSlug mismatch breaks Teams sync, but they assert conflicting canonical slugs, a material factual conflict I cannot reconcile per instructions."
+   },
+   {
+    "pair": 16,
+    "a": {
+     "mechanism": "office365video passes 'msteams' which is not a valid Cal.com store slug; parent can't resolve it",
+     "trigger": "Teams refresh on sync instance",
+     "consequence": "Parent can't resolve slug; Teams token sync fails, silent degradation"
+    },
+    "b": {
+     "mechanism": "office365video uses 'msteams' while office365calendar uses 'office365-calendar', creating two slugs for one Microsoft integration with one credential store",
+     "trigger": "Parent syncing Microsoft credentials",
+     "consequence": "Syncing one slug doesn't cover the other; Teams video refresh fails in sharing mode"
+    },
+    "material_differences": [
+     "A claims 'msteams' is an unresolvable non-slug; B claims the defect is slug-family inconsistency between msteams and office365-calendar",
+     "Different mechanism: A = invalid slug lookup; B = split-identity/same-credential-store conflict"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "Different material claims: A reports an invalid/unresolvable slug; B reports a two-slugs-for-one-integration inconsistency across office365 apps."
+   },
+   {
+    "pair": 17,
+    "a": {
+     "mechanism": "office365video passes appSlug 'msteams', not its store slug 'office365video'; parent keyed on Cal.com slugs can't resolve it",
+     "trigger": "Teams refresh request via sync endpoint",
+     "consequence": "Parent can't resolve 'msteams'; MS Teams token sync fails silently"
+    },
+    "b": {
+     "mechanism": "office365video sends 'msteams', mismatching app-store slug 'office365video' that the credential webhook validates against prisma.app",
+     "trigger": "Reverse webhook / parent correlation of refresh request with pushed credential",
+     "consequence": "Parent can't correlate refresh with pushed credential; reverse webhook 404s on msteams; Teams sync broken"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.75,
+    "reason": "Same slug mismatch ('msteams' vs office365video), same lookup-against-prisma.app mechanism, same consequence (parent can't correlate, Teams sync fails)."
+   },
+   {
+    "pair": 18,
+    "a": {
+     "mechanism": "process.env.CALCOM_WEBHOOK_HEADER_NAME read verbatim while Node lowercases header names; failure reported as 'Invalid webhook secret'",
+     "trigger": "Deployer sets header name with any uppercase character",
+     "consequence": "Permanent 403 'Invalid webhook secret' for every sync call; operator debugs secret value instead of casing"
+    },
+    "b": {
+     "mechanism": "CALCOM_WEBHOOK_HEADER_NAME used unvalidated as header lookup without .toLowerCase()",
+     "trigger": "Env var contains whitespace or caps",
+     "consequence": "Silently fails all requests"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.65,
+    "reason": "Same mechanism (missing lowercase normalization of env header name vs Node's lowercased headers) and same consequence (silent universal auth failures); B's whitespace mention is a minor elaboration of the same unvalidated-lookup defect, not a distinct claim."
+   },
+   {
+    "pair": 19,
+    "a": {
+     "mechanism": "Webhook gated only on APP_CREDENTIAL_SHARING_ENABLED (secret+encryption key) while refreshOAuthTokens/parseRefreshTokenResponse also require CALCOM_CREDENTIAL_SYNC_ENDPOINT",
+     "trigger": "Operator sets secret+encryption key but no sync endpoint",
+     "consequence": "Live writable credential-injection webhook while instance never participates in refresh; injected credentials rot as tokens expire; half-enabled state invisible in docs"
+    },
+    "b": {
+     "mechanism": "APP_CREDENTIAL_SHARING_ENABLED gates on only secret+encryption key, omitting CALCOM_CREDENTIAL_SYNC_ENDPOINT that refreshOAuthTokens requires",
+     "trigger": "Self-hoster sets webhook secret and encryption key but not (or mis-spells) sync endpoint",
+     "consequence": "Webhook active (accepting/overwriting credentials for any user id) while token refresh falls back to provider endpoint; feature half-enabled with no validation/error telling operator which flag is missing"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.75,
+    "reason": "Same gate-divergence mechanism, same trigger (missing sync endpoint), same half-enabled consequence with no validation; B's fallback-to-provider phrasing is the same 'one half disabled' state A describes."
+   },
+   {
+    "pair": 20,
+    "a": {
+     "mechanism": "Webhook gated only on APP_CREDENTIAL_SHARING_ENABLED while all sync consumers additionally require CALCOM_CREDENTIAL_SYNC_ENDPOINT",
+     "trigger": "Operator sets secret+encryption key but no sync endpoint",
+     "consequence": "Live writable credential-injection webhook; instance never participates in refresh; injected credentials rot as tokens expire; half-enabled state invisible in .env.example"
+    },
+    "b": {
+     "mechanism": "APP_CREDENTIAL_SHARING_ENABLED gate (secret+key) diverges from runtime requirements which also need CALCOM_CREDENTIAL_SYNC_ENDPOINT and CALCOM_WEBHOOK_HEADER_NAME; no startup validation or health check",
+     "trigger": "Misconfiguration of any of the required env vars",
+     "consequence": "Misconfiguration only fails at runtime in booking flows"
+    },
+    "material_differences": [
+     "B adds CALCOM_WEBHOOK_HEADER_NAME as a required runtime variable not mentioned in A",
+     "B's stated consequence (fails at runtime in booking flows) omits and conflicts with A's credential-rot/injection-webhook consequence"
+    ],
+    "same": false,
+    "confidence": 0.55,
+    "reason": "B adds a material claim (HEADER_NAME as part of the divergent requirements) and frames a different consequence; per strict comparison the compound report does not equal A's subset."
+   }
+  ]
+ },
+ "usage": {
+  "glm-5.3-background": {
+   "input_tokens": 3849,
+   "cache_read_input_tokens": 384,
+   "cache_creation_input_tokens": 0,
+   "output_tokens": 3832,
+   "reasoning_output_tokens": 4261,
+   "cost_usd": 0.0,
+   "total_tokens": 12326
+  }
+ },
+ "status": "complete",
+ "error_type": null,
+ "elapsed_s": 58.9387481212616
+}

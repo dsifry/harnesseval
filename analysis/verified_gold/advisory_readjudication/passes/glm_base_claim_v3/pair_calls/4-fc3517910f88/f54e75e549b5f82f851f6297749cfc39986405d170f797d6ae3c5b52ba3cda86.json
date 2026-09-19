@@ -1,0 +1,484 @@
+{
+ "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/4",
+ "pass_digest": "9c5f733ce7a3f996c90c67f262cc4a77e2b234bc415c197afa7c73477ad320be",
+ "request_sha256": "f54e75e549b5f82f851f6297749cfc39986405d170f797d6ae3c5b52ba3cda86",
+ "request": {
+  "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/4",
+  "model": "glm-5.3-background",
+  "system": "You are clustering code review findings from one PR. Always respond with valid JSON.",
+  "prompt": "You are clustering code review findings from the same PR. For each PAIR below, decide whether the two findings describe the SAME underlying issue — same root cause in the same code location. Different wording is fine. A finding about a DIFFERENT defect in the same file or function is NOT the same issue. Severity or aspect differences of the same root cause ARE the same issue.\n\n\nFor THIS scoring pass, duplicate equivalence is stricter than sharing a root cause.\nYou must compare the COMPLETE MATERIAL CLAIMS, including mechanism, triggering\nconditions, execution path, and consequence. The same line or broad concern does\nnot establish equivalence. A report of wrong-category selection, a case/rename\nmismatch, a crash, and a silent fallback are different claims even at one lookup.\nAn inactive/unbound API concern and an alleged active user-facing failure differ.\nA compound report with an additional material claim does NOT equal its subset.\nDifferences only in wording, severity, or hedging do not create separate claims.\nIf the claimed mechanisms, triggers or consequences conflict, or one report adds\nan unsupported/different material factual claim, return same=false. You are NOT\nverifying which claim is true; do not repair or reinterpret either report to make\nthem match. If unsure whether their full claims are equivalent, return false.\n\nFor every numbered pair, extract what A and B actually CLAIM into mechanism,\ntrigger and consequence. Then list material_differences and give your equivalence\nverdict, confidence and reason. same=true requires no material differences.\nReturn ONLY this JSON object, with EVERY pair index exactly once:\n{\"pairs\":[{\"pair\":1,\"a\":{\"mechanism\":\"...\",\"trigger\":\"...\",\"consequence\":\"...\"},\"b\":{\"mechanism\":\"...\",\"trigger\":\"...\",\"consequence\":\"...\"},\"material_differences\":[],\"same\":true,\"confidence\":0.9,\"reason\":\"...\"}]}\n\nPAIRS:\nPAIR 1:\nA: app/controllers/embed_controller.rb:26 — `URI(request.referer || '').host != SiteSetting.embeddable_host` is an exact case-sensitive single-host compare, so a blog served at both `www.example.com` and `example.com` (or with a differently-cased/space-padded setting value) gets InvalidAccess on one variant with no multi-host or normalization support, and the same exact compare in lib/topic_retriever.rb:15 rejects those embed URLs too (P2, conf 75)\nB: embed_controller.rb referer check breaks embedding for any visitor whose browser suppresses the Referer header (privacy modes, Referrer-Policy: no-referrer, HTTPS→HTTP), returning an error page inside the iframe; security relies solely on a client-controlled header\n\nPAIR 2:\nA: app/controllers/embed_controller.rb:26 — `URI(request.referer || '').host != SiteSetting.embeddable_host` is an exact case-sensitive single-host compare, so a blog served at both `www.example.com` and `example.com` (or with a differently-cased/space-padded setting value) gets InvalidAccess on one variant with no multi-host or normalization support, and the same exact compare in lib/topic_retriever.rb:15 rejects those embed URLs too (P2, conf 75)\nB: Referer-based gating (app/controllers/embed_controller.rb:26) fails for referer-less clients: browsers/extensions configured to suppress the Referer header (private modes, privacy tools) render a hard error inside the embed iframe instead of comments\n\nPAIR 3:\nA: app/jobs/scheduled/poll_feed.rb:31 — `rss.items.each do |i| ... TopicEmbed.import(user, url, i.title, content)` has no per-item rescue, so one poison item (nil `i.content` on RSS items that only have <description> raising NoMethodError on `.scrub`, an unparseable link raising URI::InvalidURIError in absolutize_urls, a RecordNotUnique race) aborts the whole loop, and since feed order is stable the same item fails first every hour, silently blocking all subsequent items forever (P1, conf 75)\nB: Poison-item cascade in `app/jobs/scheduled/poll_feed.rb:27-33`: `rss.items.each` has no per-item error handling, so any exception aborts the run mid-iteration — e.g. nil `i.content` (SimpleRSS exposes `content:encoded` underscored) causing `nil.scrub` NoMethodError, a stale embed whose post was deleted crashing `PostRevisor.new(nil)` at `topic_embed.rb:30`, or `URI()` raising inside `absolutize_urls`; with `sidekiq_options retry: false` the next hourly run dies at the same item, permanently and silently halting all feed importing, and `topic_retriever.rb:37` invoking `Jobs::PollFeed.new.execute({})` synchronously per embed request compounds the failure\n\nPAIR 4:\nA: app/jobs/scheduled/poll_feed.rb:21 — LLM failure mode/dead code (P3, conf 75): `feed_key` (\"feed-modified:...\") is defined but never used, which implies conditional/If-Modified-Since polling that does not exist, so every hourly run and every inline retrieve re-downloads and re-hashes the full feed.\nB: feed_key (poll_feed.rb:20-22) is dead code — the intended feed-modified check was never wired up, so every first-time embed request re-downloads and re-processes the entire feed\n\nPAIR 5:\nA: app/jobs/scheduled/poll_feed.rb:21 — LLM failure mode/dead code (P3, conf 75): `feed_key` (\"feed-modified:...\") is defined but never used, which implies conditional/If-Modified-Since polling that does not exist, so every hourly run and every inline retrieve re-downloads and re-hashes the full feed.\nB: feed_key in poll_feed.rb is dead code: never read or written, no If-Modified-Since/etag handling, so every run re-parses the full feed and the first poll imports the entire backlog\n\nPAIR 6:\nA: app/jobs/scheduled/poll_feed.rb:21 — LLM failure mode/dead code (P3, conf 75): `feed_key` (\"feed-modified:...\") is defined but never used, which implies conditional/If-Modified-Since polling that does not exist, so every hourly run and every inline retrieve re-downloads and re-hashes the full feed.\nB: poll_feed.rb:33-38 — hourly full re-import of entire feed with no per-item change detection; no SHA1 short-circuit, no limit/pagination on rss.items, no incremental cursor, causing hourly O(N) full scan, Nokogiri parses, and potentially N post revisions even when feed unchanged\n\nPAIR 7:\nA: app/jobs/scheduled/poll_feed.rb:29 — open(SiteSetting.feed_polling_url)` passes an unvalidated setting to Kernel#open, which treats a leading \"|\" as a shell command and permits file:// URLs, turning a site-setting write into command execution/file read.\nB: app/jobs/scheduled/poll_feed.rb:30 — Kernel#open on the feed_polling_url setting allows a \"|cmd\" value to execute shell commands (admin-to-RCE) and follows redirects without restriction.\n\nPAIR 8:\nA: app/jobs/scheduled/poll_feed.rb:29 — open(SiteSetting.feed_polling_url)` passes an unvalidated setting to Kernel#open, which treats a leading \"|\" as a shell command and permits file:// URLs, turning a site-setting write into command execution/file read.\nB: poll_feed.rb and topic_embed.rb use Kernel#open on a user-supplied URL, which executes a subprocess when the string begins with '|', allowing command injection\n\nPAIR 9:\nA: app/jobs/scheduled/poll_feed.rb:35 — [P1, conf 50] `i.content.scrub` calls String#scrub, which was only added in Ruby 2.1, and Gemfile_rails4.lock has no scrub backport gem (scrub_rb/string-scrub); on the Ruby 2.0 runtime this Rails 4.0.2 / Dec-2013 codebase targets, every feed item raises NoMethodError, so no feed is ever imported.\nB: app/jobs/scheduled/poll_feed.rb:35 — `content = CGI.unescapeHTML(i.content.scrub)` crashes every feed import with `NoMethodError: undefined method 'scrub'` on the repository's supported Ruby 2.0 runtime because `String#scrub` is a Ruby 2.1 API and no compatibility dependency is declared.\n\nPAIR 10:\nA: app/jobs/scheduled/poll_feed.rb:35 — [P1, conf 50] `i.content.scrub` calls String#scrub, which was only added in Ruby 2.1, and Gemfile_rails4.lock has no scrub backport gem (scrub_rb/string-scrub); on the Ruby 2.0 runtime this Rails 4.0.2 / Dec-2013 codebase targets, every feed item raises NoMethodError, so no feed is ever imported.\nB: app/jobs/scheduled/poll_feed.rb:35 — `String#scrub` only exists in Ruby 2.1+, and nothing in the Gemfile adds a backport (no scrub_rb) even though the Gemfile still targets 1.9/2.0-era runtimes (\"perftools only works on 1.9 atm\"), so feed polling raises NoMethodError on those rubies (P2, conf 50)\n\nPAIR 11:\nA: app/jobs/scheduled/poll_feed.rb:35 — [P1, conf 50] `i.content.scrub` calls String#scrub, which was only added in Ruby 2.1, and Gemfile_rails4.lock has no scrub backport gem (scrub_rb/string-scrub); on the Ruby 2.0 runtime this Rails 4.0.2 / Dec-2013 codebase targets, every feed item raises NoMethodError, so no feed is ever imported.\nB: `String#scrub` in poll_feed.rb:32 requires Ruby ≥ 2.1 — on the Ruby 2.0 current at the PR's date, `i.content.scrub` raises NoMethodError on every run, making feed importing completely non-functional while CI stays green because the specs stub out poll_feed\n\nPAIR 12:\nA: app/jobs/scheduled/poll_feed.rb:35 — [P1, conf 50] `i.content.scrub` calls String#scrub, which was only added in Ruby 2.1, and Gemfile_rails4.lock has no scrub backport gem (scrub_rb/string-scrub); on the Ruby 2.0 runtime this Rails 4.0.2 / Dec-2013 codebase targets, every feed item raises NoMethodError, so no feed is ever imported.\nB: String#scrub requires Ruby 2.1+ but Ruby 2.0 was in use at the time and the string-scrub backport is not bundled in this PR — calling it in poll_feed.rb would be a NoMethodError breaking all feed polling\n\nPAIR 13:\nA: app/jobs/scheduled/poll_feed.rb:35 — [P1, conf 75] `content = CGI.unescapeHTML(i.content.scrub)` assumes every SimpleRSS item has a `content` element, but plain RSS 2.0 feeds only give `description`/`content:encoded` (exposed as `content_encoded`), so `i.content` is nil and `nil.scrub` raises NoMethodError; that kills the whole poll, and because lib/topic_retriever.rb:41 runs `Jobs::PollFeed.new.execute({})` inline with no rescue, the RetrieveTopic job also crashes before it reaches the `fetch_http` fallback at line 45.\nB: PollFeed crashes on common RSS 2.0 feeds: `i.content.scrub` at app/jobs/scheduled/poll_feed.rb:35 raises NoMethodError because SimpleRSS exposes RSS 2.0's `content:encoded` as `content_encoded` and plain RSS items have no `content`; with `sidekiq_options retry: false` (:12) the hourly import dies mid-feed and items after the crash point are never imported, silently breaking the documented RSS/ATOM support for the most common feeds (WordPress et al.); `String#scrub` also requires Ruby >= 2.1\n\nPAIR 14:\nA: app/jobs/scheduled/poll_feed.rb:28 — Iterates and imports every feed item without a limit or incremental cursor, so a large feed causes unbounded work on every hourly poll.\nB: app/jobs/scheduled/poll_feed.rb:29 — Feed polling reads, parses, and iterates an unbounded remote feed without a response-size or item limit.\n\nPAIR 15:\nA: app/jobs/scheduled/poll_feed.rb:28 — Iterates and imports every feed item without a limit or incremental cursor, so a large feed causes unbounded work on every hourly poll.\nB: app/jobs/scheduled/poll_feed.rb:29 — open(SiteSetting.feed_polling_url) reads the whole feed into memory with no timeout/size limit, and feed_key is never used so no If-Modified-Since/ETag conditional fetch — the full feed is re-downloaded and every item re-hashed/looked up hourly.\n\nPAIR 16:\nA: app/jobs/scheduled/poll_feed.rb:28 — Iterates and imports every feed item without a limit or incremental cursor, so a large feed causes unbounded work on every hourly poll.\nB: app/jobs/scheduled/poll_feed.rb:29 — The poller downloads and parses the entire feed without a byte or item limit, so an oversized or growing feed can exhaust worker memory on every poll.\n\nPAIR 17:\nA: app/jobs/scheduled/poll_feed.rb:28 — Iterates and imports every feed item without a limit or incremental cursor, so a large feed causes unbounded work on every hourly poll.\nB: app/jobs/scheduled/poll_feed.rb:30 — Feed is fetched via open() with no timeout/size limit and every item is re-imported (string build, SHA1, DB lookup) each poll with no Last-Modified/ETag check despite defining feed_key.\n\nPAIR 18:\nA: app/jobs/scheduled/poll_feed.rb:28 — Iterates and imports every feed item without a limit or incremental cursor, so a large feed causes unbounded work on every hourly poll.\nB: app/jobs/scheduled/poll_feed.rb:31 — Every poll walks the entire feed and performs per-item database import lookups, so feed size drives unbounded memory and query work instead of a capped batch.\n\nPAIR 19:\nA: app/jobs/scheduled/poll_feed.rb:28 — Iterates and imports every feed item without a limit or incremental cursor, so a large feed causes unbounded work on every hourly poll.\nB: app/jobs/scheduled/poll_feed.rb:31 — Iterates every item in the feed with no limit, running a full PostCreator/PostRevisor (plus a topic_embeds lookup) per item, so a large feed can monopolize the worker.\n\nPAIR 20:\nA: app/jobs/scheduled/poll_feed.rb:28 — Iterates and imports every feed item without a limit or incremental cursor, so a large feed causes unbounded work on every hourly poll.\nB: app/jobs/scheduled/poll_feed.rb:31 — Iterating every feed item calls an import that performs a separate embed lookup, creating an unbounded N+1 database workload for large feeds.\n",
+  "effort": "low",
+  "pairs": [
+   [
+    510,
+    1082
+   ],
+   [
+    510,
+    1455
+   ],
+   [
+    614,
+    1406
+   ],
+   [
+    585,
+    1096
+   ],
+   [
+    585,
+    1098
+   ],
+   [
+    585,
+    1426
+   ],
+   [
+    597,
+    603
+   ],
+   [
+    597,
+    1421
+   ],
+   [
+    636,
+    639
+   ],
+   [
+    636,
+    661
+   ],
+   [
+    636,
+    1679
+   ],
+   [
+    636,
+    1680
+   ],
+   [
+    638,
+    1412
+   ],
+   [
+    593,
+    595
+   ],
+   [
+    593,
+    598
+   ],
+   [
+    593,
+    600
+   ],
+   [
+    593,
+    602
+   ],
+   [
+    593,
+    606
+   ],
+   [
+    593,
+    607
+   ],
+   [
+    593,
+    608
+   ]
+  ]
+ },
+ "parsed_response": {
+  "pairs": [
+   {
+    "pair": 1,
+    "a": {
+     "mechanism": "exact case-sensitive single-host comparison of referer host vs embeddable_host setting",
+     "trigger": "blog served at www and bare domain variants, or differently-cased/space-padded setting",
+     "consequence": "InvalidAccess for one host variant in embed_controller and topic_retriever"
+    },
+    "b": {
+     "mechanism": "referer-host check fails when Referer header absent",
+     "trigger": "privacy modes / no-referrer policy / HTTPS→HTTP",
+     "consequence": "error page inside iframe; security relies on client-controlled header"
+    },
+    "material_differences": [
+     "different trigger (host mismatch vs missing referer)",
+     "different claim about normalization vs referer suppression"
+    ],
+    "same": false,
+    "confidence": 0.95,
+    "reason": "Different triggering conditions and mechanisms despite same line."
+   },
+   {
+    "pair": 2,
+    "a": {
+     "mechanism": "exact case-sensitive single-host compare, no multi-host/normalization",
+     "trigger": "www vs bare domain or case/padding variance in setting",
+     "consequence": "InvalidAccess on one host variant, also in topic_retriever"
+    },
+    "b": {
+     "mechanism": "referer gating fails for referer-less clients",
+     "trigger": "browsers/extensions suppressing Referer",
+     "consequence": "hard error inside embed iframe instead of comments"
+    },
+    "material_differences": [
+     "host-string mismatch vs absent header",
+     "different affected users"
+    ],
+    "same": false,
+    "confidence": 0.95,
+    "reason": "Missing-referer failure is a distinct defect from strict host comparison."
+   },
+   {
+    "pair": 3,
+    "a": {
+     "mechanism": "no per-item rescue in rss.items.each; one poison item aborts loop; stable order blocks all subsequent items forever",
+     "trigger": "nil i.content NoMethodError, URI::InvalidURIError, RecordNotUnique race",
+     "consequence": "whole loop aborts; same item fails each hour, silently blocking subsequent items (P1)"
+    },
+    "b": {
+     "mechanism": "no per-item error handling; exception aborts run mid-iteration; retry: false so same item kills each hourly run permanently",
+     "trigger": "nil i.content, PostRevisor.new(nil) on deleted post, URI() in absolutize_urls",
+     "consequence": "permanent silent halt of feed importing; adds claim that topic_retriever.rb:37 runs PollFeed inline per embed request"
+    },
+    "material_differences": [
+     "B adds PostRevisor nil crash and synchronous inline execution claim"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "Core poison-item cascade matches, but B adds a compound extra material claim (inline execute per embed request, stale-post crash) making it a superset."
+   },
+   {
+    "pair": 4,
+    "a": {
+     "mechanism": "feed_key defined but never used; no If-Modified-Since polling",
+     "trigger": "every hourly run and every inline retrieve",
+     "consequence": "full re-download and re-hash of feed every run"
+    },
+    "b": {
+     "mechanism": "feed_key dead code, intended feed-modified check never wired",
+     "trigger": "every first-time embed request",
+     "consequence": "re-downloads and re-processes entire feed"
+    },
+    "material_differences": [
+     "A adds hourly-run and re-hash claim; B limits to first-time embed request"
+    ],
+    "same": false,
+    "confidence": 0.6,
+    "reason": "Both dead-code feed_key claims, but A's claim covers hourly runs too and B restricts trigger to embed requests; scope difference is arguably severity/aspect. Borderline; strict pass: false."
+   },
+   {
+    "pair": 5,
+    "a": {
+     "mechanism": "feed_key dead code, no If-Modified-Since",
+     "trigger": "every hourly run and inline retrieve",
+     "consequence": "full re-download/re-hash every run"
+    },
+    "b": {
+     "mechanism": "feed_key never read/written, no If-Modified-Since/etag",
+     "trigger": "every run",
+     "consequence": "full re-parse; first poll imports entire backlog"
+    },
+    "material_differences": [
+     "B adds first-poll backlog import consequence"
+    ],
+    "same": false,
+    "confidence": 0.6,
+    "reason": "B adds additional material consequence (first poll imports backlog) not in A."
+   },
+   {
+    "pair": 6,
+    "a": {
+     "mechanism": "feed_key dead code; no conditional fetch",
+     "trigger": "every hourly run and inline retrieve",
+     "consequence": "full re-download and re-hash each run"
+    },
+    "b": {
+     "mechanism": "no per-item change detection, no SHA1 short-circuit, no limit/pagination, no incremental cursor",
+     "trigger": "every hourly poll",
+     "consequence": "O(N) full scan, Nokogiri parses, N post revisions even when feed unchanged"
+    },
+    "material_differences": [
+     "B claims missing per-item change detection and post revisions; A claims dead feed_key and re-hash"
+    ],
+    "same": false,
+    "confidence": 0.75,
+    "reason": "A is about unused feed_key/conditional fetch; B is about missing per-item change detection/limits — related but distinct claims."
+   },
+   {
+    "pair": 7,
+    "a": {
+     "mechanism": "Kernel#open on unvalidated feed_polling_url; '|' prefix shell command, file:// URLs",
+     "trigger": "site-setting write",
+     "consequence": "command execution/file read"
+    },
+    "b": {
+     "mechanism": "Kernel#open on feed_polling_url allows '|cmd' shell execution; follows redirects without restriction",
+     "trigger": "admin setting value",
+     "consequence": "admin-to-RCE"
+    },
+    "material_differences": [
+     "B adds unrestricted redirect following; A adds file:// read"
+    ],
+    "same": false,
+    "confidence": 0.65,
+    "reason": "Core command-injection claim matches; each adds a different extra claim (file:// vs redirect following). Strict pass: false."
+   },
+   {
+    "pair": 8,
+    "a": {
+     "mechanism": "Kernel#open on feed_polling_url; '|' shell command, file:// URLs",
+     "trigger": "site-setting write",
+     "consequence": "command execution / file read"
+    },
+    "b": {
+     "mechanism": "Kernel#open in poll_feed.rb and topic_embed.rb on user-supplied URL; '|' prefix executes subprocess",
+     "trigger": "user-supplied URL string",
+     "consequence": "command injection"
+    },
+    "material_differences": [
+     "B extends to topic_embed.rb user-supplied URL (broader trigger/location); A restricts to site setting"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "B claims an additional attack surface (topic_embed.rb, user-supplied URL) beyond A's site-setting-only claim."
+   },
+   {
+    "pair": 9,
+    "a": {
+     "mechanism": "String#scrub (Ruby 2.1+) called with no backport gem in Gemfile_rails4.lock",
+     "trigger": "Ruby 2.0 runtime",
+     "consequence": "every feed item NoMethodError, no feed imported (P1)"
+    },
+    "b": {
+     "mechanism": "String#scrub is Ruby 2.1 API, no compatibility dependency",
+     "trigger": "supported Ruby 2.0 runtime",
+     "consequence": "crashes every feed import with NoMethodError"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.95,
+    "reason": "Identical claim: scrub missing on Ruby 2.0, no backport, all imports crash."
+   },
+   {
+    "pair": 10,
+    "a": {
+     "mechanism": "String#scrub Ruby 2.1+ only, no backport in Gemfile_rails4.lock",
+     "trigger": "Ruby 2.0 runtime",
+     "consequence": "every feed item NoMethodError, no feed ever imported"
+    },
+    "b": {
+     "mechanism": "String#scrub requires 2.1+, no scrub_rb backport, Gemfile targets 1.9/2.0-era runtimes",
+     "trigger": "those rubies",
+     "consequence": "feed polling NoMethodError (P2)"
+    },
+    "material_differences": [
+     "B frames supported rubies as 1.9/2.0 via Gemfile hint; severity P2 vs P1"
+    ],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "Same mechanism, trigger set slightly broader (1.9/2.0) but same root cause and consequence; severity difference only."
+   },
+   {
+    "pair": 11,
+    "a": {
+     "mechanism": "String#scrub Ruby 2.1+, no backport in Gemfile_rails4.lock",
+     "trigger": "Ruby 2.0 runtime of this codebase",
+     "consequence": "NoMethodError every item, no feed imported"
+    },
+    "b": {
+     "mechanism": "String#scrub needs Ruby ≥2.1, Ruby 2.0 current at PR date",
+     "trigger": "Ruby 2.0 runtime; CI specs stub poll_feed",
+     "consequence": "NoMethodError every run, feed importing non-functional, CI stays green"
+    },
+    "material_differences": [
+     "B adds CI-green-because-stubbed claim"
+    ],
+    "same": false,
+    "confidence": 0.6,
+    "reason": "Core claim identical; B adds material claim about CI stubbing. Strict pass: false."
+   },
+   {
+    "pair": 12,
+    "a": {
+     "mechanism": "String#scrub Ruby 2.1+, no backport gem",
+     "trigger": "Ruby 2.0 runtime",
+     "consequence": "NoMethodError every item, no feed imported"
+    },
+    "b": {
+     "mechanism": "String#scrub requires 2.1+, backport not bundled in this PR",
+     "trigger": "Ruby 2.0 in use at time",
+     "consequence": "NoMethodError breaking all feed polling"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Equivalent claims; wording differences only."
+   },
+   {
+    "pair": 13,
+    "a": {
+     "mechanism": "i.content nil on plain RSS 2.0 (SimpleRSS exposes content_encoded), nil.scrub NoMethodError; poll dies; topic_retriever.rb:41 runs PollFeed inline with no rescue so RetrieveTopic crashes before fetch_http fallback",
+     "trigger": "RSS 2.0 feeds with only description/content:encoded",
+     "consequence": "whole poll killed and RetrieveTopic job crashes before fallback"
+    },
+    "b": {
+     "mechanism": "i.content nil on RSS 2.0 feeds, NoMethodError at .scrub; retry: false; String#scrub also requires Ruby ≥2.1",
+     "trigger": "common RSS 2.0 feeds (WordPress)",
+     "consequence": "hourly import dies mid-feed, later items never imported, silently breaking documented RSS support"
+    },
+    "material_differences": [
+     "A claims inline RetrieveTopic crash before fetch_http fallback; B claims mid-feed blocking and adds Ruby 2.1 scrub requirement"
+    ],
+    "same": false,
+    "confidence": 0.75,
+    "reason": "Shared nil-content root cause, but each adds different material claims (inline job crash/fallback vs retry:false blocking plus separate scrub version issue)."
+   },
+   {
+    "pair": 14,
+    "a": {
+     "mechanism": "imports every feed item without limit or incremental cursor",
+     "trigger": "large feed",
+     "consequence": "unbounded work every hourly poll"
+    },
+    "b": {
+     "mechanism": "reads, parses, iterates unbounded remote feed without response-size or item limit",
+     "trigger": "oversized feed",
+     "consequence": "unbounded work"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "Same claim: no size/item limit, unbounded processing each poll."
+   },
+   {
+    "pair": 15,
+    "a": {
+     "mechanism": "no limit or incremental cursor on item iteration",
+     "trigger": "large feed",
+     "consequence": "unbounded work hourly"
+    },
+    "b": {
+     "mechanism": "no timeout/size limit on open(); feed_key unused so no conditional fetch; full re-download, re-hash/lookup hourly",
+     "trigger": "every hourly poll",
+     "consequence": "full feed re-downloaded and re-processed"
+    },
+    "material_differences": [
+     "B adds timeout/conditional-fetch/feed_key claims, focusing on re-download rather than iteration limits"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "B compound: adds fetch-level timeout and dead feed_key claims beyond A's item-iteration limit concern."
+   },
+   {
+    "pair": 16,
+    "a": {
+     "mechanism": "no limit or incremental cursor on item iteration",
+     "trigger": "large feed",
+     "consequence": "unbounded work hourly"
+    },
+    "b": {
+     "mechanism": "downloads/parses entire feed with no byte or item limit",
+     "trigger": "oversized or growing feed",
+     "consequence": "worker memory exhaustion every poll"
+    },
+    "material_differences": [
+     "B frames consequence as memory exhaustion"
+    ],
+    "same": true,
+    "confidence": 0.8,
+    "reason": "Same unbounded-download/parse claim; consequence framing differs only in emphasis."
+   },
+   {
+    "pair": 17,
+    "a": {
+     "mechanism": "no limit or incremental cursor on item iteration",
+     "trigger": "large feed",
+     "consequence": "unbounded work hourly"
+    },
+    "b": {
+     "mechanism": "open() no timeout/size limit; every item re-imported each poll; no Last-Modified/ETag despite feed_key",
+     "trigger": "every hourly poll",
+     "consequence": "full re-download and per-item re-import work"
+    },
+    "material_differences": [
+     "B adds timeout and ETag/feed_key conditional-fetch claims"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "B is a compound claim including conditional-fetch and timeout concerns absent from A."
+   },
+   {
+    "pair": 18,
+    "a": {
+     "mechanism": "no limit or incremental cursor on item iteration",
+     "trigger": "large feed",
+     "consequence": "unbounded work hourly"
+    },
+    "b": {
+     "mechanism": "every poll walks entire feed, per-item DB import lookups",
+     "trigger": "feed size",
+     "consequence": "unbounded memory and query work instead of capped batch"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "Same unbounded full-walk per poll claim; DB-lookup detail is mechanism elaboration."
+   },
+   {
+    "pair": 19,
+    "a": {
+     "mechanism": "no limit or incremental cursor on item iteration",
+     "trigger": "large feed",
+     "consequence": "unbounded work hourly"
+    },
+    "b": {
+     "mechanism": "iterates every item, full PostCreator/PostRevisor plus topic_embeds lookup per item",
+     "trigger": "large feed",
+     "consequence": "worker monopolization"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.8,
+    "reason": "Same unbounded iteration claim; per-item import detail elaborates the same mechanism."
+   },
+   {
+    "pair": 20,
+    "a": {
+     "mechanism": "no limit or incremental cursor on item iteration",
+     "trigger": "large feed",
+     "consequence": "unbounded work hourly"
+    },
+    "b": {
+     "mechanism": "per-item import performs separate embed lookup, N+1 DB workload",
+     "trigger": "large feed",
+     "consequence": "unbounded N+1 database work"
+    },
+    "material_differences": [
+     "B emphasizes N+1 query pattern as the defect rather than missing limit/cursor"
+    ],
+    "same": false,
+    "confidence": 0.6,
+    "reason": "B's core claim is an N+1 query pattern inside the loop, a distinct defect from missing batch limit/cursor; borderline, strict pass: false."
+   }
+  ]
+ },
+ "usage": {
+  "glm-5.3-background": {
+   "input_tokens": 2965,
+   "cache_read_input_tokens": 384,
+   "cache_creation_input_tokens": 0,
+   "output_tokens": 2915,
+   "reasoning_output_tokens": 1,
+   "cost_usd": 0.0,
+   "total_tokens": 6265
+  }
+ },
+ "status": "complete",
+ "error_type": null,
+ "elapsed_s": 28.947005033493042
+}
