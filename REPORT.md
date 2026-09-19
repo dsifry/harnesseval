@@ -833,6 +833,7 @@ Pairs-level aggregate: mean ΔF1 +0.044 [+0.019, +0.073], mean ΔF1' +0.042 [+0.
 
 #### T14 — harness vs vanilla, paired Δrecall_sem (semantic union)
 
+<!-- collapsible: Show the table (44 data rows) -->
 | model · fw · effort | n PRs | Δrecall_sem (harness − vanilla) | resolved |
 |---|---|---|---|
 | fable-5.1 CE low | 2 | +0.111 [+0.077, +0.128] | + |
@@ -878,6 +879,7 @@ Pairs-level aggregate: mean ΔF1 +0.044 [+0.019, +0.073], mean ΔF1' +0.042 [+0.
 | astra MRV high | 6 | +0.142 [+0.087, +0.179] | + |
 | astra MRV low | 6 | +0.123 [+0.081, +0.171] | + |
 | astra MRV medium | 6 | +0.087 [+0.007, +0.130] | + |
+<!-- /collapsible -->
 
 Resolved positive 39/43 on this superseded semantic-union metric (vs 38/42 under the frozen key-union, 17/42 strict); the primary true-gold count is 39/42.
 
@@ -914,6 +916,7 @@ fresh input + cached reads + cache writes + output (incl. reasoning). GLM cells 
 conservative (all input priced at the fresh rate; no per-model token split available).
 Values < $0.01 are shown in cents (¢) to avoid leading-zero drowning; ≥ $0.01 in $.
 
+<!-- collapsible: Show the table (73 data rows) -->
 | model | fw | eff | $/run [CI] | $/real [CI] | $/TP [CI] | tok/run [CI] | wall s/run [CI] | price per k-tok [CI] |
 |---|---|---|---|---|---|---|---|---|
 | fable-5.1 | van | low | $0.89976 [$0.81493, $0.98873] | $0.05142 [$0.04497, $0.05971] | $0.17415 [$0.1514, $0.20981] | 84,674 [79,473, 90,156] | 57 [48, 65] | $0.01063 [$0.01025, $0.011] |
@@ -988,9 +991,11 @@ Values < $0.01 are shown in cents (¢) to avoid leading-zero drowning; ≥ $0.01
 | glm-flash | MRV | low | $0.02354 [$0.02093, $0.02635] | 0.03891¢ [0.03323¢, 0.04456¢] | 0.40353¢ [0.36845¢, 0.46147¢] | 127,440 [114,595, 140,318] | 79 [74, 83] | 0.01847¢ [0.01717¢, 0.01965¢] |
 | glm-flash | MRV | medium | $0.07612 [$0.06658, $0.08463] | 0.12211¢ [0.10431¢, 0.14759¢] | $0.01575 [$0.0121, $0.02126] | 258,152 [227,704, 283,565] | 684 [561, 782] | 0.02949¢ [0.02865¢, 0.03031¢] |
 | glm-flash | MRV | high | $0.31726 [$0.21397, $0.42794] | 0.35916¢ [0.22542¢, 0.55112¢] | $0.05949 [$0.0394, $0.0844] | 743,571 [527,665, 969,148] | 2,984 [1,797, 4,190] | 0.04267¢ [0.04037¢, 0.04408¢] |
+<!-- /collapsible -->
 
 
-> **Figure 3.4a — Cost per review, per cell (log scale)** *(static figure)*
+> **Figure 3.4a — Cost per review, per cell (log scale)** *(static figure — the compact all-cells view;
+> the same quantity is plotted interactively against quality in Figure 1, dashboard panel 1a)*
 >
 > How to read: one point per cell; y is metered dollars per PR review at published list prices on a log
 > scale, with 95% cluster-bootstrap whiskers; cells are ordered by framework within model.
@@ -1021,7 +1026,7 @@ opus-5 CE/MRV burn 1.7–4.4M tokens per PR, ~75–90% of them **cached reads at
 10–20× fewer total tokens (100–570k/PR) at list input rates ($1.40 fresh / $0.26 cached for
 vision). Both arrive at *cheap per token*; they differ by ~13× in $ per PR review at the
 recommendation point (vision-MRV $0.22 vs opus-CE $2.95) and by ~13× in tokens per task against
-the opus *harness* cells (T7). The vanilla cells are trivially cheap per task because a single
+the opus *harness* cells (§3.5.2). The vanilla cells are trivially cheap per task because a single
 call is ~100k tokens — but they find the fewest real issues (T4 recall deltas).
 
 #### 3.4.4 Wall-clock
@@ -1078,33 +1083,26 @@ against glm-vis MRV low's ~2.1 at $0.22); the frontier-model harness cells (opus
 sonnet CE/MRV, fable CE/MRV-gap cells) are dominated on both axes by the GLM harness cells in the F2′
 panel — but not in the recall panel, where opus CE medium holds the frontier.
 
-> **Figure 3.4e — Four views of efficiency** *(static figure)*
+> **Figure 3.4e — What it costs to catch one true bug** *(interactive — the dashboard's own panel; toggle the legend key to isolate models; the 95% CI checkbox sits under the chart)*
 >
-> How to read: four panels, every point with its 95% CI — **(a)** price/performance ($ per PR review vs
-> F2′), **(b)** F2′ per dollar, **(c)** F2′ vs wall-clock per run, **(d)** $ per true bug found vs recall.
+> How to read: the x-axis is the price per **distinct true bug** — one of the 147 in our golden set — and the
+> y-axis is overall quality (F2′: bugs found, penalised for noise, with a missed bug charged 4× a false
+> alarm). Cheap-and-high is the win: a point far to the left but low is buying cheap catches while missing a
+> lot; far right and high is thorough but you pay for it. One point per complete cell, coloured by model;
+> hover for the value and its CI, double-click a legend entry to isolate a model.
 >
-> ![Four-panel efficiency view: price/performance, F2′ per dollar, F2′ vs latency, and cost per true bug](analysis/figures/fig_efficiency_2x2.png)
+> **Mind the denominator.** This panel counts each distinct true bug **once** — a bug is credited once no
+> matter how often it was reported. The dashboard's panel 1d instead divides by every adjudicated real
+> finding, so a bug reported repeatedly counts each time and beyond-gold findings count too; 1d's dollars are
+> therefore always lower and are not comparable to these. A wide 1c↔1d gap means many confirmed findings per
+> distinct credited bug.
 >
-> **Takeaway:** panel (d) is the buyer's panel — the GLM harness cells buy F2′ for a small fraction of what
-> the frontier-model cells pay — while the recall axis in panel (a) still favours the premium cells.
-
-The four-panel efficiency view puts every point with its
-95% CI: **(a)** price/performance ($ per PR review vs F2′ — how much quality a dollar buys *per
-review*), **(b)** F2′ per $ (approx CI = F2′ CI / cost point), **(c)** F2′ vs wall-clock per
-run (latency/quality; the low-effort GLM cells sit in the fast/high-F2′ corner), and
-**(d)** $ per true bug found vs recall (true golden set; the buyer's panel: what a caught real
-bug costs, against how many are caught).
-
-> **Figure 3.4f — What it costs to catch one true bug** *(interactive — the dashboard's own panel; toggle the legend key; the 95% CI checkbox sits under the chart)*
+> ![Dollars per distinct true bug versus F2′, per cell](analysis/figures/dash_chart1c.png)
 >
-> How to read: dollars per true bug found (x; true golden set = 42 goldens + 105 verified defects) against
-> F2′ (y), one point per cell, with the 95% CI checkbox showing the whiskers.
->
-> ![Dollars per true bug found versus F2′, per cell](analysis/figures/dash_chart1c.png)
->
-> **Takeaway:** the harness cells' cheap end is very cheap per true bug (the GLM rows), while the premium
-> frontier cells pay multiples of that for the same quality — the same trade as figure 3.4d, seen from the
-> cost-per-bug side.
+> **Takeaway:** per distinct true bug found, the open-weight GLM harness cells pay far less than the frontier
+> models — glm-flash·MRV·low **$0.0020/bug**, glm-vis·MRV·low **$0.0185/bug**, glm-vis·MRV·high
+> **$0.204/bug**, against opus·CE·low **$0.272/bug** and fable·vanilla·high **$0.152/bug** — and fable finds
+> 51 real bugs to glm-vis MRV high's 76.
 
 **Interactive versions of all main figures** — single-file HTML, no server needed:
 `analysis/figures/interactive_dashboard.html` (open in any browser; built by
@@ -1128,6 +1126,18 @@ visible.
 
 
 #### 3.5.1 Harnesses spend more tokens but find more bugs — both numbers, always
+
+**The claim, and why both numbers must travel together.** A harness finds more than a one-shot prompt because
+it makes the model work harder — more passes, more tool calls, more tokens. The honest way to report that is
+to quote both sides at once, because a quality gain at any price is not something a buyer can act on. Table T4
+does exactly that for all 42 matched harness-vs-vanilla pairs on the same PRs, and the pattern is consistent:
+a harness typically spends **10–20× the tokens** and costs **roughly 3–5× the dollars** of the *same model*
+run one-shot, while raising recall on those PRs. Two things make that trade worth reading carefully rather
+than dismissing on the multiple alone. First, the multiple is measured per review, not per bug: a harness that
+costs 4× per review but finds 12× the real bugs is strictly cheaper per bug found (that comparison is the
+subject of §3.4 and Figure 1). Second, the multiple is a property of the *model's price*, not of the harness
+design — which is why running a harness on an open-weight model costs less than a frontier model run once,
+and that inversion is the report's cost headline.
 
 Across 42 harness-vs-vanilla pairs on the same 6 PRs:
 
@@ -1189,10 +1199,18 @@ inside noise — a frontier single pass is already near these harnesses' ceiling
 
 #### 3.5.2 Per-token price vs per-task cost — the operator's "~1/200th" is not supported
 
-Measured (blended $/ktok from actual token mixes, low effort, same 6 PRs):
+The operator's shorthand was "~1/200th per token, ~1/10th per task". Measured at published list prices with
+the token mixes these runs actually used, neither ratio holds. The direction of the folklore is right — the
+open-weight lane is dramatically cheaper — but its magnitude is not: against the matching frontier one-shot
+run the cheap GLM-flash harness is **about 1/57 per blended token** and **about 1/38 per task**. The two
+ratios differ because a harness task spends more tokens than a one-shot task does (§3.5.1), so the per-task
+advantage is smaller than the per-token advantage — quote whichever you mean, and check which one a vendor is
+quoting.
 
-#### T7 — cost-structure ratios (all pairs, low effort unless stated): per-token / tokens-per-task / net cost-per-task
+The per-pair ratios are below (collapsed so they do not interrupt the argument):
 
+
+<!-- collapsible: Show the per-pair ratios — per-token, tokens-per-task, cost-per-task (8 rows) -->
 | glm cell vs frontier cell | per-token (glm/frontier) [CI] | tokens/task [CI] | cost/task [CI] |
 |---|---|---|---|
 | glm-5.3-flash-background|metareview-realistic|low vs claude-fable-5-1|vanilla-engineered|low | 0.01738 [0.01623, 0.01883] | 1.5× [1.4, 1.6] | 0.02616 [0.02439, 0.02746] |
@@ -1202,6 +1220,7 @@ Measured (blended $/ktok from actual token mixes, low effort, same 6 PRs):
 | glm-5.3-flash-background|metareview-realistic|low vs gpt-6-astra|vanilla-engineered|low | 0.03704 [0.03441, 0.03983] | 1.5× [1.3, 1.7] | 0.0574 [0.04873, 0.0677] |
 | glm-5.3-vision-background|metareview-realistic|low vs gpt-6-astra|vanilla-engineered|low | 0.33238 [0.30127, 0.36598] | 1.6× [1.5, 1.8] | 0.54042 [0.4753, 0.61013] |
 | glm-5.3-vision-background|metareview-realistic|low vs claude-opus-5|metareview-realistic|medium | 2.16674 [2.046, 2.30426] | 0.2× [0.2, 0.3] | 0.42555 [0.35759, 0.53967] |
+<!-- /collapsible -->
 
 
 
