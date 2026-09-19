@@ -33,6 +33,7 @@ checksum set cover; this tool only renders them. Run it after regenerating figur
 from __future__ import annotations
 
 import base64
+import html
 import datetime
 import json
 import re
@@ -113,6 +114,29 @@ figure.callout .fig-title { margin:0 0 .5rem; font-size:1.02rem; color:var(--ink
 .plotly-fig { width:100%; height:clamp(480px, 62vh, 900px); }
 .fig-controls { margin:.2rem 0 .5rem; font-size:.85em; color:var(--muted); }
 .fig-controls label { cursor:pointer; user-select:none; }
+
+/* ---- per-figure key box (model / harness / effort / CI), mirrors the dashboard's docked filter box ---- */
+.fig-key { margin:.2rem 0 .6rem; }
+.fig-key .key-sentinel { display:block; height:1px; }
+.fig-key .key-panel { position:sticky; top:0; z-index:5;
+  border:1px solid var(--rule); border-radius:9px; background:#fff; padding:.5rem .7rem .55rem;
+  transition: padding .3s ease, box-shadow .3s ease, border-radius .3s ease; }
+.fig-key.docked .key-panel { padding:.25rem .55rem .3rem; box-shadow:0 2px 10px rgba(16,24,40,.10);
+  border-radius:0 0 9px 9px; }
+.fig-key .key-head { font-size:.78em; font-weight:700; letter-spacing:.03em; text-transform:uppercase;
+  color:var(--muted); margin:0 0 .2rem; transition:font-size .3s ease; }
+.fig-key.docked .key-head { font-size:.68em; margin-bottom:.1rem; }
+.fig-key .key-note { color:var(--muted); font-size:.82em; margin:.1rem 0 .35rem; }
+.fig-key.docked .key-note { display:none; }
+.fig-key .key-groups { display:flex; flex-wrap:wrap; gap:.25rem 1.1rem; }
+.fig-key .key-group { display:flex; flex-wrap:wrap; gap:.15rem .6rem; align-items:baseline; }
+.fig-key .key-title { font-size:.72em; font-weight:700; text-transform:uppercase; letter-spacing:.03em;
+  color:var(--muted); }
+.fig-key .key-title .key-all { font-weight:400; text-transform:none; letter-spacing:0; }
+.fig-key label { font-size:.85em; color:var(--ink); white-space:nowrap; }
+.fig-key input[type=checkbox] { vertical-align:-1px; margin-right:.15rem; }
+.fig-key input[type=checkbox]:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+.fig-key a.key-all { color:var(--accent); }
 @media (max-width: 760px) { main { width: 100%; padding: 1.5rem .9rem 3rem; } .plotly-fig { height: 460px; } }
 .fig-fallback { margin-top:.6rem; }
 .fig-fallback summary { cursor:pointer; color:var(--muted); font-size:.85em; }
@@ -165,13 +189,81 @@ FIG_HEIGHTS = {
 _BOOT_SCRIPT = """<script>
 (function () {
   var figs = Array.prototype.slice.call(document.querySelectorAll('div.plotly-fig'));
+  if (!figs.length) return;
+
   function fallbackFor(el) {
-    var body = el.closest ? el.closest('.fig-body') : null;
-    return body ? body.querySelector('details.fig-fallback') : null;
+    var b = el.closest ? el.closest('.fig-body') : null;
+    return b ? b.querySelector('details.fig-fallback') : null;
   }
+
+  /* ---- cell extraction: mirrors report_to_html.py _point_cell / _label_cell ---- */
+  var LABEL_RE = /^([^·]+)·([^·]+)·([lmh])[ ]*†?$/;
+  function cellOf(cd, x) {
+    if (typeof cd === 'string') {
+      var p = cd.split('|');
+      if (p.length >= 3) return { m: p[0], fw: p[1], e: p[2] };
+    } else if (Array.isArray(cd)) {
+      if (cd.length && typeof cd[0] === 'string') {
+        var q = cd[0].split('|');
+        if (q.length >= 3) return { m: q[0], fw: q[1], e: q[2] };
+      } else if (cd.length && cd[0] && typeof cd[0] === 'object') {
+        var r = cd[0], m0 = r.model || r.m, f0 = r.fw || r.fwFull, e0 = r.eff || r.e;
+        if (m0 && f0 && e0) return { m: m0, fw: f0, e: e0 };
+      }
+    } else if (cd && typeof cd === 'object') {
+      var m1 = cd.model || cd.m, f1 = cd.fw || cd.fwFull, e1 = cd.eff || cd.e;
+      if (m1 && f1 && e1) return { m: m1, fw: f1, e: e1 };
+    }
+    if (typeof x === 'string') {
+      var t = LABEL_RE.exec(x.trim());
+      if (t) return { m: t[1], fw: t[2], e: t[3] };
+    }
+    return null;
+  }
+
+  function copy(o) { return JSON.parse(JSON.stringify(o)); }
+
+  /* Hide the points the key says to hide: null them out (keeps the legend and the rest of the trace). */
+  function maskedTraces(traces, st) {
+    return traces.map(function (t) {
+      var xsrc = t.x || [], cd = t.customdata || [];
+      var out = copy(t), any = false, kept = 0;
+      var xs = [], ys = (t.y || []).slice();
+      var ex = t.error_x && t.error_x.array ? t.error_x.array.slice() : null;
+      var exm = t.error_x && t.error_x.arrayminus ? t.error_x.arrayminus.slice() : null;
+      var ey = t.error_y && t.error_y.array ? t.error_y.array.slice() : null;
+      var eym = t.error_y && t.error_y.arrayminus ? t.error_y.arrayminus.slice() : null;
+      for (var i = 0; i < xsrc.length; i++) {
+        var c = cellOf(cd.length ? cd[i] : null, xsrc[i]);
+        var pass = true;
+        if (c) {
+          any = true;
+          pass = st.model[c.m] !== false && st.fw[c.fw] !== false && st.eff[c.e] !== false;
+        }
+        if (pass) { kept++; xs.push(xsrc[i]); }
+        else {
+          xs.push(null);
+          if (ys.length) ys[i] = null;
+          if (ex) ex[i] = null; if (exm) exm[i] = null;
+          if (ey) ey[i] = null; if (eym) eym[i] = null;
+        }
+      }
+      out.x = xs;
+      if (t.y) out.y = ys;
+      if (ex) out.error_x.array = ex;
+      if (exm) out.error_x.arrayminus = exm;
+      if (ey) out.error_y.array = ey;
+      if (eym) out.error_y.arrayminus = eym;
+      if (any && kept === 0) out.visible = false;
+      return out;
+    });
+  }
+
   function boot() {
+    var keys = Array.prototype.slice.call(document.querySelectorAll('.fig-key'));
     if (!window.Plotly) {
-      // No runtime: hide the empty chart containers so the static fallbacks stand alone.
+      // No runtime: the key box and the empty container go away; the static fallback stands alone.
+      keys.forEach(function (k) { k.style.display = 'none'; });
       figs.forEach(function (el) {
         el.style.display = 'none';
         var fb = fallbackFor(el);
@@ -179,6 +271,7 @@ _BOOT_SCRIPT = """<script>
       });
       return;
     }
+
     figs.forEach(function (el) {
       var base = el.id.replace(/^fig-/, '');
       var raw = document.getElementById('data-' + base);
@@ -187,30 +280,75 @@ _BOOT_SCRIPT = """<script>
         var spec = JSON.parse(raw.textContent);
         var ciRaw = document.getElementById('data-' + base + '-ci');
         var ciSpec = ciRaw ? JSON.parse(ciRaw.textContent) : null;
-        var useCi = false;
-        var layout = spec.layout || {};
-        // let the chart fill the responsive container
-        delete layout.width; delete layout.height;
-        if (ciSpec && ciSpec.layout) { delete ciSpec.layout.width; delete ciSpec.layout.height; }
+        [spec, ciSpec].forEach(function (sp) {
+          if (!sp) return;
+          sp.layout = sp.layout || {};
+          sp.layout.pop && sp.layout.pop('updatemenus');
+          delete sp.layout.updatemenus;
+          delete sp.layout.width; delete sp.layout.height;
+        });
         var cfg = spec.config || {}; cfg.responsive = true; cfg.displayModeBar = false;
-        var draw = function () {
-          var s2 = (useCi && ciSpec) ? ciSpec : spec;
-          return window.Plotly.react(el, s2.traces, s2.layout || {}, cfg);
-        };
+
+        // filter state: value -> checked? (absent = checked)
+        var st = { model: {}, fw: {}, eff: {}, ci: false };
+        Array.prototype.forEach.call(
+          document.querySelectorAll('.key-filter[data-fig="' + base + '"]'),
+          function (b) { st[b.getAttribute('data-kind')][b.value] = b.checked; });
+
+        function draw() {
+          var chosen = (st.ci && ciSpec) ? ciSpec : spec;
+          return window.Plotly.react(el, maskedTraces(chosen.traces, st), chosen.layout || {}, cfg);
+        }
         draw().then(function () {
           var fb = fallbackFor(el);
-          if (fb) { fb.open = false; }   // chart is live; fold the static copy away
+          if (fb) { fb.open = false; }
         });
-        var box = document.querySelector('input.ci-toggle[data-fig="' + base + '"]');
-        if (box) { box.addEventListener('change', function () { useCi = box.checked; draw(); }); }
+
+        Array.prototype.forEach.call(
+          document.querySelectorAll('.key-filter[data-fig="' + base + '"]'),
+          function (b) {
+            b.addEventListener('change', function () {
+              st[b.getAttribute('data-kind')][b.value] = b.checked;
+              draw();
+            });
+          });
+        Array.prototype.forEach.call(
+          document.querySelectorAll('a.key-all[data-fig="' + base + '"]'),
+          function (a) {
+            a.addEventListener('click', function (ev) {
+              ev.preventDefault();
+              var kind = a.getAttribute('data-kind'), on = a.getAttribute('data-mode') === 'all';
+              Array.prototype.forEach.call(
+                document.querySelectorAll('input.key-filter[data-fig="' + base + '"][data-kind="' + kind + '"]'),
+                function (b) { b.checked = on; st[kind][b.value] = on; });
+              draw();
+            });
+          });
+        var ciBox = document.querySelector('input.ci-toggle[data-fig="' + base + '"]');
+        if (ciBox) {
+          ciBox.addEventListener('change', function () { st.ci = ciBox.checked; draw(); });
+        }
       } catch (e) {
         console.error('figure render failed:', el.id, e);
         el.style.display = 'none';
+        var kb = document.querySelector('.fig-key[data-fig="' + base + '"]');
+        if (kb) { kb.style.display = 'none'; }
         var fb2 = fallbackFor(el);
         if (fb2) { fb2.open = true; }
       }
     });
+
+    /* docking animation: once the key box scrolls past the top it shrinks and pins (dashboard behaviour) */
+    keys.forEach(function (box) {
+      var sentinel = box.querySelector('.key-sentinel');
+      if (sentinel && 'IntersectionObserver' in window) {
+        new IntersectionObserver(function (entries) {
+          box.classList.toggle('docked', !entries[0].isIntersecting);
+        }, { rootMargin: '-4px 0px 0px 0px', threshold: 0 }).observe(sentinel);
+      }
+    });
   }
+
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', boot);
   } else {
@@ -327,6 +465,139 @@ def _fig_asset(base: str, prefer_svg: bool = True) -> Path | None:
     return None
 
 
+# --------------------------------------------------------------- per-figure key box
+
+# readable labels (mirrors the dashboard's M_SHORT / framework names)
+MODEL_SHORT = {
+    "claude-fable-5-1": "fable-5.1", "gpt-6-astra": "astra", "gpt-5.6-sol": "sol",
+    "claude-opus-5": "opus", "glm-5.3-vision-background": "glm-vis",
+    "gpt-5.6-terra": "terra", "claude-sonnet-5": "sonnet",
+    "glm-5.3-flash-background": "glm-flash",
+}
+FW_LABEL = {
+    "vanilla-engineered": "vanilla (one-shot)", "compound-realistic": "compound (CE)",
+    "metareview-realistic": "metareview (MRV)",
+    "van": "vanilla (one-shot)", "CE": "compound (CE)", "MRV": "metareview (MRV)",
+}
+EFF_LABEL = {"low": "low", "medium": "medium", "high": "high",
+             "l": "low", "m": "medium", "h": "high"}
+
+# some figures encode the cell in the x-axis label instead of customdata: "model·fw·eff†"
+LABEL_CELL_RE = re.compile(r"^([^·]+)·([^·]+)·([lmh])\s*†?$")
+
+
+def _point_cell(cd):
+    """Extract (model, fw, eff) from one point's customdata, in any of the shapes the fragments use.
+
+    (a) dict  {"model":…, "fw":…, "eff":…}   (dashboard panels)
+    (b) list  ["model|fw|eff", …]            (rebuilt true-gold charts)
+    (c) scalar/None -> None                  (aggregate charts; also hover-label strings)
+    """
+    if cd is None:
+        return None
+    if isinstance(cd, str):
+        parts = cd.split("|")
+        return tuple(parts[:3]) if len(parts) >= 3 else None
+    if isinstance(cd, list):
+        if cd and isinstance(cd[0], str):
+            parts = cd[0].split("|")
+            return tuple(parts[:3]) if len(parts) >= 3 else None
+        if cd and isinstance(cd[0], dict):
+            return _point_cell(cd[0])
+        return None
+    if isinstance(cd, dict):
+        m = cd.get("model") or cd.get("m")
+        fw = cd.get("fw") or cd.get("fwFull")
+        e = cd.get("eff") or cd.get("e")
+        if m and fw and e:
+            return (m, fw, e)
+    return None
+
+
+def _label_cell(label):
+    """Fallback: charts that print the cell as an axis label ("glm-vis·CE·m")."""
+    if not isinstance(label, str):
+        return None
+    m = LABEL_CELL_RE.match(label.strip())
+    return (m.group(1), m.group(2), m.group(3)) if m else None
+
+
+def scan_figure_cells(spec: dict):
+    """Return ({model: label}, {fw: label}, {eff: label}) for the cells present in one fragment."""
+    models: dict[str, str] = {}
+    fws: dict[str, str] = {}
+    effs: dict[str, str] = {}
+    for t in spec.get("traces", []):
+        cds = t.get("customdata") or []
+        xs = t.get("x") or []
+        for i in range(len(xs)):
+            cd = cds[i] if i < len(cds) else None
+            cell = _point_cell(cd)
+            if cell is None:
+                cell = _label_cell(xs[i])
+            if cell is None:
+                continue
+            m, fw, e = cell
+            mlab = model_label(cd) or MODEL_SHORT.get(m, m)
+            flab = fw_label_from(cd) or FW_LABEL.get(fw, fw)
+            models.setdefault(m, mlab)
+            fws.setdefault(fw, flab)
+            effs.setdefault(e, EFF_LABEL.get(e, e))
+    return models, fws, effs
+
+
+def model_label(cd):
+    if isinstance(cd, dict):
+        return cd.get("modelShort") or cd.get("mshort")
+    if isinstance(cd, list) and cd and isinstance(cd[0], dict):
+        return cd[0].get("modelShort") or cd[0].get("mshort")
+    return None
+
+
+def fw_label_from(cd):
+    if isinstance(cd, dict):
+        return FW_LABEL.get(cd.get("fwShort") or "")
+    if isinstance(cd, list) and cd and isinstance(cd[0], dict):
+        return FW_LABEL.get(cd[0].get("fwShort") or "")
+    return None
+
+
+def _key_group(base: str, kind: str, title: str, items: dict[str, str]) -> str:
+    if not items:
+        return ""
+    boxes = "".join(
+        f'<label><input type="checkbox" class="key-filter" data-fig="{base}" data-kind="{kind}" '
+        f'value="{html.escape(v)}" checked> {html.escape(lab)}</label>'
+        for v, lab in items.items()
+    )
+    return (f'<div class="key-group"><span class="key-title">{title} '
+            f'<a href="#" class="key-all" data-fig="{base}" data-kind="{kind}" data-mode="all">all</a>/'
+            f'<a href="#" class="key-all" data-fig="{base}" data-kind="{kind}" data-mode="none">none</a>'
+            f'</span>{boxes}</div>')
+
+
+def key_box_html(base: str, spec: dict, has_ci: bool) -> str:
+    models, fws, effs = scan_figure_cells(spec)
+    groups = (_key_group(base, "model", "Models", models)
+              + _key_group(base, "fw", "Harness", fws)
+              + _key_group(base, "eff", "Effort", effs))
+    ci = (f'<div class="key-group key-ci"><label><input type="checkbox" class="ci-toggle" '
+          f'data-fig="{base}"> show 95% CIs</label></div>') if has_ci else ""
+    if not groups and not ci:
+        return ""                                  # nothing to control on this chart
+    note = ("Filter this chart: untick a model, harness or effort to drop its points."
+            if groups else "This chart has no per-cell series; the 95% CI toggle below applies.")
+    return (
+        f'<div class="fig-key" data-fig="{base}">'
+        f'<span class="key-sentinel"></span>'
+        f'<div class="key-panel">'
+        f'<p class="key-head">Key</p>'
+        f'<p class="key-note">{note}</p>'
+        f'<div class="key-groups">{groups}{ci}</div>'
+        f'</div></div>'
+    )
+
+
 def render_callout(blk: list[str], inline_md: markdown.Markdown, interactive_count: list[int]) -> str:
     paras = _paragraphs(blk)
     title_para = paras[0]
@@ -375,9 +646,7 @@ def render_callout(blk: list[str], inline_md: markdown.Markdown, interactive_cou
         uri = _data_uri(asset)
         interactive_count[0] += 1
         parts.append('<div class="fig-body">')
-        if ci_payload is not None:
-            parts.append('<p class="fig-controls"><label><input type="checkbox" class="ci-toggle" '
-                         f'data-fig="{base}"> show 95% CIs</label></p>')
+        parts.append(key_box_html(base, spec, ci_payload is not None))
         _h = FIG_HEIGHTS.get(base)
         parts.append(f'<div class="plotly-fig" id="fig-{base}"'
                      + (f' style="height:{_h}"' if _h else '') + '></div>')
