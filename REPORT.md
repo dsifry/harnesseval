@@ -436,6 +436,20 @@ Three choices shape every number in §3: how defects are counted (the metrics to
 is read (F2′), and which cells are allowed to be compared at all (the instrument caveat). Each is a stated
 choice with a cost, and each is stated here rather than buried in the results.
 
+**What a 95% confidence interval (CI) means here.** Every cell's number is a mean over six pull requests, so
+it is a sample statistic, not a constant. To say how firmly the sample pins it down we resample the six PRs
+with replacement 10,000 times (a *cluster* bootstrap at the PR level: a PR is drawn whole, with all of its
+findings together), recompute the metric on each resample, and take the 2.5th and 97.5th percentiles — the
+interval reported beside every headline number and drawn as whiskers on the figures. Read it as: *from these
+six PRs, the value we would report had the benchmark drawn a different six PRs is inside this range about 95%
+of the time.* Three consequences shape how §3 is written: (i) a narrow interval means the number is robust to
+which PRs landed in the sample, a wide one means six PRs cannot pin the cell down; (ii) when two cells'
+intervals overlap, this sample does not resolve which is better — we report that as a tie rather than ranking
+them; (iii) a *pairwise* difference is called resolved only when the interval of the paired difference excludes
+zero (tables T4 onward). What the interval does **not** cover: run-to-run variation in the model itself (one
+run per cell per PR — §4) and judge/verdict noise beyond the instrument deltas measured in §2.3.3. It is
+uncertainty about PR sampling, and only that.
+
 Metrics: `tools/verified_gold_defect_metrics.py` (cluster bootstrap, B=10,000, seed 20260916); finding-to-
 defect assignment by `tools/verified_gold_defect_assign.py` (repaired 2026-09-18: every one of the 2,923
 findings is now considered — the pre-repair version silently dropped 276 past a 60-finding cap; audit trail
@@ -764,16 +778,24 @@ harness is only as good as the models it actually calls. (c) *adjP is where fron
 bleed*: opus-5 CE/MRV adjP 0.30–0.44 vs glm-vis MRV medium 0.85 and astra MRV low 0.93 — the
 expensive harnesses emit large volumes of non-golden content of which more is judged waste.
 
-> **Figure 3.2a — Recall with CIs, per cell (strict 42-golden lens)** *(static figure)*
+> **Figure 3.2a — Recall with 95% confidence intervals, per cell (strict 42-golden lens)** *(static figure)*
 >
-> How to read: one bar per cell, grouped by framework within model; bar height is recall against the
-> benchmark's 42 human-verified golden comments, with 95% cluster-bootstrap whiskers. This is the
-> benchmark's own lens, kept here for comparison with the true-golden results in §3.1.
+> How to read: one bar per cell, grouped by framework within model. Bar height is recall against the
+> benchmark's own **42 human-verified golden comments** (the "strict lens"; our extended 147-bug ground truth
+> is the primary lens in §3.1, and this panel is kept so the two can be compared). **CI means confidence
+> interval**: the vertical whisker on each bar is the 95% CI obtained by resampling the six PRs 10,000 times
+> (a PR-level cluster bootstrap — defined in full in §2.6). Concretely, it is the range in which this cell's
+> recall would land for about 95% of *different six-PR draws* from the same benchmark: a short whisker means
+> the number is stable against which PRs happened to be chosen, a long one means six PRs is not enough to pin
+> the cell down. Where two cells' whiskers overlap, this sample does not resolve which is better — read
+> overlapping bars as tied, not ranked.
 >
 > ![Per-cell recall with confidence intervals under the strict benchmark lens](analysis/figures/fig_recall_grid.png)
 >
 > **Takeaway:** under the benchmark's own lens, harnesses raise recall where the base model is weak or
-> mid-tier and leave it unchanged or worse at the top of the frontier (reading (a) above).
+> mid-tier and leave it unchanged or worse at the top of the frontier (reading (a) above). Note how wide most
+> whiskers are: at six PRs, few cell-to-cell gaps survive their intervals, which is exactly why the claims in
+> §3 rest on paired comparisons (T4 onward) rather than on the ordering of the bars.
 
 
 
