@@ -818,31 +818,8 @@ expensive harnesses emit large volumes of non-golden content of which more is ju
 
 ### 3.3 Metareview vs compound engineering (MRV vs CE) on the same PRs
 
-#### T13 — CE vs MRV, paired on the same PRs (Δ = MRV − CE, semantic metrics)
+> **Table T13 — CE vs MRV, paired on the same PRs (Δ = MRV − CE, semantic metrics)** — full table in [Appendix B, Table T13](#t13).
 
-| model · effort | n PRs | Δrecall_sem | ΔF1 | ΔF1' |
-|---|---|---|---|---|
-| opus-5 · high | 6 | +0.020 [-0.996, +0.581] | +0.035 [-0.174, +0.197] | +0.042 [-0.132, +0.144] |
-| opus-5 · low | 6 | +0.032 [-0.342, +0.727] | +0.020 [-0.125, +0.145] | +0.030 [-0.097, +0.119] |
-| opus-5 · medium | 6 | -0.087 [-0.224, +0.250] | -0.031 [-0.070, +0.061] | +0.035 [-0.056, +0.047] |
-| sonnet-5 · high | 6 | +0.198 [-0.636, +0.506] | +0.227 [-0.187, +0.162] | +0.159 [-0.132, +0.129] |
-| sonnet-5 · low | 6 | +0.126 [-0.823, +0.549] | +0.143 [-0.217, +0.178] | +0.097 [-0.178, +0.140] |
-| sonnet-5 · medium | 6 | +0.130 [-1.412, +0.301] | +0.148 [-0.268, +0.175] | +0.109 [-0.255, +0.131] |
-| glm-flash · high | 6 | +0.051 [-0.344, +0.251] | +0.052 [-0.095, +0.082] | +0.003 [-0.071, +0.062] |
-| glm-flash · low | 6 | +0.004 [-0.686, +0.253] | -0.011 [-0.127, +0.113] | -0.026 [-0.109, +0.087] |
-| glm-flash · medium | 6 | +0.028 [-0.311, +0.314] | +0.035 [-0.117, +0.105] | +0.035 [-0.092, +0.085] |
-| glm-vis · high | 6 | +0.012 [-0.109, +0.270] | +0.013 [-0.046, +0.049] | +0.017 [-0.037, +0.045] |
-| glm-vis · low | 6 | +0.040 [-0.428, +0.610] | +0.062 [-0.160, +0.139] | +0.083 [-0.122, +0.104] |
-| glm-vis · medium | 6 | -0.004 [-0.376, +0.315] | +0.020 [-0.097, +0.093] | +0.008 [-0.073, +0.073] |
-| sol · high | 6 | -0.063 [-0.584, +0.399] | -0.051 [-0.135, +0.149] | -0.023 [-0.092, +0.111] |
-| sol · low | 6 | +0.032 [-0.238, +0.356] | +0.042 [-0.091, +0.060] | +0.058 [-0.071, +0.050] |
-| sol · medium | 6 | +0.020 [-0.475, +0.469] | +0.019 [-0.165, +0.180] | +0.024 [-0.114, +0.138] |
-| terra · high | 6 | +0.051 [-1.016, +0.372] | +0.068 [-0.192, +0.175] | +0.067 [-0.141, +0.127] |
-| terra · low | 6 | -0.016 [-0.216, +0.340] | -0.030 [-0.078, +0.075] | -0.019 [-0.062, +0.057] |
-| terra · medium | 6 | +0.008 [-0.341, +0.291] | +0.008 [-0.064, +0.083] | +0.017 [-0.050, +0.068] |
-| astra · high | 6 | +0.075 [-0.350, +0.189] | +0.098 [-0.054, +0.061] | +0.095 [-0.047, +0.047] |
-| astra · low | 6 | +0.036 [-0.180, +0.419] | +0.056 [-0.074, +0.085] | +0.066 [-0.059, +0.064] |
-| astra · medium | 6 | +0.004 [-0.416, +0.279] | +0.005 [-0.108, +0.096] | +0.012 [-0.085, +0.075] |
 
 Pairs-level aggregate: mean ΔF1 +0.044 [+0.019, +0.073], mean ΔF1' +0.042 [+0.024, +0.063] — **resolves positive**. Signs: ΔF1 17+/4−/00; ΔF1' 18+/3−. No single pair's CI excludes zero (6 PRs each); the aggregate over 21 matched pairs is the reportable quantity.
 
@@ -1639,16 +1616,8 @@ double-count a few entries. The robust quantity is the paired Δ (T10), which is
 across all three clustering variants we tried (verbatim, difflib-only, anchor-primary).
 
 
-#### T11 — hidden-gold union sizes per top-6 PR
+> **Table T11 — hidden-gold union sizes per top-6 PR** — full table in [Appendix B, Table T11](#t11).
 
-| PR | goldens | union clusters | expanded set |
-|---|---|---|---|
-| [calcom/cal.com/pull/11059](https://github.com/calcom/cal.com/pull/11059) | 9 | 981 | 990 |
-| [ai-code-review-evaluation/discourse-graphite/pull/4](https://github.com/ai-code-review-evaluation/discourse-graphite/pull/4) | 8 | 928 | 936 |
-| [ai-code-review-evaluation/discourse-graphite/pull/10](https://github.com/ai-code-review-evaluation/discourse-graphite/pull/10) | 7 | 680 | 687 |
-| [ai-code-review-evaluation/discourse-graphite/pull/8](https://github.com/ai-code-review-evaluation/discourse-graphite/pull/8) | 6 | 513 | 519 |
-| [calcom/cal.com/pull/14740](https://github.com/calcom/cal.com/pull/14740) | 6 | 919 | 925 |
-| [calcom/cal.com/pull/10967](https://github.com/calcom/cal.com/pull/10967) | 6 | 960 | 966 |
 
 
 
@@ -1681,7 +1650,10 @@ conservative; the *ranking* and the *ratios* are the reportable quantities.
 Every supporting data table is collected here, collapsed by default and linked from the text where it is
 discussed. They carry the same numbers as the machine-readable artifacts
 (`analysis/final_report_metrics.json`, `analysis/verified_gold/DEFECT_METRICS.json`): the narrative sections
-state each finding, and these tables are the full evidence behind it.
+state each finding, and these tables are the full evidence behind it. Three tables stay in the section that
+discusses them, also collapsed, because they are the primary evidence for that section's own claim — **T1**
+(§3.2, the benchmark's own lens), **T2** (§3.4, cost and throughput) and **T14** (§3.3, harness vs vanilla on
+the semantic union).
 
 <a id="t4"></a>
 <!-- collapsible: Table T4 — harness vs vanilla, paired on the same 6 PRs (Δrecall CI; token ×; cost ×) -->
@@ -2081,6 +2053,49 @@ the robust comparison.
 | glm-flash MRV low | +0.037 [+0.029, +0.044] |
 | glm-flash MRV medium | +0.041 [+0.033, +0.052] |
 | glm-flash MRV high | +0.066 [+0.051, +0.080] |
+<!-- /collapsible -->
+
+<a id="t13"></a>
+<!-- collapsible: Table T13 — CE vs MRV, paired on the same PRs (Δ = MRV − CE, semantic metrics) -->
+#### T13 — CE vs MRV, paired on the same PRs (Δ = MRV − CE, semantic metrics)
+
+| model · effort | n PRs | Δrecall_sem | ΔF1 | ΔF1' |
+|---|---|---|---|---|
+| opus-5 · high | 6 | +0.020 [-0.996, +0.581] | +0.035 [-0.174, +0.197] | +0.042 [-0.132, +0.144] |
+| opus-5 · low | 6 | +0.032 [-0.342, +0.727] | +0.020 [-0.125, +0.145] | +0.030 [-0.097, +0.119] |
+| opus-5 · medium | 6 | -0.087 [-0.224, +0.250] | -0.031 [-0.070, +0.061] | +0.035 [-0.056, +0.047] |
+| sonnet-5 · high | 6 | +0.198 [-0.636, +0.506] | +0.227 [-0.187, +0.162] | +0.159 [-0.132, +0.129] |
+| sonnet-5 · low | 6 | +0.126 [-0.823, +0.549] | +0.143 [-0.217, +0.178] | +0.097 [-0.178, +0.140] |
+| sonnet-5 · medium | 6 | +0.130 [-1.412, +0.301] | +0.148 [-0.268, +0.175] | +0.109 [-0.255, +0.131] |
+| glm-flash · high | 6 | +0.051 [-0.344, +0.251] | +0.052 [-0.095, +0.082] | +0.003 [-0.071, +0.062] |
+| glm-flash · low | 6 | +0.004 [-0.686, +0.253] | -0.011 [-0.127, +0.113] | -0.026 [-0.109, +0.087] |
+| glm-flash · medium | 6 | +0.028 [-0.311, +0.314] | +0.035 [-0.117, +0.105] | +0.035 [-0.092, +0.085] |
+| glm-vis · high | 6 | +0.012 [-0.109, +0.270] | +0.013 [-0.046, +0.049] | +0.017 [-0.037, +0.045] |
+| glm-vis · low | 6 | +0.040 [-0.428, +0.610] | +0.062 [-0.160, +0.139] | +0.083 [-0.122, +0.104] |
+| glm-vis · medium | 6 | -0.004 [-0.376, +0.315] | +0.020 [-0.097, +0.093] | +0.008 [-0.073, +0.073] |
+| sol · high | 6 | -0.063 [-0.584, +0.399] | -0.051 [-0.135, +0.149] | -0.023 [-0.092, +0.111] |
+| sol · low | 6 | +0.032 [-0.238, +0.356] | +0.042 [-0.091, +0.060] | +0.058 [-0.071, +0.050] |
+| sol · medium | 6 | +0.020 [-0.475, +0.469] | +0.019 [-0.165, +0.180] | +0.024 [-0.114, +0.138] |
+| terra · high | 6 | +0.051 [-1.016, +0.372] | +0.068 [-0.192, +0.175] | +0.067 [-0.141, +0.127] |
+| terra · low | 6 | -0.016 [-0.216, +0.340] | -0.030 [-0.078, +0.075] | -0.019 [-0.062, +0.057] |
+| terra · medium | 6 | +0.008 [-0.341, +0.291] | +0.008 [-0.064, +0.083] | +0.017 [-0.050, +0.068] |
+| astra · high | 6 | +0.075 [-0.350, +0.189] | +0.098 [-0.054, +0.061] | +0.095 [-0.047, +0.047] |
+| astra · low | 6 | +0.036 [-0.180, +0.419] | +0.056 [-0.074, +0.085] | +0.066 [-0.059, +0.064] |
+| astra · medium | 6 | +0.004 [-0.416, +0.279] | +0.005 [-0.108, +0.096] | +0.012 [-0.085, +0.075] |
+<!-- /collapsible -->
+
+<a id="t11"></a>
+<!-- collapsible: Table T11 — hidden-gold union sizes per top-6 PR -->
+#### T11 — hidden-gold union sizes per top-6 PR
+
+| PR | goldens | union clusters | expanded set |
+|---|---|---|---|
+| [calcom/cal.com/pull/11059](https://github.com/calcom/cal.com/pull/11059) | 9 | 981 | 990 |
+| [ai-code-review-evaluation/discourse-graphite/pull/4](https://github.com/ai-code-review-evaluation/discourse-graphite/pull/4) | 8 | 928 | 936 |
+| [ai-code-review-evaluation/discourse-graphite/pull/10](https://github.com/ai-code-review-evaluation/discourse-graphite/pull/10) | 7 | 680 | 687 |
+| [ai-code-review-evaluation/discourse-graphite/pull/8](https://github.com/ai-code-review-evaluation/discourse-graphite/pull/8) | 6 | 513 | 519 |
+| [calcom/cal.com/pull/14740](https://github.com/calcom/cal.com/pull/14740) | 6 | 919 | 925 |
+| [calcom/cal.com/pull/10967](https://github.com/calcom/cal.com/pull/10967) | 6 | 960 | 966 |
 <!-- /collapsible -->
 
 ## About this revision
