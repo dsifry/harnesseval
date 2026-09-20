@@ -49,7 +49,7 @@ PLOTLY_JS = FIGDIR / "vendor_plotly.min.js"
 CSS = """
 :root { color-scheme: light; --ink:#16191d; --ink2:#3f4650; --muted:#6b7280; --accent:#0b5cad; --accent-wash:#eaf2fb;
   --rule:#e3e6ea; --rule-strong:#c9cfd6; --bg:#fcfcfd; --surface:#ffffff; --tint:#f6f7f9;
-  --measure:50rem;   /* prose measure; tables, figures and folds may use the full content width */ }
+  --measure:54rem;   /* prose measure; tables, figures and folds may use the full content width */ }
 * { box-sizing:border-box; }
 /* Type and layout scale with the viewport: 16px on a laptop, ~24px on a 2560px-wide display, 26px max. */
 html { font-size:clamp(16px, 0.7vw + 6px, 26px); scroll-behavior:smooth; }
