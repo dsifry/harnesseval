@@ -1,0 +1,153 @@
+"""sdlc-report.html must say nothing the frozen metrics do not support.
+
+Three layers: (1) the template's visible prose carries no typed numbers, only {{fact}} placeholders;
+(2) the facts agree with the numbers REPORT.md publishes; (3) the claim guards reject data under
+which the template's qualitative sentences would be false.
+"""
+import copy
+import html
+import importlib.util
+import json
+import re
+import unittest
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+
+# Tokens that contain digits or number-words but are names, not claims.
+ALLOWED = [r"F[12]′?", r"§\s?[\d.]+", r"September 2026", r"one-shot", r"One-shot"]
+NUMBER_WORDS = r"\b(two|three|four|five|six|seven|eight|nine|ten|dozen|double|twice|half|third|quarter)\b"
+
+
+def visible_text(page: str) -> str:
+    page = re.sub(r"<(script|style)\b.*?</\1>", " ", page, flags=re.S)
+    page = re.sub(r"<[^>]+>", " ", page)
+    return html.unescape(page)
+
+
+class SdlcReportTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        spec = importlib.util.spec_from_file_location("sdlc", ROOT / "tools/sdlc_report_html.py")
+        cls.gen = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.gen)
+        cls.metrics = json.loads((ROOT / "analysis/final_report_metrics.json").read_text())
+        cls.template = (ROOT / "tools/sdlc_report_template.html").read_text(encoding="utf-8")
+        cls.dataset = json.loads((ROOT / "analysis/final_report_dataset.json").read_text())
+        cls.facts, cls.data, cls.guards = cls.gen.compute(cls.metrics, cls.dataset)
+        cls.page = cls.gen.render(cls.template, cls.facts, cls.data)
+        cls.report_md = (ROOT / "REPORT.md").read_text(encoding="utf-8")
+        cls.report_html = (ROOT / "REPORT.html").read_text(encoding="utf-8")
+
+    def test_template_prose_has_no_typed_numbers(self):
+        text = re.sub(r"\{\{\w+\}\}", " ", visible_text(self.template))
+        for pattern in ALLOWED:
+            text = re.sub(pattern, " ", text)
+        digits = re.findall(r"\S*\d\S*", text)
+        self.assertEqual(digits, [], f"typed numerals in template prose: {digits}")
+        words = re.findall(NUMBER_WORDS, text, flags=re.I)
+        self.assertEqual(words, [], f"typed number-words in template prose: {words}")
+
+    def test_every_placeholder_resolves(self):
+        self.assertNotRegex(self.page, r"\{\{\w+\}\}")
+
+    def test_committed_page_matches_generator(self):
+        self.assertEqual((ROOT / "sdlc-report.html").read_text(encoding="utf-8"), self.page,
+                         "sdlc-report.html is stale: run tools/sdlc_report_html.py")
+
+    def test_render_is_deterministic(self):
+        facts, data, _ = self.gen.compute(copy.deepcopy(self.metrics), self.dataset)
+        self.assertEqual(self.gen.render(self.template, facts, data), self.page)
+
+    def test_headline_facts_match_the_published_report(self):
+        f = self.facts
+        cell = {r['key']: r for r in self.data['cells']}
+        best_oneshot = max((r for r in self.data['cells'] if r['fw'] == 'one-shot'), key=lambda r: r['score'])
+        for needle in (
+            f"{f['hv_pos']}/{f['hv_pairs']}",                       # 39/42 harness-vs-vanilla
+            f"{f['gold_total']} distinct bugs",                     # 147
+            f"{f['gold_hidden']} verified hidden defects",          # 105
+            f"union covers {f['union_found']}/{f['gold_total']}",   # 140/147
+            f"| {f['top_label']} | {f['best_bugs']} |",             # Opus · CE · medium | 88
+            f"{f['top_score']} [",                                  # 0.641 [CI]
+            f"**{f['eff_unresolved']} not resolved by this sample**",
+            f"| vision | {f['pilot_bugs']} | {cell[self.gen.PILOT]['advice']} | {f['pilot_unsup']} |",
+            f"| flash | {f['cheap_bugs']} | {cell[self.gen.PILOT_CHEAP]['advice']} | {f['cheap_unsup']} |",
+            f"| {f['pilot_score']} | $0.222 | {f['pilot_secs']} |",
+            f"| {f['cheap_score']} | {f['cheap_cost']} | {f['cheap_secs']} |",
+            f"Fable · vanilla · medium ({best_oneshot['score']:.3f})",
+            f"{f['n_runs']} healthy runs",                          # 2,416
+            f"public {f['n_bench_prs']}-PR benchmark",              # 50
+            f"mean gap {f['sel_recall_gap'].replace('−', '-')}",    # +0.006
+            f"{f['sel_cells']} cells with ≥40/50 PRs",              # 33
+            f"overstated by {f['sel_f1_gap'].replace('−', '-')}4",  # +0.084
+        ):
+            self.assertIn(needle, self.report_md)
+        self.assertEqual(f["best_oneshot_label"], "Fable · one-shot · medium")
+        self.assertIn("median token multiple **10.1×**", self.report_md)
+        self.assertEqual(f["tok_mult"], "10")
+
+    def test_report_links_point_at_real_anchors(self):
+        anchors = set(re.findall(r'href="REPORT\.html#([^"]+)"', self.page))
+        self.assertGreater(len(anchors), 8)
+        for anchor in anchors:
+            self.assertIn(f'id="{anchor}"', self.report_html, f"REPORT.html has no #{anchor}")
+
+    def test_disclosure_is_on_the_page_and_on_every_share_card(self):
+        text = re.sub(r"\s+", " ", visible_text(self.page))
+        self.assertIn("I wrote metareview", text)
+        self.assertRegex(text, r"harnesseval · September 2026 · .*the author wrote metareview")
+
+    def test_share_posts_fit_in_a_tweet_with_their_link(self):
+        posts = re.findall(r'<p class="post">(.*?)</p>', self.page, flags=re.S)
+        self.assertEqual(len(posts), 7)
+        for post in posts:
+            text = html.unescape(re.sub(r"\s+", " ", post).strip())
+            self.assertLessEqual(len(text) + 24, 280, text)  # X counts any link as 23 characters, plus a space
+
+    def test_report_prints_the_one_shot_prompt_the_adapter_runs(self):
+        source = (ROOT / "harnesseval/adapters/vanilla.py").read_text(encoding="utf-8")
+        prompt, line = self.gen.oneshot_prompt()
+        self.assertTrue(source.splitlines()[line - 1].startswith("ENGINEERED_PROMPT"))
+        self.assertIn('tmpl = NAIVE_PROMPT if variant == "naive" else ENGINEERED_PROMPT', source)
+        self.assertIn(f"~~~text\n{prompt}\n~~~", self.report_md, "REPORT.md §2.2 must print the prompt verbatim")
+        self.assertIn('href="REPORT.html#the-one-shot-baseline-prompt-verbatim"', self.page)
+
+    def test_chart_data_is_the_complete_cells_only(self):
+        cells = self.metrics["true_gold_defects"]["verified"]["cells"]
+        self.assertEqual({r["key"] for r in self.data["cells"]}, {k for k, c in cells.items() if c["n_pr"] == 6})
+        for r in self.data["cells"]:
+            self.assertEqual(r["bugs"], cells[r["key"]]["TP"])
+            self.assertAlmostEqual(r["cost"], self.metrics["matrix"][r["key"]]["cost_run"], places=4)
+
+    def test_guards_pass_on_the_frozen_data(self):
+        self.gen.check_guards(self.guards)
+
+    def test_guard_rejects_a_closed_model_entering_the_top_group(self):
+        M = copy.deepcopy(self.metrics)
+        M["true_gold_defects"]["verified"]["cells"]["gpt-5.6-sol|compound-realistic|high"]["F2p"] = 0.63
+        with self.assertRaises(self.gen.ClaimGuardError):
+            self.gen.check_guards(self.gen.compute(M, self.dataset)[2])
+
+    def test_guard_rejects_the_pilot_no_longer_matching_opus(self):
+        M = copy.deepcopy(self.metrics)
+        M["true_gold_defects"]["verified"]["cells"]["glm-5.3-vision-background|metareview-realistic|low"]["F2p"] = 0.50
+        with self.assertRaises(self.gen.ClaimGuardError):
+            self.gen.check_guards(self.gen.compute(M, self.dataset)[2])
+
+    def test_guard_rejects_a_closed_model_on_the_efficiency_frontier(self):
+        M = copy.deepcopy(self.metrics)
+        M["matrix"]["gpt-5.6-sol|compound-realistic|high"]["cost_run"] = 0.01
+        with self.assertRaises(self.gen.ClaimGuardError):
+            self.gen.check_guards(self.gen.compute(M, self.dataset)[2])
+
+    def test_guard_rejects_effort_mostly_paying_off(self):
+        M = copy.deepcopy(self.metrics)
+        for v in M["effort_ladder"].values():
+            v["delta"]["F1"] = [0.2, 0.1, 0.3]
+        with self.assertRaises(self.gen.ClaimGuardError):
+            self.gen.check_guards(self.gen.compute(M, self.dataset)[2])
+
+
+if __name__ == "__main__":
+    unittest.main()

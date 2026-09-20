@@ -161,6 +161,36 @@ persona roster dispatched as parallel subagents, then a separate synthesis pass.
 parallel subagents, single-pass synthesis. Both harness adapters run the real plugin/CLI inside a host
 agent loop, so subagent dispatch is real — with cost-attribution consequences disclosed in §2.3.
 
+#### The one-shot baseline prompt (verbatim)
+
+The `vanilla-engineered` baseline is not a bare "find the bugs" request. Every one-shot cell sends the prompt
+below as a single model call, with the pull request's title and diff substituted for `{pr_title}` and
+`{diff}`. It fixes a reviewer role, the eight issue categories of the benchmark's Core scoring profile (§2.1), a
+per-finding severity, an instruction to report only confident, real issues, and an output format. It is defined as
+`ENGINEERED_PROMPT` in `harnesseval/adapters/vanilla.py`; the deliberately minimal `NAIVE_PROMPT` in the same
+file is not part of this matrix.
+
+~~~text
+You are an expert code reviewer. Review the following code diff for real, actionable issues.
+
+PR: {pr_title}
+
+```diff
+{diff}
+```
+
+Find issues in these categories: bug, security, concurrency, data, api, performance, test_gap, doc_defect.
+For each issue:
+- State the specific problem concisely (one issue per item — do not bundle).
+- Note the file and line if identifiable from the diff.
+- Classify severity as Low, Medium, High, or Critical.
+- Only report real issues you are confident about; do not pad with style nits or speculation.
+
+Respond with a numbered list, one issue per line, e.g.:
+1. [High/bug] path/to/file.py:71 — description of the specific problem
+2. [Medium/performance] ...
+~~~
+
 **Effort.** `low` / `medium` / `high` map to the provider's reasoning-effort setting (Anthropic: thinking
 disabled at low/medium; OpenAI/GLM: `reasoning_effort`); `xhigh` is outside this matrix (§3.5.4).
 
