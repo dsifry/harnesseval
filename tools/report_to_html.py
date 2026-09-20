@@ -47,67 +47,98 @@ INTERACTIVE = FIGDIR / "interactive"
 PLOTLY_JS = FIGDIR / "vendor_plotly.min.js"
 
 CSS = """
-:root { color-scheme: light; --ink:#1b1f24; --muted:#5b6472; --accent:#0b5cad; --rule:#d9dee5; --bg:#fcfcfd; }
-* { box-sizing: border-box; }
-/* Type scales with the viewport (on html, so rem-based headings/measures scale too). */
-html { font-size: clamp(16px, 0.40vw + 11.5px, 21px); }
-body { margin:0; padding:0 0 6rem; background:var(--bg); color:var(--ink);
-       font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
-       font-size:1rem; line-height:1.65; }
-/* The container and the text measure BOTH track the viewport, so text and charts scale together:
-   charts/tables fill the container, prose fills ~92% of it. */
-main { width: min(96vw, 2840px); margin: 0 auto; padding: 2.5rem clamp(.75rem, 2.5vw, 3rem) 4rem; }
-:root { --measure: min(100%, 92vw, 2600px); }
-@media (max-width: 760px) { main { width: 100%; padding: 1.5rem .9rem 3rem; } }
-main > p, main > ul, main > ol, main > blockquote, main > h1, main > h2, main > h3, main > h4,
-main > table, main > details, main > hr { max-width: var(--measure); margin-left: auto; margin-right: auto; }
-figure.callout .fig-how, figure.callout figcaption.fig-takeaway, figure.callout .fig-controls {
-  max-width: var(--measure); }
-h1,h2,h3,h4 { line-height:1.25; font-weight:700; scroll-margin-top:1rem; }
-h1 { font-size:1.9rem; margin:2.5rem 0 1rem; border-bottom:3px solid var(--accent); padding-bottom:.4rem; }
-h2 { font-size:1.45rem; margin:2.4rem 0 .8rem; border-bottom:1px solid var(--rule); padding-bottom:.3rem; }
-h3 { font-size:1.18rem; margin:1.8rem 0 .6rem; }
-h4 { font-size:1.02rem; margin:1.4rem 0 .5rem; color:var(--muted); }
+:root { color-scheme: light; --ink:#16191d; --ink2:#3f4650; --muted:#6b7280; --accent:#0b5cad; --accent-wash:#eaf2fb;
+  --rule:#e3e6ea; --rule-strong:#c9cfd6; --bg:#fcfcfd; --surface:#ffffff; --tint:#f6f7f9;
+  --measure:50rem;   /* prose measure; tables, figures and folds may use the full content width */ }
+* { box-sizing:border-box; }
+html { font-size:16px; scroll-behavior:smooth; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior:auto; } }
+body { margin:0; background:var(--bg); color:var(--ink); line-height:1.6;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; font-size:1rem; }
+.page { max-width:1500px; margin:0 auto; padding:0 24px 5rem; }
+main { min-width:0; }
+@media (max-width: 700px) { .page { padding:0 14px 4rem; } }
+
+/* ---- navigation: a sticky sidebar on wide screens, a collapsible list above the text otherwise ---- */
+details.toc > summary { list-style:none; } details.toc > summary::-webkit-details-marker { display:none; }
+@media (min-width: 1180px) {
+  .page { display:grid; grid-template-columns:270px minmax(0, 1fr); column-gap:44px; }
+  details.toc { position:sticky; top:0; align-self:start; max-height:100vh; overflow-y:auto; padding:2.2rem 8px 2rem 0;
+    font-size:.86rem; scrollbar-width:thin; }
+  details.toc > summary { display:none; }
+}
+@media (max-width: 1179px) {
+  details.toc { margin:1.4rem 0 .4rem; border:1px solid var(--rule); border-radius:10px; background:var(--surface); padding:0 14px; font-size:.92rem; }
+  details.toc > summary { cursor:pointer; padding:10px 0; font-weight:700; }
+  details.toc > summary::before { content:"▸ "; color:var(--muted); } details.toc[open] > summary::before { content:"▾ "; }
+  nav.toc .toc-head { display:none; }
+  nav.toc .toc-body { padding-bottom:10px; }
+}
+nav.toc .toc-head { font-size:.72rem; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); margin:0 0 .5rem; }
+nav.toc ul { list-style:none; margin:0; padding:0; }
+nav.toc ul ul { margin:.1rem 0 .3rem .8rem; border-left:1px solid var(--rule); padding-left:.7rem; }
+nav.toc li { margin:0; }
+nav.toc a { display:block; color:var(--ink2); padding:.22rem 0; line-height:1.35; text-decoration:none; border-left:2px solid transparent; margin-left:-2px; }
+nav.toc ul ul a { color:var(--muted); font-size:.95em; }
+nav.toc a:hover { color:var(--ink); text-decoration:none; }
+nav.toc a.active { color:var(--accent); font-weight:600; }
+nav.toc .toc-links { margin-top:1rem; padding-top:.8rem; border-top:1px solid var(--rule); }
+nav.toc .toc-links a { color:var(--accent); }
+
+/* ---- prose measure and headings ---- */
+main > p, main > ul, main > ol, main > blockquote, main > h1, main > h2, main > h3, main > h4, main > pre, main > .meta,
+main > .generated { max-width:var(--measure); }
+h1,h2,h3,h4 { line-height:1.22; font-weight:700; letter-spacing:-.012em; scroll-margin-top:1rem; color:var(--ink); }
+h1 { font-size:2.05rem; letter-spacing:-.022em; margin:2.6rem 0 .9rem; }
+h2 { font-size:1.5rem; margin:3.2rem 0 .9rem; padding-top:1.2rem; border-top:1px solid var(--rule-strong); }
+h3 { font-size:1.17rem; margin:2.1rem 0 .6rem; }
+h4 { font-size:.98rem; margin:1.6rem 0 .5rem; color:var(--ink2); }
+h1 a.toclink, h2 a.toclink, h3 a.toclink, h4 a.toclink { color:inherit; }
+p { margin:0 0 1rem; }
 a { color:var(--accent); text-decoration:none; }
 a:hover { text-decoration:underline; }
-code, pre { font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
-code { background:#eef1f4; padding:.1em .35em; border-radius:4px; }
-pre { background:#f4f6f8; border:1px solid var(--rule); border-radius:8px;
-      padding:.9rem 1.1rem; overflow-x:auto; }
+.meta { display:flex; flex-wrap:wrap; gap:.35rem .5rem; align-items:center; margin:0 0 1.6rem; font-size:.86rem; color:var(--muted); }
+.meta a { display:inline-block; padding:.28rem .7rem; border:1px solid var(--rule); border-radius:999px; background:var(--surface); color:var(--ink2); }
+.meta a:hover { border-color:var(--rule-strong); color:var(--ink); text-decoration:none; }
+.meta a.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+code, pre { font:13px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+code { background:var(--tint); padding:.1em .35em; border-radius:4px; }
+pre { background:var(--tint); border:1px solid var(--rule); border-radius:8px; padding:.9rem 1.1rem; overflow-x:auto; }
 pre code { background:none; padding:0; }
-table { border-collapse:collapse; margin:1.1rem 0; width:100%; font-size:.92em; display:block;
-        overflow-x:auto; }
-th,td { border:1px solid var(--rule); padding:.4rem .6rem; text-align:left; vertical-align:top; }
-th { background:#eef2f6; font-weight:700; }
-tr:nth-child(even) td { background:#f7f9fb; }
-blockquote { margin:1rem 0; padding:.6rem 1rem; border-left:4px solid var(--accent);
-             color:var(--muted); background:#f2f6fa; border-radius:0 6px 6px 0; }
+blockquote { margin:1.2rem 0; padding:.2rem 0 .2rem 1.1rem; border-left:3px solid var(--rule-strong); color:var(--ink2); }
+blockquote p:last-child { margin-bottom:0; }
 hr { border:none; border-top:1px solid var(--rule); margin:2rem 0; }
-details.fold { margin:1rem 0; border:1px solid var(--rule); border-radius:10px; background:#fff; }
-details.fold > summary { cursor:pointer; padding:.6rem .9rem; font-weight:600; color:var(--accent);
-  list-style:none; user-select:none; }
+ul, ol { padding-left:1.4rem; } li { margin:.25rem 0; }
+
+/* ---- tables: horizontal rules only, numbers right-aligned in tabular figures ---- */
+table { border-collapse:collapse; margin:1.2rem 0 1.4rem; width:100%; font-size:.88rem; display:block; overflow-x:auto;
+  font-variant-numeric:tabular-nums; }
+th, td { padding:.45rem .7rem; text-align:left; vertical-align:top; border-bottom:1px solid var(--rule); white-space:nowrap; }
+th { font-size:.74rem; letter-spacing:.04em; text-transform:uppercase; color:var(--muted); font-weight:700;
+  border-bottom:1px solid var(--rule-strong); background:var(--surface); }
+td.num, th.num { text-align:right; }
+tbody tr:hover td { background:var(--tint); }
+
+details.fold { margin:1.1rem 0; border:1px solid var(--rule); border-radius:10px; background:var(--surface); }
+details.fold > summary { cursor:pointer; padding:.65rem .95rem; font-weight:600; color:var(--ink); list-style:none; user-select:none; }
 details.fold > summary::-webkit-details-marker { display:none; }
 details.fold > summary::before { content:"▸ "; color:var(--muted); }
 details.fold[open] > summary::before { content:"▾ "; }
 details.fold[open] > summary { border-bottom:1px solid var(--rule); }
-details.fold .fold-body { padding:.4rem .9rem .9rem; }
+details.fold .fold-body { padding:.4rem .95rem .9rem; }
 details.fold table { margin:.4rem 0; }
-.generated { color:var(--muted); font-size:.85em; border:1px solid var(--rule);
-             border-radius:8px; padding:.5rem .9rem; background:#f4f6f8; }
-.toc a { color:var(--ink); }
-footer { margin-top:4rem; color:var(--muted); font-size:.85em; border-top:1px solid var(--rule); padding-top:1rem; }
+.generated { color:var(--muted); font-size:.85em; border:1px solid var(--rule); border-radius:8px; padding:.5rem .9rem; background:var(--tint); }
+footer { margin-top:4rem; color:var(--muted); font-size:.85em; border-top:1px solid var(--rule); padding-top:1rem; max-width:var(--measure); }
 
 /* ---- figure callout cards ---- */
-figure.callout { margin:2rem 0; padding:1.1rem 1.2rem 1.2rem; background:#fff;
-  border:1px solid var(--rule); border-left:5px solid var(--accent); border-radius:10px;
-  box-shadow:0 1px 2px rgba(16,24,40,.04); }
+figure.callout { margin:2rem 0; padding:1.1rem 1.2rem 1.2rem; background:var(--surface);
+  border:1px solid var(--rule); border-radius:12px; box-shadow:0 1px 2px rgba(16,24,40,.04), 0 6px 20px rgba(16,24,40,.04); }
 figure.callout .fig-title { margin:0 0 .5rem; font-size:1.02rem; color:var(--ink); font-weight:700; }
-.fig-badge { display:inline-block; margin-left:.5rem; vertical-align:1px; padding:.1em .55em;
-  font-size:.72em; font-weight:700; letter-spacing:.03em; text-transform:uppercase;
-  border-radius:999px; border:1px solid; }
+.fig-badge { display:inline-block; margin-left:.5rem; vertical-align:1px; padding:.1em .55em; font-size:.72em; font-weight:700;
+  letter-spacing:.03em; text-transform:uppercase; border-radius:999px; border:1px solid; }
 .fig-badge-interactive { color:#0b5cad; border-color:#9dc2e6; background:#eaf3fb; }
 .fig-badge-static { color:#5b6472; border-color:#d9dee5; background:#f4f6f8; }
-.fig-how { margin:.35rem 0 .9rem; color:var(--muted); font-style:italic; font-size:.93em; }
+.fig-how { margin:.35rem 0 .9rem; color:var(--muted); font-style:italic; font-size:.93em; max-width:var(--measure); }
 .fig-body { margin:.4rem 0 .9rem; }
 .fig-body img { width:100%; max-width:100%; height:auto; display:block; margin:0 auto; }
 .plotly-fig { width:100%; height:clamp(480px, 62vh, 900px); }
@@ -117,34 +148,29 @@ figure.callout .fig-title { margin:0 0 .5rem; font-size:1.02rem; color:var(--ink
 /* ---- per-figure key box (model / harness / effort / CI), mirrors the dashboard's docked filter box ---- */
 .fig-key { margin:.2rem 0 .6rem; }
 .fig-key .key-sentinel { display:block; height:1px; }
-.fig-key .key-panel { position:sticky; top:0; z-index:5;
-  border:1px solid var(--rule); border-radius:9px; background:#fff; padding:.5rem .7rem .55rem;
-  transition: padding .3s ease, box-shadow .3s ease, border-radius .3s ease; }
-.fig-key.docked .key-panel { padding:.25rem .55rem .3rem; box-shadow:0 2px 10px rgba(16,24,40,.10);
-  border-radius:0 0 9px 9px; }
-.fig-key .key-head { font-size:.78em; font-weight:700; letter-spacing:.03em; text-transform:uppercase;
-  color:var(--muted); margin:0 0 .2rem; transition:font-size .3s ease; }
+.fig-key .key-panel { position:sticky; top:0; z-index:5; border:1px solid var(--rule); border-radius:9px; background:var(--surface);
+  padding:.5rem .7rem .55rem; transition: padding .3s ease, box-shadow .3s ease, border-radius .3s ease; }
+.fig-key.docked .key-panel { padding:.25rem .55rem .3rem; box-shadow:0 2px 10px rgba(16,24,40,.10); border-radius:0 0 9px 9px; }
+.fig-key .key-head { font-size:.78em; font-weight:700; letter-spacing:.03em; text-transform:uppercase; color:var(--muted); margin:0 0 .2rem;
+  transition:font-size .3s ease; }
 .fig-key.docked .key-head { font-size:.68em; margin-bottom:.1rem; }
 .fig-key .key-note { color:var(--muted); font-size:.82em; margin:.1rem 0 .35rem; }
 .fig-key.docked .key-note { display:none; }
-/* one row per group: Models on its own line, then Harness, then Effort (wrapping only when narrow) */
 .fig-key .key-groups { display:block; }
 .fig-key .key-group { display:flex; flex-wrap:wrap; align-items:baseline; gap:.1rem .85rem; margin:.1rem 0; }
-.fig-key .key-title { flex:0 0 auto; min-width:6.4rem; font-size:.72em; font-weight:700;
-  text-transform:uppercase; letter-spacing:.03em; color:var(--muted); }
-.fig-key label { display:inline-flex; align-items:center; gap:.28rem; }
+.fig-key .key-title { flex:0 0 auto; min-width:6.4rem; font-size:.72em; font-weight:700; text-transform:uppercase; letter-spacing:.03em; color:var(--muted); }
+.fig-key label { display:inline-flex; align-items:center; gap:.28rem; font-size:.85em; color:var(--ink); white-space:nowrap; }
 .fig-key .key-title .key-all { font-weight:400; text-transform:none; letter-spacing:0; }
-.fig-key label { font-size:.85em; color:var(--ink); white-space:nowrap; }
 .fig-key input[type=checkbox] { vertical-align:-1px; margin-right:.15rem; }
 .fig-key input[type=checkbox]:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
 .fig-key a.key-all { color:var(--accent); }
-@media (max-width: 760px) { main { width: 100%; padding: 1.5rem .9rem 3rem; } .plotly-fig { height: 460px; } }
+@media (max-width: 760px) { .plotly-fig { height:460px; } }
 .fig-fallback { margin-top:.6rem; }
 .fig-fallback summary { cursor:pointer; color:var(--muted); font-size:.85em; }
-.fig-fallback img { margin-top:.6rem; }figcaption.fig-takeaway { margin-top:.4rem; padding-left:.8rem; border-left:3px solid var(--rule);
-  font-size:.95em; }
+.fig-fallback img { margin-top:.6rem; }
+figcaption.fig-takeaway { margin-top:.4rem; padding-left:.8rem; border-left:3px solid var(--rule-strong); font-size:.95em; max-width:var(--measure); }
 figcaption.fig-takeaway strong { color:var(--ink); }
-@media print { figure.callout { break-inside:avoid; } .fig-fallback { display:block; } }
+@media print { figure.callout { break-inside:avoid; } .fig-fallback { display:block; } nav.toc { display:none; } .page { display:block; } }
 """
 
 BODY_TMPL = """<!DOCTYPE html>
@@ -157,6 +183,8 @@ BODY_TMPL = """<!DOCTYPE html>
 {plotly}
 </head>
 <body>
+<div class="page">
+{toc}
 <main>
 {body}
 {footer}
@@ -166,6 +194,8 @@ the Markdown file is the source of truth. Generated by
 the interactive charts carry the same data as the
 <a href="analysis/figures/interactive_dashboard.html">interactive dashboard</a>.</p>
 </main>
+</div>
+{navscript}
 {boot}
 </body>
 </html>
@@ -173,6 +203,7 @@ the interactive charts carry the same data as the
 
 FOOTER = (
     "Automated code review evaluation — corrected September 2026 report. "
+    'Developer edition: <a href="sdlc-report.html">sdlc-report.html</a> · '
     'Charts: <a href="analysis/figures/interactive_dashboard.html">interactive dashboard</a> · '
     'PNGs in <a href="analysis/figures/">analysis/figures/</a> · '
     '<a href="EXECUTIVE_SUMMARY.html">executive summary (HTML)</a> / '
@@ -181,6 +212,96 @@ FOOTER = (
     "in this report — open source, MIT licensed, available free of charge at "
     '<a href="https://github.com/dsifry/metareview">github.com/dsifry/metareview</a>.'
 )
+
+# Links shown under each document's title. The developer edition is the short, practitioner-facing cut.
+HEADER_LINKS = {
+    "REPORT.md": [
+        ("sdlc-report.html", "Developer edition", True),
+        ("EXECUTIVE_SUMMARY.html", "Executive summary", False),
+        ("SLIDES.html", "Slides", False),
+        ("#235-author-interest-disclosure-metareview", "Author disclosure", False),
+        ("#5-reproducibility", "Reproduce it", False),
+        ("https://github.com/dsifry/harnesseval", "Data and code", False),
+    ],
+    "EXECUTIVE_SUMMARY.md": [
+        ("sdlc-report.html", "Developer edition", True),
+        ("REPORT.html", "Full report", False),
+        ("SLIDES.html", "Slides", False),
+        ("https://github.com/dsifry/harnesseval", "Data and code", False),
+    ],
+}
+
+_NUMERIC_CELL = re.compile(
+    r"^\s*(?:[-−+]?\$?\d[\d,]*(?:\.\d+)?%?×?|[-−+]?\.\d+|—|–|n/?a)"
+    r"(?:\s*(?:\[[^\]]*\]|\([^)]*\)|/\s*\d+|[-−–]\s*[\d.]+))?\s*[×%*†]?\s*$", re.I)
+
+
+def header_links_html(links: list[tuple[str, str, bool]]) -> str:
+    return '<p class="meta">' + " ".join(
+        f'<a href="{href}"{" class=\"primary\"" if primary else ""}>{html.escape(label)}</a>'
+        for href, label, primary in links) + "</p>"
+
+
+def toc_html(tokens: list[dict], links: list[tuple[str, str, bool]], max_level: int = 3) -> str:
+    """Sidebar navigation from the toc extension's heading tree (h2/h3), plus the sibling-document links."""
+    def items(toks: list[dict]) -> str:
+        out = []
+        for tk in toks:
+            if tk["level"] < 2 or tk["level"] > max_level:
+                out.append(items(tk.get("children", [])))
+                continue
+            kids = items([c for c in tk.get("children", []) if c["level"] <= max_level])
+            out.append(f'<li><a href="#{tk["id"]}">{tk["name"]}</a>{f"<ul>{kids}</ul>" if kids else ""}</li>')
+        return "".join(out)
+    body = items(tokens)
+    if not body:
+        return ""
+    extra = "".join(f'<a href="{href}">{html.escape(label)}</a><br>' for href, label, _ in links if not href.startswith("#"))
+    return (f'<details class="toc" open><summary>On this page</summary><nav class="toc"><div class="toc-body">'
+            f'<p class="toc-head">On this page</p><ul>{body}</ul>'
+            f'<div class="toc-links">{extra}</div></div></nav></details>')
+
+
+def mark_numeric_cells(body: str) -> str:
+    """Right-align table cells that hold a number (optionally with a CI, a fraction, or a unit)."""
+    def fix(m: re.Match) -> str:
+        plain = html.unescape(re.sub(r"<[^>]+>", "", m.group(1)))
+        return f'<td class="num">{m.group(1)}</td>' if _NUMERIC_CELL.match(plain) else m.group(0)
+    return re.sub(r"<td>(.*?)</td>", fix, body, flags=re.S)
+
+
+NAV_SCRIPT = """<script>
+(function () {
+  var links = Array.prototype.slice.call(document.querySelectorAll('nav.toc a[href^="#"]'));
+  if (!links.length) return;
+  var byId = {}; links.forEach(function (a) { byId[a.getAttribute('href').slice(1)] = a; });
+  var heads = Object.keys(byId).map(function (id) { return document.getElementById(id); }).filter(Boolean);
+  var current = null, ticking = false;
+  function activate(id) {
+    if (current === id) return; current = id;
+    links.forEach(function (a) { a.classList.toggle('active', a.getAttribute('href') === '#' + id); });
+    var a = byId[id], box = a && a.closest('details.toc');
+    if (a && box && box.scrollHeight > box.clientHeight) {
+      var r = a.getBoundingClientRect(), n = box.getBoundingClientRect();
+      if (r.top < n.top + 40 || r.bottom > n.bottom - 40) box.scrollTop += r.top - n.top - n.height / 2;
+    }
+  }
+  function update() {
+    ticking = false;
+    var pick = null;  /* the last heading that has scrolled past the top band; else the first one */
+    for (var i = 0; i < heads.length; i++) { if (heads[i].getBoundingClientRect().top <= 140) pick = heads[i]; else break; }
+    activate((pick || heads[0]).id);
+  }
+  function onScroll() { if (!ticking) { ticking = true; requestAnimationFrame(update); } }
+  window.addEventListener('scroll', onScroll, { passive: true });
+  window.addEventListener('resize', onScroll);
+  window.addEventListener('load', update);
+  update();
+  var mq = window.matchMedia('(max-width: 1179px)'), det = document.querySelector('details.toc');
+  function fold() { if (det) det.open = !mq.matches; }
+  fold(); mq.addEventListener ? mq.addEventListener('change', fold) : mq.addListener(fold);
+})();
+</script>"""
 
 
 # Per-figure height overrides (CSS height values). Dense charts need more vertical room than the default.
@@ -749,6 +870,12 @@ def render(md_path: Path, html_path: Path, title: str) -> None:
         else:
             raise ValueError(f"collapsible placeholder {i} not found after markdown conversion")
 
+    body = mark_numeric_cells(body)
+    links = HEADER_LINKS.get(md_path.name, [])
+    if links and "</h1>" in body:
+        body = body.replace("</h1>", "</h1>\n" + header_links_html(links), 1)
+    toc = toc_html(md.toc_tokens, links)
+
     plotly = ""
     boot = ""
     if interactive_count[0]:
@@ -760,7 +887,7 @@ def render(md_path: Path, html_path: Path, title: str) -> None:
     tagline = " from the checked-out Markdown and figure artifacts"
     html = BODY_TMPL.format(
         title=title, css=CSS, src=md_path.name, tagline=tagline,
-        body=body, footer=FOOTER, plotly=plotly, boot=boot,
+        body=body, footer=FOOTER, plotly=plotly, boot=boot, toc=toc, navscript=NAV_SCRIPT if toc else "",
     )
     html_path.write_text(html)
     print(f"rendered {md_path.name} -> {html_path.name}: "
