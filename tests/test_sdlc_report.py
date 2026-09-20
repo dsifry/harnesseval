@@ -101,9 +101,12 @@ class SdlcReportTests(unittest.TestCase):
     def test_share_posts_fit_in_a_tweet_with_their_link(self):
         posts = re.findall(r'<p class="post">(.*?)</p>', self.page, flags=re.S)
         self.assertEqual(len(posts), 7)
+        tags = re.search(r"const HASHTAGS = \[([^\]]*)\]", self.template).group(1)
+        tag_text = " ".join("#" + h.strip("' ") for h in tags.split(","))
         for post in posts:
             text = html.unescape(re.sub(r"\s+", " ", post).strip())
-            self.assertLessEqual(len(text) + 24, 280, text)  # X counts any link as 23 characters, plus a space
+            # post + space + hashtags + space + link; X counts any link as 23 characters
+            self.assertLessEqual(len(text) + 1 + len(tag_text) + 1 + 23, 280, text)
 
     def test_report_prints_the_one_shot_prompt_the_adapter_runs(self):
         source = (ROOT / "harnesseval/adapters/vanilla.py").read_text(encoding="utf-8")
@@ -112,6 +115,42 @@ class SdlcReportTests(unittest.TestCase):
         self.assertIn('tmpl = NAIVE_PROMPT if variant == "naive" else ENGINEERED_PROMPT', source)
         self.assertIn(f"~~~text\n{prompt}\n~~~", self.report_md, "REPORT.md §2.2 must print the prompt verbatim")
         self.assertIn('href="REPORT.html#the-one-shot-baseline-prompt-verbatim"', self.page)
+
+    def test_share_images_carry_a_qr_code_for_their_own_link(self):
+        ids = re.findall(r'id="([^"]+)"[^>]*data-share=', self.page)
+        self.assertEqual(sorted(ids), sorted(self.data["qr"]))
+        for sid, rows in self.data["qr"].items():
+            n = len(rows)
+            self.assertTrue(all(len(r) == n for r in rows) and (n - 17) % 4 == 0, sid)
+            self.assertEqual(rows[0][:7], "1111111", sid)  # finder pattern
+        try:
+            import cv2
+            import numpy as np
+        except ImportError:  # the decoder is a local verification aid, not a project dependency
+            return
+        det = cv2.QRCodeDetector()
+        for sid, rows in self.data["qr"].items():
+            n, s, qz = len(rows), 8, 4
+            img = np.full(((n + 2 * qz) * s, (n + 2 * qz) * s), 255, np.uint8)
+            for r, row in enumerate(rows):
+                for c, v in enumerate(row):
+                    if v == "1":
+                        img[(r + qz) * s:(r + qz + 1) * s, (c + qz) * s:(c + qz + 1) * s] = 0
+            self.assertEqual(det.detectAndDecode(img)[0], f"{self.gen.PUBLIC_BASE}{self.gen.PAGE_NAME}#{sid}", sid)
+
+    def test_qr_encoder_matches_the_reference_encoder(self):
+        try:
+            import segno
+        except ImportError:
+            return
+        import importlib.util as ilu
+        spec = ilu.spec_from_file_location("qr", ROOT / "tools/qr.py"); qr = ilu.module_from_spec(spec); spec.loader.exec_module(qr)
+        # exact-fit payloads leave no pad codewords, where segno deviates from ISO 18004 by inserting a zero byte
+        for v in range(1, 11):
+            text = "".join(chr(97 + i % 26) for i in range(qr._BLOCKS[v][0] - (3 if v >= 10 else 2)))
+            ours = qr.encode(text)
+            self.assertTrue(any([[int(x) for x in row] for row in segno.make(text, error="m", version=v, mask=m, boost_error=False).matrix] == ours
+                                for m in range(8)), f"version {v}")
 
     def test_chart_data_is_the_complete_cells_only(self):
         cells = self.metrics["true_gold_defects"]["verified"]["cells"]
