@@ -51,18 +51,19 @@ CSS = """
   --rule:#e3e6ea; --rule-strong:#c9cfd6; --bg:#fcfcfd; --surface:#ffffff; --tint:#f6f7f9;
   --measure:50rem;   /* prose measure; tables, figures and folds may use the full content width */ }
 * { box-sizing:border-box; }
-html { font-size:16px; scroll-behavior:smooth; }
+/* Type and layout scale with the viewport: 16px on a laptop, ~22px on a 2560px-wide display. */
+html { font-size:clamp(16px, 0.5vw + 9px, 22px); scroll-behavior:smooth; }
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior:auto; } }
 body { margin:0; background:var(--bg); color:var(--ink); line-height:1.6;
   font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; font-size:1rem; }
-.page { max-width:1500px; margin:0 auto; padding:0 24px 5rem; }
+.page { max-width:94rem; margin:0 auto; padding:0 1.5rem 5rem; }
 main { min-width:0; }
 @media (max-width: 700px) { .page { padding:0 14px 4rem; } }
 
 /* ---- navigation: a sticky sidebar on wide screens, a collapsible list above the text otherwise ---- */
 details.toc > summary { list-style:none; } details.toc > summary::-webkit-details-marker { display:none; }
 @media (min-width: 1180px) {
-  .page { display:grid; grid-template-columns:270px minmax(0, 1fr); column-gap:44px; }
+  .page { display:grid; grid-template-columns:17rem minmax(0, 1fr); column-gap:2.75rem; }
   details.toc { position:sticky; top:0; align-self:start; max-height:100vh; overflow-y:auto; padding:2.2rem 8px 2rem 0;
     font-size:.86rem; scrollbar-width:thin; }
   details.toc > summary { display:none; }
@@ -101,7 +102,7 @@ a:hover { text-decoration:underline; }
 .meta a { display:inline-block; padding:.28rem .7rem; border:1px solid var(--rule); border-radius:999px; background:var(--surface); color:var(--ink2); }
 .meta a:hover { border-color:var(--rule-strong); color:var(--ink); text-decoration:none; }
 .meta a.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
-code, pre { font:13px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+code, pre { font:.82rem/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
 code { background:var(--tint); padding:.1em .35em; border-radius:4px; }
 pre { background:var(--tint); border:1px solid var(--rule); border-radius:8px; padding:.9rem 1.1rem; overflow-x:auto; }
 pre code { background:none; padding:0; }
