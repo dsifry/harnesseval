@@ -36,7 +36,7 @@ OUT = f"{ROOT}/sdlc-report.html"
 
 # Where the page will be served from. Used only for share links and Open Graph tags.
 PUBLIC_BASE = "https://dsifry.github.io/harnesseval/"
-PAGE_NAME = "sdlc-report.html"
+PAGE_NAME = ""  # published as the site index (tools/publish_site.sh), so links point at the root
 OG_IMAGE = "analysis/figures/dash_chart1a.png"
 
 VAN, CE, MRV = "vanilla-engineered", "compound-realistic", "metareview-realistic"
