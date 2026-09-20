@@ -2355,7 +2355,8 @@ report. It is open source, MIT licensed, and available free of charge at
 
 Thank you to the team at [LunaRoute](https://lunaroute.com), who supported this work with an account and
 free usage while their service was in alpha. The open-weight GLM review lanes in this report ran through
-their gateway (§3.4.1), which is what made a grid this size affordable to run.
+their gateway (§3.4.1), and that help was much appreciated. The Anthropic and OpenAI usage in this campaign
+was paid for by the author.
 
 LunaRoute serves open-weight models (GLM-5.3-vision, GLM-5.3-flash, DeepSeek-4.1-flash and many others)
 from US datacenters on flat-rate plans, and its stated policy is that request and response bodies are
