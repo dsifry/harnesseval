@@ -1514,6 +1514,7 @@ harness reads keys from a file outside the repo (`~/.config/harnesseval/keys.env
 node tools/export_dashboard_panels.js --ci              # dashboard fragments, including CI variants
 .venv/bin/python tools/dashboard_panel_snapshots.py      # requires installed Chrome/Chromium
 .venv/bin/python tools/report_to_html.py                 # REPORT.md + EXECUTIVE_SUMMARY.md → matching HTML
+.venv/bin/python tools/sdlc_report_html.py               # metrics + dataset → sdlc-report.html (the developer edition; stdlib only)
 
 # 6. the two scope/ledger checks the report cites (no keys needed)
 .venv/bin/python tools/verify_hitlist.py --verbose        # top-6 scope check (§2.4). NOTE: exits 1 while
