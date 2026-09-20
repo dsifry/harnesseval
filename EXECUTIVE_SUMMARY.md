@@ -1,4 +1,4 @@
-# EXECUTIVE SUMMARY — automated code review: findings, cost and uncertainty
+# EXECUTIVE SUMMARY — Harnesses find more verified bugs, and open-weight models make them cheap: a systematic evaluation of AI code review (September 2026)
 
 **For:** engineering leadership choosing a code-review pilot · **Data:** 2026-09-16 campaign freeze,
 2026-09-18 evidence audit and 2026-09-19 advisory policy · **Full report:** `REPORT.md` · **Coverage:** `analysis/COVERAGE.md`

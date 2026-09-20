@@ -204,7 +204,7 @@ the interactive charts carry the same data as the
 """
 
 FOOTER = (
-    "Automated code review evaluation — corrected September 2026 report. "
+    "Harnesses find more verified bugs, and open-weight models make them cheap: a systematic evaluation of AI code review (September 2026). "
     'Developer edition: <a href="sdlc-report.html">sdlc-report.html</a> · '
     'Charts: <a href="analysis/figures/interactive_dashboard.html">interactive dashboard</a> · '
     'PNGs in <a href="analysis/figures/">analysis/figures/</a> · '
@@ -904,7 +904,7 @@ def main(argv: list[str]) -> None:
     render(ROOT / "REPORT.md", ROOT / "REPORT.html",
            html.escape((ROOT / "REPORT.md").read_text().splitlines()[0].removeprefix("# ")))
     render(ROOT / "EXECUTIVE_SUMMARY.md", ROOT / "EXECUTIVE_SUMMARY.html",
-           "Automated code review — executive summary")
+           "Executive summary — Harnesses find more verified bugs, and open-weight models make them cheap: a systematic evaluation of AI code review (September 2026)")
 
 
 if __name__ == "__main__":
