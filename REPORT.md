@@ -1,4 +1,4 @@
-# Harnesses find more verified bugs, and open-weight models make them cheap: a 147-bug evaluation of AI code review - prompts, models, effort levels, and harnesses (September 2026)
+# Harnesses find more verified bugs, and open-weight models make them cheap: a systematic evaluation of AI code review - prompts, models, effort levels, and harnesses (September 2026)
 
 **In one line:** On six severity-selected PRs from two codebases, harnesses increase true-gold recall over the **same model's vanilla prompt** in **39/42 comparisons** (7 models × 2 harnesses × 3 efforts; Fable excluded because its harness coverage is incomplete). Opus · CE · medium leads the revised advisory-reward F2′ point estimates; GLM harness cells offer lower-cost pilot options. This is evidence for a pilot, not production certification or statistical equivalence.
 
