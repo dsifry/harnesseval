@@ -26,6 +26,10 @@ import json
 import os
 import re
 import statistics
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import qr  # noqa: E402  (tools/qr.py: dependency-free QR encoder for the share images)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 METRICS = f"{ROOT}/analysis/final_report_metrics.json"
@@ -57,6 +61,7 @@ OPEN_WEIGHT = {"glm-5.3-vision-background", "glm-5.3-flash-background"}
 WORDS = {1: "one", 2: "two", 3: "three", 4: "four", 5: "five", 6: "six", 7: "seven", 8: "eight",
          9: "nine", 10: "ten"}
 
+SHARE_IDS = ["f-harness", "f-cost", "f-effort", "c-harness", "c-money", "c-effort", "c-explore"]
 PILOT = f"glm-5.3-vision-background|{MRV}|low"
 PILOT_CHEAP = f"glm-5.3-flash-background|{MRV}|low"
 CLOSED_SAME_HARNESS = f"claude-opus-5|{MRV}|low"
@@ -315,6 +320,8 @@ def compute(M: dict, D: dict) -> tuple[dict, dict, dict]:
             "labelled": [top["key"], pilot["key"], cheap["key"], best_oneshot["key"]],
             "model_order": list(MODEL_NAME), "frontier": [r["key"] for r in frontier],
             "compare": [top["key"], closed["key"], pilot["key"], cheap["key"], best_oneshot["key"]],
+            # a scannable link for each share image; the explorer's is its section link (the pinned set varies)
+            "qr": {sid: qr.as_strings(qr.encode(f"{PUBLIC_BASE}{PAGE_NAME}#{sid}")) for sid in SHARE_IDS},
             "page_url": facts["page_url"]}
     guards = {"ranked": ranked, "top": top, "pilot": pilot, "closed": closed, "cheap": cheap,
               "frontier": frontier, "cheap_floor": cheap_floor, "rows": rows, "eff_best": eff_best, "eb": eb,
