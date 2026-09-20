@@ -116,6 +116,20 @@ class SdlcReportTests(unittest.TestCase):
         self.assertIn(f"~~~text\n{prompt}\n~~~", self.report_md, "REPORT.md §2.2 must print the prompt verbatim")
         self.assertIn('href="REPORT.html#the-one-shot-baseline-prompt-verbatim"', self.page)
 
+    def test_linkedin_posts_follow_the_long_form_rules(self):
+        posts = re.findall(r'<p class="post-li">(.*?)</p>', self.page, flags=re.S)
+        self.assertEqual(len(posts), 7)
+        tags = re.search(r"const LI_HASHTAGS = \[([^\]]*)\]", self.template).group(1)
+        n_tags = len([h for h in tags.split(",") if h.strip()])
+        self.assertTrue(3 <= n_tags <= 5)
+        for post in posts:
+            lines = [re.sub(r"\s+", " ", ln).strip() for ln in html.unescape(post).split("\n")]
+            text = "\n".join(lines).strip()
+            self.assertLessEqual(len(lines[0]), 210, "hook must fit before 'see more': " + lines[0])
+            self.assertTrue(text.rstrip().endswith("?"), "end with a question: " + text[-80:])
+            self.assertTrue(1000 <= len(text) <= 1900, f"{len(text)} chars: " + lines[0])
+            self.assertLessEqual(len(text) + 2 + 23 + 2 + 60, 3000)  # with link and hashtags, inside LinkedIn's limit
+
     def test_share_images_carry_a_qr_code_for_their_own_link(self):
         ids = re.findall(r'id="([^"]+)"[^>]*data-share=', self.page)
         self.assertEqual(sorted(ids), sorted(self.data["qr"]))
