@@ -127,6 +127,7 @@ class SdlcReportTests(unittest.TestCase):
             text = "\n".join(lines).strip()
             self.assertLessEqual(len(lines[0]), 210, "hook must fit before 'see more': " + lines[0])
             self.assertTrue(text.rstrip().endswith("?"), "end with a question: " + text[-80:])
+            self.assertNotRegex(text, r"\b([Ww]e|[Oo]ur|[Uu]s)\b", "the reader is not an author: " + lines[0])
             self.assertTrue(1000 <= len(text) <= 1900, f"{len(text)} chars: " + lines[0])
             self.assertLessEqual(len(text) + 2 + 23 + 2 + 60, 3000)  # with link and hashtags, inside LinkedIn's limit
 
