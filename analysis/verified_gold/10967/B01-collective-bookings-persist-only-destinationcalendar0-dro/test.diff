@@ -1,0 +1,233 @@
+diff --git a/packages/features/bookings/lib/handleNewBooking.verified.test.ts b/packages/features/bookings/lib/handleNewBooking.verified.test.ts
+new file mode 100644
+--- /dev/null
++++ b/packages/features/bookings/lib/handleNewBooking.verified.test.ts
+@@ -0,0 +1,228 @@
++import { beforeEach, describe, expect, it, vi } from "vitest";
++
++const mocks = vi.hoisted(() => ({
++  bookingCreate: vi.fn().mockResolvedValue({ id: 1, uid: "booking-uid" }),
++  eventTypeFindUnique: vi.fn(),
++  userFindUnique: vi.fn(),
++}));
++
++vi.mock("@calcom/prisma", () => ({
++  prisma: {
++    booking: {
++      create: mocks.bookingCreate,
++      findFirst: vi.fn().mockResolvedValue(null),
++      findUnique: vi.fn().mockResolvedValue(null),
++      findFirstOrThrow: vi.fn().mockResolvedValue(null),
++      update: vi.fn().mockResolvedValue({}),
++    },
++    user: {
++      findUnique: mocks.userFindUnique,
++      findFirst: vi.fn().mockResolvedValue(null),
++      findMany: vi.fn().mockResolvedValue([]),
++    },
++    credential: {
++      findFirst: vi.fn().mockResolvedValue(null),
++      findFirstOrThrow: vi.fn().mockResolvedValue({ id: 1, key: {}, appId: "office365-calendar" }),
++      update: vi.fn().mockResolvedValue({}),
++    },
++    destinationCalendar: {
++      findFirst: vi.fn().mockResolvedValue(null),
++      findMany: vi.fn().mockResolvedValue([]),
++      create: vi.fn().mockResolvedValue({}),
++      update: vi.fn().mockResolvedValue({}),
++    },
++    eventType: {
++      findUnique: mocks.eventTypeFindUnique,
++      findFirst: vi.fn().mockResolvedValue(null),
++    },
++    payment: { findFirst: vi.fn().mockResolvedValue(null) },
++    membership: { findFirst: vi.fn().mockResolvedValue(null) },
++    team: { findUnique: vi.fn().mockResolvedValue(null) },
++    $transaction: vi.fn().mockResolvedValue([]),
++    webhook: { findMany: vi.fn().mockResolvedValue([]) },
++  },
++}));
++
++vi.mock("@calcom/core/EventManager", () => ({
++  default: class EventManager {
++    async create() {
++      return { referencesToCreate: [], results: [], updatedBookings: [] };
++    }
++    async update() {
++      return { referencesToCreate: [] };
++    }
++    async delete() {
++      return {};
++    }
++  },
++}));
++
++vi.mock("@calcom/core/event", () => ({ getEventName: vi.fn().mockReturnValue("Test Event") }));
++vi.mock("@calcom/core/getUserAvailability", () => ({
++  getUserAvailability: vi.fn().mockResolvedValue({
++    busy: [],
++    timeZone: "UTC",
++    dateRanges: [],
++    oooExcludedDateRanges: [],
++    currentSeats: [],
++  }),
++}));
++vi.mock("@calcom/core/videoClient", () => ({ deleteMeeting: vi.fn() }));
++vi.mock("@calcom/app-store/_utils/getCalendar", () => ({ getCalendar: vi.fn() }));
++vi.mock("@calcom/app-store/googlevideo/_metadata", () => ({ metadata: {} }));
++vi.mock("@calcom/app-store/zapier/lib/nodeScheduler", () => ({
++  cancelScheduledJobs: vi.fn(),
++  scheduleTrigger: vi.fn(),
++}));
++vi.mock("@calcom/app-store/locations", () => ({
++  getLocationValueForDB: vi.fn().mockReturnValue({ label: "in-person", value: "in-person" }),
++  MeetLocationType: "integrations:google:meet",
++  OrganizerDefaultConferencingAppType: "organizer-default",
++}));
++vi.mock("@calcom/app-store/utils", () => ({ getAppFromSlug: vi.fn() }));
++vi.mock("@calcom/emails", () => ({
++  sendAttendeeRequestEmail: vi.fn(),
++  sendOrganizerRequestEmail: vi.fn(),
++  sendRescheduledEmails: vi.fn(),
++  sendRescheduledSeatEmail: vi.fn(),
++  sendScheduledEmails: vi.fn(),
++  sendScheduledSeatsEmails: vi.fn(),
++}));
++vi.mock("@calcom/features/bookings/lib/getBookingFields", () => ({
++  getBookingFieldsWithSystemFields: vi.fn().mockReturnValue([]),
++}));
++vi.mock("@calcom/features/bookings/lib/getCalEventResponses", () => ({
++  getCalEventResponses: vi.fn().mockReturnValue([]),
++}));
++vi.mock("@calcom/features/bookings/lib/handleWebhookTrigger", () => ({
++  handleWebhookTrigger: vi.fn(),
++}));
++
++describe("collective bookings destinationCalendar persistence", () => {
++  beforeEach(() => {
++    vi.clearAllMocks();
++  });
++
++  it("persists the destination calendar for every collective host, not only destinationCalendar[0]", async () => {
++    const orgCal = {
++      id: 10,
++      integration: "office365_calendar",
++      externalId: "org@example.com",
++      userId: 1,
++      credentialId: 100,
++    };
++    const host2Cal = {
++      id: 22,
++      integration: "office365_calendar",
++      externalId: "host2@example.com",
++      userId: 2,
++      credentialId: 200,
++    };
++
++    const orgCred = { id: 100, appId: "office365-calendar", type: "office365_calendar", key: {}, userId: 1, teamId: null };
++    const host2Cred = { id: 200, appId: "office365-calendar", type: "office365_calendar", key: {}, userId: 2, teamId: null };
++
++    const organizerUser = {
++      id: 1,
++      username: "org",
++      name: "Org",
++      email: "org@example.com",
++      timeZone: "UTC",
++      locale: "en",
++      destinationCalendar: orgCal,
++      credentials: [orgCred],
++      organization: { slug: null },
++      organizationId: null,
++      avatarUrl: null,
++      allowDynamicBooking: false,
++      isFixed: true,
++    };
++    const secondHost = {
++      ...organizerUser,
++      id: 2,
++      username: "host2",
++      name: "Host Two",
++      email: "host2@example.com",
++      destinationCalendar: host2Cal,
++      credentials: [host2Cred],
++      isFixed: true,
++    };
++
++    const eventType = {
++      id: 5,
++      slug: "team-event",
++      title: "Team Event",
++      schedulingType: "COLLECTIVE",
++      length: 30,
++      hosts: [
++        { user: organizerUser, isFixed: true },
++        { user: secondHost, isFixed: true },
++      ],
++      users: [organizerUser, secondHost],
++      destinationCalendar: null,
++      locations: [],
++      customInputs: [],
++      price: 0,
++      currency: "usd",
++      requiresConfirmation: false,
++      seatsPerTimeSlot: null,
++      seatsShowAttendees: true,
++      hideCalendarNotes: false,
++      slotInterval: null,
++      minimumBookingNotice: 0,
++      beforeEventBuffer: 0,
++      afterEventBuffer: 0,
++      metadata: {},
++      recurringEvent: null,
++      teamId: 1,
++      team: { id: 1, name: "Team" },
++      bookingFields: [],
++    };
++
++    mocks.eventTypeFindUnique.mockResolvedValue(eventType);
++    mocks.userFindUnique.mockResolvedValue(organizerUser);
++
++    const mod = await import("./handleNewBooking");
++    const handler = (mod as any).default ?? (mod as any).handler;
++
++    const startMs = Date.now() + 86_400_000;
++    const req = {
++      method: "POST",
++      headers: {},
++      body: {
++        eventTypeId: 5,
++        start: new Date(startMs).toISOString(),
++        end: new Date(startMs + 1_800_000).toISOString(),
++        timeZone: "UTC",
++        language: "en",
++        user: "org",
++        email: "booker@example.com",
++        name: "Booker",
++        metadata: {},
++        customInputs: {},
++        responses: {},
++        bookingFieldsResponses: {},
++      },
++    } as any;
++
++    try {
++      await handler(req);
++    } catch {
++      // The handler may fail later in the pipeline for unrelated reasons.
++      // We only care about what was passed into the booking creation call.
++    }
++
++    const created = mocks.bookingCreate.mock.calls[0]?.[0] as any;
++    const connect = created?.data?.destinationCalendar?.connect;
++    const connectedIds: number[] = Array.isArray(connect)
++      ? connect.map((c: any) => c.id)
++      : connect
++      ? [connect.id]
++      : [];
++
++    expect(
++      connectedIds,
++      "Collective bookings must persist a destination calendar for every co-host (not only destinationCalendar[0])"
++    ).toEqual(expect.arrayContaining([orgCal.id, host2Cal.id]));
++  });
++});

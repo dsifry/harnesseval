@@ -1,0 +1,93 @@
+require 'digest'
+
+# ---- Minimal stubs so the real file can load without Rails/DB ----
+def require_dependency(_name); end
+
+module I18n
+  def self.t(_key, opts = {})
+    "imported from #{opts[:link]}"
+  end
+end
+
+class Object
+  def present?
+    return false if nil?
+    respond_to?(:empty?) ? !empty? : true
+  end
+  def blank?; !present?; end
+end
+
+class FakeRelation
+  def initialize(recs); @recs = recs; end
+  def where(*); self; end
+  def first; @recs.first; end
+  def pluck(*); []; end
+end
+
+module ActiveRecord
+  class Base
+    def self.belongs_to(*); end
+    def self.validates_presence_of(*); end
+    def self.where(*); FakeRelation.new([]); end
+    def self.create!(*); new; end
+  end
+end
+
+class Topic
+  def self.transaction; yield; end
+end
+
+class Post
+  def self.cook_methods; { raw_html: 1 }; end
+end
+
+class PostCreator
+  def initialize(*); end
+  def create; nil; end
+end
+
+class PostRevisor
+  def initialize(*); end
+  def revise!(*); end
+end
+
+# ---- Load the REAL file under test ----
+require_relative '../../app/models/topic_embed'
+
+# The guard `return unless url =~ /^https?\:\/\//` runs before anything else.
+# If it does NOT return, the very next statement mutates `contents` by
+# interpolating the raw url into an unescaped <a href='...'>. That mutation is
+# the observable side effect we assert on, so downstream DB/Nokogiri calls are
+# irrelevant and any exception they raise is ignored.
+def run_import(url)
+  contents = +""
+  begin
+    TopicEmbed.import(nil, url, "title", contents)
+  rescue StandardError
+    # ignore downstream work (DB model / Nokogiri / URI)
+  end
+  contents
+end
+
+failures = []
+
+# Positive control: a legitimate single-line https URL must pass the guard.
+ctl = run_import("http://example.com/a")
+failures << "control: legit URL was blocked" unless ctl.include?("http://example.com/a")
+
+# Negative control: a scheme-less single line must be rejected by the guard.
+neg = run_import("javascript:alert(1)")
+failures << "neg control: javascript: URL passed guard" unless neg.empty?
+
+# The claimed defect: a multiline value whose 2nd line starts with http://
+# satisfies Ruby's line-anchored ^ anchor and bypasses the scheme check.
+bypass = run_import("javascript:alert(1)\nhttp://evil.example/x")
+if bypass.include?("javascript:alert(1)")
+  failures << "multiline URL bypassed ^-anchored scheme check; raw value interpolated unescaped: #{bypass.inspect}"
+end
+
+if failures.empty?
+  puts "RESULT: PASS"
+else
+  puts "RESULT: FAIL: #{failures.join('; ')}"
+end

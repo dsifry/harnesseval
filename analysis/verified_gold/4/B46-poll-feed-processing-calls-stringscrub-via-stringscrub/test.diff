@@ -1,0 +1,96 @@
+diff --git a/spec/verify/poll_feed_verify.rb b/spec/verify/poll_feed_verify.rb
+new file mode 100644
+--- /dev/null
++++ b/spec/verify/poll_feed_verify.rb
+@@ -0,0 +1,91 @@
++#!/usr/bin/env ruby
++# Regression evidence for app/jobs/scheduled/poll_feed.rb
++#
++# CLAIM: Jobs::PollFeed#poll_feed calls String#scrub, which only exists on
++# Ruby >= 2.1.  On the Ruby 2.0 runtime contemporaneous with this checkout,
++# every feed item raises NoMethodError.
++#
++# Ruby 2.0 is not installable here, so we emulate that runtime by removing
++# String#scrub (absent there) and then driving the REAL file under test.
++
++require 'digest/sha1'
++require 'cgi'
++require 'ostruct'
++require 'stringio'
++require 'open-uri'
++
++# ---- minimal environment stubs (no Rails, no DB) ---------------------------
++
++def require_dependency(_name); end
++
++# Make the `require 'simple-rss'` inside poll_feed a no-op.
++$LOADED_FEATURES << 'simple-rss.rb'
++
++module Kernel
++  def open(*_args, &_blk); StringIO.new('<rss/>'); end
++end
++
++class String
++  def present?; !empty?; end
++  def blank?;   empty?;  end
++end
++
++module Jobs
++  class Scheduled
++    def self.recurrence(&_b); end
++    def self.sidekiq_options(_opts = {}); end
++  end
++end
++
++class SiteSetting
++  def self.feed_polling_enabled?; true; end
++  def self.feed_polling_url; 'http://example.com/feed.xml'; end
++  def self.embed_by_username; 'admin'; end
++end
++
++class User
++  def self.where(*_args); [new]; end
++  def blank?; false; end
++end
++
++class TopicEmbed
++  def self.import(*_args); end
++end
++
++module SimpleRSS
++  ITEM = OpenStruct.new(
++    link:    'http://example.com/post/1',
++    id:      nil,
++    content: 'Hello &amp; goodbye',
++    title:   'A title'
++  )
++  def self.parse(_xml); OpenStruct.new(items: [ITEM]); end
++end
++
++# ---- load the REAL file under test ----------------------------------------
++
++require File.expand_path('../../../app/jobs/scheduled/poll_feed.rb', __FILE__)
++
++# ---- emulate Ruby 2.0: String#scrub does not exist ------------------------
++
++if String.method_defined?(:scrub)
++  class String
++    undef_method :scrub
++  end
++end
++
++# ---- exercise the real logic ----------------------------------------------
++
++begin
++  Jobs::PollFeed.new.poll_feed
++  # No crash -> the code path does not depend on String#scrub.
++  puts 'RESULT: PASS'
++rescue NoMethodError => e
++  if e.message.include?('scrub')
++    puts "RESULT: FAIL: poll_feed requires String#scrub (Ruby >= 2.1 only); on Ruby 2.0 it raises #{e.class}: #{e.message}"
++  else
++    puts "RESULT: FAIL: unexpected NoMethodError -> #{e.message}"
++  end
++rescue => e
++  puts "RESULT: FAIL: #{e.class}: #{e.message}"
++end

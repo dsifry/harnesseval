@@ -1,0 +1,458 @@
+{
+ "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/10",
+ "pass_digest": "9c5f733ce7a3f996c90c67f262cc4a77e2b234bc415c197afa7c73477ad320be",
+ "request_sha256": "1578bfa9cf1866c271e83c8f21725894394fc65a38ed1c087823d2bf89007896",
+ "request": {
+  "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/10",
+  "model": "glm-5.3-background",
+  "system": "You are clustering code review findings from one PR. Always respond with valid JSON.",
+  "prompt": "You are clustering code review findings from the same PR. For each PAIR below, decide whether the two findings describe the SAME underlying issue — same root cause in the same code location. Different wording is fine. A finding about a DIFFERENT defect in the same file or function is NOT the same issue. Severity or aspect differences of the same root cause ARE the same issue.\n\n\nFor THIS scoring pass, duplicate equivalence is stricter than sharing a root cause.\nYou must compare the COMPLETE MATERIAL CLAIMS, including mechanism, triggering\nconditions, execution path, and consequence. The same line or broad concern does\nnot establish equivalence. A report of wrong-category selection, a case/rename\nmismatch, a crash, and a silent fallback are different claims even at one lookup.\nAn inactive/unbound API concern and an alleged active user-facing failure differ.\nA compound report with an additional material claim does NOT equal its subset.\nDifferences only in wording, severity, or hedging do not create separate claims.\nIf the claimed mechanisms, triggers or consequences conflict, or one report adds\nan unsupported/different material factual claim, return same=false. You are NOT\nverifying which claim is true; do not repair or reinterpret either report to make\nthem match. If unsure whether their full claims are equivalent, return false.\n\nFor every numbered pair, extract what A and B actually CLAIM into mechanism,\ntrigger and consequence. Then list material_differences and give your equivalence\nverdict, confidence and reason. same=true requires no material differences.\nReturn ONLY this JSON object, with EVERY pair index exactly once:\n{\"pairs\":[{\"pair\":1,\"a\":{\"mechanism\":\"...\",\"trigger\":\"...\",\"consequence\":\"...\"},\"b\":{\"mechanism\":\"...\",\"trigger\":\"...\",\"consequence\":\"...\"},\"material_differences\":[],\"same\":true,\"confidence\":0.9,\"reason\":\"...\"}]}\n\nPAIRS:\nPAIR 1:\nA: db/migrate/20150818190757_create_embeddable_hosts.rb:9-11 — `execute(\"SELECT c.id FROM categories ... WHERE s.name = 'embed_category'\")[0]['id']` runs unconditionally before any host check, so on every site where `embed_category` was never set to an existing category name (all fresh installs and every site that never used embedding) the empty PG::Result raises IndexError and `db:migrate` aborts, blocking the upgrade for users who never touched embedding (severity P0, confidence 75, blocking)\nB: db/migrate/20150818190757_create_embeddable_hosts.rb:9-11 — `execute(\"SELECT c.id FROM categories AS c INNER JOIN site_settings AS s ON s.value = c.name WHERE s.name = 'embed_category'\")[0]['id']` indexes row 0 of a result that is empty whenever embed_category was never set (defaults are not stored in site_settings) or names no existing category, so PG::Result#[] raises IndexError and the migration aborts on those sites instead of taking the `category_id == 0` fallback, which is unreachable in that case (P0, conf 75)\n\nPAIR 2:\nA: spec/controllers/admin/embeddable_hosts_controller_spec.rb:5 — Only assertion for both new admin controllers is `< Admin::AdminController`; no specs cover create/update/destroy, the uncategorized fallback, or the `EmbeddableHost` normalization/`record_for_host` logic.\nB: spec/controllers/admin/embeddable_hosts_controller_spec.rb:5 — The inheritance-only assertion leaves create, update, destroy, validation failure, and default-category behavior untested, so regressions in the new administrative CRUD API can ship undetected.\n\nPAIR 3:\nA: spec/controllers/admin/embeddable_hosts_controller_spec.rb:5 — Only assertion for both new admin controllers is `< Admin::AdminController`; no specs cover create/update/destroy, the uncategorized fallback, or the `EmbeddableHost` normalization/`record_for_host` logic.\nB: spec/controllers/admin/embeddable_hosts_controller_spec.rb:5-7 — the only test for the new CRUD API asserts `Admin::EmbeddableHostsController < Admin::AdminController`; there is no spec for create/update/destroy, for `EmbeddableHost` before_validation normalization, for `record_for_host`/`host_allowed?`, or for the migration's data import, so none of the feature's acceptance behaviour (editing host/category relationships) is verified. (severity P2, confidence 100, blocking)\n\nPAIR 4:\nA: spec/controllers/admin/embeddable_hosts_controller_spec.rb:5 — The inheritance-only assertion leaves create, update, destroy, validation failure, and default-category behavior untested, so regressions in the new administrative CRUD API can ship undetected.\nB: spec/controllers/admin/embeddable_hosts_controller_spec.rb:5-7 — the only test for the new CRUD API asserts `Admin::EmbeddableHostsController < Admin::AdminController`; there is no spec for create/update/destroy, for `EmbeddableHost` before_validation normalization, for `record_for_host`/`host_allowed?`, or for the migration's data import, so none of the feature's acceptance behaviour (editing host/category relationships) is verified. (severity P2, confidence 100, blocking)\n\nPAIR 5:\nA: spec/controllers/admin/embedding_controller_spec.rb:5 — the only assertion is a class-ancestry check, so `show` (serialized `embeddable_hosts` ordered by host with `category_id`) and `update` (app/controllers/admin/embedding_controller.rb:10-12, which persists nothing and just re-renders the OpenStruct) are never requested; a PUT that the admin UI's `saveChanges()` issues silently discards changes and no test can observe that (severity P2, confidence 100, blocking)\nB: spec/controllers/admin/embedding_controller_spec.rb:6 — the spec only checks inheritance, so show's serialized embeddable_hosts payload and update (which persists nothing and just re-renders) have no behavioral test, and the spec gives false confidence that the admin embedding endpoints work (P2, conf 100)\n\nPAIR 6:\nA: Embedding 'save changes' silently discards data: EmbeddingController#update never reads params or writes anything, and admin-embedding.js.es6 calls embedding.update({}) with no payload or error handling, so an admin clicking save sees success while nothing persists; implement persistence or remove the affordance\nB: saveChanges() calls this.get('embedding').update({}) with no .then/.catch, and the server-side update action does nothing but re-serialize, so the admin gets no success/error feedback and a false sense that settings were saved\n\nPAIR 7:\nA: update and destroy look up the host with `EmbeddableHost.where(id: params[:id]).first` and never handle a nil result, so save_host calls `host.host =` on nil and destroy calls `host.destroy` on nil. A PUT/DELETE to /admin/embeddable_hosts/:id with a stale or nonexistent id raises NoMethodError and returns a 500 instead of a 404; the same applies when params[:embeddable_host] is absent in create/update (`params[:embeddable_host][:host]` on nil → 500).\nB: Admin EmbeddableHostsController destroy/save_host raise unhandled 500s (NoMethodError) when the record is missing or the embeddable_host param key is absent, instead of 404/400\n\nPAIR 8:\nA: update and destroy look up the host with `EmbeddableHost.where(id: params[:id]).first` and never handle a nil result, so save_host calls `host.host =` on nil and destroy calls `host.destroy` on nil. A PUT/DELETE to /admin/embeddable_hosts/:id with a stale or nonexistent id raises NoMethodError and returns a 500 instead of a 404; the same applies when params[:embeddable_host] is absent in create/update (`params[:embeddable_host][:host]` on nil → 500).\nB: Admin::EmbeddableHostsController returns 500s on unknown ids and missing params: update/destroy do `where(id: params[:id]).first` then call `save_host(nil)` / `nil.destroy` causing NoMethodError, and `params[:embeddable_host][:host]` raises when the embeddable_host key is absent; unknown ids should 404 and missing params should 422\n\nPAIR 9:\nA: update and destroy look up the host with `EmbeddableHost.where(id: params[:id]).first` and never handle a nil result, so save_host calls `host.host =` on nil and destroy calls `host.destroy` on nil. A PUT/DELETE to /admin/embeddable_hosts/:id with a stale or nonexistent id raises NoMethodError and returns a 500 instead of a 404; the same applies when params[:embeddable_host] is absent in create/update (`params[:embeddable_host][:host]` on nil → 500).\nB: `Admin::EmbeddableHostsController` update and destroy do `EmbeddableHost.where(id: params[:id]).first` with no presence check, so unknown ids cause `nil.host =` / `nil.destroy` NoMethodError 500s instead of 404/422 (e.g., a stale UI row after another admin deletes the host), and `params[:embeddable_host][:host]` raises when the nested param is absent or not a hash\n\nPAIR 10:\nA: update and destroy look up the host with `EmbeddableHost.where(id: params[:id]).first` and never handle a nil result, so save_host calls `host.host =` on nil and destroy calls `host.destroy` on nil. A PUT/DELETE to /admin/embeddable_hosts/:id with a stale or nonexistent id raises NoMethodError and returns a 500 instead of a 404; the same applies when params[:embeddable_host] is absent in create/update (`params[:embeddable_host][:host]` on nil → 500).\nB: P3: `update`/`destroy` in Admin::EmbeddableHostsController raise 500 on unknown id or missing params — `EmbeddableHost.where(id: params[:id]).first` returns nil for a stale/unknown id, then `save_host(nil)` raises `NoMethodError` on `nil.host =` and `destroy` calls `nil.destroy`\n\nPAIR 11:\nA: update and destroy look up the host with `EmbeddableHost.where(id: params[:id]).first` and never handle a nil result, so save_host calls `host.host =` on nil and destroy calls `host.destroy` on nil. A PUT/DELETE to /admin/embeddable_hosts/:id with a stale or nonexistent id raises NoMethodError and returns a 500 instead of a 404; the same applies when params[:embeddable_host] is absent in create/update (`params[:embeddable_host][:host]` on nil → 500).\nB: update/destroy in EmbeddableHostsController raise NoMethodError on unknown id: where(id:).first returns nil, then save_host calls nil.host= and destroy calls nil.destroy, producing a 500 instead of 404; also params[:embeddable_host][:host] raises if the key is absent; add a not-found guard and use params.require(:embeddable_host).permit(:host, :category_id)\n\nPAIR 12:\nA: Admin EmbeddableHostsController destroy/save_host raise unhandled 500s (NoMethodError) when the record is missing or the embeddable_host param key is absent, instead of 404/400\nB: Admin::EmbeddableHostsController returns 500s on unknown ids and missing params: update/destroy do `where(id: params[:id]).first` then call `save_host(nil)` / `nil.destroy` causing NoMethodError, and `params[:embeddable_host][:host]` raises when the embeddable_host key is absent; unknown ids should 404 and missing params should 422\n\nPAIR 13:\nA: Admin EmbeddableHostsController destroy/save_host raise unhandled 500s (NoMethodError) when the record is missing or the embeddable_host param key is absent, instead of 404/400\nB: `Admin::EmbeddableHostsController` update and destroy do `EmbeddableHost.where(id: params[:id]).first` with no presence check, so unknown ids cause `nil.host =` / `nil.destroy` NoMethodError 500s instead of 404/422 (e.g., a stale UI row after another admin deletes the host), and `params[:embeddable_host][:host]` raises when the nested param is absent or not a hash\n\nPAIR 14:\nA: Admin EmbeddableHostsController destroy/save_host raise unhandled 500s (NoMethodError) when the record is missing or the embeddable_host param key is absent, instead of 404/400\nB: P3: `update`/`destroy` in Admin::EmbeddableHostsController raise 500 on unknown id or missing params — `EmbeddableHost.where(id: params[:id]).first` returns nil for a stale/unknown id, then `save_host(nil)` raises `NoMethodError` on `nil.host =` and `destroy` calls `nil.destroy`\n\nPAIR 15:\nA: Admin EmbeddableHostsController destroy/save_host raise unhandled 500s (NoMethodError) when the record is missing or the embeddable_host param key is absent, instead of 404/400\nB: update/destroy in EmbeddableHostsController raise NoMethodError on unknown id: where(id:).first returns nil, then save_host calls nil.host= and destroy calls nil.destroy, producing a 500 instead of 404; also params[:embeddable_host][:host] raises if the key is absent; add a not-found guard and use params.require(:embeddable_host).permit(:host, :category_id)\n\nPAIR 16:\nA: Admin::EmbeddableHostsController returns 500s on unknown ids and missing params: update/destroy do `where(id: params[:id]).first` then call `save_host(nil)` / `nil.destroy` causing NoMethodError, and `params[:embeddable_host][:host]` raises when the embeddable_host key is absent; unknown ids should 404 and missing params should 422\nB: `Admin::EmbeddableHostsController` update and destroy do `EmbeddableHost.where(id: params[:id]).first` with no presence check, so unknown ids cause `nil.host =` / `nil.destroy` NoMethodError 500s instead of 404/422 (e.g., a stale UI row after another admin deletes the host), and `params[:embeddable_host][:host]` raises when the nested param is absent or not a hash\n\nPAIR 17:\nA: Admin::EmbeddableHostsController returns 500s on unknown ids and missing params: update/destroy do `where(id: params[:id]).first` then call `save_host(nil)` / `nil.destroy` causing NoMethodError, and `params[:embeddable_host][:host]` raises when the embeddable_host key is absent; unknown ids should 404 and missing params should 422\nB: P3: `update`/`destroy` in Admin::EmbeddableHostsController raise 500 on unknown id or missing params — `EmbeddableHost.where(id: params[:id]).first` returns nil for a stale/unknown id, then `save_host(nil)` raises `NoMethodError` on `nil.host =` and `destroy` calls `nil.destroy`\n\nPAIR 18:\nA: Admin::EmbeddableHostsController returns 500s on unknown ids and missing params: update/destroy do `where(id: params[:id]).first` then call `save_host(nil)` / `nil.destroy` causing NoMethodError, and `params[:embeddable_host][:host]` raises when the embeddable_host key is absent; unknown ids should 404 and missing params should 422\nB: update/destroy in EmbeddableHostsController raise NoMethodError on unknown id: where(id:).first returns nil, then save_host calls nil.host= and destroy calls nil.destroy, producing a 500 instead of 404; also params[:embeddable_host][:host] raises if the key is absent; add a not-found guard and use params.require(:embeddable_host).permit(:host, :category_id)\n\nPAIR 19:\nA: `Admin::EmbeddableHostsController` update and destroy do `EmbeddableHost.where(id: params[:id]).first` with no presence check, so unknown ids cause `nil.host =` / `nil.destroy` NoMethodError 500s instead of 404/422 (e.g., a stale UI row after another admin deletes the host), and `params[:embeddable_host][:host]` raises when the nested param is absent or not a hash\nB: P3: `update`/`destroy` in Admin::EmbeddableHostsController raise 500 on unknown id or missing params — `EmbeddableHost.where(id: params[:id]).first` returns nil for a stale/unknown id, then `save_host(nil)` raises `NoMethodError` on `nil.host =` and `destroy` calls `nil.destroy`\n\nPAIR 20:\nA: `Admin::EmbeddableHostsController` update and destroy do `EmbeddableHost.where(id: params[:id]).first` with no presence check, so unknown ids cause `nil.host =` / `nil.destroy` NoMethodError 500s instead of 404/422 (e.g., a stale UI row after another admin deletes the host), and `params[:embeddable_host][:host]` raises when the nested param is absent or not a hash\nB: update/destroy in EmbeddableHostsController raise NoMethodError on unknown id: where(id:).first returns nil, then save_host calls nil.host= and destroy calls nil.destroy, producing a 500 instead of 404; also params[:embeddable_host][:host] raises if the key is absent; add a not-found guard and use params.require(:embeddable_host).permit(:host, :category_id)\n",
+  "effort": "low",
+  "pairs": [
+   [
+    1222,
+    1224
+   ],
+   [
+    1489,
+    1497
+   ],
+   [
+    1489,
+    1512
+   ],
+   [
+    1497,
+    1512
+   ],
+   [
+    1545,
+    1561
+   ],
+   [
+    1262,
+    1467
+   ],
+   [
+    302,
+    360
+   ],
+   [
+    302,
+    372
+   ],
+   [
+    302,
+    374
+   ],
+   [
+    302,
+    1440
+   ],
+   [
+    302,
+    1719
+   ],
+   [
+    360,
+    372
+   ],
+   [
+    360,
+    374
+   ],
+   [
+    360,
+    1440
+   ],
+   [
+    360,
+    1719
+   ],
+   [
+    372,
+    374
+   ],
+   [
+    372,
+    1440
+   ],
+   [
+    372,
+    1719
+   ],
+   [
+    374,
+    1440
+   ],
+   [
+    374,
+    1719
+   ]
+  ]
+ },
+ "parsed_response": {
+  "pairs": [
+   {
+    "pair": 1,
+    "a": {
+     "mechanism": "Migration executes SQL on embed_category and indexes result[0] unconditionally; empty PG::Result raises IndexError",
+     "trigger": "Fresh installs / sites where embed_category never set to existing category name",
+     "consequence": "db:migrate aborts, blocking upgrades"
+    },
+    "b": {
+     "mechanism": "Same execute(...)[0]['id']; empty when embed_category unset (defaults not stored) or names no existing category; category_id==0 fallback unreachable",
+     "trigger": "Sites where embed_category unset or invalid",
+     "consequence": "IndexError, migration aborts"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Same mechanism, trigger, and consequence; B only elaborates on why result is empty and fallback unreachable."
+   },
+   {
+    "pair": 2,
+    "a": {
+     "mechanism": "Only inheritance assertion; no specs for create/update/destroy, uncategorized fallback, EmbeddableHost normalization, record_for_host",
+     "trigger": "Running the test suite",
+     "consequence": "Regressions in all that logic undetected"
+    },
+    "b": {
+     "mechanism": "Inheritance-only assertion; create/update/destroy, validation failure, default-category untested",
+     "trigger": "Test suite",
+     "consequence": "Regressions in CRUD API ship undetected"
+    },
+    "material_differences": [
+     "A additionally claims missing specs for EmbeddableHost normalization and record_for_host logic"
+    ],
+    "same": false,
+    "confidence": 0.6,
+    "reason": "A is a compound claim including model/lookup logic coverage gaps that B does not mention."
+   },
+   {
+    "pair": 3,
+    "a": {
+     "mechanism": "Only inheritance assertion; missing specs for CRUD, uncategorized fallback, normalization, record_for_host",
+     "trigger": "Test suite",
+     "consequence": "Regressions undetected"
+    },
+    "b": {
+     "mechanism": "Only inheritance assertion; missing specs for CRUD, normalization, record_for_host/host_allowed?, and the migration's data import",
+     "trigger": "Test suite",
+     "consequence": "Feature acceptance behavior unverified"
+    },
+    "material_differences": [
+     "B adds a claim that the migration's data import is also untested"
+    ],
+    "same": false,
+    "confidence": 0.6,
+    "reason": "B adds a distinct material claim (migration data import untested) absent from A."
+   },
+   {
+    "pair": 4,
+    "a": {
+     "mechanism": "Inheritance-only assertion; create/update/destroy, validation failure, default-category untested",
+     "trigger": "Test suite",
+     "consequence": "CRUD regressions ship undetected"
+    },
+    "b": {
+     "mechanism": "Inheritance-only assertion; CRUD, normalization, record_for_host/host_allowed?, migration data import untested",
+     "trigger": "Test suite",
+     "consequence": "Acceptance behavior unverified"
+    },
+    "material_differences": [
+     "B claims missing specs for normalization, record_for_host/host_allowed?, and migration data import, which A does not"
+    ],
+    "same": false,
+    "confidence": 0.65,
+    "reason": "B is a compound claim with additional coverage-gap claims not in A."
+   },
+   {
+    "pair": 5,
+    "a": {
+     "mechanism": "Spec only checks ancestry; show and update never requested; update persists nothing and re-renders",
+     "trigger": "Running embedding controller spec",
+     "consequence": "PUT silently discards changes, no test observes it"
+    },
+    "b": {
+     "mechanism": "Spec only checks inheritance; show payload and update (persists nothing) lack behavioral tests",
+     "trigger": "Test suite",
+     "consequence": "False confidence that endpoints work"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "Same root cause and claims; B phrases consequence as false confidence rather than silent data loss but no conflicting mechanism."
+   },
+   {
+    "pair": 6,
+    "a": {
+     "mechanism": "EmbeddingController#update reads no params and writes nothing; admin JS calls embedding.update({}) with no payload or error handling",
+     "trigger": "Admin clicks save",
+     "consequence": "Success shown while nothing persists"
+    },
+    "b": {
+     "mechanism": "saveChanges calls update({}) with no .then/.catch; server update re-serializes only",
+     "trigger": "Admin saves",
+     "consequence": "No feedback, false sense settings saved"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Identical mechanism, trigger, consequence about non-persisting update and unhandled frontend call."
+   },
+   {
+    "pair": 7,
+    "a": {
+     "mechanism": "where(id:).first without nil check; save_host/destroy on nil; also params[:embeddable_host][:host] on nil",
+     "trigger": "Stale/nonexistent id PUT/DELETE; missing embeddable_host param in create/update",
+     "consequence": "NoMethodError 500 instead of 404/500 on missing param"
+    },
+    "b": {
+     "mechanism": "destroy/save_host raise NoMethodError on missing record or absent param key",
+     "trigger": "Missing record or absent embeddable_host key",
+     "consequence": "500 instead of 404/400"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "B is a summary of the same claims and triggers."
+   },
+   {
+    "pair": 8,
+    "a": {
+     "mechanism": "Nil lookup, save_host/destroy on nil, params[:embeddable_host][:host] on nil",
+     "trigger": "Unknown id or missing embeddable_host param",
+     "consequence": "500 instead of 404"
+    },
+    "b": {
+     "mechanism": "Same nil lookup and nil method calls; param key absent raises",
+     "trigger": "Unknown ids, missing params",
+     "consequence": "500s; should be 404/422"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "Identical claims; 404/422 vs 404 is a suggested fix, not a factual difference."
+   },
+   {
+    "pair": 9,
+    "a": {
+     "mechanism": "Nil lookup + nil method calls; missing nested param on nil",
+     "trigger": "Stale/nonexistent id; absent params[:embeddable_host]",
+     "consequence": "NoMethodError 500 instead of 404"
+    },
+    "b": {
+     "mechanism": "Same nil lookup; params[:embeddable_host][:host] raises when nested param absent or not a hash",
+     "trigger": "Stale UI row / unknown id; nested param absent or not a hash",
+     "consequence": "500 instead of 404/422"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.8,
+    "reason": "Same root defect; 'not a hash' is a minor elaboration of the same missing-param trigger."
+   },
+   {
+    "pair": 10,
+    "a": {
+     "mechanism": "Nil lookup, save_host/destroy on nil, missing param on nil",
+     "trigger": "Unknown id or missing param",
+     "consequence": "NoMethodError 500 instead of 404"
+    },
+    "b": {
+     "mechanism": "where(id:).first returns nil, save_host(nil) NoMethodError, nil.destroy",
+     "trigger": "Stale/unknown id or missing params",
+     "consequence": "500"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "B restates A's core claims."
+   },
+   {
+    "pair": 11,
+    "a": {
+     "mechanism": "Nil lookup, nil method calls, missing nested param on nil",
+     "trigger": "Unknown id; absent param key",
+     "consequence": "500 instead of 404"
+    },
+    "b": {
+     "mechanism": "Same nil lookup and method calls; params key absent raises; suggests guard and params.require",
+     "trigger": "Unknown id, absent key",
+     "consequence": "500 instead of 404"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "Same claims; B adds a fix suggestion, not a new factual claim."
+   },
+   {
+    "pair": 12,
+    "a": {
+     "mechanism": "destroy/save_host NoMethodError on missing record or absent param key",
+     "trigger": "Missing record or absent param",
+     "consequence": "500 instead of 404/400"
+    },
+    "b": {
+     "mechanism": "Same nil lookup, nil method calls, absent param raises",
+     "trigger": "Unknown ids, missing params",
+     "consequence": "500s; should be 404/422"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.8,
+    "reason": "Same claims; 400 vs 422 is only a suggested-remediation difference."
+   },
+   {
+    "pair": 13,
+    "a": {
+     "mechanism": "destroy/save_host NoMethodError on missing record or absent param",
+     "trigger": "Missing record or absent key",
+     "consequence": "500 instead of 404/400"
+    },
+    "b": {
+     "mechanism": "Same nil lookup; nested param absent or not a hash raises",
+     "trigger": "Stale UI row / unknown id; nested param absent",
+     "consequence": "500 instead of 404/422"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.8,
+    "reason": "Same root cause and consequences."
+   },
+   {
+    "pair": 14,
+    "a": {
+     "mechanism": "destroy/save_host NoMethodError on missing record or absent param",
+     "trigger": "Missing record or absent key",
+     "consequence": "500 instead of 404/400"
+    },
+    "b": {
+     "mechanism": "save_host(nil) NoMethodError, nil.destroy",
+     "trigger": "Unknown id or missing params",
+     "consequence": "500"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "B is a subset restatement of A's claims."
+   },
+   {
+    "pair": 15,
+    "a": {
+     "mechanism": "destroy/save_host NoMethodError on missing record or absent param",
+     "trigger": "Missing record or absent key",
+     "consequence": "500 instead of 404/400"
+    },
+    "b": {
+     "mechanism": "Same nil lookup, nil method calls; param key absent raises; suggests guard/params.require",
+     "trigger": "Unknown id, absent key",
+     "consequence": "500 instead of 404"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "Same claims; B's fix suggestion is not a material factual difference."
+   },
+   {
+    "pair": 16,
+    "a": {
+     "mechanism": "Nil lookup + nil method calls; param key absent raises; should 404/422",
+     "trigger": "Unknown ids, missing params",
+     "consequence": "500s"
+    },
+    "b": {
+     "mechanism": "Same; adds 'not a hash' condition and stale-UI-row example",
+     "trigger": "Stale UI row / unknown id; nested param absent or not a hash",
+     "consequence": "500 instead of 404/422"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "Same claims with elaboration of trigger conditions."
+   },
+   {
+    "pair": 17,
+    "a": {
+     "mechanism": "Nil lookup, save_host(nil)/nil.destroy, param key absent; should 404/422",
+     "trigger": "Unknown ids, missing params",
+     "consequence": "500s"
+    },
+    "b": {
+     "mechanism": "Same nil lookup and method calls",
+     "trigger": "Stale/unknown id or missing params",
+     "consequence": "500"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "B is a subset restatement of A."
+   },
+   {
+    "pair": 18,
+    "a": {
+     "mechanism": "Nil lookup, nil method calls, param key absent; should 404/422",
+     "trigger": "Unknown ids, missing params",
+     "consequence": "500s"
+    },
+    "b": {
+     "mechanism": "Same nil lookup, nil method calls; suggests guard and params.require",
+     "trigger": "Unknown id, absent key",
+     "consequence": "500 instead of 404"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "Same claims; fix suggestion is not material."
+   },
+   {
+    "pair": 19,
+    "a": {
+     "mechanism": "Nil lookup, nil method calls; nested param absent or not a hash raises",
+     "trigger": "Stale UI row/unknown id; nested param absent",
+     "consequence": "500 instead of 404/422"
+    },
+    "b": {
+     "mechanism": "Same nil lookup, save_host(nil), nil.destroy",
+     "trigger": "Stale/unknown id or missing params",
+     "consequence": "500"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "Same root cause; B is a subset restatement."
+   },
+   {
+    "pair": 20,
+    "a": {
+     "mechanism": "Nil lookup, nil method calls; nested param absent or not a hash raises",
+     "trigger": "Stale UI row/unknown id; nested param absent",
+     "consequence": "500 instead of 404/422"
+    },
+    "b": {
+     "mechanism": "Same nil lookup, nil method calls; suggests guard and params.require",
+     "trigger": "Unknown id, absent key",
+     "consequence": "500 instead of 404"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "Same claims; fix suggestion is not a material difference."
+   }
+  ]
+ },
+ "usage": {
+  "glm-5.3-background": {
+   "input_tokens": 3569,
+   "cache_read_input_tokens": 384,
+   "cache_creation_input_tokens": 0,
+   "output_tokens": 2551,
+   "reasoning_output_tokens": 540,
+   "cost_usd": 0.0,
+   "total_tokens": 7044
+  }
+ },
+ "status": "complete",
+ "error_type": null,
+ "elapsed_s": 13.849436044692993
+}

@@ -1,0 +1,1534 @@
+{
+  "tp": 2,
+  "fp": 49,
+  "fn": 0,
+  "precision": 0.0392156862745098,
+  "recall": 1.0,
+  "n_findings": 52,
+  "n_golden": 2,
+  "tokens_in": 159745,
+  "tokens_out": 9895,
+  "wall_ms": 161073.38500022888,
+  "per_model_usage": {},
+  "total_cost_usd": 0.0,
+  "resolved_model": "glm-5.3-background",
+  "adjudicated_precision": 0.25,
+  "incremental_recall": 1.0,
+  "n_bug_ungold": 26,
+  "n_important_non_bug": 16,
+  "n_true_hallucination": 6,
+  "n_unresolved": 1,
+  "n_real_ungold": 26,
+  "n_hallucination": 6,
+  "decomposition": {
+    "deterministic_tp": 0,
+    "llm_lens_tp": 2,
+    "deterministic_gate_recall": 0.0,
+    "llm_lens_recall": 1.0
+  },
+  "findings": [
+    {
+      "issue_text": "[BUG] GroupPermissionsV2.hasPermission(String groupId, ...) looks up per-group resources via resourceStore.findByName(server, groupId), but group authorization resources created by the legacy GroupPermissions path are named getGroupResourceName(group) = \"group.resource.\" + group.getId() (see GroupPermissions.RESOURCE_NAME_PREFIX), so findByName with the bare group ID returns null. In a realm migrated from the legacy fine-grained admin permissions (or where resources were created through GroupPermissions.initialize/setPermissionsEnabled), a V2 admin holding a per-group manage/view permission gets resource==null, falls through to the all-groups type resource, and hasPermission returns false \u2014 the admin loses access they were granted, and every canManage(group)/canView(group)/canViewMembers(group) call denies. The two naming conventions (\"group.resource.<id>\" vs raw group id used by AdminPermissionsSchema.getOrCreateResource) are never reconciled in this diff.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] GroupPermissionsV2.getGroupIdsWithViewPermission adds groupResource.getId() to the returned set, but the per-group authorization resource is looked up by name (= group id) and its own id is whatever the resource store generated/assigned when the resource was created, which is not guaranteed to be the group's id for resources created outside the new getOrCreateResource path. When the returned set is placed into session attribute UserModel.GROUPS by UsersResource.searchForUser / BruteForceUsersResource.searchForUser, the user-storage backends filter by actual group IDs; if the resource id does not equal the group id, group-scoped user searches silently return zero users for admins whose only permission is VIEW_MEMBERS/MANAGE_MEMBERS on specific groups, and getUsersCount(realm, groupIds) over-counts or counts nothing.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] The ProviderEventListener registered in AdminPermissions.registerListener handles GroupModel.GroupRemovedEvent by calling management(session, realm).groups().setPermissionsEnabled(group, false), but GroupPermissionsV2.setPermissionsEnabled is overridden to throw UnsupportedOperationException. When MgmtPermissionsV2 (the V2 evaluators introduced in this diff) is active with ADMIN_FINE_GRAINED_AUTHZ enabled, deleting any group fires GroupRemovedEvent, the listener invokes setPermissionsEnabled, and the UnsupportedOperationException propagates out of the event dispatch, breaking group deletion (500s on DELETE /groups/{id}) for every V2 deployment. The diff wires MgmtPermissionsV2.groups() to return the throwing V2 implementation without adjusting the event listener that is guaranteed to call the removed method.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] GroupPermissionsV2.hasPermission dereferences resource.getScopes() and root.evaluatePermission(new ResourcePermission(resource, ...)) without a null check after AdminPermissionsSchema.SCHEMA.getResourceTypeResource(session, server, GROUPS_RESOURCE_TYPE) \u2014 a getter (unlike getOrCreateResource) that can return null when no \"Groups\" type resource exists yet in the resource server. If getResourceTypeResource returns null for a realm where no group permission was ever configured, hasPermission(null, ...) throws NullPointerException instead of returning false, turning canView()/canManage() for admins without the admin roles into a 500 on every admin groups/users listing in that realm. The 'policyStore.findByResource(...).isEmpty()' guard only protects the non-null branch.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] GroupPermissionsV2.getGroupIdsWithViewPermission grants group IDs only for VIEW_MEMBERS/MANAGE_MEMBERS scopes, while GroupPermissionsV2.canView(group) (used to filter the very group listings that the search attribute feeds) accepts VIEW/MANAGE scopes. An admin granted view/manage on specific groups (createGroupPermission(..., Set.of(VIEW))) sees those groups in GET /groups (filter passes canView) but the group set returned to UserModel.GROUPS for user search is empty, so GET /users returns no users \u2014 group-permission admins get an inconsistent half-permission experience that the new tests (which only cover VIEW_MEMBERS/MANAGE_MEMBERS) do not catch.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] GroupPermissionsV2.canManage() evaluates hasPermission(null, AdminPermissionsSchema.VIEW, AdminPermissionsSchema.MANAGE), i.e. it grants realm-wide manage on a VIEW-scoped type-level permission, contradicting both its own javadoc (\"permission to MANAGE\") and GroupPermissionEvaluator.canManage() documentation in the interface this class implements. An admin holding only a view-all-groups type-level permission passes canManage() and requireManage(), gaining the ability to create, update and delete groups realm-wide \u2014 a privilege escalation relative to the documented and intended behavior; GroupsResource child-add (addChild) and group create/update paths gated on this check become writable by view-only admins.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] GroupPermissionsV2.canManage() (the global, group-id-less overload) grants manage access when the caller holds only a VIEW permission on the all-groups type resource, because hasPermission(null, AdminPermissionsSchema.VIEW, AdminPermissionsSchema.MANAGE) treats VIEW as sufficient for manage. An admin granted a view-only permission on all groups passes requireManage() in GroupsResource.add (group create) and GroupResource delete paths, letting a read-only principal create and delete groups realm-wide \u2014 a privilege escalation the old V1 canManage (MANAGE_USERS role only) prevented; no test in the diff exercises a VIEW-only all-groups permission against a manage endpoint.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] searchForUser drops the post-hoc `.filter(usersEvaluator::canView)` and relies solely on the UserModel.GROUPS session attribute, but that attribute is only set when getGroupIdsWithViewPermission() is non-empty \u2014 an admin lacking users view permission who holds no group VIEW_MEMBERS/MANAGE_MEMBERS permission (e.g. only a group-level VIEW scope) gets a completely unfiltered user search. A fine-grained admin with only a Groups 'view' scope (or only manage-group-membership scope, or no grants at all beyond query) receives the full realm user list \u2014 the removed stream filter was the only enforcement for that case, and the new test class only asserts empty results for a permission-less admin without covering the group-VIEW-scope-only case where the leak is unambiguous.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] getGroupIdsWithViewPermission() returns groups granted VIEW_MEMBERS/MANAGE_MEMBERS while canView(GroupModel) grants on VIEW/MANAGE scopes, so the set used to constrain user search is computed under different scopes than the group-listing permission used to render the admin UI. An admin holding only a VIEW scope on a group sees the group in GET /groups but the users of that group are absent from their user search (and the getUsersCount path uses the same member-scoped set), producing group lists and user lists/counts that disagree; no test in the diff covers a group VIEW-scope permission's interaction with user search or count.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The BruteForceUsersResource.searchForUser rewrite (permission path flattened to the same group-id-attribute mechanism) is not covered by any test in the diff \u2014 GroupResourceTypeEvaluationTest exercises only the core admin UsersResource/GroupsResource endpoints. A regression in the brute-force user listing's permission filtering (e.g. the same missing post-filter as UsersResource, or the brute-force endpoint exposing users the admin cannot see) ships unverified; the next refactor of this path has no safety net, and brute-force listing is a security-sensitive surface.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] All three getUsersCount overloads were switched from group-model sets to getGroupIdsWithViewPermission() IDs with no accompanying test in the diff asserting count/list consistency under group-scoped permissions. If the returned IDs and the search filter's semantics drift (the count path uses the member-scoped group set while search results depend on the same set but rendered via a different filter chain), paginated UIs show counts that don't match the returned page \u2014 admins with partial group permissions get wrong totals with no test to catch it.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The interface method getGroupsWithViewPermission(GroupModel) was deleted outright (with getGroupsWithViewPermission() renamed to getGroupIdsWithViewPermission()) rather than deprecated, while the interface also keeps deprecated members like isImpersonatable \u2014 an inconsistent migration policy for a public evaluator interface. Any out-of-tree implementor of GroupPermissionEvaluator (e.g. custom admin extensions or forks) fails to compile against this change with no migration path, and the deprecation-then-removal convention used elsewhere in this same diff (UserPermissionEvaluator.isImpersonatable) is silently dropped for this method.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] canManage() in GroupPermissionsV2 grants full manage rights on a fallback to a VIEW scope permission on the all-groups resource. An admin holding only the VIEW scope on the Groups resource type gets canManage() == true, so they can pass requireManage() and create/rename/delete groups \u2014 a privilege escalation where the interface javadoc for canManage() (GroupPermissionEvaluator) only promises the MANAGE scope for V2.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] getGroupIdsWithViewPermission() collects resourceStore resource IDs (groupResource.getId()) into the granted set instead of group IDs, and the set is consumed as group IDs by UsersResource/BruteForceUsersResource via session.setAttribute(UserModel.GROUPS, groupIds). If the authorization resource's internal ID is not identical to the group's model ID, every group-scoped user search and getUsersCount returns zero users for admins granted VIEW_MEMBERS on specific groups, silently breaking the group-restricted user search the PR is supposed to deliver.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] Removing the `.filter(usersEvaluator::canView)` post-filter from searchForUser makes user-search results depend entirely on the store honoring the UserModel.GROUPS attribute. Admins with per-user (not per-group) fine-grained view permissions \u2014 previously surfaced by the post-filter \u2014 disappear from search results, and any UserStorageProvider implementation that ignores UserModel.GROUPS leaks users the caller cannot view; the filter was the enforcement invariant this diff silently drops.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] The ADMIN_FINE_GRAINED_AUTHZ feature check moved from inside the ProviderEventListener (evaluated per event) to registration time, changing when the feature flag is sampled. Environments that toggle the feature at runtime (or where the listener registration precedes profile evaluation of dynamic config) no longer get role/group permission cleanup events, leaving stale permission resources behind; the previous per-event check was the correct seam.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The public static method searchGroupModelsByAttributes is deleted from a public utility class with no deprecation cycle. Out-of-tree extensions and downstream forks calling ModelToRepresentation.searchGroupModelsByAttributes fail to compile against this version; the single-caller refactor could have been done with a deprecated delegating method.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] Eight inherited GroupPermissionManagement methods (isPermissionsEnabled, setPermissionsEnabled, viewMembersPermission, manageMembersPermission, manageMembershipPermission, viewPermission, managePermission, resource, getPermissions) all throw UnsupportedOperationException with no caller audit in this diff. Any existing admin REST endpoint (e.g., group permission-management endpoints invoked via realm.admin() or the AdminPermissions.registerListener GroupRemovedEvent path that calls setPermissionsEnabled) still dispatches through the V2 evaluator when the V2 profile is active and crashes with UnsupportedOperationException instead of a contract error.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The `!auth.users().canView()` guard was removed and getGroupIdsWithViewPermission() is now invoked unconditionally on every brute-force user search. Every brute-force search now pays the resource-store scan and permission evaluation even for full admins who previously short-circuited at canView(); a hot-path regression on the admin console's user list, and the V1 GroupPermissions version has no V2 fast path beyond the canView() empty-set return.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The try-with-resources refactor of handleCreatedResponse is unrelated to adding the Groups resource type to the authorization schema. Scope drift: an unrelated test-infra cleanup rides in a permissions-semantics PR, so a failure in the refactor (e.g., assert firing inside try-with-resources altering the response-close timing) gets bisected to the wrong change; belongs in its own commit.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] Removing the .filter(usersEvaluator::canView) from searchForUser makes the store-side UserModel.GROUPS attribute the only authorization filter, and that attribute is never set when getGroupIdsWithViewPermission returns an empty set for a caller who lacks view permission. An admin holding only the query-users role (no view-users, no group grants) now receives the full unfiltered user list with full representations \u2014 the old code returned zero rows because the per-user canView filter rejected every user; this is an information-disclosure regression on GET /users.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] The brute-force user search drops its per-user authorization filter and relies solely on the UserModel.GROUPS session attribute, which is not set when getGroupIdsWithViewPermission returns empty for a caller without view permission. A caller with listing rights but no view permission and no group grants sees brute-force status for all realm users instead of none; the empty-set sentinel now means both 'full access' and 'no access', so the no-access case is served unfiltered.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] GroupPermissionsV2.canManage() (the global 'manage any group' check used by group creation and requireManage()) evaluates hasPermission(null, VIEW, MANAGE), accepting a VIEW-only all-groups grant as sufficient to manage. An admin granted only the view scope on the all-groups resource can create, update, and delete groups, contradicting the group-scoped canManage(group) which requires MANAGE \u2014 the global and per-group paths enforce different invariants, and testManageAllGroups never exercises a view-only global grant to catch it.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] getGroupIdsWithViewPermission collects groupResource.getId() into the granted set, while hasPermission resolves group resources via resourceStore.findByName(server, groupId), i.e. the group ID is the resource *name*, not the resource ID. If the V2 resource store assigns generated internal IDs (as the name-based lookup implies), the returned set contains resource IDs rather than group IDs, so the UserModel.GROUPS attribute handed to the user store never matches any group's membership join and group-scoped user searches silently return empty for permission-limited admins.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] Moving the ADMIN_FINE_GRAINED_AUTHZ Profile check from per-event to registration time means the listener is only registered if the feature is enabled when registerListener runs. A deployment that enables the feature after startup (feature is not a startup-only toggle in all setups, and the old code deliberately re-checked per event) never gets group-permission cleanup on role/group removal, leaving orphaned authorization resources until a restart.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] getSubGroups now calls auth.groups()::canView per group inside the filter with no short-circuit for admins who can view everything, and paginates only after the full unbounded sub-group stream is fetched (first/max applied to -1,-1 fetch). For a realm admin viewing a group with tens of thousands of sub-groups, each element triggers a full authz policy evaluation (realm resource server lookup plus policy evaluation in V2), turning one paginated listing call into an O(n) authorization fan-out with only max results ever returned.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] getGroupIdsWithViewPermission iterates every Groups-typed resource in the realm and runs a full policy evaluation per resource with no limit, on the hot path of every user search performed by a non-view admin. Realms with fine-grained permissions on many groups make every GET /users and users-count call issued by a limited admin cost N policy evaluations up front, a scalability cliff proportional to the number of permission-enabled groups.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] The diff silently deletes the per-user `usersEvaluator::canView` post-filter from user search, changing the endpoint's contract from 'return only users the caller may view' to 'return whatever the store returns when the GROUPS attribute is empty'. An admin holding only QUERY_USERS (canQuery() true, canView() false) with no group-level grants gets an empty groupIds set, so no UserModel.GROUPS attribute is set and searchForUserStream returns the full unfiltered user list \u2014 an information-disclosure regression the original code explicitly prevented; likewise admins whose only grants are per-user resource permissions (V2 hasPermission(user, VIEW)) no longer have those honored in search results.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] The removal of the `!auth.users().canView()` guard combined with the dropped result filtering changes brute-force user search from permission-filtered to unfiltered whenever getGroupIdsWithViewPermission() returns an empty set. An admin querying the brute-force detection UI with canQuery-style access but neither global view-users nor any group grants receives the complete list of realm users with no filtering, where the previous code's session-attribute-only mechanism produced an empty/no result set for that caller class.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] GroupPermissionsV2.canManage() grants manage on VIEW scope (`hasPermission(null, AdminPermissionsSchema.VIEW, AdminPermissionsSchema.MANAGE)`), contradicting both the interface javadoc ('permission to MANAGE groups') and the sibling canView() implementation. An admin granted only the view scope on the all-groups resource passes requireManage(), letting them create/update/delete groups and map roles, an intent-drift between the documented and implemented semantics introduced during review rework.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] V2's hasPermission looks up group resources by bare `resourceStore.findByName(server, groupId)` while the existing (V1) group resources are named with the `group.resource.` prefix defined in GroupPermissions.RESOURCE_NAME_PREFIX, so a permission granted under the old naming is silently invisible to V2 evaluation. Realms upgrading to the V2 evaluator with pre-existing fine-grained group permissions lose all per-group grant checks (lookups miss, evaluation falls through to the all-groups resource and returns false), silently denying admins who were previously authorized; the new naming also coexists with the old, so the two evaluators disagree about the same realm's grants.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] MgmtPermissionsV2.groups() returns GroupPermissionsV2, which throws UnsupportedOperationException for setPermissionsEnabled/isPermissionsEnabled/resource/viewPermission/managePermission, while AdminPermissions.registerListener's GroupRemovedEvent handler (visible in this same diff's AdminPermissions.java hunk) calls `management(...).groups().setPermissionsEnabled(cast.getGroup(), false)`. When the V2 permissions path is active alongside ADMIN_FINE_GRAINED_AUTHZ, deleting any group fires the RoleRemovedEvent/GroupRemovedEvent listener into a hard UnsupportedOperationException, breaking group deletion instead of the intended permission cleanup \u2014 the intent 'add a Groups resource type' silently disabled the V1 cleanup contract for V2 realms.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] Moving the ADMIN_FINE_GRAINED_AUTHZ profile check outside the listener registration changes the failure/initialization contract of registerListener from always-registers to conditionally-registers, a behavioral change to a public static API unrelated to adding the Groups resource type. Any deployment or test that relies on the listener being present to later observe feature state at event time (e.g., feature toggled via config reload in the same JVM) now silently loses event handling; this objective change shipped without being part of the stated intent.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The interface method getGroupsWithViewPermission(GroupModel) was deleted and requireViewMembers rewired to canViewMembers, changing requireViewMembers' documented semantics from the old method's users().canView()||users().canManage() short-circuit plus isAdminSameRealm check to canViewMembers' own precondition set. In-realm callers that previously passed requireViewMembers purely by holding MANAGE_USERS (without VIEW_MEMBERS scope evaluation) now depend on canViewMembers' internal checks; out-of-tree extensions implementing GroupPermissionEvaluator break at compile time from the removed method with no deprecation cycle, a silent public-surface change accompanying what was described as an additive schema change.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] canMapRoles and canManageGroupMembership were changed from delegating to canManage(user) to delegating to root.hasOneAdminRole(MANAGE_USERS) plus canManageByGroup, which drops the direct per-user MANAGE permission path those methods previously inherited through canManage(user). An admin holding a direct MANAGE grant on a specific user (not MANAGE_USERS, no group membership) previously satisfied canMapRoles/canManageGroupMembership via the canManage(user) delegation and now receives 403 \u2014 a semantics change in the user-permission contract bundled silently into a groups-schema PR.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] GroupPermissionsV2.canManage() evaluates hasPermission(null, VIEW, MANAGE), so a caller holding only the VIEW scope on the all-groups type resource satisfies canManage(). An admin granted view-only group permission (VIEW on the Groups type resource) passes canManage()/requireManage() and can create, update, and delete any group in the realm \u2014 privilege escalation from read to write that testManageAllGroups does not cover (it only grants MANAGE).",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] getGroupIdsWithViewPermission() passes groupResource.getId() (the resource's internal UUID) into hasPermission(), which resolves resources via resourceStore.findByName(server, groupId) \u2014 the lookup never matches because the per-group resource's name is the group id, not its resource id. Per-group VIEW_MEMBERS/MANAGE_MEMBERS grants are never recognized when scoping user searches (the name lookup fails and evaluation silently falls back to the all-groups type resource, so the check only ever passes when type-level policies exist). An admin with a per-group member-view grant sees an empty user search; an admin with any type-level group policy gets every group id, i.e. users of all groups.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] searchForUser() drops the post-hoc .filter(usersEvaluator::canView) and relies solely on the UserModel.GROUPS session attribute, which is only set when getGroupIdsWithViewPermission() is non-empty. An admin who fails users().canView() and has no group member-view permissions (empty set) triggers searchForUserStream without the GROUPS attribute and with no downstream filter, returning the full realm user list (usernames, emails, attributes) \u2014 an authorization bypass / user-data disclosure via GET /admin/realms/{realm}/users.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] The rewritten searchForUser() has the same empty-set hole as UsersResource: when the caller lacks users().canView() and getGroupIdsWithViewPermission() returns an empty set, the GROUPS attribute is never set and the stream is returned without any canView filter. A brute-force-protection admin with no user-view permission and no group grants receives the entire realm user list through the brute-force user search endpoint; unlike UsersResource the old code also lacked the filter here, but this diff rewrites and retains the unguarded path instead of fixing it.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] canMapRoles() and canManageGroupMembership() now also return true when the caller holds only MANAGE_MEMBERS on any group in the user's group chain, conflating member management with role mapping and membership administration. An admin granted MANAGE_MEMBERS on group G (intended to let them manage users who are members of G) can additionally map realm/client roles to those users and move them between groups via PUT /users/{id}/groups \u2014 a scope escalation that operators configuring V2 fine-grained permissions will not expect; the javadoc documents it, but the permission surface expansion is a security-relevant semantic change on existing endpoints.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] getGroupIdsWithViewPermission() collects the authorization Resource's own ID (groupResource.getId()) instead of the group ID, so the UserModel.GROUPS attribute is populated with authz-resource UUIDs that never match any group membership. In UsersResource.searchForUser / getUsersCount / BruteForceUsersResource, an admin restricted to a group via VIEW_MEMBERS/MANAGE_MEMBERS gets a GROUPS attribute of resource UUIDs; user searches by group membership match zero users and the count endpoints return 0, silently hiding every member the permission was supposed to grant \u2014 the exact scenario the new test testCanViewUserByViewGroupMembers exercises, except it passes only because searchForUserStream's fallback/other path returns the user. The name-vs-id confusion (resourceStore.findByName(server, groupId) shows group IDs are resource *names*, not IDs) means any path relying purely on the GROUPS attribute filter returns nothing.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] GroupPermissionsV2 throws UnsupportedOperationException from isPermissionsEnabled, setPermissionsEnabled, viewPermission, managePermission, resource, and getPermissions with no test in the diff triggering any of these paths, and existing admin endpoints (e.g., GroupResource's permissions-enabled toggle and GroupPermissions management UI) call them. When the V2 schema is active, any admin REST call that reads group permission state (GET .../management/permissions, PUT enable/disable) hits UnsupportedOperationException and surfaces as a 500 to the admin console instead of a defined 4xx/feature error. Checked the only test file in this diff (tests/base/src/test/java/org/keycloak/tests/admin/authz/fgap/GroupResourceTypeEvaluationTest.java) \u2014 every test creates scope permissions directly and never invokes the fine-grained permission-management endpoints, so this crash path is completely unverified.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] The V1 GroupPermissions semantics changed in this diff (canView()/canManage() switched from users().canViewDefault()/canManageDefault() to direct hasOneAdminRole checks, canViewMembers now also grants MANAGE_MEMBERS_SCOPE, requireViewMembers switched from getGroupsWithViewPermission to canViewMembers, and canList was reordered), but the only test file changed in this diff (GroupResourceTypeEvaluationTest.java) runs exclusively under the V2 server config. The default (V1) installation ships these altered permission semantics with zero verification in this diff: a regression such as canViewMembers now accepting MANAGE_MEMBERS scope changing who can view group members for plain fine-grained-authz realms, or the removal of the users().canManage() short-circuit in getGroupIdsWithViewPermission (old code returned empty set for managers too \u2014 V1 line 'if (root.users().canView() || root.users().canManage())' became 'if (root.users().canView())'), would pass the entire suite. Operators on the legacy admin-fine-grained-authz feature get behavior changes nobody tested.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] BruteForceUsersResource.searchForUser now unconditionally computes getGroupIdsWithViewPermission() and drops the old auth.users().canView() guard, and no test in this diff exercises the brute-force user search endpoint under the new schema (GroupResourceTypeEvaluationTest only covers /users and /groups REST paths). The admin-ui extension's brute-force listing changes from a guarded lookup to an always-on resource-store scan (resourceStore.findByType over all Groups resources) on every user search, and its result correctness now depends entirely on the resource-ID-vs-group-ID issue above; a regression here fails silently in the admin UI's brute-force tab, which no test in this diff can catch.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] Removing the per-user `usersEvaluator::canView` post-filter makes user search depend entirely on the GROUPS session attribute, and when `getGroupIdsWithViewPermission()` returns an empty set the query runs completely unfiltered. An admin in the same realm with neither VIEW_USERS nor any group permission (e.g. only QUERY_USERS, or a realm where the resource server exists but no group policies match) gets getGroupIdsWithViewPermission() == empty set, so UserModel.GROUPS is never set and searchForUserStream returns every user in the realm with no post-filter \u2014 a full user-list disclosure that the removed `.filter(usersEvaluator::canView)` previously prevented.",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] The same unconditional getGroupIdsWithViewPermission() call with empty-set fallthrough drops the previous `!auth.users().canView()` guard without adding any compensating post-filter on the returned stream. Same unfiltered-results failure mode as UsersResource: a caller with no view-users role and no matching group permissions receives the entire realm user list from the brute-force user search endpoint instead of an empty/filtered result.",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] V2 group permission lookups key on the new 'Groups' resource type and `resourceStore.findByName(server, groupId)`, but realms upgrading from the previous version have group resources stored under the V1 naming ('group.resource.<id>' via GroupPermissions.getGroupResourceName) and the pre-existing resource type, so none of those stored resources are found. After upgrade, admins whose fine-grained group permissions were created under the V1 schema silently lose all group-scoped access: getGroupIdsWithViewPermission() finds no GROUPS_RESOURCE_TYPE resources and hasPermission() finds no resource named by group id, returning empty/false with no error \u2014 existing stored permission data is orphaned with no migration or dual-read step in this diff.",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] getGroupIdsWithViewPermission() collects `groupResource.getId()` (the authorization resource's own id) into the granted set, which is then used as UserModel.GROUPS containing group IDs downstream, while the sibling hasPermission() resolves resources via findByName(groupId) \u2014 id and name are treated as interchangeable with no normalization step. If resource ids are not group ids for resources created through any path other than getOrCreateResource (e.g. resources imported or created with generated ids), the set stored in UserModel.GROUPS contains resource UUIDs that never match user group memberships, so filtered user searches silently return zero users for admins who do hold permissions.",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] Removing the per-user `.filter(usersEvaluator::canView)` makes the GROUPS session attribute the only remaining authorization filter, and that attribute is only set when groupIds is non-empty, so an admin with no view permission and no group grants receives the complete unfiltered user list. A fine-grained admin (no MANAGE_USERS/VIEW_USERS role, no group VIEW/MANAGE permissions, cross-realm admin, or a realm without a resource server) calls GET /users and gets every user in the realm returned with HTTP 200 \u2014 the previous filter silently dropped these, now they are silently authorized; the API reports success while dropping access control.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p0",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] The rewrite drops both the `!auth.users().canView()` guard and any per-user filter, so when `getGroupIdsWithViewPermission()` returns an empty set for a caller without global view permission, the GROUPS attribute is never set and searchForUserStream returns all realm users unfiltered. An admin with only brute-force-related roles but no user view permission queries the brute-force user search endpoint and receives the full user list (usernames, emails, brute-force status) with a 200 response \u2014 previously this path was restricted to explicitly granted groups; silent full data exposure reported as success.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p0",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] Every group-management method overridden in GroupPermissionsV2 (setPermissionsEnabled, resource, viewPermission, etc.) throws UnsupportedOperationException, and the registered ProviderEventListener in AdminPermissions.registerListener unconditionally calls `management(...).groups().setPermissionsEnabled(cast.getGroup(), false)` on GroupModel.GroupRemovedEvent when ADMIN_FINE_GRAINED_AUTHZ is enabled. Deleting a group in a realm using the V2 permissions implementation throws UnsupportedOperationException from inside the event listener, turning group deletion into a raw 500 / aborted transaction instead of the clean delete the API contract promises \u2014 a user-facing write operation whose failure mode is an unhandled unsupported-operation exception.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] getGroupIdsWithViewPermission enumerates every Groups-typed resource via resourceStore.findByType and, for each one, calls hasPermission which performs another resourceStore.findByName plus a full policy evaluation, producing O(N) resource lookups plus O(N) policy-store queries plus O(N) authorization evaluations per single /users search request. Every admin user-search request in a realm with thousands of group resources issues thousands of duplicate store queries and permission evaluations; the search endpoint's latency grows linearly (with a large constant from the authz evaluation) with the number of groups, degrading the hot user-search path for all admins until the request times out on large realms.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    }
+  ],
+  "goldens": [
+    {
+      "comment": "In GroupPermissionsV2.canManage(), the permission fallback checks for both VIEW and MANAGE scopes (hasPermission(null, AdminPermissionsSchema.VIEW, AdminPermissionsSchema.MANAGE)), but canManage() should only grant access for MANAGE scope, not VIEW. This means users with only VIEW permission on groups can pass the canManage() check, granting them write access they should not have. The canView() method correctly checks both VIEW and MANAGE, but canManage() should only check MANAGE.",
+      "severity": "High",
+      "category": "bug"
+    },
+    {
+      "comment": "In getGroupIdsWithViewPermission, hasPermission is called with groupResource.getId() and the same groupResource.getId() is added to granted, but hasPermission resolves resources by name (treating the argument as a group id) and the GroupPermissionEvaluator contract says this method returns group IDs that are later used as UserModel.GROUPS and in getUsersCount group filters. This mismatch means per-group VIEW_MEMBERS/MANAGE_MEMBERS permissions may not yield the expected group IDs for filtering and counts, and evaluation may effectively only look at the type-level 'all-groups' resource; consider revisiting whether this should operate on the underlying group ids (resource names) instead so it aligns with the JPA queries and the interface contract.",
+      "severity": "High",
+      "category": "api"
+    }
+  ],
+  "per_golden_matches": [
+    {
+      "golden_comment": "In GroupPermissionsV2.canManage(), the permission fallback checks for both VIEW and MANAGE scopes (hasPermission(null, AdminPermissionsSchema.VIEW, AdminPermissionsSchema.MANAGE)), but canManage() should only grant access for MANAGE scope, not VIEW. This means users with only VIEW permission on groups can pass the canManage() check, granting them write access they should not have. The canView() method correctly checks both VIEW and MANAGE, but canManage() should only check MANAGE.",
+      "severity": "High",
+      "category": "bug",
+      "matched_candidate": "[BUG] GroupPermissionsV2.canManage() evaluates hasPermission(null, VIEW, MANAGE), so a caller holding only the VIEW scope on the all-groups type resource satisfies canManage(). An admin granted view-only group permission (VIEW on the Groups type resource) passes canManage()/requireManage() and can create, update, and delete any group in the realm \u2014 privilege escalation from read to write that testManageAllGroups does not cover (it only grants MANAGE).",
+      "confidence": 0.98,
+      "reasoning": "The candidate flags that GroupPermissionsV2.canManage() incorrectly falls back to hasPermission(null, VIEW, MANAGE), allowing VIEW-only users to pass manage checks and gain write access. This is the same issue described in the golden comment (canManage should require MANAGE only; canView can allow VIEW or MANAGE)."
+    },
+    {
+      "golden_comment": "In getGroupIdsWithViewPermission, hasPermission is called with groupResource.getId() and the same groupResource.getId() is added to granted, but hasPermission resolves resources by name (treating the argument as a group id) and the GroupPermissionEvaluator contract says this method returns group IDs that are later used as UserModel.GROUPS and in getUsersCount group filters. This mismatch means per-group VIEW_MEMBERS/MANAGE_MEMBERS permissions may not yield the expected group IDs for filtering and counts, and evaluation may effectively only look at the type-level 'all-groups' resource; consider revisiting whether this should operate on the underlying group ids (resource names) instead so it aligns with the JPA queries and the interface contract.",
+      "severity": "High",
+      "category": "api",
+      "matched_candidate": "[BUG] GroupPermissionsV2.getGroupIdsWithViewPermission adds groupResource.getId() to the returned set, but the per-group authorization resource is looked up by name (= group id) and its own id is whatever the resource store generated/assigned when the resource was created, which is not guaranteed to be the group's id for resources created outside the new getOrCreateResource path. When the returned set is placed into session attribute UserModel.GROUPS by UsersResource.searchForUser / BruteForceUsersResource.searchForUser, the user-storage backends filter by actual group IDs; if the resource id does not equal the group id, group-scoped user searches silently return zero users for admins whose only permission is VIEW_MEMBERS/MANAGE_MEMBERS on specific groups, and getUsersCount(realm, groupIds) over-counts or counts nothing.",
+      "confidence": 0.93,
+      "reasoning": "The candidate flags the same core mismatch: getGroupIdsWithViewPermission returns/collects groupResource.getId() (authorization resource id) while permission evaluation and downstream filtering/counting expect actual group IDs (resource name treated as group id). It also ties this to UserModel.GROUPS usage and user search/count behavior, matching the golden comment\u2019s concern about per-group VIEW/MANAGE permissions not yielding correct group IDs for queries."
+    }
+  ],
+  "adjudication_records": [
+    {
+      "issue_text": "[BUG] GroupPermissionsV2.hasPermission(String groupId, ...) looks up per-group resources via resourceStore.findByName(server, groupId), but group authorization resources created by the legacy GroupPermissions path are named getGroupResourceName(group) = \"group.resource.\" + group.getId() (see GroupPermissions.RESOURCE_NAME_PREFIX), so findByName with the bare group ID returns null. In a realm migrated from the legacy fine-grained admin permissions (or where resources were created through GroupPermissions.initialize/setPermissionsEnabled), a V2 admin holding a per-group manage/view permission gets resource==null, falls through to the all-groups type resource, and hasPermission returns false \u2014 the admin loses access they were granted, and every canManage(group)/canView(group)/canViewMembers(group) call denies. The two naming conventions (\"group.resource.<id>\" vs raw group id used by AdminPermissionsSchema.getOrCreateResource) are never reconciled in this diff.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.72,
+        "rationale": "In the diff, legacy group resources are still keyed by a prefixed name: `GroupPermissions` defines `RESOURCE_NAME_PREFIX = \"group.resource.\"` and `getGroupResourceName(GroupModel)` returns `\"group.resource.\" + group.getId()`. However, the new V2 evaluator `GroupPermissionsV2.hasPermission(String groupId, ...)` looks up a per-group resource using `resourceStore.findByName(server, groupId)` (bare ID). If an existing realm has per-group resources created via the legacy `GroupPermissions` path (using the prefixed resource name), this lookup will return `null`, causing V2 to fall back to the all-groups resource-type resource and potentially return `false` (denying access) even when a per-group permission exists. The diff does not show any reconciliation/migration between these naming conventions.",
+        "diff_context_hash": "25a97b5f19bf18ad6463a96b2b30d6c2eff080f4"
+      }
+    },
+    {
+      "issue_text": "[BUG] GroupPermissionsV2.getGroupIdsWithViewPermission adds groupResource.getId() to the returned set, but the per-group authorization resource is looked up by name (= group id) and its own id is whatever the resource store generated/assigned when the resource was created, which is not guaranteed to be the group's id for resources created outside the new getOrCreateResource path. When the returned set is placed into session attribute UserModel.GROUPS by UsersResource.searchForUser / BruteForceUsersResource.searchForUser, the user-storage backends filter by actual group IDs; if the resource id does not equal the group id, group-scoped user searches silently return zero users for admins whose only permission is VIEW_MEMBERS/MANAGE_MEMBERS on specific groups, and getUsersCount(realm, groupIds) over-counts or counts nothing.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug",
+      "matched_golden_ids": [
+        "In getGroupIdsWithViewPermission, hasPermission is called with groupResource.getId() and the same groupResource.getId() is added to granted, but hasPermission resolves resources by name (treating the argument as a group id) and the GroupPermissionEvaluator contract says this method returns group IDs that are later used as UserModel.GROUPS and in getUsersCount group filters. This mismatch means per-group VIEW_MEMBERS/MANAGE_MEMBERS permissions may not yield the expected group IDs for filtering and counts, and evaluation may effectively only look at the type-level 'all-groups' resource; consider revisiting whether this should operate on the underlying group ids (resource names) instead so it aligns with the JPA queries and the interface contract."
+      ],
+      "primary_judge_verdict": "matched",
+      "primary_judge": "gpt-5.2",
+      "primary_judge_confidence": 0.93,
+      "primary_judge_reasoning": "The candidate flags the same core mismatch: getGroupIdsWithViewPermission returns/collects groupResource.getId() (authorization resource id) while permission evaluation and downstream filtering/counting expect actual group IDs (resource name treated as group id). It also ties this to UserModel.GROUPS usage and user search/count behavior, matching the golden comment\u2019s concern about per-group VIEW/MANAGE permissions not yielding correct group IDs for queries.",
+      "adjudication": {
+        "verdict": "matched",
+        "adjudicating_judge": null,
+        "confidence": null,
+        "rationale": null,
+        "diff_context_hash": "25a97b5f19bf18ad6463a96b2b30d6c2eff080f4"
+      }
+    },
+    {
+      "issue_text": "[BUG] The ProviderEventListener registered in AdminPermissions.registerListener handles GroupModel.GroupRemovedEvent by calling management(session, realm).groups().setPermissionsEnabled(group, false), but GroupPermissionsV2.setPermissionsEnabled is overridden to throw UnsupportedOperationException. When MgmtPermissionsV2 (the V2 evaluators introduced in this diff) is active with ADMIN_FINE_GRAINED_AUTHZ enabled, deleting any group fires GroupRemovedEvent, the listener invokes setPermissionsEnabled, and the UnsupportedOperationException propagates out of the event dispatch, breaking group deletion (500s on DELETE /groups/{id}) for every V2 deployment. The diff wires MgmtPermissionsV2.groups() to return the throwing V2 implementation without adjusting the event listener that is guaranteed to call the removed method.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.78,
+        "rationale": "The diff adds `GroupPermissionsV2` where `setPermissionsEnabled(GroupModel, boolean)` explicitly throws `UnsupportedOperationException` (new file `GroupPermissionsV2.java`). The existing event listener in `AdminPermissions.registerListener` still handles `GroupModel.GroupRemovedEvent` by calling `management(session, realm).groups().setPermissionsEnabled(group, false)` (code shown in the diff; only wrapped by a feature-flag check, not by any V2 check). The diff also wires `MgmtPermissionsV2.groups()` to return `new GroupPermissionsV2(...)`, so in a V2 permissions setup this event path would call the throwing method during group deletion, likely propagating an exception from event dispatch and breaking deletion.",
+        "diff_context_hash": "25a97b5f19bf18ad6463a96b2b30d6c2eff080f4"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] GroupPermissionsV2.hasPermission dereferences resource.getScopes() and root.evaluatePermission(new ResourcePermission(resource, ...)) without a null check after AdminPermissionsSchema.SCHEMA.getResourceTypeResource(session, server, GROUPS_RESOURCE_TYPE) \u2014 a getter (unlike getOrCreateResource) that can return null when no \"Groups\" type resource exists yet in the resource server. If getResourceTypeResource returns null for a realm where no group permission was ever configured, hasPermission(null, ...) throws NullPointerException instead of returning false, turning canView()/canManage() for admins without the admin roles into a 500 on every admin groups/users listing in that realm. The 'policyStore.findByResource(...).isEmpty()' guard only protects the non-null branch.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "unresolved",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "unresolved",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.46,
+        "rationale": "In `GroupPermissionsV2.hasPermission`, the code assigns `resource = AdminPermissionsSchema.SCHEMA.getResourceTypeResource(session, server, GROUPS_RESOURCE_TYPE)` when a group-specific resource isn\u2019t found, and then immediately uses `policyStore.findByResource(server, resource)` and later `new ResourcePermission(resource, resource.getScopes(), server)` without any null-check on `resource`. The diff does not show the implementation/contract of `getResourceTypeResource`, so it\u2019s not verifiable from this diff alone that it can return null; however, the lack of a null guard is a concrete, diff-grounded robustness issue that could become an NPE if that method ever returns null.",
+        "diff_context_hash": "25a97b5f19bf18ad6463a96b2b30d6c2eff080f4"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] GroupPermissionsV2.getGroupIdsWithViewPermission grants group IDs only for VIEW_MEMBERS/MANAGE_MEMBERS scopes, while GroupPermissionsV2.canView(group) (used to filter the very group listings that the search attribute feeds) accepts VIEW/MANAGE scopes. An admin granted view/manage on specific groups (createGroupPermission(..., Set.of(VIEW))) sees those groups in GET /groups (filter passes canView) but the group set returned to UserModel.GROUPS for user search is empty, so GET /users returns no users \u2014 group-permission admins get an inconsistent half-permission experience that the new tests (which only cover VIEW_MEMBERS/MANAGE_MEMBERS) do not catch.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "hallucination",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "hallucination",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.72,
+        "rationale": "The diff introduces separate group scopes (VIEW/MANAGE vs VIEW_MEMBERS/MANAGE_MEMBERS) in AdminPermissionsSchema and implements GroupPermissionsV2.getGroupIdsWithViewPermission() to return group IDs only when the caller has VIEW_MEMBERS or MANAGE_MEMBERS on those groups. User visibility-by-group is also explicitly based on GroupPermissionEvaluator.canViewMembers (see UserPermissions.canViewByGroup now using root.groups()::canViewMembers). Therefore, an admin who only has VIEW on a group is expected to see the group in GET /groups (filtered by canView(group)) but not see the group\u2019s users in GET /users (no VIEW_MEMBERS/MANAGE_MEMBERS). This behavior matches the distinct scopes added in the diff rather than indicating a defect.",
+        "diff_context_hash": "25a97b5f19bf18ad6463a96b2b30d6c2eff080f4"
+      }
+    },
+    {
+      "issue_text": "[BUG] GroupPermissionsV2.canManage() evaluates hasPermission(null, AdminPermissionsSchema.VIEW, AdminPermissionsSchema.MANAGE), i.e. it grants realm-wide manage on a VIEW-scoped type-level permission, contradicting both its own javadoc (\"permission to MANAGE\") and GroupPermissionEvaluator.canManage() documentation in the interface this class implements. An admin holding only a view-all-groups type-level permission passes canManage() and requireManage(), gaining the ability to create, update and delete groups realm-wide \u2014 a privilege escalation relative to the documented and intended behavior; GroupsResource child-add (addChild) and group create/update paths gated on this check become writable by view-only admins.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "unjudged",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "unjudged",
+        "adjudicating_judge": null,
+        "confidence": null,
+        "rationale": null,
+        "diff_context_hash": "25a97b5f19bf18ad6463a96b2b30d6c2eff080f4"
+      }
+    },
+    {
+      "issue_text": "[BUG] GroupPermissionsV2.canManage() (the global, group-id-less overload) grants manage access when the caller holds only a VIEW permission on the all-groups type resource, because hasPermission(null, AdminPermissionsSchema.VIEW, AdminPermissionsSchema.MANAGE) treats VIEW as sufficient for manage. An admin granted a view-only permission on all groups passes requireManage() in GroupsResource.add (group create) and GroupResource delete paths, letting a read-only principal create and delete groups realm-wide \u2014 a privilege escalation the old V1 canManage (MANAGE_USERS role only) prevented; no test in the diff exercises a VIEW-only all-groups permission against a manage endpoint.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.78,
+        "rationale": "In the diff, `GroupPermissionsV2.canManage()` returns `hasPermission(null, AdminPermissionsSchema.VIEW, AdminPermissionsSchema.MANAGE)` when the caller lacks `MANAGE_USERS`. The local `hasPermission(...)` implementation treats *any* of the provided scopes as sufficient (it returns true if any evaluated permission contains a scope in `expectedScopes`). Therefore, a principal granted only `VIEW` on the all-groups (type) resource will have `canManage()` == true. Since `GroupPermissions.requireManage()` delegates to `canManage()`, any endpoint using the global `requireManage()` (as opposed to `requireManage(group)`) would incorrectly allow manage operations with only view permission. The new tests include `VIEW` all-groups for listing but do not cover attempting a manage endpoint with only `VIEW`.",
+        "diff_context_hash": "25a97b5f19bf18ad6463a96b2b30d6c2eff080f4"
+      }
+    },
+    {
+      "issue_text": "[BUG] searchForUser drops the post-hoc `.filter(usersEvaluator::canView)` and relies solely on the UserModel.GROUPS session attribute, but that attribute is only set when getGroupIdsWithViewPermission() is non-empty \u2014 an admin lacking users view permission who holds no group VIEW_MEMBERS/MANAGE_MEMBERS permission (e.g. only a group-level VIEW scope) gets a completely unfiltered user search. A fine-grained admin with only a Groups 'view' scope (or only manage-group-membership scope, or no grants at all beyond query) receives the full realm user list \u2014 the removed stream filter was the only enforcement for that case, and the new test class only asserts empty results for a permission-less admin without covering the group-VIEW-scope-only case where the leak is unambiguous.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.72,
+        "rationale": "In `UsersResource#searchForUser` (and `BruteForceUsersResource#searchForUser`), the diff removes the post-query enforcement `.filter(usersEvaluator::canView)` and now only conditionally sets `session.setAttribute(UserModel.GROUPS, groupIds)` when `auth.groups().getGroupIdsWithViewPermission()` is non-empty. For a caller who cannot globally view users and for whom `getGroupIdsWithViewPermission()` returns an empty set (no VIEW_MEMBERS/MANAGE_MEMBERS grants), the code does not set any limiting session attribute and still returns `session.users().searchForUserStream(...)` directly, with no subsequent per-user permission filter shown in the diff. Compared to the prior code, this can broaden results from \u201cempty/filtered by usersEvaluator\u201d to \u201cunrestricted stream\u201d, which is a correctness/security regression grounded in the changed lines.",
+        "diff_context_hash": "25a97b5f19bf18ad6463a96b2b30d6c2eff080f4"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] getGroupIdsWithViewPermission() returns groups granted VIEW_MEMBERS/MANAGE_MEMBERS while canView(GroupModel) grants on VIEW/MANAGE scopes, so the set used to constrain user search is computed under different scopes than the group-listing permission used to render the admin UI. An admin holding only a VIEW scope on a group sees the group in GET /groups but the users of that group are absent from their user search (and the getUsersCount path uses the same member-scoped set), producing group lists and user lists/counts that disagree; no test in the diff covers a group VIEW-scope permission's interaction with user search or count.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.68,
+        "rationale": "The diff shows an intentional separation between group visibility and group-members visibility: in GroupPermissionsV2, canView(GroupModel) checks VIEW/MANAGE scopes on the group (hasPermission(group.getId(), VIEW, MANAGE)), while getGroupIdsWithViewPermission() collects only groups where VIEW_MEMBERS/MANAGE_MEMBERS is granted (hasPermission(groupResource.getId(), VIEW_MEMBERS, MANAGE_MEMBERS)). UsersResource/BruteForceUsersResource now rely on getGroupIdsWithViewPermission() to set UserModel.GROUPS for user search/count when the caller lacks global user view, and UserPermissions canViewByGroup now uses groups()::canViewMembers. Therefore a principal with only group VIEW permission can see the group in GET /groups (GroupsResource filters with groupsEvaluator::canView) but will not gain visibility into users via group membership unless they also have VIEW_MEMBERS/MANAGE_MEMBERS. The finding\u2019s note about missing test coverage is supported: added tests cover VIEW_MEMBERS/MANAGE_MEMBERS effects on user search and VIEW effects on group listing, but no test covers the 'group VIEW only' interaction with user search/count.",
+        "diff_context_hash": "25a97b5f19bf18ad6463a96b2b30d6c2eff080f4"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The BruteForceUsersResource.searchForUser rewrite (permission path flattened to the same group-id-attribute mechanism) is not covered by any test in the diff \u2014 GroupResourceTypeEvaluationTest exercises only the core admin UsersResource/GroupsResource endpoints. A regression in the brute-force user listing's permission filtering (e.g. the same missing post-filter as UsersResource, or the brute-force endpoint exposing users the admin cannot see) ships unverified; the next refactor of this path has no safety net, and brute-force listing is a security-sensitive surface.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.84,
+        "rationale": "The diff changes permission-related behavior in `rest/admin-ui-ext/.../BruteForceUsersResource.searchForUser` by removing the `!auth.users().canView()` guard and switching to always setting `UserModel.GROUPS` based on `auth.groups().getGroupIdsWithViewPermission()` (and also removing the intermediate `userModels` variable). The newly added tests (`GroupResourceTypeEvaluationTest`) exercise `services/.../UsersResource` and `GroupsResource` behavior, not the admin-ui-ext brute-force endpoint. No test in the diff covers the brute-force listing path after this rewrite, so regressions in that security-sensitive filtering mechanism would go unverified.",
+        "diff_context_hash": "25a97b5f19bf18ad6463a96b2b30d6c2eff080f4"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] All three getUsersCount overloads were switched from group-model sets to getGroupIdsWithViewPermission() IDs with no accompanying test in the diff asserting count/list consistency under group-scoped permissions. If the returned IDs and the search filter's semantics drift (the count path uses the member-scoped group set while search results depend on the same set but rendered via a different filter chain), paginated UIs show counts that don't match the returned page \u2014 admins with partial group permissions get wrong totals with no test to catch it.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.73,
+        "rationale": "The diff does change all three `UsersResource#getUsersCount(...)` paths to use `auth.groups().getGroupIdsWithViewPermission()` (e.g., lines changing `getUsersCount(realm, ..., auth.groups().getGroupIdsWithViewPermission())`). In the same PR, the user *listing* path was also changed: `searchForUser(...)` now sets `session.setAttribute(UserModel.GROUPS, groupIds)` and no longer applies `.filter(usersEvaluator::canView)` before mapping to representations. That means count and list now rely on two different enforcement mechanisms (explicit group-id parameter in count vs. session attribute + underlying provider behavior in search), and the new tests added (`GroupResourceTypeEvaluationTest`) assert only `users().search(...)` behavior, not any `getUsersCount`/pagination consistency. So the finding\u2019s \u201cmissing test for count/list consistency under group-scoped permissions\u201d is specific and grounded in the diff, but it\u2019s not a directly verifiable defect from the diff alone.",
+        "diff_context_hash": "25a97b5f19bf18ad6463a96b2b30d6c2eff080f4"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The interface method getGroupsWithViewPermission(GroupModel) was deleted outright (with getGroupsWithViewPermission() renamed to getGroupIdsWithViewPermission()) rather than deprecated, while the interface also keeps deprecated members like isImpersonatable \u2014 an inconsistent migration policy for a public evaluator interface. Any out-of-tree implementor of GroupPermissionEvaluator (e.g. custom admin extensions or forks) fails to compile against this change with no migration path, and the deprecation-then-removal convention used elsewhere in this same diff (UserPermissionEvaluator.isImpersonatable) is silently dropped for this method.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.83,
+        "rationale": "The diff shows a breaking API change to the public `GroupPermissionEvaluator` interface: the method `boolean getGroupsWithViewPermission(GroupModel group);` is removed entirely (and its prior semantics are shifted to `canViewMembers(GroupModel)` / `requireViewMembers`), while the no-arg `getGroupsWithViewPermission()` is renamed to `getGroupIdsWithViewPermission()` (see `GroupPermissionEvaluator` and corresponding changes in `GroupPermissions`, plus call-site updates in `UsersResource` / `BruteForceUsersResource`). This will cause any out-of-tree implementor of `GroupPermissionEvaluator` to fail compilation with no in-interface deprecation bridge, whereas the same diff keeps an explicitly deprecated API in `UserPermissionEvaluator` (`isImpersonatable` marked `@Deprecated`). That inconsistency/migration-policy concern is real and diff-grounded, but it is not a runtime correctness bug within this PR itself.",
+        "diff_context_hash": "25a97b5f19bf18ad6463a96b2b30d6c2eff080f4"
+      }
+    },
+    {
+      "issue_text": "[BUG] canManage() in GroupPermissionsV2 grants full manage rights on a fallback to a VIEW scope permission on the all-groups resource. An admin holding only the VIEW scope on the Groups resource type gets canManage() == true, so they can pass requireManage() and create/rename/delete groups \u2014 a privilege escalation where the interface javadoc for canManage() (GroupPermissionEvaluator) only promises the MANAGE scope for V2.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.78,
+        "rationale": "In `GroupPermissionsV2.canManage()` the fallback permission check is `hasPermission(null, AdminPermissionsSchema.VIEW, AdminPermissionsSchema.MANAGE)`, so a caller granted only the `VIEW` scope on the Groups resource type (\u201call-groups\u201d fallback) will get `canManage() == true` and therefore pass `requireManage()`. This makes \"manage\" authorization depend on a view-only scope, which is a privilege escalation risk for operations guarded by `requireManage()` (e.g., group creation/update). Note: the finding\u2019s claim that the interface javadoc only promises MANAGE for V2 is not accurate\u2014the diff\u2019s javadoc for `canManage()` explicitly mentions VIEW or MANAGE\u2014but the code behavior still grants manage based on VIEW.",
+        "diff_context_hash": "25a97b5f19bf18ad6463a96b2b30d6c2eff080f4"
+      }
+    },
+    {
+      "issue_text": "[BUG] getGroupIdsWithViewPermission() collects resourceStore resource IDs (groupResource.getId()) into the granted set instead of group IDs, and the set is consumed as group IDs by UsersResource/BruteForceUsersResource via session.setAttribute(UserModel.GROUPS, groupIds). If the authorization resource's internal ID is not identical to the group's model ID, every group-scoped user search and getUsersCount returns zero users for admins granted VIEW_MEMBERS on specific groups, silently breaking the group-restricted user search the PR is supposed to deliver.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.78,
+        "rationale": "In GroupPermissionsV2#getGroupIdsWithViewPermission(), the code iterates authorization Resources of type GROUPS and then calls hasPermission(groupResource.getId(), ...) and, on success, adds groupResource.getId() to the granted set. However, hasPermission(String groupId, ...) treats its parameter as a *group id/name* by doing resourceStore.findByName(server, groupId). Passing Resource#getId() (the authz resource\u2019s internal id) to findByName is inconsistent and will typically fail to resolve the per-group resource, causing the method to fall back to the all-groups resource-type check and potentially return an empty set even when per-group VIEW_MEMBERS/MANAGE_MEMBERS permissions exist. The returned set is then used as group IDs via session.setAttribute(UserModel.GROUPS, groupIds) in UsersResource/BruteForceUsersResource, so returning authz resource IDs would also break group-restricted user search/count.",
+        "diff_context_hash": "25a97b5f19bf18ad6463a96b2b30d6c2eff080f4"
+      }
+    },
+    {
+      "issue_text": "[BUG] Removing the `.filter(usersEvaluator::canView)` post-filter from searchForUser makes user-search results depend entirely on the store honoring the UserModel.GROUPS attribute. Admins with per-user (not per-group) fine-grained view permissions \u2014 previously surfaced by the post-filter \u2014 disappear from search results, and any UserStorageProvider implementation that ignores UserModel.GROUPS leaks users the caller cannot view; the filter was the enforcement invariant this diff silently drops.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.66,
+        "rationale": "In `UsersResource.searchForUser(...)` the diff removes the explicit enforcement `.filter(usersEvaluator::canView)` and now passes the raw `session.users().searchForUserStream(...)` directly into `toRepresentation(...)` (same pattern in `BruteForceUsersResource`). The diff does not show any new filtering added in `toRepresentation`, so visibility enforcement for search results now relies solely on the user store honoring the session attribute `UserModel.GROUPS` (set via `auth.groups().getGroupIdsWithViewPermission()`). If a `UserStorageProvider`/user store ignores that attribute or returns a superset, users the caller cannot view would no longer be filtered out, which is an authorization/correctness regression introduced by this change.",
+        "diff_context_hash": "25a97b5f19bf18ad6463a96b2b30d6c2eff080f4"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The ADMIN_FINE_GRAINED_AUTHZ feature check moved from inside the ProviderEventListener (evaluated per event) to registration time, changing when the feature flag is sampled. Environments that toggle the feature at runtime (or where the listener registration precedes profile evaluation of dynamic config) no longer get role/group permission cleanup events, leaving stale permission resources behind; the previous per-event check was the correct seam.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.6,
+        "rationale": "The diff in AdminPermissions.registerListener changes behavior: previously the ProviderEventListener was always registered and gated per event by `if (Profile.isFeatureEnabled(...))` inside `onEvent`, but now the listener is only registered if the feature is enabled at registration time (outer `if`). This definitively changes when the feature flag is sampled and could affect cleanup events if the feature\u2019s enabled state can differ later in runtime. However, the diff alone does not prove Keycloak supports runtime toggling or that profile evaluation is dynamic, so the claim of leaving stale resources behind cannot be verified as an introduced defect solely from this change.",
+        "diff_context_hash": "25a97b5f19bf18ad6463a96b2b30d6c2eff080f4"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The public static method searchGroupModelsByAttributes is deleted from a public utility class with no deprecation cycle. Out-of-tree extensions and downstream forks calling ModelToRepresentation.searchGroupModelsByAttributes fail to compile against this version; the single-caller refactor could have been done with a deprecated delegating method.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.7,
+        "rationale": "The diff explicitly removes the public static method `ModelToRepresentation.searchGroupModelsByAttributes(...)` (server-spi-private/src/main/java/org/keycloak/models/utils/ModelToRepresentation.java) and replaces its only in-tree usage with a direct call to `session.groups().searchGroupsByAttributes(...)` (GroupsResource). There is no deprecated delegating stub left behind, so any code compiling against this method will now fail. While this is not a runtime correctness defect in-tree, it is a concrete compatibility/API-break concern grounded in the diff.",
+        "diff_context_hash": "25a97b5f19bf18ad6463a96b2b30d6c2eff080f4"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] Eight inherited GroupPermissionManagement methods (isPermissionsEnabled, setPermissionsEnabled, viewMembersPermission, manageMembersPermission, manageMembershipPermission, viewPermission, managePermission, resource, getPermissions) all throw UnsupportedOperationException with no caller audit in this diff. Any existing admin REST endpoint (e.g., group permission-management endpoints invoked via realm.admin() or the AdminPermissions.registerListener GroupRemovedEvent path that calls setPermissionsEnabled) still dispatches through the V2 evaluator when the V2 profile is active and crashes with UnsupportedOperationException instead of a contract error.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.62,
+        "rationale": "In this diff, MgmtPermissionsV2.groups() is overridden to return GroupPermissionsV2, and GroupPermissionsV2 explicitly overrides multiple GroupPermissionManagement methods (including setPermissionsEnabled) to throw UnsupportedOperationException. The diff also shows an existing execution path that calls management(...).groups().setPermissionsEnabled(...) in AdminPermissions.registerListener() on GroupRemovedEvent. If the V2 MgmtPermissions implementation is in use, that call will now throw at runtime rather than performing the expected cleanup/disable behavior.",
+        "diff_context_hash": "25a97b5f19bf18ad6463a96b2b30d6c2eff080f4"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The `!auth.users().canView()` guard was removed and getGroupIdsWithViewPermission() is now invoked unconditionally on every brute-force user search. Every brute-force search now pays the resource-store scan and permission evaluation even for full admins who previously short-circuited at canView(); a hot-path regression on the admin console's user list, and the V1 GroupPermissions version has no V2 fast path beyond the canView() empty-set return.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "hallucination",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "hallucination",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.77,
+        "rationale": "The diff does remove the outer `if (!auth.users().canView())` guard in `BruteForceUsersResource.searchForUser` (and similarly in `UsersResource`). However, the invoked method `getGroupIdsWithViewPermission()` (in both `GroupPermissions` and new `GroupPermissionsV2`) immediately short-circuits with `if (root.users().canView()) return Collections.emptySet();`. That means full viewers/admins do *not* incur the resource-store scan/evaluation described; the expensive scan happens only when the caller cannot view users. Previously those callers would have gone into the guarded block anyway. So the claimed hot-path regression \u201ceven for full admins\u201d is not supported by the diff.",
+        "diff_context_hash": "25a97b5f19bf18ad6463a96b2b30d6c2eff080f4"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The try-with-resources refactor of handleCreatedResponse is unrelated to adding the Groups resource type to the authorization schema. Scope drift: an unrelated test-infra cleanup rides in a permissions-semantics PR, so a failure in the refactor (e.g., assert firing inside try-with-resources altering the response-close timing) gets bisected to the wrong change; belongs in its own commit.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.74,
+        "rationale": "The diff includes an unrelated change in test infrastructure: `ApiUtil.handleCreatedResponse` is refactored to use try-with-resources (test-framework/core/.../ApiUtil.java). This is orthogonal to the PR\u2019s main purpose (adding Groups as an authorization resource type and changing permission semantics across admin endpoints), so it constitutes scope drift and could complicate bisection. The specific concern about assertion/close timing is somewhat speculative, but the \u201cunrelated cleanup rides along\u201d part is directly supported by the diff.",
+        "diff_context_hash": "25a97b5f19bf18ad6463a96b2b30d6c2eff080f4"
+      }
+    },
+    {
+      "issue_text": "[BUG] Removing the .filter(usersEvaluator::canView) from searchForUser makes the store-side UserModel.GROUPS attribute the only authorization filter, and that attribute is never set when getGroupIdsWithViewPermission returns an empty set for a caller who lacks view permission. An admin holding only the query-users role (no view-users, no group grants) now receives the full unfiltered user list with full representations \u2014 the old code returned zero rows because the per-user canView filter rejected every user; this is an information-disclosure regression on GET /users.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.78,
+        "rationale": "In `UsersResource.searchForUser(...)`, the diff removes the client-side authorization filter `.filter(usersEvaluator::canView)` and now relies on setting `session.setAttribute(UserModel.GROUPS, groupIds)` as the only restriction. However, `groupIds` is only set when `!groupIds.isEmpty()`. For callers who cannot globally view users and have no group grants, `auth.groups().getGroupIdsWithViewPermission()` can return an empty set, meaning the session attribute is never set and `session.users().searchForUserStream(...)` is invoked with no per-user filter at all. This differs from the previous behavior (where the per-user `canView` filter would yield zero results) and creates a plausible information-disclosure regression path based purely on the shown logic change.",
+        "diff_context_hash": "25a97b5f19bf18ad6463a96b2b30d6c2eff080f4"
+      }
+    },
+    {
+      "issue_text": "[BUG] The brute-force user search drops its per-user authorization filter and relies solely on the UserModel.GROUPS session attribute, which is not set when getGroupIdsWithViewPermission returns empty for a caller without view permission. A caller with listing rights but no view permission and no group grants sees brute-force status for all realm users instead of none; the empty-set sentinel now means both 'full access' and 'no access', so the no-access case is served unfiltered.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "hallucination",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "hallucination",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.44,
+        "rationale": "The diff does not show a per-user authorization filter being removed from BruteForceUsersResource: before and after, it calls `session.users().searchForUserStream(...)` without `.filter(usersEvaluator::canView)`, and the only change there is swapping `getGroupsWithViewPermission()` for `getGroupIdsWithViewPermission()` plus minor refactoring. Also, the \u201cempty set means full access vs no access\u201d ambiguity is not newly introduced here; previously `getGroupsWithViewPermission()` could also return an empty set in multiple cases and BruteForceUsersResource similarly only set the session attribute when the set was non-empty. Finally, whether absence of `UserModel.GROUPS` causes `searchForUserStream` to return all users is not verifiable from this diff.",
+        "diff_context_hash": "25a97b5f19bf18ad6463a96b2b30d6c2eff080f4"
+      }
+    },
+    {
+      "issue_text": "[BUG] GroupPermissionsV2.canManage() (the global 'manage any group' check used by group creation and requireManage()) evaluates hasPermission(null, VIEW, MANAGE), accepting a VIEW-only all-groups grant as sufficient to manage. An admin granted only the view scope on the all-groups resource can create, update, and delete groups, contradicting the group-scoped canManage(group) which requires MANAGE \u2014 the global and per-group paths enforce different invariants, and testManageAllGroups never exercises a view-only global grant to catch it.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.92,
+        "rationale": "In the newly added `GroupPermissionsV2` (services/.../GroupPermissionsV2.java), the global manage check is:\n\n```java\n@Override\npublic boolean canManage() {\n    if (root.hasOneAdminRole(AdminRoles.MANAGE_USERS)) return true;\n    return hasPermission(null, AdminPermissionsSchema.VIEW, AdminPermissionsSchema.MANAGE);\n}\n```\n\nBecause `hasPermission(...)` returns true if *any* of the provided scopes is granted (it iterates permission scopes and checks `expectedScopes.contains(scope)`), a VIEW-only permission on the all-groups resource-type resource will make `canManage()` true. That would allow operations guarded by `requireManage()` / `canManage()` (e.g., group creation at the collection level) to succeed for principals who only have VIEW. This contradicts `canManage(GroupModel group)`, which correctly requires `AdminPermissionsSchema.MANAGE` only. The new test `testManageAllGroups` grants only `MANAGE`, so it doesn't catch the VIEW-only escalation case.",
+        "diff_context_hash": "25a97b5f19bf18ad6463a96b2b30d6c2eff080f4"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] getGroupIdsWithViewPermission collects groupResource.getId() into the granted set, while hasPermission resolves group resources via resourceStore.findByName(server, groupId), i.e. the group ID is the resource *name*, not the resource ID. If the V2 resource store assigns generated internal IDs (as the name-based lookup implies), the returned set contains resource IDs rather than group IDs, so the UserModel.GROUPS attribute handed to the user store never matches any group's membership join and group-scoped user searches silently return empty for permission-limited admins.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.8,
+        "rationale": "In GroupPermissionsV2#getGroupIdsWithViewPermission, the code iterates over group resources and uses groupResource.getId() both to evaluate permissions and to populate the returned Set (\"granted.add(groupResource.getId())\"). However, GroupPermissionsV2#hasPermission resolves a group-specific resource via resourceStore.findByName(server, groupId), meaning the argument is intended to be the resource *name*. From the diff, group resources appear to be named by the Keycloak group id (AdminPermissionsSchema#resolveGroup returns group.getId(), and V2 uses findByName(server, groupId)), so returning/using Resource.getId() (internal authorization resource id) instead of the group id/name will cause mismatches when UsersResource/BruteForceUsersResource store this set into session attribute UserModel.GROUPS for group-scoped user searches.",
+        "diff_context_hash": "25a97b5f19bf18ad6463a96b2b30d6c2eff080f4"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] Moving the ADMIN_FINE_GRAINED_AUTHZ Profile check from per-event to registration time means the listener is only registered if the feature is enabled when registerListener runs. A deployment that enables the feature after startup (feature is not a startup-only toggle in all setups, and the old code deliberately re-checked per event) never gets group-permission cleanup on role/group removal, leaving orphaned authorization resources until a restart.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.6,
+        "rationale": "The diff in AdminPermissions.registerListener changes behavior from always registering a ProviderEventListener and gating cleanup per event (previously: `if (Profile.isFeatureEnabled(...))` inside `onEvent`) to registering the listener only when the feature is enabled at registration time (now: outer `if (Profile.isFeatureEnabled(...)) { manager.register(...) }`). This is a real, diff-grounded behavioral change: if the feature flag were to become enabled after `registerListener` executes, the listener would never run and cleanup on RoleRemovedEvent/GroupRemovedEvent would not occur until restart. Whether runtime enabling is supported is not verifiable from the diff, so this is a deployment/feature-toggle semantics concern rather than a definitively provable bug from the patch alone.",
+        "diff_context_hash": "25a97b5f19bf18ad6463a96b2b30d6c2eff080f4"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] getSubGroups now calls auth.groups()::canView per group inside the filter with no short-circuit for admins who can view everything, and paginates only after the full unbounded sub-group stream is fetched (first/max applied to -1,-1 fetch). For a realm admin viewing a group with tens of thousands of sub-groups, each element triggers a full authz policy evaluation (realm resource server lookup plus policy evaluation in V2), turning one paginated listing call into an O(n) authorization fan-out with only max results ever returned.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.74,
+        "rationale": "In `GroupResource.getSubGroups`, the diff removes the `canViewGlobal = auth.groups().canView()` pre-check and changes the filter from `g -> canViewGlobal || auth.groups().canView(g)` to `.filter(auth.groups()::canView)`. This means even callers who can view all groups will still invoke `canView(GroupModel)` for every subgroup. Given the diff also introduces `GroupPermissionsV2.canView(GroupModel)` which can perform per-group authz evaluation (`resourceStore` lookup + `policyStore`/permission evaluation via `hasPermission(...)`), this is a concrete scalability/performance regression. The `-1, -1` fetch for `getSubGroupsStream(...)` remains unchanged, but the loss of global short-circuit makes the per-element auth cost unavoidable.",
+        "diff_context_hash": "25a97b5f19bf18ad6463a96b2b30d6c2eff080f4"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] getGroupIdsWithViewPermission iterates every Groups-typed resource in the realm and runs a full policy evaluation per resource with no limit, on the hot path of every user search performed by a non-view admin. Realms with fine-grained permissions on many groups make every GET /users and users-count call issued by a limited admin cost N policy evaluations up front, a scalability cliff proportional to the number of permission-enabled groups.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.86,
+        "rationale": "In the new `GroupPermissionsV2#getGroupIdsWithViewPermission()` implementation, it scans *all* group resources via `resourceStore.findByType(server, AdminPermissionsSchema.GROUPS_RESOURCE_TYPE, ...)` and for each resource calls `hasPermission(...)`, which performs a permission evaluation (`root.evaluatePermission(...)`). This method is invoked on the user-search path: `UsersResource#searchForUser(...)` now always calls `auth.groups().getGroupIdsWithViewPermission()` and sets `session.setAttribute(UserModel.GROUPS, groupIds)` when non-empty, and `UsersResource#getUsersCount(...)` also uses `auth.groups().getGroupIdsWithViewPermission()` for non-view admins. For admins who can query but not view users, this introduces O(number of group resources) policy evaluations per request, matching the scalability concern. This is a performance/architecture issue rather than a functional defect.",
+        "diff_context_hash": "25a97b5f19bf18ad6463a96b2b30d6c2eff080f4"
+      }
+    },
+    {
+      "issue_text": "[BUG] The diff silently deletes the per-user `usersEvaluator::canView` post-filter from user search, changing the endpoint's contract from 'return only users the caller may view' to 'return whatever the store returns when the GROUPS attribute is empty'. An admin holding only QUERY_USERS (canQuery() true, canView() false) with no group-level grants gets an empty groupIds set, so no UserModel.GROUPS attribute is set and searchForUserStream returns the full unfiltered user list \u2014 an information-disclosure regression the original code explicitly prevented; likewise admins whose only grants are per-user resource permissions (V2 hasPermission(user, VIEW)) no longer have those honored in search results.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.82,
+        "rationale": "In `UsersResource.searchForUser(...)` the diff removes the explicit post-filter `...searchForUserStream(...).filter(usersEvaluator::canView)` and now returns `searchForUserStream(...)` directly. At the same time it only sets `session.setAttribute(UserModel.GROUPS, groupIds)` when `groupIds` is non-empty. For callers who cannot globally view users and also have no group IDs with view-members/manage-members permission (`getGroupIdsWithViewPermission()` returns empty), no GROUPS restriction is applied and no per-user `usersEvaluator::canView` filtering happens anymore, so the stream can include users the caller should not be able to view. This is a clear behavior/security regression compared to the previous code path that always enforced `usersEvaluator::canView` filtering even when no group restriction was set.",
+        "diff_context_hash": "25a97b5f19bf18ad6463a96b2b30d6c2eff080f4"
+      }
+    },
+    {
+      "issue_text": "[BUG] The removal of the `!auth.users().canView()` guard combined with the dropped result filtering changes brute-force user search from permission-filtered to unfiltered whenever getGroupIdsWithViewPermission() returns an empty set. An admin querying the brute-force detection UI with canQuery-style access but neither global view-users nor any group grants receives the complete list of realm users with no filtering, where the previous code's session-attribute-only mechanism produced an empty/no result set for that caller class.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "hallucination",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "hallucination",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.74,
+        "rationale": "In `BruteForceUsersResource#searchForUser`, the diff does not \u201cdrop result filtering\u201d: before and after it passes the `searchForUserStream(...)` result directly to `toRepresentation(...)` without any `.filter(usersEvaluator::canView)` in this method. Also, the session attribute `UserModel.GROUPS` is still only set when the computed set is non-empty (previously `groupModels` via `getGroupsWithViewPermission()`, now `groupIds` via `getGroupIdsWithViewPermission()`), so when that set is empty the behavior (no session attribute set) is the same as before. The only structural change is removing the `!auth.users().canView()` guard, but `getGroupIdsWithViewPermission()` is documented/implemented to return an empty set when the caller can view users, making this effectively equivalent for the global-view case. Therefore the finding\u2019s claimed newly introduced \u201cunfiltered whenever empty set\u201d behavior in the brute-force search is not verifiable from this diff.",
+        "diff_context_hash": "25a97b5f19bf18ad6463a96b2b30d6c2eff080f4"
+      }
+    },
+    {
+      "issue_text": "[BUG] GroupPermissionsV2.canManage() grants manage on VIEW scope (`hasPermission(null, AdminPermissionsSchema.VIEW, AdminPermissionsSchema.MANAGE)`), contradicting both the interface javadoc ('permission to MANAGE groups') and the sibling canView() implementation. An admin granted only the view scope on the all-groups resource passes requireManage(), letting them create/update/delete groups and map roles, an intent-drift between the documented and implemented semantics introduced during review rework.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.83,
+        "rationale": "In the newly added `GroupPermissionsV2`, `canManage()` returns `hasPermission(null, AdminPermissionsSchema.VIEW, AdminPermissionsSchema.MANAGE)`, so an admin with only the all-groups `VIEW` scope would pass `requireManage()` (which delegates to `canManage()`) and be treated as having manage rights. This is verifiable in the diff: `GroupPermissionsV2.canManage()` is more permissive than `GroupPermissionsV2.canManage(GroupModel)` (which checks only `MANAGE`) and would allow manage-gated group operations to proceed when only view is granted, which is a real authorization/correctness defect.",
+        "diff_context_hash": "25a97b5f19bf18ad6463a96b2b30d6c2eff080f4"
+      }
+    },
+    {
+      "issue_text": "[BUG] V2's hasPermission looks up group resources by bare `resourceStore.findByName(server, groupId)` while the existing (V1) group resources are named with the `group.resource.` prefix defined in GroupPermissions.RESOURCE_NAME_PREFIX, so a permission granted under the old naming is silently invisible to V2 evaluation. Realms upgrading to the V2 evaluator with pre-existing fine-grained group permissions lose all per-group grant checks (lookups miss, evaluation falls through to the all-groups resource and returns false), silently denying admins who were previously authorized; the new naming also coexists with the old, so the two evaluators disagree about the same realm's grants.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.78,
+        "rationale": "The diff shows two incompatible group resource naming schemes. Existing (V1) group permissions use a prefixed resource name via `GroupPermissions.RESOURCE_NAME_PREFIX` and `getGroupResourceName(GroupModel)` which returns `\"group.resource.\" + group.getId()` (still present in `GroupPermissions`). But the new V2 evaluator resolves/looks up group resources by bare group id: `AdminPermissionsSchema.resolveGroup(..)` returns `group.getId()`, and `GroupPermissionsV2.hasPermission(..)` does `resourceStore.findByName(server, groupId)`. If a realm already has per-group resources created under the old prefixed name, V2's lookup by bare id will miss, then it falls back to the all-groups type resource and may return false (`policyStore.findByResource(server, resource).isEmpty()`), silently denying access that V1 would have granted. No migration/compat handling is shown in the diff.",
+        "diff_context_hash": "25a97b5f19bf18ad6463a96b2b30d6c2eff080f4"
+      }
+    },
+    {
+      "issue_text": "[BUG] MgmtPermissionsV2.groups() returns GroupPermissionsV2, which throws UnsupportedOperationException for setPermissionsEnabled/isPermissionsEnabled/resource/viewPermission/managePermission, while AdminPermissions.registerListener's GroupRemovedEvent handler (visible in this same diff's AdminPermissions.java hunk) calls `management(...).groups().setPermissionsEnabled(cast.getGroup(), false)`. When the V2 permissions path is active alongside ADMIN_FINE_GRAINED_AUTHZ, deleting any group fires the RoleRemovedEvent/GroupRemovedEvent listener into a hard UnsupportedOperationException, breaking group deletion instead of the intended permission cleanup \u2014 the intent 'add a Groups resource type' silently disabled the V1 cleanup contract for V2 realms.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.66,
+        "rationale": "The diff shows an internal call chain that can deterministically throw at runtime: `AdminPermissions.registerListener` registers a listener (when `ADMIN_FINE_GRAINED_AUTHZ` is enabled) whose `GroupRemovedEvent` handler calls `management(...).groups().setPermissionsEnabled(cast.getGroup(), false)` (AdminPermissions.java hunk). In the same diff, `MgmtPermissionsV2.groups()` is overridden to return `GroupPermissionsV2`, and `GroupPermissionsV2.setPermissionsEnabled(...)` explicitly throws `UnsupportedOperationException` (new file GroupPermissionsV2.java). If `AdminPermissions.management(...)` returns a V2 management instance in this mode, group removal will trigger the listener and crash group deletion/cleanup instead of performing the intended disablement.",
+        "diff_context_hash": "25a97b5f19bf18ad6463a96b2b30d6c2eff080f4"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] Moving the ADMIN_FINE_GRAINED_AUTHZ profile check outside the listener registration changes the failure/initialization contract of registerListener from always-registers to conditionally-registers, a behavioral change to a public static API unrelated to adding the Groups resource type. Any deployment or test that relies on the listener being present to later observe feature state at event time (e.g., feature toggled via config reload in the same JVM) now silently loses event handling; this objective change shipped without being part of the stated intent.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.66,
+        "rationale": "The diff in AdminPermissions.registerListener changes semantics from always registering a ProviderEventListener (and gating behavior inside onEvent with Profile.isFeatureEnabled) to conditionally registering the listener only if the feature is enabled at registration time. This is a real behavioral/API-contract change visible in the diff (the listener will no longer receive any events if the feature becomes enabled later in the same JVM), but whether that is a correctness defect depends on assumptions about runtime feature toggling, which the diff alone doesn\u2019t establish.",
+        "diff_context_hash": "25a97b5f19bf18ad6463a96b2b30d6c2eff080f4"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The interface method getGroupsWithViewPermission(GroupModel) was deleted and requireViewMembers rewired to canViewMembers, changing requireViewMembers' documented semantics from the old method's users().canView()||users().canManage() short-circuit plus isAdminSameRealm check to canViewMembers' own precondition set. In-realm callers that previously passed requireViewMembers purely by holding MANAGE_USERS (without VIEW_MEMBERS scope evaluation) now depend on canViewMembers' internal checks; out-of-tree extensions implementing GroupPermissionEvaluator break at compile time from the removed method with no deprecation cycle, a silent public-surface change accompanying what was described as an additive schema change.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.78,
+        "rationale": "The diff does remove a public interface method (`GroupPermissionEvaluator.getGroupsWithViewPermission(GroupModel)`) and renames `getGroupsWithViewPermission()` to `getGroupIdsWithViewPermission()`, which is a compile-time breaking change for any out-of-tree implementation (no deprecation shown). However, the claimed behavioral regression for callers holding `MANAGE_USERS` is not supported by the diff: `GroupPermissions.canViewMembers()` short-circuits on `root.users().canView()`, and `UserPermissions.canView()` now returns true for `MANAGE_USERS` as well (`root.hasOneAdminRole(AdminRoles.MANAGE_USERS, AdminRoles.VIEW_USERS)`), preserving the previous \u201cmanage implies view-members\u201d bypass. So the actionable issue is API compatibility rather than an introduced correctness defect.",
+        "diff_context_hash": "25a97b5f19bf18ad6463a96b2b30d6c2eff080f4"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] canMapRoles and canManageGroupMembership were changed from delegating to canManage(user) to delegating to root.hasOneAdminRole(MANAGE_USERS) plus canManageByGroup, which drops the direct per-user MANAGE permission path those methods previously inherited through canManage(user). An admin holding a direct MANAGE grant on a specific user (not MANAGE_USERS, no group membership) previously satisfied canMapRoles/canManageGroupMembership via the canManage(user) delegation and now receives 403 \u2014 a semantics change in the user-permission contract bundled silently into a groups-schema PR.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "hallucination",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "hallucination",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.86,
+        "rationale": "In `UserPermissionsV2`, `canMapRoles` and `canManageGroupMembership` no longer call `canManage(user)`, but they still explicitly include the per-user `MANAGE` permission path in the new checks: `canMapRoles` now returns `hasPermission(user, null, MANAGE, MAP_ROLES) || canManageByGroup(user)` and `canManageGroupMembership` returns `hasPermission(user, null, MANAGE, MANAGE_GROUP_MEMBERSHIP) || canManageByGroup(user)`. Because `MANAGE` is among the scopes passed to `hasPermission(...)`, an admin with a direct per-user `MANAGE` grant would still satisfy these methods. The diff does not show the claimed loss of the direct per-user MANAGE-based authorization.",
+        "diff_context_hash": "25a97b5f19bf18ad6463a96b2b30d6c2eff080f4"
+      }
+    },
+    {
+      "issue_text": "[BUG] GroupPermissionsV2.canManage() evaluates hasPermission(null, VIEW, MANAGE), so a caller holding only the VIEW scope on the all-groups type resource satisfies canManage(). An admin granted view-only group permission (VIEW on the Groups type resource) passes canManage()/requireManage() and can create, update, and delete any group in the realm \u2014 privilege escalation from read to write that testManageAllGroups does not cover (it only grants MANAGE).",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug",
+      "matched_golden_ids": [
+        "In GroupPermissionsV2.canManage(), the permission fallback checks for both VIEW and MANAGE scopes (hasPermission(null, AdminPermissionsSchema.VIEW, AdminPermissionsSchema.MANAGE)), but canManage() should only grant access for MANAGE scope, not VIEW. This means users with only VIEW permission on groups can pass the canManage() check, granting them write access they should not have. The canView() method correctly checks both VIEW and MANAGE, but canManage() should only check MANAGE."
+      ],
+      "primary_judge_verdict": "matched",
+      "primary_judge": "gpt-5.2",
+      "primary_judge_confidence": 0.98,
+      "primary_judge_reasoning": "The candidate flags that GroupPermissionsV2.canManage() incorrectly falls back to hasPermission(null, VIEW, MANAGE), allowing VIEW-only users to pass manage checks and gain write access. This is the same issue described in the golden comment (canManage should require MANAGE only; canView can allow VIEW or MANAGE).",
+      "adjudication": {
+        "verdict": "matched",
+        "adjudicating_judge": null,
+        "confidence": null,
+        "rationale": null,
+        "diff_context_hash": "25a97b5f19bf18ad6463a96b2b30d6c2eff080f4"
+      }
+    },
+    {
+      "issue_text": "[BUG] getGroupIdsWithViewPermission() passes groupResource.getId() (the resource's internal UUID) into hasPermission(), which resolves resources via resourceStore.findByName(server, groupId) \u2014 the lookup never matches because the per-group resource's name is the group id, not its resource id. Per-group VIEW_MEMBERS/MANAGE_MEMBERS grants are never recognized when scoping user searches (the name lookup fails and evaluation silently falls back to the all-groups type resource, so the check only ever passes when type-level policies exist). An admin with a per-group member-view grant sees an empty user search; an admin with any type-level group policy gets every group id, i.e. users of all groups.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.9,
+        "rationale": "In GroupPermissionsV2#getGroupIdsWithViewPermission(), it iterates group resources via resourceStore.findByType(...) and then calls hasPermission(groupResource.getId(), ...) and also adds granted.add(groupResource.getId()). However hasPermission(String groupId, ...) resolves a per-group Resource using resourceStore.findByName(server, groupId), which expects the resource *name*; passing the resource's internal ID will not match a resource stored under the groupId name. As a result, per-group resources are not found and the code falls back to the type-level \"all-groups\" resource (AdminPermissionsSchema.GROUPS_RESOURCE_TYPE), so per-group VIEW_MEMBERS/MANAGE_MEMBERS grants can be ignored unless type-level policies exist (in which case the loop may incorrectly grant for all resources and returns resource IDs rather than group IDs). This is grounded directly in the shown method bodies.",
+        "diff_context_hash": "25a97b5f19bf18ad6463a96b2b30d6c2eff080f4"
+      }
+    },
+    {
+      "issue_text": "[BUG] searchForUser() drops the post-hoc .filter(usersEvaluator::canView) and relies solely on the UserModel.GROUPS session attribute, which is only set when getGroupIdsWithViewPermission() is non-empty. An admin who fails users().canView() and has no group member-view permissions (empty set) triggers searchForUserStream without the GROUPS attribute and with no downstream filter, returning the full realm user list (usernames, emails, attributes) \u2014 an authorization bypass / user-data disclosure via GET /admin/realms/{realm}/users.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.78,
+        "rationale": "In `UsersResource.searchForUser(...)` the diff removes the post-search `filter(usersEvaluator::canView)` and now always calls `toRepresentation(...)` on the raw `session.users().searchForUserStream(...)` results. At the same time, the only remaining restriction mechanism is setting `session.setAttribute(UserModel.GROUPS, groupIds)` *only if* `auth.groups().getGroupIdsWithViewPermission()` is non-empty. For a caller who can reach the endpoint (e.g., has query capability) but does not have global `users().canView()` and also has zero group member-view permissions (empty set), no `UserModel.GROUPS` session attribute is set and no downstream filter is applied, so the underlying search stream can return users outside the caller\u2019s view scope. The fact that the previous code explicitly filtered by `usersEvaluator::canView` strongly indicates this filter was required for authorization.",
+        "diff_context_hash": "25a97b5f19bf18ad6463a96b2b30d6c2eff080f4"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The rewritten searchForUser() has the same empty-set hole as UsersResource: when the caller lacks users().canView() and getGroupIdsWithViewPermission() returns an empty set, the GROUPS attribute is never set and the stream is returned without any canView filter. A brute-force-protection admin with no user-view permission and no group grants receives the entire realm user list through the brute-force user search endpoint; unlike UsersResource the old code also lacked the filter here, but this diff rewrites and retains the unguarded path instead of fixing it.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.74,
+        "rationale": "In both `UsersResource#searchForUser` and `BruteForceUsersResource#searchForUser/searchForUser(...)`, the diff removes the explicit per-user permission filter and only conditionally sets `session.setAttribute(UserModel.GROUPS, groupIds)` when `groupIds` is non-empty. Specifically, `UsersResource` changed from `searchForUserStream(...).filter(usersEvaluator::canView)` to returning the raw `searchForUserStream(...)` with no filter, and it no longer gates the GROUPS attribute on `!auth.users().canView()`. If the caller lacks global user view and `auth.groups().getGroupIdsWithViewPermission()` is empty, the code will not set `UserModel.GROUPS` and will also not filter by `usersEvaluator::canView`, leaving an unguarded path. The same conditional-set pattern exists in `BruteForceUsersResource`, and that class still has no `canView` filtering at all.",
+        "diff_context_hash": "25a97b5f19bf18ad6463a96b2b30d6c2eff080f4"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] canMapRoles() and canManageGroupMembership() now also return true when the caller holds only MANAGE_MEMBERS on any group in the user's group chain, conflating member management with role mapping and membership administration. An admin granted MANAGE_MEMBERS on group G (intended to let them manage users who are members of G) can additionally map realm/client roles to those users and move them between groups via PUT /users/{id}/groups \u2014 a scope escalation that operators configuring V2 fine-grained permissions will not expect; the javadoc documents it, but the permission surface expansion is a security-relevant semantic change on existing endpoints.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.83,
+        "rationale": "The diff does show a deliberate permission-surface expansion: `UserPermissionsV2.canMapRoles()` now returns `hasPermission(... MANAGE, MAP_ROLES) || canManageByGroup(user)`, and `canManageByGroup(user)` is based on `root.groups()::canManageMembers` (see `UserPermissions` change and `UserPermissionsV2` at `return ... || canManageByGroup(user);`). In V2, `GroupPermissionsV2.canManageMembers()` is granted by the group-scope `MANAGE_MEMBERS` (see `return hasPermission(group.getId(), AdminPermissionsSchema.MANAGE_MEMBERS);`). Likewise, `canManageGroupMembership()` now returns `... || canManageByGroup(user)`. So holding only `MANAGE_MEMBERS` on a group in the user\u2019s group chain can enable role mapping and group-membership management for that user. Whether this is a \"bug\" is debatable (it\u2019s documented in the updated javadoc), but it is a security-relevant semantic change that should be explicitly reviewed/communicated.",
+        "diff_context_hash": "25a97b5f19bf18ad6463a96b2b30d6c2eff080f4"
+      }
+    },
+    {
+      "issue_text": "[BUG] getGroupIdsWithViewPermission() collects the authorization Resource's own ID (groupResource.getId()) instead of the group ID, so the UserModel.GROUPS attribute is populated with authz-resource UUIDs that never match any group membership. In UsersResource.searchForUser / getUsersCount / BruteForceUsersResource, an admin restricted to a group via VIEW_MEMBERS/MANAGE_MEMBERS gets a GROUPS attribute of resource UUIDs; user searches by group membership match zero users and the count endpoints return 0, silently hiding every member the permission was supposed to grant \u2014 the exact scenario the new test testCanViewUserByViewGroupMembers exercises, except it passes only because searchForUserStream's fallback/other path returns the user. The name-vs-id confusion (resourceStore.findByName(server, groupId) shows group IDs are resource *names*, not IDs) means any path relying purely on the GROUPS attribute filter returns nothing.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.92,
+        "rationale": "In `GroupPermissionsV2#getGroupIdsWithViewPermission()`, the code iterates authz resources by type and adds `groupResource.getId()` to the granted set, and also calls `hasPermission(groupResource.getId(), ...)`. But `hasPermission(String groupId, ...)` looks up the resource via `resourceStore.findByName(server, groupId)`, and `AdminPermissionsSchema#resolveGroup()` indicates the *resource name* is the Keycloak group id (`group.getId()`), not the authz resource internal id. Therefore passing/returning `Resource#getId()` (authz UUID) is a mismatch: the set populated into `UserModel.GROUPS` (via `UsersResource` / `BruteForceUsersResource`) will contain authz resource IDs, not group IDs, so any user-provider logic expecting group IDs for membership filtering/counting will fail (e.g., count endpoints returning 0, searches yielding no matches when relying on the GROUPS attribute).",
+        "diff_context_hash": "25a97b5f19bf18ad6463a96b2b30d6c2eff080f4"
+      }
+    },
+    {
+      "issue_text": "[BUG] GroupPermissionsV2 throws UnsupportedOperationException from isPermissionsEnabled, setPermissionsEnabled, viewPermission, managePermission, resource, and getPermissions with no test in the diff triggering any of these paths, and existing admin endpoints (e.g., GroupResource's permissions-enabled toggle and GroupPermissions management UI) call them. When the V2 schema is active, any admin REST call that reads group permission state (GET .../management/permissions, PUT enable/disable) hits UnsupportedOperationException and surfaces as a 500 to the admin console instead of a defined 4xx/feature error. Checked the only test file in this diff (tests/base/src/test/java/org/keycloak/tests/admin/authz/fgap/GroupResourceTypeEvaluationTest.java) \u2014 every test creates scope permissions directly and never invokes the fine-grained permission-management endpoints, so this crash path is completely unverified.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.74,
+        "rationale": "The diff introduces GroupPermissionsV2 (used via MgmtPermissionsV2.groups()) that overrides group-permission-management methods with UnsupportedOperationException (isPermissionsEnabled, setPermissionsEnabled, viewPermission, managePermission, resource, getPermissions). The diff also contains at least one concrete caller of these management methods: AdminPermissions.registerListener() invokes management(...).groups().setPermissionsEnabled(cast.getGroup(), false) on GroupRemovedEvent. If MgmtPermissionsV2 is the active implementation, that call will now throw UnsupportedOperationException, likely surfacing as a 500. The added test GroupResourceTypeEvaluationTest only exercises scope permission evaluation and does not cover these management endpoints/paths.",
+        "diff_context_hash": "25a97b5f19bf18ad6463a96b2b30d6c2eff080f4"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The V1 GroupPermissions semantics changed in this diff (canView()/canManage() switched from users().canViewDefault()/canManageDefault() to direct hasOneAdminRole checks, canViewMembers now also grants MANAGE_MEMBERS_SCOPE, requireViewMembers switched from getGroupsWithViewPermission to canViewMembers, and canList was reordered), but the only test file changed in this diff (GroupResourceTypeEvaluationTest.java) runs exclusively under the V2 server config. The default (V1) installation ships these altered permission semantics with zero verification in this diff: a regression such as canViewMembers now accepting MANAGE_MEMBERS scope changing who can view group members for plain fine-grained-authz realms, or the removal of the users().canManage() short-circuit in getGroupIdsWithViewPermission (old code returned empty set for managers too \u2014 V1 line 'if (root.users().canView() || root.users().canManage())' became 'if (root.users().canView())'), would pass the entire suite. Operators on the legacy admin-fine-grained-authz feature get behavior changes nobody tested.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.78,
+        "rationale": "The diff does change V1 (legacy) `GroupPermissions` behavior: e.g. `canManage()` and `canView()` now use `root.hasOneAdminRole(...)` instead of delegating to `root.users().canManageDefault()` / `canViewDefault()` (services/.../GroupPermissions.java), `requireViewMembers()` now checks `canViewMembers(group)` (was `getGroupsWithViewPermission(group)`), and `canViewMembers()` now treats `MANAGE_MEMBERS_SCOPE` as sufficient alongside `VIEW_MEMBERS_SCOPE` (services/.../GroupPermissions.java). The only newly added verification in this diff is a new test class `GroupResourceTypeEvaluationTest` which explicitly runs under a V2 config (`@KeycloakIntegrationTest(config = KeycloakAdminPermissionsServerConfig.class)`) and exercises the new V2 path (`GroupPermissionsV2`, `MgmtPermissionsV2.groups()`), not the modified V1 implementation. So the review concern\u2014shipping altered V1 semantics without any diff-added test coverage\u2014is specific and grounded. One sub-point is weaker: the change from `if (root.users().canView() || root.users().canManage())` to `if (root.users().canView())` is likely not behavior-changing because `users().canView()` already covers MANAGE_USERS, but the broader \u201cV1 semantics changed without tests\u201d point stands.",
+        "diff_context_hash": "25a97b5f19bf18ad6463a96b2b30d6c2eff080f4"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] BruteForceUsersResource.searchForUser now unconditionally computes getGroupIdsWithViewPermission() and drops the old auth.users().canView() guard, and no test in this diff exercises the brute-force user search endpoint under the new schema (GroupResourceTypeEvaluationTest only covers /users and /groups REST paths). The admin-ui extension's brute-force listing changes from a guarded lookup to an always-on resource-store scan (resourceStore.findByType over all Groups resources) on every user search, and its result correctness now depends entirely on the resource-ID-vs-group-ID issue above; a regression here fails silently in the admin UI's brute-force tab, which no test in this diff can catch.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.62,
+        "rationale": "The diff does show BruteForceUsersResource.searchForUser now always calls auth.groups().getGroupIdsWithViewPermission() (the old surrounding `if (!auth.users().canView())` guard was removed) and there are no tests added that exercise the admin-ui-ext brute-force users endpoint; the new tests cover `/users` and `/groups` only. However, the finding\u2019s claim that this becomes an \u201calways-on resource-store scan on every user search\u201d is overstated: both GroupPermissions#getGroupIdsWithViewPermission and GroupPermissionsV2#getGroupIdsWithViewPermission early-return an empty set when `root.users().canView()` is true, so the expensive `resourceStore.findByType(...)` scan only happens when the caller lacks global user-view permission (similar to the previous guarded behavior).",
+        "diff_context_hash": "25a97b5f19bf18ad6463a96b2b30d6c2eff080f4"
+      }
+    },
+    {
+      "issue_text": "[BUG] Removing the per-user `usersEvaluator::canView` post-filter makes user search depend entirely on the GROUPS session attribute, and when `getGroupIdsWithViewPermission()` returns an empty set the query runs completely unfiltered. An admin in the same realm with neither VIEW_USERS nor any group permission (e.g. only QUERY_USERS, or a realm where the resource server exists but no group policies match) gets getGroupIdsWithViewPermission() == empty set, so UserModel.GROUPS is never set and searchForUserStream returns every user in the realm with no post-filter \u2014 a full user-list disclosure that the removed `.filter(usersEvaluator::canView)` previously prevented.",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.68,
+        "rationale": "In both `UsersResource.searchForUser(...)` and `BruteForceUsersResource.searchForUser(...)`, the diff removes the post-search permission filter (`.filter(usersEvaluator::canView)`) and now only conditionally sets `session.setAttribute(UserModel.GROUPS, groupIds)` when `auth.groups().getGroupIdsWithViewPermission()` is non-empty. If the caller lacks global view and also has no group IDs with view-members/manage-members permission, `groupIds` will be empty, the `UserModel.GROUPS` session attribute will not be set, and `session.users().searchForUserStream(...)` is invoked without any additional filtering in these methods\u2014potentially returning all matching users rather than none. Previously, even with no group restriction, the `.filter(usersEvaluator::canView)` would have prevented disclosure.",
+        "diff_context_hash": "25a97b5f19bf18ad6463a96b2b30d6c2eff080f4"
+      }
+    },
+    {
+      "issue_text": "[BUG] The same unconditional getGroupIdsWithViewPermission() call with empty-set fallthrough drops the previous `!auth.users().canView()` guard without adding any compensating post-filter on the returned stream. Same unfiltered-results failure mode as UsersResource: a caller with no view-users role and no matching group permissions receives the entire realm user list from the brute-force user search endpoint instead of an empty/filtered result.",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "hallucination",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "hallucination",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.78,
+        "rationale": "In BruteForceUsersResource, removing the `if (!auth.users().canView())` guard does not change the effective restriction logic shown in the diff: it still only calls `session.setAttribute(UserModel.GROUPS, ...)` when the returned set is non-empty. For callers who cannot view users and have no permitted groups, the prior code also would not set the session attribute (because `groupModels` would be empty) and would still execute `searchForUserStream(...)` unfiltered. So the claimed \u201cnew\u201d leak caused by dropping the guard is not verifiable as introduced/exposed by this change; the empty-set fallthrough existed before as well (and any actual filtering may happen inside `toRepresentation`, which is not shown here).",
+        "diff_context_hash": "25a97b5f19bf18ad6463a96b2b30d6c2eff080f4"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] V2 group permission lookups key on the new 'Groups' resource type and `resourceStore.findByName(server, groupId)`, but realms upgrading from the previous version have group resources stored under the V1 naming ('group.resource.<id>' via GroupPermissions.getGroupResourceName) and the pre-existing resource type, so none of those stored resources are found. After upgrade, admins whose fine-grained group permissions were created under the V1 schema silently lose all group-scoped access: getGroupIdsWithViewPermission() finds no GROUPS_RESOURCE_TYPE resources and hasPermission() finds no resource named by group id, returning empty/false with no error \u2014 existing stored permission data is orphaned with no migration or dual-read step in this diff.",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.72,
+        "rationale": "The diff introduces a new group permissions evaluator for V2 (GroupPermissionsV2) that looks up per-group authz resources by `resourceStore.findByName(server, groupId)` and enumerates by the new `AdminPermissionsSchema.GROUPS_RESOURCE_TYPE` (\"Groups\"). However, the existing (V1) GroupPermissions code clearly uses a different naming scheme for group resources via `RESOURCE_NAME_PREFIX = \"group.resource.\"` / `getGroupResourceName(group)` (i.e., `group.resource.<id>`), and AdminPermissionsSchema only now adds the new Groups resource type. Nothing in the diff provides migration or a dual-read fallback from `groupId` to `group.resource.<id>` / old type, so existing stored fine-grained group permission resources created under the old naming/type would not be found and would stop granting access after upgrade.",
+        "diff_context_hash": "25a97b5f19bf18ad6463a96b2b30d6c2eff080f4"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] getGroupIdsWithViewPermission() collects `groupResource.getId()` (the authorization resource's own id) into the granted set, which is then used as UserModel.GROUPS containing group IDs downstream, while the sibling hasPermission() resolves resources via findByName(groupId) \u2014 id and name are treated as interchangeable with no normalization step. If resource ids are not group ids for resources created through any path other than getOrCreateResource (e.g. resources imported or created with generated ids), the set stored in UserModel.GROUPS contains resource UUIDs that never match user group memberships, so filtered user searches silently return zero users for admins who do hold permissions.",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.82,
+        "rationale": "In `GroupPermissionsV2#getGroupIdsWithViewPermission`, the callback iterates `resourceStore.findByType(..., groupResource -> ...)` and adds `groupResource.getId()` to the granted set, and also calls `hasPermission(groupResource.getId(), ...)`. However, `hasPermission(String groupId, ...)` treats its argument as a **group id used as the authorization Resource name**, doing `resourceStore.findByName(server, groupId)`. Passing `Resource#getId()` (typically an authz resource UUID) will not match `findByName`, so it won\u2019t evaluate the intended group-specific resource. The returned set is then stored into `session.setAttribute(UserModel.GROUPS, groupIds)` (see `UsersResource` / `BruteForceUsersResource`), which is expected to contain real group IDs, not authz resource UUIDs. This mismatch can cause permitted admins to get empty user search results (or fall back incorrectly to all-groups resource-type checks).",
+        "diff_context_hash": "25a97b5f19bf18ad6463a96b2b30d6c2eff080f4"
+      }
+    },
+    {
+      "issue_text": "[BUG] Removing the per-user `.filter(usersEvaluator::canView)` makes the GROUPS session attribute the only remaining authorization filter, and that attribute is only set when groupIds is non-empty, so an admin with no view permission and no group grants receives the complete unfiltered user list. A fine-grained admin (no MANAGE_USERS/VIEW_USERS role, no group VIEW/MANAGE permissions, cross-realm admin, or a realm without a resource server) calls GET /users and gets every user in the realm returned with HTTP 200 \u2014 the previous filter silently dropped these, now they are silently authorized; the API reports success while dropping access control.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p0",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.66,
+        "rationale": "In `UsersResource.searchForUser(...)` the diff removes the per-user authorization filter `.filter(usersEvaluator::canView)` and now returns `session.users().searchForUserStream(...)` directly. The only remaining narrowing in this method is setting `session.setAttribute(UserModel.GROUPS, groupIds)` when `groupIds` is non-empty. However, `GroupPermissionEvaluator#getGroupIdsWithViewPermission()` (see `GroupPermissions#getGroupIdsWithViewPermission()` and `GroupPermissionsV2#getGroupIdsWithViewPermission()`) can legitimately return an empty set for callers who cannot view users (e.g., cross-realm admin via `!root.isAdminSameRealm()`, or no resource server), which means the GROUPS attribute is not set and the user search is not constrained at all. With the explicit `usersEvaluator::canView` filter removed, the diff shows a path where an otherwise unauthorized caller receives an unfiltered stream of users.",
+        "diff_context_hash": "25a97b5f19bf18ad6463a96b2b30d6c2eff080f4"
+      }
+    },
+    {
+      "issue_text": "[BUG] The rewrite drops both the `!auth.users().canView()` guard and any per-user filter, so when `getGroupIdsWithViewPermission()` returns an empty set for a caller without global view permission, the GROUPS attribute is never set and searchForUserStream returns all realm users unfiltered. An admin with only brute-force-related roles but no user view permission queries the brute-force user search endpoint and receives the full user list (usernames, emails, brute-force status) with a 200 response \u2014 previously this path was restricted to explicitly granted groups; silent full data exposure reported as success.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p0",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.72,
+        "rationale": "In both `UsersResource.searchForUser(...)` and `BruteForceUsersResource.searchForUser(...)`, the diff removes the downstream authorization filter (`.filter(usersEvaluator::canView)`) and also changes the group-restriction setup to only set `session.setAttribute(UserModel.GROUPS, ...)` when `getGroupIdsWithViewPermission()` is non-empty. But `GroupPermissionEvaluator#getGroupIdsWithViewPermission()` can legitimately return an empty set for callers who do *not* have global user-view permission and also have *no* group member-view grants (see `GroupPermissions.getGroupIdsWithViewPermission()` returning `granted` which can be empty). In that case, the session attribute is not set and the code now passes the raw `session.users().searchForUserStream(...)` straight to representation without any per-user `canView` check, meaning unfiltered user search results can be returned where previously they would have been filtered out by `usersEvaluator::canView`.",
+        "diff_context_hash": "25a97b5f19bf18ad6463a96b2b30d6c2eff080f4"
+      }
+    },
+    {
+      "issue_text": "[BUG] Every group-management method overridden in GroupPermissionsV2 (setPermissionsEnabled, resource, viewPermission, etc.) throws UnsupportedOperationException, and the registered ProviderEventListener in AdminPermissions.registerListener unconditionally calls `management(...).groups().setPermissionsEnabled(cast.getGroup(), false)` on GroupModel.GroupRemovedEvent when ADMIN_FINE_GRAINED_AUTHZ is enabled. Deleting a group in a realm using the V2 permissions implementation throws UnsupportedOperationException from inside the event listener, turning group deletion into a raw 500 / aborted transaction instead of the clean delete the API contract promises \u2014 a user-facing write operation whose failure mode is an unhandled unsupported-operation exception.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.8,
+        "rationale": "The diff shows `AdminPermissions.registerListener` registers a listener (when `ADMIN_FINE_GRAINED_AUTHZ` is enabled) that, on `GroupModel.GroupRemovedEvent`, calls `management(...).groups().setPermissionsEnabled(cast.getGroup(), false)` (services/.../AdminPermissions.java). The diff also adds `MgmtPermissionsV2.groups()` returning `new GroupPermissionsV2(...)` (services/.../MgmtPermissionsV2.java), and `GroupPermissionsV2.setPermissionsEnabled(...)` is overridden to `throw new UnsupportedOperationException(\"Not supported in V2\")` (services/.../GroupPermissionsV2.java). Therefore, in the V2 permissions implementation, deleting a group will trigger the event listener and can throw `UnsupportedOperationException` from inside the listener, which would surface as an unhandled server error/failed transaction for a group deletion operation.",
+        "diff_context_hash": "25a97b5f19bf18ad6463a96b2b30d6c2eff080f4"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] getGroupIdsWithViewPermission enumerates every Groups-typed resource via resourceStore.findByType and, for each one, calls hasPermission which performs another resourceStore.findByName plus a full policy evaluation, producing O(N) resource lookups plus O(N) policy-store queries plus O(N) authorization evaluations per single /users search request. Every admin user-search request in a realm with thousands of group resources issues thousands of duplicate store queries and permission evaluations; the search endpoint's latency grows linearly (with a large constant from the authz evaluation) with the number of groups, degrading the hot user-search path for all admins until the request times out on large realms.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.9,
+        "rationale": "The diff adds GroupPermissionsV2#getGroupIdsWithViewPermission(), which iterates all GROUPS resources via resourceStore.findByType(...) and for each resource calls hasPermission(...). That helper does at least a resourceStore.findByName(server, groupId) plus a permission evaluation (root.evaluatePermission(...)) and may also consult policyStore.findByResource(...) for the fallback resource-type resource. This method is now called on the hot /users search path (UsersResource.searchForUser and BruteForceUsersResource.searchForUser set session attribute based on auth.groups().getGroupIdsWithViewPermission()), so the finding\u2019s linear-per-group cost is directly grounded in the new code. This is a performance/architecture concern rather than a functional correctness defect.",
+        "diff_context_hash": "25a97b5f19bf18ad6463a96b2b30d6c2eff080f4"
+      }
+    }
+  ],
+  "diff_context_hash": "25a97b5f19bf18ad6463a96b2b30d6c2eff080f4",
+  "primary_judge": "gpt-5.2",
+  "adjudicating_judge": "gpt-5.2",
+  "url": "https://github.com/keycloak/keycloak/pull/37038",
+  "framework": "metareview-realistic",
+  "model": "glm-5.3-background",
+  "effort": "low",
+  "judge": "gpt-5.2",
+  "wall_s": 315.0929419994354,
+  "execution_mode": "api",
+  "run_batch": "20260909-mrv0112-lens1"
+}

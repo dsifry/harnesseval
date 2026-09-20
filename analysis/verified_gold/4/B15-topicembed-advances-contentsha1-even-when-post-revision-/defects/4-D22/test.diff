@@ -1,0 +1,128 @@
+require 'digest'
+require 'uri'
+
+def require_dependency(_name); end
+
+module I18n
+  def self.t(_key, opts = {})
+    "imported from #{opts[:link]}"
+  end
+end
+
+module Nokogiri
+  module HTML
+    class FakeFragment
+      def initialize(html); @html = html; end
+      def css(_sel); []; end
+      def to_html; @html; end
+    end
+    def self.fragment(html); FakeFragment.new(html); end
+  end
+end
+
+class String
+  def present?; !empty?; end
+  def blank?; empty?; end
+end
+
+$records = []
+$revisions = []
+$on_revise = nil
+
+class FakeRelation
+  def initialize(cond); @cond = cond; end
+  def first
+    $records.find { |r| @cond.all? { |k, v| r.send(k) == v } }
+  end
+  def pluck(col); $records.map { |r| r.send(col) }; end
+end
+
+module ActiveRecord
+  class Base
+    def self.belongs_to(*_a); end
+    def self.validates_presence_of(*_a); end
+    def self.where(cond); FakeRelation.new(cond); end
+    def self.create!(attrs)
+      obj = new
+      attrs.each { |k, v| obj.instance_variable_set("@#{k}", v) }
+      $records << obj
+      obj
+    end
+    %i[embed_url content_sha1 post_id topic_id].each do |m|
+      define_method(m) { instance_variable_get("@#{m}") }
+    end
+    def post; @post; end
+    def post=(p); @post = p; end
+    def update_column(col, val); instance_variable_set("@#{col}", val); end
+    def blank?; false; end
+    def present?; true; end
+  end
+end
+
+class FakePost
+  attr_accessor :body
+  def initialize(body); @body = body; end
+end
+
+class PostRevisor
+  def initialize(post); @post = post; end
+  def revise!(_user, raw, _opts = {})
+    @post.body = raw
+    $revisions << raw
+    cb = $on_revise
+    cb.call if cb
+  end
+end
+
+require_relative '../../app/models/topic_embed.rb'
+
+URL = 'http://example.com/article'
+
+embed = TopicEmbed.create!(
+  topic_id: 1,
+  embed_url: URL,
+  content_sha1: Digest::SHA1.hexdigest('stale'),
+  post_id: 1
+)
+post = FakePost.new('stale body')
+embed.post = post
+
+user = Object.new
+contents_a = +'article A body'
+contents_b = +'article B body'
+
+# When the first import revises the post, interleave a full import of B
+# before A writes its digest back.
+$on_revise = proc do
+  $on_revise = nil
+  TopicEmbed.import(user, URL, 'B', contents_b)
+end
+
+TopicEmbed.import(user, URL, 'A', contents_a)
+
+raw_a = $revisions[0]
+raw_b = $revisions[1]
+digest_a = Digest::SHA1.hexdigest(raw_a)
+
+if $revisions.length != 2
+  puts "RESULT: FAIL: interleaving setup failed (#{$revisions.length} revisions)"
+  exit
+end
+unless post.body == raw_b && embed.content_sha1 == digest_a
+  puts 'RESULT: FAIL: expected interleaved write ordering did not occur'
+  exit
+end
+
+mismatch = Digest::SHA1.hexdigest(post.body) != embed.content_sha1
+
+# A subsequent import of A must be skipped because the digest matches,
+# even though the stored body is B's.
+before = $revisions.length
+TopicEmbed.import(user, URL, 'A', +'article A body')
+skipped = $revisions.length == before && post.body == raw_b
+
+if mismatch && skipped
+  puts 'RESULT: FAIL: concurrent imports left body/digest mismatch; later import of A skipped the correction'
+else
+  puts 'RESULT: PASS'
+end

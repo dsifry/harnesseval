@@ -1,0 +1,119 @@
+# frozen_string_literal: true
+#
+# Standalone regression harness that loads the REAL app/models/post.rb and
+# probes the raw_html cooking branch introduced for imported RSS/HTML posts.
+#
+# Claimed defect: Post#cook returns `raw` unchanged when cook_method is
+# :raw_html, skipping the rendering/sanitization pipeline entirely, so an
+# attacker-controlled HTML payload is stored and later rendered verbatim.
+
+module Kernel
+  alias_method :__orig_require, :require
+  def require(path, *rest)
+    return true if path == 'archetype'
+    __orig_require(path, *rest)
+  end
+  private :require, :__orig_require
+end
+
+def require_dependency(*); end
+
+module Enum
+  def initialize(*keys)
+    @map = {}
+    keys.each_with_index { |k, i| @map[k] = i + 1 }
+  end
+
+  def [](key); @map[key]; end
+end
+
+module RateLimiter
+  module OnCreateRecord
+    def self.included(base); base.extend(ClassMethods); end
+
+    module ClassMethods
+      def rate_limit(*); end
+    end
+  end
+end
+
+module Trashable; end
+
+module Validators
+  class PostValidator; end
+end
+
+module Plugin
+  module Filter
+    class << self
+      attr_accessor :calls
+
+      def apply(_key, _post, cooked)
+        self.calls = (calls || 0) + 1
+        "FILTERED(#{cooked})"
+      end
+    end
+  end
+end
+
+class PostAnalyzer
+  def initialize(raw, _topic_id); @raw = raw; end
+  def cook(*); "COOKED(#{@raw})"; end
+end
+
+module ActiveRecord
+  class Base
+    def initialize(attrs = {})
+      @attrs = {}
+      attrs.each { |k, v| @attrs[k] = v }
+    end
+
+    def method_missing(name, *args)
+      s = name.to_s
+      if s.end_with?('=')
+        @attrs[s.chomp('=').to_sym] = args.first
+      elsif @attrs.key?(name)
+        @attrs[name]
+      else
+        super
+      end
+    end
+
+    def respond_to_missing?(name, include_private = false)
+      @attrs.key?(name.to_s.chomp('=').to_sym) || super
+    end
+
+    %w[belongs_to has_many has_one validates_with attr_accessor scope
+       before_create before_save after_save after_update].each do |macro|
+      define_singleton_method(macro) { |*_args, &_blk| }
+    end
+  end
+end
+
+require_relative '../../app/models/post'
+
+Plugin::Filter.calls = 0
+
+payload = '<img src=x onerror="alert(document.cookie)">'
+raw_post = Post.new(raw: payload, cook_method: Post.cook_methods[:raw_html])
+out = raw_post.cook
+filter_calls_for_raw = Plugin::Filter.calls
+
+regular = Post.new(raw: '<b>hello</b>', cook_method: Post.cook_methods[:regular])
+regular_out = regular.cook
+
+puts "raw_html cook output  : #{out.inspect}"
+puts "raw_html filter calls : #{filter_calls_for_raw}"
+puts "regular  cook output  : #{regular_out.inspect}"
+puts "regular  filter calls : #{Plugin::Filter.calls}"
+
+defect = (out == payload) &&
+         out.include?('onerror') &&
+         filter_calls_for_raw.to_i.zero? &&
+         regular_out != regular.raw
+
+if defect
+  puts 'RESULT: FAIL: raw_html cooking returns the raw unsanitized HTML verbatim and bypasses Plugin::Filter / the sanitization pipeline'
+else
+  puts 'RESULT: PASS'
+end

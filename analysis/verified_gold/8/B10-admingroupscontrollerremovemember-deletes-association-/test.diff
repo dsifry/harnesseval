@@ -1,0 +1,101 @@
+diff --git a/spec/verify/groups_controller_verify.rb b/spec/verify/groups_controller_verify.rb
+new file mode 100644
+--- /dev/null
++++ b/spec/verify/groups_controller_verify.rb
+@@ -0,0 +1,96 @@
++# frozen_string_literal: true
++
++# Standalone regression test for Admin::GroupsController#remove_member.
++# Loads the REAL controller file and stubs only the minimum Rails surface.
++
++module ActiveRecord
++  class AssociationTypeMismatch < StandardError; end
++end
++
++module I18n
++  def self.t(key, _opts = {}); key.to_s; end
++end
++
++module Admin; end
++
++class Admin::AdminController
++  attr_accessor :params
++  def render(*); end
++  def render_serialized(*); end
++  def render_json_error(*); end
++  def success_json; { success: :ok }; end
++end
++
++class User
++  attr_reader :id
++  def initialize(id = nil); @id = id; end
++end
++
++# Mimics an ActiveRecord has_many :through association collection.
++# #delete in the 2015-era of Rails raises AssociationTypeMismatch when given
++# anything other than the associated record class.
++class FakeMembers
++  attr_reader :delete_calls, :members
++  def initialize; @members = []; @delete_calls = []; end
++  def <<(u); @members << u; self; end
++  def delete(*args)
++    @delete_calls << args
++    args.each do |a|
++      unless a.is_a?(User)
++        raise ActiveRecord::AssociationTypeMismatch,
++              "User expected, got #{a.class} (#{a.inspect})"
++      end
++    end
++    @members -= args
++  end
++end
++
++class Group
++  class << self
++    attr_accessor :find_result
++    def find(_id); find_result; end
++  end
++
++  attr_accessor :automatic
++  def initialize
++    @automatic = false
++    @members = FakeMembers.new
++    @saved = false
++    @save_result = true
++  end
++  def users; @members; end
++  def save; @saved = true; @save_result; end
++  def saved?; @saved; end
++  def save_result=(v); @save_result = v; end
++end
++
++class FakeParams
++  def initialize(h); @h = h; end
++  def require(k); @h.fetch(k.to_s) { raise "missing param #{k}" }; end
++  def [](k); @h[k.to_s]; end
++end
++
++require_relative '../../app/controllers/admin/groups_controller'
++
++group = Group.new
++Group.find_result = group
++
++ctrl = Admin::GroupsController.new
++ctrl.params = FakeParams.new('group_id' => '7', 'user_id' => '42')
++
++reason = nil
++begin
++  ctrl.remove_member
++rescue ActiveRecord::AssociationTypeMismatch => e
++  reason = "group.users.delete was passed a non-User argument (integer user id 42): #{e.message}"
++rescue => e
++  reason = "#{e.class}: #{e.message}"
++end
++
++if reason
++  puts "RESULT: FAIL: #{reason}"
++elsif group.users.delete_calls.any? { |args| args.any? { |a| a.is_a?(Integer) } }
++  puts "RESULT: FAIL: group.users.delete called with Integer instead of User record (save_called=#{group.saved?})"
++else
++  puts "RESULT: PASS"
++end

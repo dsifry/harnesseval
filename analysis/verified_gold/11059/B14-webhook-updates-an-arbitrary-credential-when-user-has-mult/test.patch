@@ -1,0 +1,102 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const prismaMock = vi.hoisted(() => {
+  return {
+    user: {
+      findUnique: vi.fn(),
+    },
+    app: {
+      findUnique: vi.fn(),
+    },
+    credential: {
+      findFirst: vi.fn(),
+      findMany: vi.fn(),
+      update: vi.fn(),
+      create: vi.fn(),
+    },
+  };
+});
+
+vi.mock("@calcom/prisma", () => ({
+  default: prismaMock,
+}));
+
+vi.mock("@calcom/lib/constants", () => ({
+  APP_CREDENTIAL_SHARING_ENABLED: true,
+}));
+
+vi.mock("@calcom/lib/crypto", () => ({
+  symmetricDecrypt: vi.fn(() => JSON.stringify({ token: "NEW_TOKEN" })),
+}));
+
+vi.mock("@calcom/app-store/appStoreMetaData", () => ({
+  appStoreMetadata: {
+    myapp: {
+      slug: "myapp",
+      type: "myapp_type",
+    },
+  },
+}));
+
+function createMockRes() {
+  const res: any = {
+    statusCode: undefined as number | undefined,
+    body: undefined as any,
+    status(code: number) {
+      res.statusCode = code;
+      return res;
+    },
+    json(payload: any) {
+      res.body = payload;
+      return res;
+    },
+  };
+  return res;
+}
+
+describe("app-credential webhook", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+
+    process.env.CALCOM_WEBHOOK_SECRET = "secret";
+    process.env.CALCOM_WEBHOOK_HEADER_NAME = "calcom-webhook-secret";
+    process.env.CALCOM_APP_CREDENTIAL_ENCRYPTION_KEY = "irrelevant_for_mock";
+  });
+
+  it("FAILS CURRENTLY: should not overwrite an arbitrary credential when user has multiple credentials for the same app", async () => {
+    prismaMock.user.findUnique.mockResolvedValue({ id: 1 });
+    prismaMock.app.findUnique.mockResolvedValue({ slug: "myapp" });
+
+    // Simulate the user having multiple credentials for the same app.
+    // The fixed code should detect this and refuse to update without a disambiguator.
+    prismaMock.credential.findMany.mockResolvedValue([{ id: "credA" }, { id: "credB" }]);
+
+    // Current (buggy) code uses findFirst and will update one arbitrary credential.
+    prismaMock.credential.findFirst.mockResolvedValue({ id: "credA" });
+    prismaMock.credential.update.mockResolvedValue({ id: "credA" });
+
+    const req: any = {
+      headers: {
+        "calcom-webhook-secret": "secret",
+      },
+      body: {
+        userId: 1,
+        appSlug: "myapp",
+        keys: "ENCRYPTED_PAYLOAD",
+      },
+    };
+
+    const res = createMockRes();
+
+    const { default: handler } = await import("./app-credential");
+    await handler(req, res);
+
+    expect(prismaMock.credential.update, "should not overwrite an arbitrary credential when user has multiple credentials for the same app").not.toHaveBeenCalled();
+    expect(res.statusCode).toBe(409);
+    expect(res.body).toEqual(
+      expect.objectContaining({
+        message: expect.stringMatching(/multiple credentials/i),
+      })
+    );
+  });
+});

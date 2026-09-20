@@ -1,0 +1,97 @@
+import { describe, expect, test, vi } from "vitest";
+
+vi.mock("@prisma/extension-accelerate", () => ({
+  withAccelerate: () => (client: unknown) => client,
+}));
+
+vi.mock("@vercel/functions", () => ({
+  waitUntil: () => undefined,
+}));
+
+const { organizerAddGuestsCalls } = vi.hoisted(() => ({
+  organizerAddGuestsCalls: [] as Array<Record<string, unknown>>,
+}));
+
+vi.mock("./templates/organizer-add-guests-email", () => ({
+  default: class OrganizerAddGuestsEmail {
+    constructor(opts: Record<string, unknown>) {
+      organizerAddGuestsCalls.push(opts);
+    }
+    async sendEmail() {}
+  },
+}));
+
+vi.mock("./templates/attendee-add-guests-email", () => ({
+  default: class AttendeeAddGuestsEmail {
+    constructor(_calEvent: unknown, _attendee: unknown) {}
+    async sendEmail() {}
+  },
+}));
+
+vi.mock("./templates/attendee-scheduled-email", () => ({
+  default: class AttendeeScheduledEmail {
+    constructor(_calEvent: unknown, _attendee: unknown) {}
+    async sendEmail() {}
+  },
+}));
+
+const fakeLanguage = { locale: "en", translate: (key: string) => key };
+
+describe("sendAddGuestsEmails (team bookings) adversarial", () => {
+  test("preserves team on the constructed CalendarEvent passed to OrganizerAddGuestsEmail", async () => {
+    const { sendAddGuestsEmails } = await import("./email-manager");
+    organizerAddGuestsCalls.length = 0;
+
+    const teamMembers = [
+      { name: "Alpha", email: "alpha@example.com", timeZone: "UTC", language: fakeLanguage },
+      { name: "Beta", email: "beta@example.com", timeZone: "UTC", language: fakeLanguage },
+    ];
+
+    const calEvent = {
+      type: "team",
+      title: "Team Sync",
+      description: "",
+      startTime: "2024-05-01T10:00:00.000Z",
+      endTime: "2024-05-01T10:30:00.000Z",
+      organizer: {
+        id: 1,
+        name: "Org",
+        email: "org@example.com",
+        timeZone: "UTC",
+        language: fakeLanguage,
+      },
+      attendees: [
+        {
+          name: "Attendee",
+          email: "attendee@example.com",
+          timeZone: "UTC",
+          language: fakeLanguage,
+        },
+      ],
+      team: {
+        id: 42,
+        name: "Engineering",
+        members: teamMembers,
+      },
+    };
+
+    await sendAddGuestsEmails(calEvent as never, ["new-guest@example.com"]);
+
+    const baseOrganizerCall = organizerAddGuestsCalls.find(
+      (call) => !("teamMember" in call)
+    ) as any;
+
+    expect(baseOrganizerCall).toBeDefined();
+    expect(baseOrganizerCall.calEvent.team).toBeDefined();
+    expect(
+      baseOrganizerCall.calEvent.team.members.map((m: { email: string }) => m.email).sort()
+    ).toEqual(["alpha@example.com", "beta@example.com"]);
+
+    const teamMemberCalls = organizerAddGuestsCalls.filter((call) => "teamMember" in call);
+    expect(teamMemberCalls).toHaveLength(2);
+    for (const call of teamMemberCalls) {
+      const c = call as any;
+      expect(c.calEvent.team?.members).toHaveLength(2);
+    }
+  });
+});

@@ -1,0 +1,79 @@
+require 'uri'
+
+class Object
+  def blank?
+    respond_to?(:empty?) ? !!empty? : !self
+  end
+end
+
+module SiteSetting
+  class << self
+    attr_accessor :embeddable_host, :embed_by_username, :feed_polling_enabled
+    def feed_polling_enabled?; !!@feed_polling_enabled; end
+  end
+end
+SiteSetting.embeddable_host = 'example.com'
+SiteSetting.embed_by_username = ''
+SiteSetting.feed_polling_enabled = false
+
+$redis = Object.new
+class << $redis
+  def setnx(*); true; end
+  def expire(*); true; end
+end
+
+class FakeUserRelation
+  def initialize(val); @val = val; end
+  def first; @val; end
+end
+
+class User
+  def self.where(_conds); FakeUserRelation.new(nil); end
+end
+
+class TopicEmbed
+  class << self
+    attr_accessor :found, :import_called, :import_args
+  end
+  @found = false
+  @import_called = false
+  def self.where(_conds); self; end
+  def self.exists?; @found; end
+  def self.import_remote(user, url)
+    @import_called = true
+    @import_args = [user, url]
+  end
+end
+
+module Jobs
+  class PollFeed
+    def execute(_h); end
+  end
+end
+
+require_relative '../../lib/topic_retriever.rb'
+
+def run_scenario(username)
+  SiteSetting.embed_by_username = username
+  TopicEmbed.import_called = false
+  TopicEmbed.found = false
+  error = nil
+  begin
+    TopicRetriever.new('http://example.com/t/1', no_throttle: true).retrieve
+  rescue => e
+    error = e
+  end
+  [TopicEmbed.import_called, error]
+end
+
+called_blank, err_blank = run_scenario('')
+called_missing, err_missing = run_scenario('ghost_user_does_not_exist')
+
+if called_blank || called_missing
+  puts 'RESULT: PASS'
+else
+  details = []
+  details << "embed_by_username='' -> import_called=#{called_blank} error=#{err_blank.inspect}"
+  details << "embed_by_username='ghost_user_does_not_exist' -> import_called=#{called_missing} error=#{err_missing.inspect}"
+  puts "RESULT: FAIL: TopicRetriever#retrieve silently returns without importing when the configured embed user is blank or names a missing user; `return if user.blank?` leaves TopicEmbed unimported with no raised error, so the embed stays in the loading state forever. #{details.join('; ')}"
+end

@@ -1,0 +1,110 @@
+diff --git a/spec/verify/embed_controller_verify.rb b/spec/verify/embed_controller_verify.rb
+new file mode 100644
+--- /dev/null
++++ b/spec/verify/embed_controller_verify.rb
+@@ -0,0 +1,105 @@
++require 'uri'
++
++# --- Minimal stubs so the real controller can load and run ---
++module Discourse
++  class InvalidAccess < StandardError; end
++end
++
++class String
++  def blank?; strip.empty?; end
++end
++
++class NilClass
++  def blank?; true; end
++  def try(*); nil; end
++end
++
++class Integer
++  def minute; self * 60; end
++end
++
++class SiteSetting
++  class << self
++    attr_accessor :embeddable_host
++  end
++end
++
++module TopicEmbed
++  def self.topic_id_for_embed(_url); nil; end
++end
++
++module Jobs
++  def self.enqueue(*); true; end
++end
++
++class FakeResponse
++  def headers; @headers ||= {}; end
++end
++
++class FakeRequest
++  def initialize(ref); @ref = ref; end
++  def referer; @ref; end
++end
++
++class FakeParams
++  def initialize(h); @h = h; end
++  def require(k)
++    v = @h[k] || @h[k.to_s]
++    raise ArgumentError, "missing param #{k}" if v.nil?
++    v
++  end
++end
++
++class ApplicationController
++  def self.skip_before_filter(*); end
++  def self.preload_json(*); end
++  def self.before_filter(*); end
++  def self.layout(*); end
++
++  attr_accessor :_params, :_request, :_response
++
++  def params; @_params; end
++  def request; @_request; end
++  def response; @_response ||= FakeResponse.new; end
++  def render(*a); @rendered = a; end
++  def current_user; nil; end
++  def discourse_expires_in(*); end
++end
++
++# --- Load the REAL file under test (no redefinition) ---
++require_relative '../../app/controllers/embed_controller.rb'
++
++reasons = []
++
++# --- Defect A: embed_url host is not validated against embeddable_host ---
++captured = nil
++TopicEmbed.define_singleton_method(:topic_id_for_embed) { |url| captured = url; nil }
++SiteSetting.embeddable_host = 'example.com'
++
++c1 = EmbedController.new
++c1._request = FakeRequest.new('http://example.com/legit-page')
++c1._params  = FakeParams.new({ embed_url: 'http://evil.example.net/attacker' })
++begin
++  c1.send(:ensure_embeddable)
++  c1.best
++rescue Discourse::InvalidAccess
++end
++if captured == 'http://evil.example.net/attacker'
++  reasons << "embed_url host not validated against embeddable_host (accepted #{captured.inspect})"
++end
++
++# --- Defect B: referer host comparison is case-sensitive ---
++c2 = EmbedController.new
++c2._request = FakeRequest.new('http://EXAMPLE.com/page')
++c2._params  = FakeParams.new({ embed_url: 'http://example.com/t/1' })
++begin
++  c2.send(:ensure_embeddable)
++rescue Discourse::InvalidAccess => e
++  reasons << "referer host check is case-sensitive (rejected legit same-host case variant: #{e.message})"
++end
++
++if reasons.empty?
++  puts 'RESULT: PASS'
++else
++  puts 'RESULT: FAIL: ' + reasons.join('; ')
++end

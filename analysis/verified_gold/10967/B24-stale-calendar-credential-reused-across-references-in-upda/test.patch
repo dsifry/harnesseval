@@ -1,0 +1,121 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const mockCredentialFindUnique = vi.fn();
+const mockBookingFindUnique = vi.fn();
+
+vi.mock("@calcom/prisma", () => ({
+  default: {
+    credential: { findUnique: (...args: unknown[]) => mockCredentialFindUnique(...args) },
+    booking: { findUnique: (...args: unknown[]) => mockBookingFindUnique(...args) },
+  },
+}));
+
+vi.mock("@calcom/app-store/_utils/getCalendar", () => ({
+  getCalendar: vi.fn(),
+}));
+
+const updateEventCalls: unknown[][] = [];
+
+vi.mock("./CalendarManager", () => ({
+  createEvent: vi.fn(),
+  updateEvent: vi.fn((...args: unknown[]) => {
+    updateEventCalls.push(args);
+    return Promise.resolve({ type: "test", success: true, uid: args[2] });
+  }),
+}));
+
+vi.mock("./videoClient", () => ({
+  createMeeting: vi.fn(),
+  updateMeeting: vi.fn(),
+}));
+
+vi.mock("@calcom/app-store/utils", () => ({
+  default: vi.fn().mockResolvedValue([]),
+}));
+
+vi.mock("@calcom/app-store/locations", () => ({
+  MeetLocationType: "integrations:google:meet",
+  getEventLocationTypeFromApp: vi.fn(() => undefined),
+}));
+
+vi.mock("@calcom/app-store/dailyvideo/lib/VideoApiAdapter", () => ({
+  FAKE_DAILY_CREDENTIAL: {
+    id: 0,
+    appName: "daily",
+    type: "daily_video",
+    key: {},
+    userId: 0,
+    teamId: null,
+    invalid: false,
+    appId: "daily-video",
+  },
+}));
+
+vi.mock("@calcom/app-store/dailyvideo/zod", () => ({
+  appKeysSchema: {},
+}));
+
+import EventManager from "./EventManager";
+
+describe("EventManager.updateAllCalendarEvents — missing credential handling", () => {
+  beforeEach(() => {
+    updateEventCalls.length = 0;
+    mockCredentialFindUnique.mockReset();
+    mockBookingFindUnique.mockReset();
+  });
+
+  it("does not update a calendar reference whose credential cannot be resolved (no stale or undefined credential reuse)", async () => {
+    const calendarCredentials = [
+      {
+        id: 1,
+        appName: "google",
+        type: "google_calendar",
+        key: { access_token: "host-a-token" },
+        userId: 100,
+        teamId: null,
+        invalid: false,
+        appId: "google-calendar",
+      },
+    ];
+
+    const booking = {
+      references: [
+        {
+          uid: "uid-1",
+          type: "google_calendar",
+          externalCalendarId: "ext-1",
+          credentialId: 1,
+        },
+        {
+          uid: "uid-2",
+          type: "google_calendar",
+          externalCalendarId: "ext-2",
+          credentialId: 2,
+        },
+      ],
+    };
+
+    // Credential id 2 does not exist in the in-memory list, and the DB has no record either.
+    mockCredentialFindUnique.mockResolvedValue(null);
+
+    const eventManager = new EventManager(calendarCredentials as any);
+    const event = {
+      title: "Test Event",
+      startTime: new Date("2024-01-01T10:00:00Z"),
+      endTime: new Date("2024-01-01T11:00:00Z"),
+    };
+
+    await (eventManager as any).updateAllCalendarEvents(event, booking);
+
+    // Sanity check: the first reference was updated with its own credential.
+    const ref1Calls = updateEventCalls.filter((call) => call[2] === "uid-1");
+    expect(ref1Calls).toHaveLength(1);
+    expect((ref1Calls[0][0] as { id: number }).id).toBe(1);
+
+    // The second reference has an unresolvable credential. It must not be
+    // updated at all — neither with the previous reference's credential
+    // (stale reuse) nor with an undefined credential.
+    const ref2Calls = updateEventCalls.filter((call) => call[2] === "uid-2");
+    expect(ref2Calls).toHaveLength(0);
+  });
+});

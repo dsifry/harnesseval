@@ -1,0 +1,102 @@
+diff --git a/spec/verify/topic_retriever_verify.rb b/spec/verify/topic_retriever_verify.rb
+new file mode 100644
+--- /dev/null
++++ b/spec/verify/topic_retriever_verify.rb
+@@ -0,0 +1,97 @@
++require 'uri'
++
++# Minimal stubs to load and exercise lib/topic_retriever.rb
++module SiteSetting
++  def self.embeddable_host
++    "example.com"
++  end
++end
++
++class FakeRedis
++  attr_reader :data
++  def initialize
++    @data = {}
++    @fail_next_expire = false
++  end
++
++  def fail_next_expire!
++    @fail_next_expire = true
++  end
++
++  def setnx(key, value)
++    if @data.key?(key)
++      false
++    else
++      @data[key] = {value: value, ttl: nil}
++      true
++    end
++  end
++
++  def expire(key, seconds)
++    if @fail_next_expire
++      @fail_next_expire = false
++      raise "Simulated crash between SETNX and EXPIRE"
++    end
++    if @data.key?(key)
++      @data[key][:ttl] = seconds
++      true
++    else
++      false
++    end
++  end
++
++  def ttl(key)
++    entry = @data[key]
++    entry ? entry[:ttl] : -2
++  end
++end
++
++$redis = FakeRedis.new
++
++module TopicEmbed
++  def self.where(*); raise "TopicEmbed.where called"; end
++end
++
++module Jobs
++  class PollFeed
++    def execute(*); raise "PollFeed.execute called"; end
++  end
++end
++
++module User
++  def self.where(*); raise "User.where called"; end
++end
++
++require_relative '../../lib/topic_retriever'
++
++url = "http://example.com/embed"
++retriever = TopicRetriever.new(url)
++
++# Simulate a crash between SETNX and EXPIRE
++$redis.fail_next_expire!
++
++begin
++  retriever.retrieve
++rescue => e
++  # expected simulated crash
++end
++
++key = "retrieved:#{url}"
++
++unless $redis.data.key?(key)
++  puts "RESULT: FAIL: key was not set at all"
++  exit
++end
++
++if $redis.ttl(key).nil?
++  # Permanent key -> defect
++  begin
++    retriever.retrieve
++  rescue => e
++    puts "RESULT: FAIL: permanent key but throttle failed (#{e.message})"
++    exit
++  end
++  puts "RESULT: FAIL: non-atomic SETNX/EXPIRE left permanent throttle key"
++else
++  puts "RESULT: PASS"
++end

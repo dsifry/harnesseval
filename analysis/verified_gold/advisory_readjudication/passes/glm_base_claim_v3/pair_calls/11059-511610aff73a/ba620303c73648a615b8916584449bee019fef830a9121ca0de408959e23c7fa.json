@@ -1,0 +1,460 @@
+{
+ "url": "https://github.com/calcom/cal.com/pull/11059",
+ "pass_digest": "9c5f733ce7a3f996c90c67f262cc4a77e2b234bc415c197afa7c73477ad320be",
+ "request_sha256": "ba620303c73648a615b8916584449bee019fef830a9121ca0de408959e23c7fa",
+ "request": {
+  "url": "https://github.com/calcom/cal.com/pull/11059",
+  "model": "glm-5.3-background",
+  "system": "You are clustering code review findings from one PR. Always respond with valid JSON.",
+  "prompt": "You are clustering code review findings from the same PR. For each PAIR below, decide whether the two findings describe the SAME underlying issue — same root cause in the same code location. Different wording is fine. A finding about a DIFFERENT defect in the same file or function is NOT the same issue. Severity or aspect differences of the same root cause ARE the same issue.\n\n\nFor THIS scoring pass, duplicate equivalence is stricter than sharing a root cause.\nYou must compare the COMPLETE MATERIAL CLAIMS, including mechanism, triggering\nconditions, execution path, and consequence. The same line or broad concern does\nnot establish equivalence. A report of wrong-category selection, a case/rename\nmismatch, a crash, and a silent fallback are different claims even at one lookup.\nAn inactive/unbound API concern and an alleged active user-facing failure differ.\nA compound report with an additional material claim does NOT equal its subset.\nDifferences only in wording, severity, or hedging do not create separate claims.\nIf the claimed mechanisms, triggers or consequences conflict, or one report adds\nan unsupported/different material factual claim, return same=false. You are NOT\nverifying which claim is true; do not repair or reinterpret either report to make\nthem match. If unsure whether their full claims are equivalent, return false.\n\nFor every numbered pair, extract what A and B actually CLAIM into mechanism,\ntrigger and consequence. Then list material_differences and give your equivalence\nverdict, confidence and reason. same=true requires no material differences.\nReturn ONLY this JSON object, with EVERY pair index exactly once:\n{\"pairs\":[{\"pair\":1,\"a\":{\"mechanism\":\"...\",\"trigger\":\"...\",\"consequence\":\"...\"},\"b\":{\"mechanism\":\"...\",\"trigger\":\"...\",\"consequence\":\"...\"},\"material_differences\":[],\"same\":true,\"confidence\":0.9,\"reason\":\"...\"}]}\n\nPAIRS:\nPAIR 1:\nA: Salesforce is the only refreshed app not routed through refreshOAuthTokens — it refreshes directly against login.salesforce.com even when CALCOM_CREDENTIAL_SYNC_ENDPOINT is configured. A parallel refresh path contradicts the feature's own architecture: self-hosters configuring sync still get direct Salesforce calls from the child using parent-shared refresh tokens, and credential rotation performed on the parent never propagates to salesforce credentials.\nB: packages/app-store/salesforce/lib/CalendarService.ts:75-99 — Salesforce is the one NEW refresh implementation added in this diff, has direct access to `parseRefreshTokenResponse` (imported and used at line 90), yet performs its own raw `fetch` to `https://login.salesforce.com/services/oauth2/token` instead of routing through `refreshOAuthTokens`; this means enabling `CALCOM_CREDENTIAL_SYNC_ENDPOINT` redirects token refresh for every other touched integration (google, hubspot, lark, office365 calendar/video, webex) but silently leaves Salesforce refreshing directly against the real provider — an inconsistency that undermines the stated purpose of the credential-sync feature (centralizing/redirecting all refresh traffic) for exactly the integration that had the clearest opportunity to adopt it. Confidence 90, Severity P2.\n\nPAIR 2:\nA: Salesforce is the only refreshed app not routed through refreshOAuthTokens — it refreshes directly against login.salesforce.com even when CALCOM_CREDENTIAL_SYNC_ENDPOINT is configured. A parallel refresh path contradicts the feature's own architecture: self-hosters configuring sync still get direct Salesforce calls from the child using parent-shared refresh tokens, and credential rotation performed on the parent never propagates to salesforce credentials.\nB: packages/app-store/salesforce/lib/CalendarService.ts:76 — Salesforce is the only adapter that got `parseRefreshTokenResponse` but not `refreshOAuthTokens`: it calls `fetch(\"https://login.salesforce.com/services/oauth2/token\"` directly, so when CALCOM_CREDENTIAL_SYNC_ENDPOINT is set, Salesforce still refreshes against Salesforce and ignores the parent app's sync endpoint. (P1, conf 100)\n\nPAIR 3:\nA: [Medium/performance] packages/app-store/salesforce/lib/CalendarService.ts:75-97 — the token refresh runs unconditionally on every service instantiation (no expiry check), adding an OAuth round-trip plus a credential DB write to every calendar operation even when the access token is still valid\nB: packages/app-store/salesforce/lib/CalendarService.ts:75 — P1, confidence 100, blocking: works while Salesforce is fast and available, but `const response = await fetch(\"https://login.salesforce.com/services/oauth2/token\", {` runs unconditionally for every service construction with no expiry gate, timeout, or abort signal, so an otherwise valid credential now incurs N redundant refreshes and every request stalls when Salesforce does.\n\nPAIR 4:\nA: Connection setup now performs an unconditional Salesforce token refresh (fetch to login.salesforce.com) plus a prisma.credential.update on every SalesforceCalendarService instantiation, where the previous code created the jsforce Connection and let jsforce refresh lazily only when the access token expired. Every booking/availability operation involving Salesforce pays an extra OAuth round-trip and a DB write (concurrent operations also race on credential.update), multiplying Salesforce token-endpoint load and adding latency to a hot path that previously refreshed only on expiry.\nB: Salesforce connection setup now performs an eager token refresh (network POST to login.salesforce.com with client_secret) plus a prisma.credential.update on every service instantiation, with no expiry check and not gated on APP_CREDENTIAL_SHARING_ENABLED, where previously construction did no network I/O and jsforce refreshed on demand. Every booking/sync operation involving Salesforce now pays a round-trip token refresh and a credential-row rewrite regardless of token validity, pushing self-hosters and cal.com toward Salesforce token-endpoint rate limits and multiplying writes on the credential table.\n\nPAIR 5:\nA: Connection setup now performs an unconditional Salesforce token refresh (fetch to login.salesforce.com) plus a prisma.credential.update on every SalesforceCalendarService instantiation, where the previous code created the jsforce Connection and let jsforce refresh lazily only when the access token expired. Every booking/availability operation involving Salesforce pays an extra OAuth round-trip and a DB write (concurrent operations also race on credential.update), multiplying Salesforce token-endpoint load and adding latency to a hot path that previously refreshed only on expiry.\nB: SalesforceCalendarService now performs an unconditional token refresh plus a prisma.credential.update on every service construction, where the previous code used the stored access token and refreshed only when needed. Every Salesforce-backed booking create/update/delete now pays an extra round-trip to login.salesforce.com and a credential DB write on the hot path; under booking load this multiplies Salesforce token-endpoint calls (rate-limit risk turns into failed bookings) and adds latency the previous path did not have.\n\nPAIR 6:\nA: Connection setup now performs an unconditional Salesforce token refresh (fetch to login.salesforce.com) plus a prisma.credential.update on every SalesforceCalendarService instantiation, where the previous code created the jsforce Connection and let jsforce refresh lazily only when the access token expired. Every booking/availability operation involving Salesforce pays an extra OAuth round-trip and a DB write (concurrent operations also race on credential.update), multiplying Salesforce token-endpoint load and adding latency to a hot path that previously refreshed only on expiry.\nB: The newly added Salesforce token-refresh fetch and prisma.credential.update run unconditionally on every service construction, with no expiry check, on a hot path (every calendar operation instantiates the service). Every Salesforce calendar read/write now issues an external token HTTP call plus a DB write even when the stored token is still valid, adding latency and provider rate-limit pressure to the booking path for all Salesforce users.\n\nPAIR 7:\nA: Connection setup now performs an unconditional Salesforce token refresh (fetch to login.salesforce.com) plus a prisma.credential.update on every SalesforceCalendarService instantiation, where the previous code created the jsforce Connection and let jsforce refresh lazily only when the access token expired. Every booking/availability operation involving Salesforce pays an extra OAuth round-trip and a DB write (concurrent operations also race on credential.update), multiplying Salesforce token-endpoint load and adding latency to a hot path that previously refreshed only on expiry.\nB: The Salesforce token refresh now runs unconditionally inside the connection-building path on every CalendarService construction, adding a network round-trip to login.salesforce.com plus a credential-table write per service instantiation even when credential sharing is disabled. Every calendar read/write for Salesforce users pays an extra provider round-trip and DB write on each service construction (previously jsforce refreshed lazily on demand), multiplying provider rate-limit pressure and credential-row churn under booking load.\n\nPAIR 8:\nA: Connection setup now performs an unconditional Salesforce token refresh (fetch to login.salesforce.com) plus a prisma.credential.update on every SalesforceCalendarService instantiation, where the previous code created the jsforce Connection and let jsforce refresh lazily only when the access token expired. Every booking/availability operation involving Salesforce pays an extra OAuth round-trip and a DB write (concurrent operations also race on credential.update), multiplying Salesforce token-endpoint load and adding latency to a hot path that previously refreshed only on expiry.\nB: The SalesforceCalendarService constructor now performs an unconditional token refresh against login.salesforce.com plus a credential DB write on every instantiation, with no check that the stored access token is still valid. Every booking, availability check, and cancellation for a Salesforce-connected user pays a round trip to Salesforce's OAuth endpoint and a DB write — previously the constructor did no network I/O and jsforce refreshed lazily only on demand — adding latency and rate-limit exposure to a hot path.\n\nPAIR 9:\nA: Connection setup now performs an unconditional Salesforce token refresh (fetch to login.salesforce.com) plus a prisma.credential.update on every SalesforceCalendarService instantiation, where the previous code created the jsforce Connection and let jsforce refresh lazily only when the access token expired. Every booking/availability operation involving Salesforce pays an extra OAuth round-trip and a DB write (concurrent operations also race on credential.update), multiplying Salesforce token-endpoint load and adding latency to a hot path that previously refreshed only on expiry.\nB: This PR adds an ungated Salesforce token refresh — a POST to login.salesforce.com plus a prisma.credential.update — that executes on every SalesforceCalendarService construction, is not routed through refreshOAuthTokens, and is not gated by APP_CREDENTIAL_SHARING_ENABLED unlike every other behavior change in the diff. Every Salesforce calendar operation on every deployment (including ones that will never use credential sharing) now pays an extra OAuth round-trip and a DB write per service construction, and the response.statusText !== 'OK' gate converts any proxy that strips the reason phrase or any Salesforce error body into a thrown HttpError that kills the operation — a scope expansion traceable to no stated requirement.\n\nPAIR 10:\nA: Connection setup now performs an unconditional Salesforce token refresh (fetch to login.salesforce.com) plus a prisma.credential.update on every SalesforceCalendarService instantiation, where the previous code created the jsforce Connection and let jsforce refresh lazily only when the access token expired. Every booking/availability operation involving Salesforce pays an extra OAuth round-trip and a DB write (concurrent operations also race on credential.update), multiplying Salesforce token-endpoint load and adding latency to a hot path that previously refreshed only on expiry.\nB: Salesforce CalendarService fetches a refreshed token unconditionally on every connection build without checking whether the current access token is still valid, causing an unnecessary OAuth round-trip and DB write on every operation\n\nPAIR 11:\nA: Connection setup now performs an unconditional Salesforce token refresh (fetch to login.salesforce.com) plus a prisma.credential.update on every SalesforceCalendarService instantiation, where the previous code created the jsforce Connection and let jsforce refresh lazily only when the access token expired. Every booking/availability operation involving Salesforce pays an extra OAuth round-trip and a DB write (concurrent operations also race on credential.update), multiplying Salesforce token-endpoint load and adding latency to a hot path that previously refreshed only on expiry.\nB: Salesforce CalendarService performs an eager blocking token refresh and DB write in the constructor even when the token is valid, coupling construction to side effects\n\nPAIR 12:\nA: Coverage gap: the diff ships a new externally-callable webhook (secret auth, AES decryption, credential upsert), two new utilities, and rewired token-refresh/persistence across ten integrations with zero test files — a scan of the diff finds none under any test path or test-name pattern. Regressions like the parse→safeParse wrapper change that corrupts Google credential keys pass straight to production because no assertion anywhere in the diff covers a token-refresh round trip or the webhook's auth/decrypt/upsert behavior.\nB: New non-trivial sync/refresh logic (refreshOAuthTokens contract, parseRefreshTokenResponse placeholder behavior, the webhook handler's create/update branching) ships with no tests anywhere in the diff. The exact failure modes above (Response-shape mismatches, placeholder refresh_token, wrong-user sync) are precisely the regressions no existing suite would catch, and each deployment with credential sharing enabled hits them on the first token expiry.\n\nPAIR 13:\nA: Coverage gap: the diff ships a new externally-callable webhook (secret auth, AES decryption, credential upsert), two new utilities, and rewired token-refresh/persistence across ten integrations with zero test files — a scan of the diff finds none under any test path or test-name pattern. Regressions like the parse→safeParse wrapper change that corrupts Google credential keys pass straight to production because no assertion anywhere in the diff covers a token-refresh round trip or the webhook's auth/decrypt/upsert behavior.\nB: The diff adds a new authenticated write API endpoint and two new shared OAuth utilities (refreshOAuthTokens, parseRefreshTokenResponse) that alter the token-refresh path of eight integrations, with zero test files or assertions anywhere in the diff (no spec/test/itest-shaped file appears in the changed paths). A regression in the placeholder refresh_token mutation or the raw-Response return type (both present in this diff) would break every booking on the affected integrations and ship undetected; there is no verification of the webhook's auth rejection, schema validation, or create-vs-update branch, and no fixture proving the sync endpoint contract (fetch body shape, response shape) matches what all eight call sites expect.\n\nPAIR 14:\nA: Coverage gap: the diff ships a new externally-callable webhook (secret auth, AES decryption, credential upsert), two new utilities, and rewired token-refresh/persistence across ten integrations with zero test files — a scan of the diff finds none under any test path or test-name pattern. Regressions like the parse→safeParse wrapper change that corrupts Google credential keys pass straight to production because no assertion anywhere in the diff covers a token-refresh round trip or the webhook's auth/decrypt/upsert behavior.\nB: The diff adds an authenticated webhook handler, an env-forked refresh dispatcher used by eight apps, and a response-parsing helper, none of which is covered by any test in the diff. The persist-then-reload contract between parseRefreshTokenResponse and its callers is exactly what the Google wrapper-persistence bug in this diff breaks, and nothing in the suite would catch that class of regression — enabling credential sharing or changing any refresh path reaches users with zero test signal.\n\nPAIR 15:\nA: Coverage gap: the diff ships a new externally-callable webhook (secret auth, AES decryption, credential upsert), two new utilities, and rewired token-refresh/persistence across ten integrations with zero test files — a scan of the diff finds none under any test path or test-name pattern. Regressions like the parse→safeParse wrapper change that corrupts Google credential keys pass straight to production because no assertion anywhere in the diff covers a token-refresh round trip or the webhook's auth/decrypt/upsert behavior.\nB: The diff introduces three non-trivial new behaviors — the credential-injection webhook endpoint (header auth, AES decryption, credential upsert), refreshOAuthTokens' sync-mode dispatch, and parseRefreshTokenResponse's dual-schema normalization — and contains zero test files (scanned the diff for spec/**, test/**, *.spec.*, *.test.*: none present), so none of the sync-mode paths that this review shows crashing or corrupting credentials are caught by CI. The exact failure modes above (Response-object misuse, placeholder refresh_token persistence, wrong userId for zoho-bigin) ship to production unverified; any regression in the webhook's auth or decryption also lands silently since no assertion covers this route.\n\nPAIR 16:\nA: Coverage gap: the diff ships a new externally-callable webhook (secret auth, AES decryption, credential upsert), two new utilities, and rewired token-refresh/persistence across ten integrations with zero test files — a scan of the diff finds none under any test path or test-name pattern. Regressions like the parse→safeParse wrapper change that corrupts Google credential keys pass straight to production because no assertion anywhere in the diff covers a token-refresh round trip or the webhook's auth/decrypt/upsert behavior.\nB: The entire credential-sync feature surface added in this diff (webhook handler, refreshOAuthTokens, parseRefreshTokenResponse, and the per-app refresh rewiring across 7 services) ships with zero tests. The findings above (Response-shape mismatch, stripped schema keys, placeholder refresh_token) are exactly the class of regression tests would have caught; any future change to the sync contract or to one of the seven rewired refreshAccessToken closures silently breaks calendar/video syncing for all users of that app, discovered only at booking time.\n\nPAIR 17:\nA: Coverage gap: the diff ships a new externally-callable webhook (secret auth, AES decryption, credential upsert), two new utilities, and rewired token-refresh/persistence across ten integrations with zero test files — a scan of the diff finds none under any test path or test-name pattern. Regressions like the parse→safeParse wrapper change that corrupts Google credential keys pass straight to production because no assertion anywhere in the diff covers a token-refresh round trip or the webhook's auth/decrypt/upsert behavior.\nB: The entire credential-sync feature — the new webhook endpoint, refreshOAuthTokens, parseRefreshTokenResponse, and ten integration call-site rewrites — is added with no tests anywhere in the diff. The broken computed-key schema at line 8 and the Google SafeParseResult-wrapper storage bug would each have been caught by a single unit test; sharing-mode regressions across ten apps will reach production undetected.\n\nPAIR 18:\nA: Coverage gap: the diff ships a new externally-callable webhook (secret auth, AES decryption, credential upsert), two new utilities, and rewired token-refresh/persistence across ten integrations with zero test files — a scan of the diff finds none under any test path or test-name pattern. Regressions like the parse→safeParse wrapper change that corrupts Google credential keys pass straight to production because no assertion anywhere in the diff covers a token-refresh round trip or the webhook's auth/decrypt/upsert behavior.\nB: No test-shaped file exists anywhere in this diff (no spec/**, test/**, *.test.* or *.spec.* files), yet the diff adds three pieces of behavior-bearing logic with zero coverage: the webhook endpoint's secret-check/validation/upsert flow, parseRefreshTokenResponse's dual-schema selection, and refreshOAuthTokens' sync-vs-direct routing. None of the sync-mode behavior (which the findings above show is broken at 4 of 9 call sites and corrupts credentials at 2 more) can be caught by CI; any regression in the secret check or credential upsert ships silently to self-hosters.\n\nPAIR 19:\nA: Coverage gap: the diff ships a new externally-callable webhook (secret auth, AES decryption, credential upsert), two new utilities, and rewired token-refresh/persistence across ten integrations with zero test files — a scan of the diff finds none under any test path or test-name pattern. Regressions like the parse→safeParse wrapper change that corrupts Google credential keys pass straight to production because no assertion anywhere in the diff covers a token-refresh round trip or the webhook's auth/decrypt/upsert behavior.\nB: [Medium/test_gap] No tests exist for the new credential-writing webhook (secret verification, decryption, update-vs-create), parseRefreshTokenResponse, or refreshOAuthTokens — high-risk credential paths, several of which contain the logic defects listed above.\n\nPAIR 20:\nA: Coverage gap: the diff ships a new externally-callable webhook (secret auth, AES decryption, credential upsert), two new utilities, and rewired token-refresh/persistence across ten integrations with zero test files — a scan of the diff finds none under any test path or test-name pattern. Regressions like the parse→safeParse wrapper change that corrupts Google credential keys pass straight to production because no assertion anywhere in the diff covers a token-refresh round trip or the webhook's auth/decrypt/upsert behavior.\nB: [Medium/test_gap] no tests were added for the new webhook endpoint, refreshOAuthTokens, or parseRefreshTokenResponse, despite these being security- and data-sensitive paths exhibiting the wrapper/placeholder behaviors above\n",
+  "effort": "low",
+  "pairs": [
+   [
+    63,
+    1284
+   ],
+   [
+    63,
+    1287
+   ],
+   [
+    592,
+    1248
+   ],
+   [
+    42,
+    62
+   ],
+   [
+    42,
+    66
+   ],
+   [
+    42,
+    153
+   ],
+   [
+    42,
+    179
+   ],
+   [
+    42,
+    180
+   ],
+   [
+    42,
+    201
+   ],
+   [
+    42,
+    1866
+   ],
+   [
+    42,
+    1869
+   ],
+   [
+    43,
+    51
+   ],
+   [
+    43,
+    99
+   ],
+   [
+    43,
+    101
+   ],
+   [
+    43,
+    106
+   ],
+   [
+    43,
+    115
+   ],
+   [
+    43,
+    116
+   ],
+   [
+    43,
+    345
+   ],
+   [
+    43,
+    598
+   ],
+   [
+    43,
+    599
+   ]
+  ]
+ },
+ "parsed_response": {
+  "pairs": [
+   {
+    "pair": 1,
+    "a": {
+     "mechanism": "Salesforce refreshes directly against login.salesforce.com instead of via refreshOAuthTokens",
+     "trigger": "CALCOM_CREDENTIAL_SYNC_ENDPOINT configured / credential rotation on parent",
+     "consequence": "direct Salesforce calls from child; rotation never propagates; feature architecture undermined"
+    },
+    "b": {
+     "mechanism": "new Salesforce refresh uses direct fetch to login.salesforce.com instead of refreshOAuthTokens despite importing parseRefreshTokenResponse",
+     "trigger": "CALCOM_CREDENTIAL_SYNC_ENDPOINT set",
+     "consequence": "all other integrations redirect but Salesforce silently refreshes directly; feature purpose undermined"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Same root cause: Salesforce bypasses refreshOAuthTokens; B's mention of other integrations is elaboration of the same architectural inconsistency."
+   },
+   {
+    "pair": 2,
+    "a": {
+     "mechanism": "Salesforce refreshes directly against login.salesforce.com instead of via refreshOAuthTokens",
+     "trigger": "sync endpoint configured / parent credential rotation",
+     "consequence": "child makes direct calls; rotation never propagates to Salesforce credentials"
+    },
+    "b": {
+     "mechanism": "Salesforce adapter got parseRefreshTokenResponse but not refreshOAuthTokens; calls login.salesforce.com directly",
+     "trigger": "CALCOM_CREDENTIAL_SYNC_ENDPOINT set",
+     "consequence": "Salesforce refreshes against Salesforce, ignoring parent sync endpoint"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.95,
+    "reason": "Identical claim: Salesforce bypasses refreshOAuthTokens when sync endpoint is set."
+   },
+   {
+    "pair": 3,
+    "a": {
+     "mechanism": "token refresh runs unconditionally on every instantiation with no expiry check",
+     "trigger": "every calendar operation / service instantiation",
+     "consequence": "extra OAuth round-trip + DB write even with valid token"
+    },
+    "b": {
+     "mechanism": "unconditional refresh with no expiry gate, no timeout, no abort signal",
+     "trigger": "every service construction",
+     "consequence": "N redundant refreshes; requests stall when Salesforce is slow/down"
+    },
+    "material_differences": [
+     "B adds missing timeout/abort-signal claims and a stall-when-Salesforce-down consequence not present in A"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "B adds material claims (no timeout/abort, stall under provider slowness) beyond A's core redundant-refresh claim."
+   },
+   {
+    "pair": 4,
+    "a": {
+     "mechanism": "unconditional Salesforce refresh + prisma.credential.update on every instantiation; jsforce previously refreshed lazily",
+     "trigger": "every booking/availability op; concurrent ops race on credential.update",
+     "consequence": "extra OAuth round-trip + DB write, load and latency on hot path"
+    },
+    "b": {
+     "mechanism": "eager refresh + credential.update every instantiation, no expiry check, not gated on APP_CREDENTIAL_SHARING_ENABLED; previously no network I/O in construction",
+     "trigger": "every booking/sync op",
+     "consequence": "round-trip + credential rewrite regardless of validity; rate-limit pressure and DB write multiplication"
+    },
+    "material_differences": [
+     "B adds claim that refresh is not gated on APP_CREDENTIAL_SHARING_ENABLED"
+    ],
+    "same": false,
+    "confidence": 0.6,
+    "reason": "Core mechanism matches, but B adds a distinct gating/scope claim absent from A."
+   },
+   {
+    "pair": 5,
+    "a": {
+     "mechanism": "unconditional refresh + credential.update every instantiation; jsforce previously refreshed lazily on expiry",
+     "trigger": "every booking/availability op",
+     "consequence": "extra round-trip + DB write, load and latency; races on credential.update"
+    },
+    "b": {
+     "mechanism": "unconditional refresh + credential.update every construction; previously used stored token and refreshed only when needed",
+     "trigger": "every Salesforce booking create/update/delete",
+     "consequence": "extra round-trip + DB write; rate-limit risk → failed bookings; latency"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Same unconditional-refresh-on-construction perf issue with same trigger and consequence; B's failed-bookings is a severity elaboration."
+   },
+   {
+    "pair": 6,
+    "a": {
+     "mechanism": "unconditional refresh + credential.update every instantiation; lazy refresh previously",
+     "trigger": "every booking/availability op",
+     "consequence": "extra round-trip + DB write, load and latency; races on credential.update"
+    },
+    "b": {
+     "mechanism": "unconditional refresh + DB write every construction, no expiry check",
+     "trigger": "every calendar operation instantiates service",
+     "consequence": "latency and rate-limit pressure on booking path for all Salesforce users"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Same mechanism, trigger, consequence; only wording differs."
+   },
+   {
+    "pair": 7,
+    "a": {
+     "mechanism": "unconditional refresh + credential.update every instantiation; jsforce previously refreshed lazily",
+     "trigger": "every booking/availability op",
+     "consequence": "extra round-trip + DB write, load and latency; races on credential.update"
+    },
+    "b": {
+     "mechanism": "unconditional refresh + credential-table write per instantiation even when credential sharing is disabled",
+     "trigger": "every calendar read/write; booking load",
+     "consequence": "rate-limit pressure and credential-row churn"
+    },
+    "material_differences": [
+     "B adds claim refresh runs even when credential sharing is disabled (scope/gating claim absent in A)"
+    ],
+    "same": false,
+    "confidence": 0.6,
+    "reason": "B adds a distinct material claim about the refresh running even with credential sharing disabled."
+   },
+   {
+    "pair": 8,
+    "a": {
+     "mechanism": "unconditional refresh + credential.update every instantiation; jsforce previously refreshed lazily",
+     "trigger": "every booking/availability op",
+     "consequence": "extra round-trip + DB write, load and latency; races on credential.update"
+    },
+    "b": {
+     "mechanism": "unconditional refresh + DB write every construction, no validity check; previously constructor did no network I/O",
+     "trigger": "every booking, availability check, cancellation",
+     "consequence": "latency and rate-limit exposure on hot path"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Same mechanism, trigger, consequence; equivalent claims."
+   },
+   {
+    "pair": 9,
+    "a": {
+     "mechanism": "unconditional refresh + credential.update every instantiation; lazy refresh previously",
+     "trigger": "every booking/availability op",
+     "consequence": "extra round-trip + DB write, load and latency; races on credential.update"
+    },
+    "b": {
+     "mechanism": "ungated refresh POST + credential.update every construction, not routed through refreshOAuthTokens, not gated by APP_CREDENTIAL_SHARING_ENABLED; response.statusText!=='OK' gate throws HttpError",
+     "trigger": "every Salesforce calendar operation on all deployments; proxies stripping reason phrase or Salesforce error bodies",
+     "consequence": "extra round-trip + DB write; HttpError kills the operation; scope expansion beyond requirements"
+    },
+    "material_differences": [
+     "B adds claims about missing APP_CREDENTIAL_SHARING_ENABLED gating, refreshOAuthTokens routing, and a separate statusText/HttpError failure mode"
+    ],
+    "same": false,
+    "confidence": 0.85,
+    "reason": "B is a compound report with several additional material claims (routing, gating, HttpError crash path) absent from A."
+   },
+   {
+    "pair": 10,
+    "a": {
+     "mechanism": "unconditional refresh + credential.update every instantiation; lazy refresh previously",
+     "trigger": "every booking/availability op",
+     "consequence": "extra round-trip + DB write, load and latency; races on credential.update"
+    },
+    "b": {
+     "mechanism": "unconditional refresh on every connection build without checking token validity",
+     "trigger": "every operation",
+     "consequence": "unnecessary OAuth round-trip and DB write"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Same unconditional-refresh redundancy issue; B is a terser version of A."
+   },
+   {
+    "pair": 11,
+    "a": {
+     "mechanism": "unconditional refresh + credential.update every instantiation; lazy refresh previously",
+     "trigger": "every booking/availability op",
+     "consequence": "extra round-trip + DB write, load and latency; races on credential.update"
+    },
+    "b": {
+     "mechanism": "eager blocking token refresh and DB write in constructor even when token valid",
+     "trigger": "every construction",
+     "consequence": "construction coupled to side effects"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "Same root cause: unconditional eager refresh in constructor; B frames consequence as design coupling but describes the same defect."
+   },
+   {
+    "pair": 12,
+    "a": {
+     "mechanism": "new webhook, utilities, and refresh rewiring shipped with zero tests",
+     "trigger": "any regression in these components",
+     "consequence": "e.g., parse→safeParse Google credential corruption reaches production undetected"
+    },
+    "b": {
+     "mechanism": "new sync/refresh logic (refreshOAuthTokens, parseRefreshTokenResponse, webhook create/update branching) untested",
+     "trigger": "first token expiry with credential sharing enabled",
+     "consequence": "Response-shape mismatch, placeholder refresh_token, wrong-user sync regressions ship uncaught"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "Both claim the credential-sync additions have zero test coverage, citing example untested failure modes; wording/examples differ but core claim identical."
+   },
+   {
+    "pair": 13,
+    "a": {
+     "mechanism": "webhook + utilities + rewired refresh across ten integrations with zero tests",
+     "trigger": "any regression in these paths",
+     "consequence": "e.g., Google credential corruption ships to production undetected"
+    },
+    "b": {
+     "mechanism": "new webhook, refreshOAuthTokens, parseRefreshTokenResponse altering eight integrations' refresh path, zero tests",
+     "trigger": "regression in placeholder refresh_token or raw-Response return type",
+     "consequence": "breaks every booking on affected integrations undetected; no verification of auth/decrypt/upsert contract"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "Same claim: no tests for the new webhook/utilities/rewiring; different counts (ten vs eight) and example defects are elaborations, not different root issues."
+   },
+   {
+    "pair": 14,
+    "a": {
+     "mechanism": "webhook + utilities + refresh rewiring, zero tests",
+     "trigger": "regression in these paths",
+     "consequence": "Google wrapper-persistence bug etc. reach production undetected"
+    },
+    "b": {
+     "mechanism": "webhook, env-forked refresh dispatcher, response-parsing helper all untested",
+     "trigger": "enabling credential sharing or changing refresh path",
+     "consequence": "persist-then-reload regressions (e.g., Google bug) reach users with zero signal"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "Same test-coverage gap for the same new components; same example defect class."
+   },
+   {
+    "pair": 15,
+    "a": {
+     "mechanism": "webhook + utilities + rewired refresh, zero tests",
+     "trigger": "regression in these paths",
+     "consequence": "Google credential corruption etc. ships undetected"
+    },
+    "b": {
+     "mechanism": "webhook, refreshOAuthTokens sync dispatch, parseRefreshTokenResponse dual-schema — zero test files",
+     "trigger": "regressions in sync-mode paths, webhook auth/decryption",
+     "consequence": "crash/corruption failure modes ship unverified"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "Same zero-test-coverage claim for the same new sync components; cited examples differ but are illustrative."
+   },
+   {
+    "pair": 16,
+    "a": {
+     "mechanism": "webhook + utilities + refresh rewiring, zero tests",
+     "trigger": "regression in sync contract or refresh closures",
+     "consequence": "Google credential corruption etc. ship undetected"
+    },
+    "b": {
+     "mechanism": "webhook, refreshOAuthTokens, parseRefreshTokenResponse, 7 rewired services — zero tests",
+     "trigger": "future change to sync contract or refresh closure",
+     "consequence": "silent breakage of calendar/video sync, discovered at booking time"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "Same core claim of zero tests over the same new feature surface."
+   },
+   {
+    "pair": 17,
+    "a": {
+     "mechanism": "webhook + utilities + refresh rewiring, zero tests",
+     "trigger": "regression in these paths",
+     "consequence": "Google SafeParse wrapper bug etc. reach production undetected"
+    },
+    "b": {
+     "mechanism": "webhook, refreshOAuthTokens, parseRefreshTokenResponse, ten call-site rewrites — no tests",
+     "trigger": "regression in schema keys or Google wrapper storage",
+     "consequence": "sharing-mode regressions reach production undetected"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "Same zero-test claim for the same components, citing the same example defects."
+   },
+   {
+    "pair": 18,
+    "a": {
+     "mechanism": "webhook + utilities + refresh rewiring, zero tests",
+     "trigger": "regression in these paths",
+     "consequence": "Google credential corruption etc. ships undetected"
+    },
+    "b": {
+     "mechanism": "webhook, parseRefreshTokenResponse dual-schema, refreshOAuthTokens sync-vs-direct routing — no test files",
+     "trigger": "regression in sync-mode behavior or webhook secret check",
+     "consequence": "broken/corrupting sync paths ship silently to self-hosters"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "Same test-coverage gap claim over the same three new components."
+   },
+   {
+    "pair": 19,
+    "a": {
+     "mechanism": "webhook + utilities + rewired refresh across ten integrations, zero tests",
+     "trigger": "regression in these paths",
+     "consequence": "Google credential corruption etc. reach production undetected"
+    },
+    "b": {
+     "mechanism": "no tests for webhook (secret verification, decryption, update-vs-create), parseRefreshTokenResponse, refreshOAuthTokens",
+     "trigger": "regression in these high-risk credential paths",
+     "consequence": "logic defects present in them go uncaught"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Same zero-test-coverage claim for the same new components."
+   },
+   {
+    "pair": 20,
+    "a": {
+     "mechanism": "webhook + utilities + rewired refresh, zero tests",
+     "trigger": "regression in these paths",
+     "consequence": "Google credential corruption etc. ships undetected"
+    },
+    "b": {
+     "mechanism": "no tests added for webhook, refreshOAuthTokens, parseRefreshTokenResponse",
+     "trigger": "regression in security/data-sensitive paths",
+     "consequence": "wrapper/placeholder behaviors go uncaught"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Identical claim: no tests for the new webhook and OAuth utilities."
+   }
+  ]
+ },
+ "usage": {
+  "glm-5.3-background": {
+   "input_tokens": 4039,
+   "cache_read_input_tokens": 384,
+   "cache_creation_input_tokens": 0,
+   "output_tokens": 2902,
+   "reasoning_output_tokens": 458,
+   "cost_usd": 0.0,
+   "total_tokens": 7783
+  }
+ },
+ "status": "complete",
+ "error_type": null,
+ "elapsed_s": 14.302634000778198
+}

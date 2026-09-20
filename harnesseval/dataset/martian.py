@@ -11,9 +11,14 @@ import glob
 from pathlib import Path
 
 # Vendored Martian CRB root (gitignored; provenance in third_party/martian_crb_sha.txt)
-CRB_ROOT = Path(__file__).resolve().parents[2] / "third_party" / "code-review-benchmark"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+CRB_ROOT = REPO_ROOT / "third_party" / "code-review-benchmark"
 OFFLINE = CRB_ROOT / "offline"
-GOLDEN_DIR = OFFLINE / "golden_comments"
+# Golden comments: prefer the VENDORED copy (committed at analysis/inputs/golden_comments) over the upstream
+# checkout, which is gitignored and therefore absent in a fresh clone. Without this the golden set loaded as
+# {} and every run silently scored against zero goldens.
+_VENDORED_GOLDEN_DIR = REPO_ROOT / "analysis" / "inputs" / "golden_comments"
+GOLDEN_DIR = _VENDORED_GOLDEN_DIR if _VENDORED_GOLDEN_DIR.is_dir() else OFFLINE / "golden_comments"
 RESULTS_DIR = OFFLINE / "results"
 
 # Martian's three judge models with stored results
@@ -30,9 +35,21 @@ ANTHROPIC_JUDGE_IDS = {
 
 
 def golden_comments_by_url() -> dict[str, list[dict]]:
-    """url -> list of golden comment dicts {comment, severity, category}."""
+    """url -> list of golden comment dicts {comment, severity, category}.
+
+    Raises rather than returning an empty mapping: a run scored against zero goldens looks like a total
+    failure of the tool under test, which is a much worse outcome than a loud error.
+    """
     out: dict[str, list[dict]] = {}
-    for f in sorted(GOLDEN_DIR.glob("*.json")):
+    files = sorted(GOLDEN_DIR.glob("*.json"))
+    if not files:
+        raise RuntimeError(
+            f"No golden comments found in {GOLDEN_DIR}.\n"
+            "  Expected the vendored copy at analysis/inputs/golden_comments/*.json (committed) or the upstream\n"
+            "  checkout third_party/code-review-benchmark/offline/golden_comments/*.json (see INSTALL.md §4).\n"
+            "  Run `python -m harnesseval.calibrate --check` to see everything that is missing."
+        )
+    for f in files:
         for pr in json.load(open(f)):
             out[pr["url"]] = pr.get("comments", [])
     return out

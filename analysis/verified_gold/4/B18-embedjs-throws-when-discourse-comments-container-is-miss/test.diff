@@ -1,0 +1,110 @@
+diff --git a/spec/verify/embed_verify.rb b/spec/verify/embed_verify.rb
+new file mode 100644
+--- /dev/null
++++ b/spec/verify/embed_verify.rb
+@@ -0,0 +1,105 @@
++require 'json'
++require 'open3'
++require 'tempfile'
++
++REPO_ROOT = File.expand_path('../..', __dir__)
++JS_PATH = File.join(REPO_ROOT, 'app/assets/javascripts/embed.js')
++
++js_src = File.read(JS_PATH)
++
++def run_node_harness(js_path)
++  harness = <<~'JS'
++    const fs = require('fs');
++    const src = fs.readFileSync(process.argv[2], 'utf8');
++    let appended1 = false;
++    global.document = {
++      getElementById: function(id) { return null; },
++      createElement: function(tag) {
++        return {
++          set src(v) { this._src = v; },
++          get src() { return this._src; },
++          id: null, width: null, frameBorder: null, scrolling: null,
++          appendChild: function() { appended1 = true; }
++        };
++      }
++    };
++    global.window = { addEventListener: function(){} };
++    global.discourseUrl = 'http://example.com/';
++    global.discourseEmbedUrl = 'http://example.com/post';
++    let threw1 = false;
++    let err1 = null;
++    try {
++      eval(src);
++    } catch (e) {
++      threw1 = true;
++      err1 = e.message;
++    }
++    let iframe2 = null;
++    global.document = {
++      getElementById: function(id) { return { appendChild: function(){} }; },
++      createElement: function(tag) {
++        iframe2 = {
++          set src(v) { this._src = v; },
++          get src() { return this._src; },
++          id: null, width: null, frameBorder: null, scrolling: null,
++          appendChild: function() {}
++        };
++        return iframe2;
++      }
++    };
++    global.discourseUrl = 'http://example.com';
++    global.discourseEmbedUrl = 'http://example.com/post';
++    try { eval(src); } catch (e) {}
++    console.log(JSON.stringify({
++      threwOnMissing: threw1,
++      error: err1,
++      appendedOnMissing: appended1,
++      srcWithoutSlash: iframe2 ? iframe2._src : null
++    }));
++  JS
++  Tempfile.create(['harness', '.js']) do |f|
++    f.write(harness)
++    f.flush
++    out, status = Open3.capture2e('node', f.path, js_path)
++    raise "node failed: #{out}" unless status.success?
++    return JSON.parse(out.strip)
++  end
++end
++
++def static_check(js_src)
++  code = js_src.gsub(%r{//.*$}, '').gsub(%r{/\*.*?\*/}m, '')
++  guarded = !!(code =~ /if\s*\(\s*!?\s*comments\s*\)\s*return/ ||
++               code =~ /if\s*\(\s*comments\s*==\s*null/ ||
++               code =~ /if\s*\(\s*comments\s*===?\s*null/ ||
++               code =~ /comments\s*&&/)
++  unnormalized = !!(code =~ /discourseUrl\s*\+\s*["']embed/ || code =~ /discourseUrl\s*\+\s*"embed/)
++  {
++    'threwOnMissing' => !guarded,
++    'srcWithoutSlash' => unnormalized ? 'http://example.comembed/best' : 'http://example.com/embed/best'
++  }
++end
++
++node_available = system('node --version > /dev/null 2>&1')
++
++result = if node_available
++  begin
++    run_node_harness(JS_PATH)
++  rescue => e
++    warn "Node harness failed: #{e.message}"
++    static_check(js_src)
++  end
++else
++  static_check(js_src)
++end
++
++reasons = []
++reasons << "null appendChild throws: #{result['error'] || 'TypeError'}" if result['threwOnMissing']
++if result['srcWithoutSlash'] && !result['srcWithoutSlash'].to_s.start_with?('http://example.com/')
++  reasons << "iframe.src malformed without trailing slash: #{result['srcWithoutSlash']}"
++end
++
++if reasons.empty?
++  puts "RESULT: PASS"
++else
++  puts "RESULT: FAIL: #{reasons.join('; ')}"
++end

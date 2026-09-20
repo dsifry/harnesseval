@@ -1,0 +1,491 @@
+{
+ "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/4",
+ "pass_digest": "9c5f733ce7a3f996c90c67f262cc4a77e2b234bc415c197afa7c73477ad320be",
+ "request_sha256": "052891fc9054bd2bfa7e0c24af080a99dce49e1b7249baa7c800e0aef668741e",
+ "request": {
+  "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/4",
+  "model": "glm-5.3-background",
+  "system": "You are clustering code review findings from one PR. Always respond with valid JSON.",
+  "prompt": "You are clustering code review findings from the same PR. For each PAIR below, decide whether the two findings describe the SAME underlying issue — same root cause in the same code location. Different wording is fine. A finding about a DIFFERENT defect in the same file or function is NOT the same issue. Severity or aspect differences of the same root cause ARE the same issue.\n\n\nFor THIS scoring pass, duplicate equivalence is stricter than sharing a root cause.\nYou must compare the COMPLETE MATERIAL CLAIMS, including mechanism, triggering\nconditions, execution path, and consequence. The same line or broad concern does\nnot establish equivalence. A report of wrong-category selection, a case/rename\nmismatch, a crash, and a silent fallback are different claims even at one lookup.\nAn inactive/unbound API concern and an alleged active user-facing failure differ.\nA compound report with an additional material claim does NOT equal its subset.\nDifferences only in wording, severity, or hedging do not create separate claims.\nIf the claimed mechanisms, triggers or consequences conflict, or one report adds\nan unsupported/different material factual claim, return same=false. You are NOT\nverifying which claim is true; do not repair or reinterpret either report to make\nthem match. If unsure whether their full claims are equivalent, return false.\n\nFor every numbered pair, extract what A and B actually CLAIM into mechanism,\ntrigger and consequence. Then list material_differences and give your equivalence\nverdict, confidence and reason. same=true requires no material differences.\nReturn ONLY this JSON object, with EVERY pair index exactly once:\n{\"pairs\":[{\"pair\":1,\"a\":{\"mechanism\":\"...\",\"trigger\":\"...\",\"consequence\":\"...\"},\"b\":{\"mechanism\":\"...\",\"trigger\":\"...\",\"consequence\":\"...\"},\"material_differences\":[],\"same\":true,\"confidence\":0.9,\"reason\":\"...\"}]}\n\nPAIRS:\nPAIR 1:\nA: lib/topic_retriever.rb:40 — the `feed_polling_enabled?` branch runs `Jobs::PollFeed.new.execute({})` synchronously on every uncached embed request, and on a feed miss it falls through to `fetch_http` without checking `feed_polling_url`, so there is no setting that turns off arbitrary-page scraping when a site wants feed-only import (P3, conf 50)\nB: lib/topic_retriever.rb:44-49 — `perform_retrieve` calls `Jobs::PollFeed.new.execute({})` to opportunistically pull the whole RSS feed on every uncached embed request without checking `SiteSetting.feed_polling_url.present?` first, so if feed_polling_enabled is on but URL is blank this silently no-ops deep inside PollFeed rather than being validated at the call site, and the whole feed is re-fetched synchronously per cold visitor request instead of only the target article.\n\nPAIR 2:\nA: lib/topic_retriever.rb:40 — the `feed_polling_enabled?` branch runs `Jobs::PollFeed.new.execute({})` synchronously on every uncached embed request, and on a feed miss it falls through to `fetch_http` without checking `feed_polling_url`, so there is no setting that turns off arbitrary-page scraping when a site wants feed-only import (P3, conf 50)\nB: TopicRetriever executes the scheduled PollFeed job inline per embed request (lib/topic_retriever.rb:41 calls Jobs::PollFeed.new.execute({})), bypassing Sidekiq; because the throttle key is per embed URL (retrieved:#{@embed_url}) rather than per feed, a site with k embedded articles can trigger up to k full feed fetches plus N import attempts per minute instead of the intended hourly poll, and any PollFeed exception now also fails RetrieveTopic with its retries re-polling the feed — this job-layer coupling should be an enqueue or a check against cached feed data, not an inline execute\n\nPAIR 3:\nA: lib/topic_retriever.rb:48-50 — fetch_http does not explicitly check SiteSetting.embed_by_username.present? the way PollFeed#execute does; it silently relies on User.where(username_lower: '').first returning nil when the setting is blank instead of an explicit guard, unlike the parallel poll_feed gating logic\nB: lib/topic_retriever.rb:49-50 — fetch_http's `return if user.blank?` silently no-ops when embed_by_username resolves to no user; the job reports success while doing nothing and no error is logged. confidence=90 severity=P2\n\nPAIR 4:\nA: spec/components/topic_retriever_spec.rb:33 — The assertion `topic_retriever.expects(:perform_retrieve).once` mocks away `lib/topic_retriever.rb:21`'s `if $redis.setnx(retrieved_key, \"1\")`, so a broken Redis throttle or the `no_throttle` bypass changes retrieval behavior while the component suite remains green .\nB: spec/components/topic_retriever_spec.rb:34-38 — test \"calls perform_retrieve if it hasn't been retrieved recently\" stubs `retrieved_recently?` to return false via mocha `.expects().returns()`, verifying the mock's own canned value rather than exercising the actual Redis-backed throttle logic it claims to test; confidence 95, severity P1.\n\nPAIR 5:\nA: spec/controllers/embed_controller_spec.rb:38-45: test verifies mocks, not real behavior — mocks TopicRetriever.new and retriever.retrieve but the controller actually calls Jobs.enqueue(:retrieve_topic, ...); nothing verifies the job is enqueued with user_id/embed_url args or that the loading template is rendered\nB: spec/controllers/embed_controller_spec.rb:39 — The success-path specs stub `TopicRetriever.expects(:new).returns(retriever)` directly, but production code in app/controllers/embed_controller.rb:14 goes through `Jobs.enqueue(:retrieve_topic, ...)` → `Jobs::RetrieveTopic#execute` (app/jobs/regular/retrieve_topic.rb:9), so the test never actually exercises or validates that integration path\n\nPAIR 6:\nA: spec/controllers/embed_controller_spec.rb:38-45: test verifies mocks, not real behavior — mocks TopicRetriever.new and retriever.retrieve but the controller actually calls Jobs.enqueue(:retrieve_topic, ...); nothing verifies the job is enqueued with user_id/embed_url args or that the loading template is rendered\nB: spec/controllers/embed_controller_spec.rb:40 — The no-embed example asserts a mocked downstream TopicRetriever rather than that :retrieve_topic is enqueued with the embed URL and user, so the controller/job contract is untested.\n\nPAIR 7:\nA: spec/controllers/embed_controller_spec.rb:38-45: test verifies mocks, not real behavior — mocks TopicRetriever.new and retriever.retrieve but the controller actually calls Jobs.enqueue(:retrieve_topic, ...); nothing verifies the job is enqueued with user_id/embed_url args or that the loading template is rendered\nB: spec/controllers/embed_controller_spec.rb:40 — the no-embed test mocks `TopicRetriever.expects(:new)` with no argument matcher and never checks that the 'loading' template is rendered, so passing the wrong embed_url, dropping the `no_throttle: user.try(:staff?)` flag in retrieve_topic.rb:17, or rendering best instead of loading all still pass (P2, confidence 75).\n\nPAIR 8:\nA: spec/controllers/embed_controller_spec.rb:38-45: test verifies mocks, not real behavior — mocks TopicRetriever.new and retriever.retrieve but the controller actually calls Jobs.enqueue(:retrieve_topic, ...); nothing verifies the job is enqueued with user_id/embed_url args or that the loading template is rendered\nB: spec/controllers/embed_controller_spec.rb:40 — The spec expects TopicRetriever.new/retrieve to be called synchronously, but app/controllers/embed_controller.rb:15 only enqueues Jobs::RetrieveTopic, so the \"no previous embed\" path has no valid verification and the test fails or proves nothing. (P1, conf 75)\n\nPAIR 9:\nA: spec/controllers/embed_controller_spec.rb:38-45: test verifies mocks, not real behavior — mocks TopicRetriever.new and retriever.retrieve but the controller actually calls Jobs.enqueue(:retrieve_topic, ...); nothing verifies the job is enqueued with user_id/embed_url args or that the loading template is rendered\nB: spec/controllers/embed_controller_spec.rb:40 — the spec mocks `TopicRetriever.new` and passes only because `queue_jobs` is `test: false` so `Jobs.enqueue` runs RetrieveTopic inline; it never asserts `render 'loading'`, the enqueued `user_id`/`embed_url` args, or the staff `no_throttle` flag, and it breaks spuriously if jobs are ever queued in test (P3, conf 75)\n\nPAIR 10:\nA: spec/controllers/embed_controller_spec.rb:38-45: test verifies mocks, not real behavior — mocks TopicRetriever.new and retriever.retrieve but the controller actually calls Jobs.enqueue(:retrieve_topic, ...); nothing verifies the job is enqueued with user_id/embed_url args or that the loading template is rendered\nB: spec/controllers/embed_controller_spec.rb:40-45 — \"tells the topic retriever to work\" mocks `TopicRetriever.new` and `retrieve`, meaning the interaction between EmbedController#best and TopicRetriever's real retrieval side effects (job enqueue timing, redis throttle) is never checked end-to-end; confidence 80, severity P2.\n\nPAIR 11:\nA: spec/controllers/embed_controller_spec.rb:38-45: test verifies mocks, not real behavior — mocks TopicRetriever.new and retriever.retrieve but the controller actually calls Jobs.enqueue(:retrieve_topic, ...); nothing verifies the job is enqueued with user_id/embed_url args or that the loading template is rendered\nB: spec/controllers/embed_controller_spec.rb:40-46 uses TopicRetriever.expects(:new) with no with(...), so the controller→job→retriever argument passing (embed_url, user_id) is completely unpinned.\n\nPAIR 12:\nA: spec/controllers/embed_controller_spec.rb:38-45: test verifies mocks, not real behavior — mocks TopicRetriever.new and retriever.retrieve but the controller actually calls Jobs.enqueue(:retrieve_topic, ...); nothing verifies the job is enqueued with user_id/embed_url args or that the loading template is rendered\nB: spec/controllers/embed_controller_spec.rb:40-46 — the \"tells the topic retriever to work\" test stubs `TopicRetriever.expects(:new).returns(retriever)` and only asserts `retriever.expects(:retrieve)` was called, so it verifies a job enqueued a call to `TopicRetriever#retrieve` but never exercises `invalid_host?`, `retrieved_recently?`, or `perform_retrieve` — none of which run in this test\n\nPAIR 13:\nA: spec/controllers/embed_controller_spec.rb:38-45: test verifies mocks, not real behavior — mocks TopicRetriever.new and retriever.retrieve but the controller actually calls Jobs.enqueue(:retrieve_topic, ...); nothing verifies the job is enqueued with user_id/embed_url args or that the loading template is rendered\nB: `spec/controllers/embed_controller_spec.rb:41-46` asserts `TopicRetriever.expects(:new)`/`retrieve` while the controller enqueues `Jobs.enqueue(:retrieve_topic, ...)`, passing only incidentally and never covering the job-argument contract; there is no spec for `Jobs::RetrieveTopic`\n\nPAIR 14:\nA: spec/controllers/embed_controller_spec.rb:38-45: test verifies mocks, not real behavior — mocks TopicRetriever.new and retriever.retrieve but the controller actually calls Jobs.enqueue(:retrieve_topic, ...); nothing verifies the job is enqueued with user_id/embed_url args or that the loading template is rendered\nB: spec/controllers/embed_controller_spec.rb:41-46 asserts TopicRetriever.new/retrieve are called, but the controller enqueues Jobs::RetrieveTopic, so the test exercises nothing real\n\nPAIR 15:\nA: spec/controllers/embed_controller_spec.rb:38-45: test verifies mocks, not real behavior — mocks TopicRetriever.new and retriever.retrieve but the controller actually calls Jobs.enqueue(:retrieve_topic, ...); nothing verifies the job is enqueued with user_id/embed_url args or that the loading template is rendered\nB: spec/controllers/embed_controller_spec.rb:42 — Test relies on Jobs.enqueue executing Jobs::RetrieveTopic inline (queue_jobs test:false) to satisfy TopicRetriever.expects(:new); it is implicitly coupled to that setting and never asserts that the job was enqueued with user_id/embed_url or that no_throttle is derived from staff.\n\nPAIR 16:\nA: spec/controllers/embed_controller_spec.rb:38-45: test verifies mocks, not real behavior — mocks TopicRetriever.new and retriever.retrieve but the controller actually calls Jobs.enqueue(:retrieve_topic, ...); nothing verifies the job is enqueued with user_id/embed_url args or that the loading template is rendered\nB: spec/controllers/embed_controller_spec.rb:42 — The new controller spec requires a synchronous `TopicRetriever.new(...).retrieve` call, but the controller now calls only `Jobs.enqueue`, so this test deterministically fails.\n\nPAIR 17:\nA: spec/controllers/embed_controller_spec.rb:38-45: test verifies mocks, not real behavior — mocks TopicRetriever.new and retriever.retrieve but the controller actually calls Jobs.enqueue(:retrieve_topic, ...); nothing verifies the job is enqueued with user_id/embed_url args or that the loading template is rendered\nB: spec/controllers/embed_controller_spec.rb:42-45 — The spec expects synchronous `TopicRetriever` instantiation and invocation even though the implementation enqueues `:retrieve_topic`, so it fails and does not test the actual asynchronous behavior.\n\nPAIR 18:\nA: spec/controllers/embed_controller_spec.rb:38-45: test verifies mocks, not real behavior — mocks TopicRetriever.new and retriever.retrieve but the controller actually calls Jobs.enqueue(:retrieve_topic, ...); nothing verifies the job is enqueued with user_id/embed_url args or that the loading template is rendered\nB: spec/controllers/embed_controller_spec.rb:43 — P1 confidence 100: The assertion `TopicRetriever.expects(:new).returns(retriever)` fails whenever the no-embed branch runs because `EmbedController#best` enqueues `Jobs.enqueue(:retrieve_topic, user_id: current_user.try(:id), embed_url: embed_url)` instead, so the changed controller spec cannot verify the asynchronous retrieval behavior it claims to cover.\n\nPAIR 19:\nA: spec/controllers/embed_controller_spec.rb:38-45: test verifies mocks, not real behavior — mocks TopicRetriever.new and retriever.retrieve but the controller actually calls Jobs.enqueue(:retrieve_topic, ...); nothing verifies the job is enqueued with user_id/embed_url args or that the loading template is rendered\nB: spec/controllers/embed_controller_spec.rb:43 — The new controller test expects a direct TopicRetriever call even though the action enqueues :retrieve_topic, so the test fails instead of verifying the delivered job.\n\nPAIR 20:\nA: spec/controllers/embed_controller_spec.rb:38-45: test verifies mocks, not real behavior — mocks TopicRetriever.new and retriever.retrieve but the controller actually calls Jobs.enqueue(:retrieve_topic, ...); nothing verifies the job is enqueued with user_id/embed_url args or that the loading template is rendered\nB: spec/controllers/embed_controller_spec.rb:43 — The no-embed example expects the removed synchronous TopicRetriever call, so it fails against the new enqueue path and never verifies the loading response or job arguments.\n",
+  "effort": "low",
+  "pairs": [
+   [
+    1281,
+    1308
+   ],
+   [
+    1281,
+    1722
+   ],
+   [
+    1310,
+    1315
+   ],
+   [
+    1497,
+    1509
+   ],
+   [
+    1532,
+    1533
+   ],
+   [
+    1532,
+    1536
+   ],
+   [
+    1532,
+    1538
+   ],
+   [
+    1532,
+    1539
+   ],
+   [
+    1532,
+    1540
+   ],
+   [
+    1532,
+    1542
+   ],
+   [
+    1532,
+    1543
+   ],
+   [
+    1532,
+    1544
+   ],
+   [
+    1532,
+    1548
+   ],
+   [
+    1532,
+    1549
+   ],
+   [
+    1532,
+    1550
+   ],
+   [
+    1532,
+    1552
+   ],
+   [
+    1532,
+    1554
+   ],
+   [
+    1532,
+    1558
+   ],
+   [
+    1532,
+    1563
+   ],
+   [
+    1532,
+    1566
+   ]
+  ]
+ },
+ "parsed_response": {
+  "pairs": [
+   {
+    "pair": 1,
+    "a": {
+     "mechanism": "feed_polling_enabled? branch runs PollFeed inline on every uncached embed request; on feed miss falls through to fetch_http without checking feed_polling_url",
+     "trigger": "uncached embed request, feed miss",
+     "consequence": "no setting can turn off arbitrary-page scraping for feed-only sites"
+    },
+    "b": {
+     "mechanism": "perform_retrieve calls PollFeed inline without first checking feed_polling_url.present?, so PollFeed itself must handle blank URL",
+     "trigger": "feed_polling_enabled on but URL blank; any cold visitor request",
+     "consequence": "silent no-op deep inside PollFeed instead of call-site validation; whole feed re-fetched synchronously per request"
+    },
+    "material_differences": [
+     "A's consequence is unwanted fall-through to fetch_http/scraping that can't be disabled; B's consequence is silent no-op inside PollFeed when URL is blank",
+     "A's trigger is feed miss; B's trigger is blank feed_polling_url"
+    ],
+    "same": false,
+    "confidence": 0.65,
+    "reason": "Both touch the missing feed_polling_url check and synchronous feed fetch, but the triggering conditions and claimed consequences (uncontrollable scraping vs silent no-op lacking call-site validation) conflict under strict comparison."
+   },
+   {
+    "pair": 2,
+    "a": {
+     "mechanism": "feed_polling_enabled? branch runs PollFeed inline; feed miss falls through to fetch_http without checking feed_polling_url",
+     "trigger": "uncached embed request, feed miss",
+     "consequence": "no way to disable arbitrary-page scraping for feed-only sites"
+    },
+    "b": {
+     "mechanism": "inline PollFeed execute bypasses Sidekiq; throttle key per embed URL not per feed; PollFeed exceptions propagate into RetrieveTopic",
+     "trigger": "site with k embedded articles; any PollFeed exception",
+     "consequence": "up to k full feed fetches plus N imports per minute instead of hourly poll; RetrieveTopic retries re-poll the feed"
+    },
+    "material_differences": [
+     "B claims wrong throttle key scope causing rate blowup — absent from A",
+     "B claims exception coupling/retry re-polling — absent from A",
+     "A claims fetch_http fall-through/scraping concern — absent from B"
+    ],
+    "same": false,
+    "confidence": 0.85,
+    "reason": "B adds multiple material claims (throttle key scope, exception coupling) absent from A, and drops A's scraping/fall-through claim."
+   },
+   {
+    "pair": 3,
+    "a": {
+     "mechanism": "fetch_http lacks explicit embed_by_username.present? guard, relying on User.where(username_lower: '').first returning nil, unlike PollFeed's explicit gating",
+     "trigger": "embed_by_username setting blank",
+     "consequence": "implicit nil-user reliance instead of explicit guard (code-quality/parallel-gating inconsistency)"
+    },
+    "b": {
+     "mechanism": "fetch_http's `return if user.blank?` silently no-ops when embed_by_username resolves to no user",
+     "trigger": "embed_by_username blank or resolves to no user",
+     "consequence": "job reports success while doing nothing, no error logged (P2)"
+    },
+    "material_differences": [
+     "A frames as missing explicit guard/parallel-gating style issue; B frames as silent failure with false success reporting"
+    ],
+    "same": true,
+    "confidence": 0.65,
+    "reason": "Same code location, same trigger (blank embed_by_username → nil user → no-op), same silent-no-op consequence; the framing differs but the material mechanism matches."
+   },
+   {
+    "pair": 4,
+    "a": {
+     "mechanism": "expects(:perform_retrieve).once mocks away the Redis setnx throttle, so broken throttle or no_throttle bypass goes undetected",
+     "trigger": "Redis throttle broken or no_throttle bypass changes behavior",
+     "consequence": "component suite stays green despite behavior change"
+    },
+    "b": {
+     "mechanism": "test stubs retrieved_recently? to return false, verifying canned mock value instead of real Redis-backed throttle logic",
+     "trigger": "any change to throttle logic",
+     "consequence": "throttle logic untested; suite passes while testing the mock"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "Both claim the spec mocks/stubs away the Redis-backed throttle (retrieved_recently?/setnx), leaving actual throttle behavior unverified; same test, same root concern."
+   },
+   {
+    "pair": 5,
+    "a": {
+     "mechanism": "spec mocks TopicRetriever.new and retrieve; controller actually enqueues Jobs.enqueue(:retrieve_topic)",
+     "trigger": "running embed controller success-path spec",
+     "consequence": "job args (user_id/embed_url) and loading template rendering never verified"
+    },
+    "b": {
+     "mechanism": "spec stubs TopicRetriever.expects(:new).returns(retriever); production path goes Jobs.enqueue → Jobs::RetrieveTopic#execute",
+     "trigger": "running embed controller spec",
+     "consequence": "controller→job→retriever integration path never exercised or validated"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "Both claim the spec mocks TopicRetriever instead of exercising the real enqueue path, leaving the integration untested; B omits the template/args detail but adds no conflicting claim."
+   },
+   {
+    "pair": 6,
+    "a": {
+     "mechanism": "spec mocks TopicRetriever.new/retrieve; controller enqueues retrieve_topic job",
+     "trigger": "embed controller spec",
+     "consequence": "job enqueue with user_id/embed_url args and loading template rendering unverified"
+    },
+    "b": {
+     "mechanism": "no-embed example asserts mocked TopicRetriever instead of asserting :retrieve_topic enqueued with embed URL and user",
+     "trigger": "no-embed test example",
+     "consequence": "controller/job contract untested"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "Same core claim: mock of TopicRetriever instead of verifying enqueue with embed_url/user; no conflicting material claims."
+   },
+   {
+    "pair": 7,
+    "a": {
+     "mechanism": "spec mocks TopicRetriever.new/retrieve; controller enqueues retrieve_topic",
+     "trigger": "embed controller spec",
+     "consequence": "job args (user_id/embed_url) and loading template rendering unverified"
+    },
+    "b": {
+     "mechanism": "no-embed test mocks TopicRetriever.new with no argument matcher and never checks loading template render",
+     "trigger": "wrong embed_url passed, no_throttle staff flag dropped, best rendered instead of loading",
+     "consequence": "those regressions all pass undetected"
+    },
+    "material_differences": [
+     "B adds the no_throttle staff-flag contract as an unverified claim, absent from A",
+     "B adds best-vs-loading rendering confusion as a separate consequence"
+    ],
+    "same": false,
+    "confidence": 0.6,
+    "reason": "B is a compound report adding material claims (no_throttle staff flag, best-vs-loading rendering) not present in A."
+   },
+   {
+    "pair": 8,
+    "a": {
+     "mechanism": "spec mocks TopicRetriever.new/retrieve; controller enqueues retrieve_topic",
+     "trigger": "embed controller spec run",
+     "consequence": "mock-only test passes but verifies nothing real about enqueue args or template"
+    },
+    "b": {
+     "mechanism": "spec expects synchronous TopicRetriever call but controller only enqueues",
+     "trigger": "running the no-embed path spec",
+     "consequence": "the test fails (or proves nothing) — deterministic failure"
+    },
+    "material_differences": [
+     "A claims the test passes while verifying nothing; B claims the test fails",
+     "Outcome claims conflict"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "A and B make conflicting claims about whether the spec passes (silently green) or fails."
+   },
+   {
+    "pair": 9,
+    "a": {
+     "mechanism": "spec mocks TopicRetriever.new/retrieve; controller enqueues retrieve_topic",
+     "trigger": "embed controller spec",
+     "consequence": "job args and loading template rendering unverified"
+    },
+    "b": {
+     "mechanism": "spec passes only because queue_jobs test:false makes Jobs.enqueue run RetrieveTopic inline; never asserts render loading, args, or staff no_throttle; breaks if jobs queued",
+     "trigger": "queue_jobs setting change",
+     "consequence": "implicit coupling to test setting; spurious failure if jobs ever queued; contracts unasserted"
+    },
+    "material_differences": [
+     "B adds the queue_jobs test:false inline-execution mechanism, absent from A",
+     "B adds spurious-breakage-on-queueing consequence",
+     "B adds no_throttle staff flag claim"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "B adds a distinct mechanism (implicit queue_jobs coupling) and additional material claims absent from A."
+   },
+   {
+    "pair": 10,
+    "a": {
+     "mechanism": "spec mocks TopicRetriever.new/retrieve; controller enqueues retrieve_topic",
+     "trigger": "embed controller spec",
+     "consequence": "job args and loading template rendering unverified"
+    },
+    "b": {
+     "mechanism": "test mocks TopicRetriever.new and retrieve; real retrieval side effects (enqueue timing, redis throttle) never checked end-to-end",
+     "trigger": "running controller spec",
+     "consequence": "EmbedController#best to TopicRetriever interaction unverified end-to-end"
+    },
+    "material_differences": [
+     "B adds redis throttle side effects and enqueue timing as untested material claims"
+    ],
+    "same": false,
+    "confidence": 0.55,
+    "reason": "B adds end-to-end claims about redis throttle and enqueue timing side effects that A does not make; A's specific unverified items (job args, loading template) differ from B's."
+   },
+   {
+    "pair": 11,
+    "a": {
+     "mechanism": "spec mocks TopicRetriever.new/retrieve; controller enqueues retrieve_topic",
+     "trigger": "embed controller spec",
+     "consequence": "job enqueued user_id/embed_url args and loading template rendering unverified"
+    },
+    "b": {
+     "mechanism": "TopicRetriever.expects(:new) with no with(...) matcher",
+     "trigger": "embed controller spec",
+     "consequence": "controller→job→retriever argument passing (embed_url, user_id) completely unpinned"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.8,
+    "reason": "B is a subset/wording variant of A's claim that job arguments are never verified; no conflicting claims."
+   },
+   {
+    "pair": 12,
+    "a": {
+     "mechanism": "spec mocks TopicRetriever.new/retrieve; controller enqueues retrieve_topic",
+     "trigger": "embed controller spec",
+     "consequence": "job args and loading template rendering unverified"
+    },
+    "b": {
+     "mechanism": "test stubs TopicRetriever.new/retrieve and only asserts retrieve called; invalid_host?, retrieved_recently?, perform_retrieve never run",
+     "trigger": "embed controller spec",
+     "consequence": "retriever internals (invalid_host?, retrieved_recently?, perform_retrieve) unexercised"
+    },
+    "material_differences": [
+     "B claims retriever-internal methods (invalid_host?, retrieved_recently?, perform_retrieve) are unexercised — a different set of unverified behaviors than A's job-args/template claims",
+     "B frames the mock as verifying a job-enqueued call, A frames it as verifying nothing about the enqueue contract"
+    ],
+    "same": false,
+    "confidence": 0.6,
+    "reason": "B's material claim centers on unexercised retriever internals, which A does not claim; the untested behaviors differ."
+   },
+   {
+    "pair": 13,
+    "a": {
+     "mechanism": "spec mocks TopicRetriever.new/retrieve; controller enqueues retrieve_topic",
+     "trigger": "embed controller spec",
+     "consequence": "job args and loading template rendering unverified"
+    },
+    "b": {
+     "mechanism": "spec asserts TopicRetriever.new/retrieve while controller enqueues retrieve_topic; passes only incidentally",
+     "trigger": "embed controller spec",
+     "consequence": "job-argument contract never covered; no spec exists for Jobs::RetrieveTopic"
+    },
+    "material_differences": [
+     "B adds the absence of any spec for Jobs::RetrieveTopic — an additional material claim"
+    ],
+    "same": false,
+    "confidence": 0.55,
+    "reason": "B compounds A's subset with the additional claim that Jobs::RetrieveTopic has no spec at all."
+   },
+   {
+    "pair": 14,
+    "a": {
+     "mechanism": "spec mocks TopicRetriever.new/retrieve; controller enqueues retrieve_topic",
+     "trigger": "embed controller spec",
+     "consequence": "job args and loading template rendering unverified"
+    },
+    "b": {
+     "mechanism": "spec asserts TopicRetriever.new/retrieve are called, but controller enqueues Jobs::RetrieveTopic",
+     "trigger": "embed controller spec",
+     "consequence": "test exercises nothing real"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "B is a terse restatement of A's core claim; no additional or conflicting material claims."
+   },
+   {
+    "pair": 15,
+    "a": {
+     "mechanism": "spec mocks TopicRetriever.new/retrieve; controller enqueues retrieve_topic",
+     "trigger": "embed controller spec",
+     "consequence": "job args and loading template rendering unverified"
+    },
+    "b": {
+     "mechanism": "spec relies on queue_jobs test:false running RetrieveTopic inline to satisfy the TopicRetriever expectation",
+     "trigger": "queue_jobs setting; staff-derived no_throttle",
+     "consequence": "implicit coupling to setting; job args and staff no_throttle never asserted"
+    },
+    "material_differences": [
+     "B adds the queue_jobs test:false inline-execution dependency mechanism, absent from A",
+     "B adds the staff no_throttle derivation claim"
+    ],
+    "same": false,
+    "confidence": 0.65,
+    "reason": "B adds a distinct mechanism (implicit queue_jobs coupling) and the no_throttle claim not present in A."
+   },
+   {
+    "pair": 16,
+    "a": {
+     "mechanism": "spec mocks TopicRetriever.new/retrieve; controller enqueues retrieve_topic; test passes while verifying nothing",
+     "trigger": "embed controller spec",
+     "consequence": "job args and loading template rendering unverified"
+    },
+    "b": {
+     "mechanism": "spec requires synchronous TopicRetriever.new(...).retrieve but controller only calls Jobs.enqueue",
+     "trigger": "running the spec",
+     "consequence": "test deterministically fails"
+    },
+    "material_differences": [
+     "A implies the mock-based spec passes green; B claims the test deterministically fails — conflicting outcome claims"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "A and B make conflicting claims about the test outcome (silently passing vs deterministic failure)."
+   },
+   {
+    "pair": 17,
+    "a": {
+     "mechanism": "spec mocks TopicRetriever.new/retrieve; controller enqueues retrieve_topic",
+     "trigger": "embed controller spec",
+     "consequence": "job args and loading template rendering unverified (test green but vacuous)"
+    },
+    "b": {
+     "mechanism": "spec expects synchronous TopicRetriever invocation but implementation enqueues :retrieve_topic",
+     "trigger": "running the spec",
+     "consequence": "spec fails and does not test actual asynchronous behavior"
+    },
+    "material_differences": [
+     "B claims the spec fails; A's framing implies it passes while verifying nothing — conflicting outcome claims"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "Conflicting claims about whether the spec passes or fails."
+   },
+   {
+    "pair": 18,
+    "a": {
+     "mechanism": "spec mocks TopicRetriever.new/retrieve; controller enqueues retrieve_topic",
+     "trigger": "embed controller spec",
+     "consequence": "job args and loading template rendering unverified"
+    },
+    "b": {
+     "mechanism": "TopicRetriever.expects(:new).returns(retriever) fails because EmbedController#best enqueues retrieve_topic instead",
+     "trigger": "no-embed branch runs",
+     "consequence": "assertion fails; changed spec cannot verify asynchronous retrieval behavior"
+    },
+    "material_differences": [
+     "B claims the assertion fails (deterministic test failure); A describes a passing mock-only test verifying nothing — conflicting outcome claims"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "B asserts the test fails, whereas A's claim is that the mock-only test passes while verifying nothing."
+   },
+   {
+    "pair": 19,
+    "a": {
+     "mechanism": "spec mocks TopicRetriever.new/retrieve; controller enqueues retrieve_topic",
+     "trigger": "embed controller spec",
+     "consequence": "job args and loading template rendering unverified"
+    },
+    "b": {
+     "mechanism": "test expects direct TopicRetriever call but action enqueues :retrieve_topic",
+     "trigger": "running the spec",
+     "consequence": "test fails instead of verifying the delivered job"
+    },
+    "material_differences": [
+     "B claims the test fails; A's framing is a passing mock-only test — conflicting outcome claims"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "Conflicting claims about test outcome: B says the test fails; A describes a vacuously passing mock test."
+   },
+   {
+    "pair": 20,
+    "a": {
+     "mechanism": "spec mocks TopicRetriever.new/retrieve; controller enqueues retrieve_topic",
+     "trigger": "embed controller spec",
+     "consequence": "job args and loading template rendering unverified"
+    },
+    "b": {
+     "mechanism": "no-embed example expects removed synchronous TopicRetriever call while action enqueues :retrieve_topic",
+     "trigger": "running the no-embed example",
+     "consequence": "test fails against new enqueue path; loading response and job arguments never verified"
+    },
+    "material_differences": [
+     "B claims the test fails; A describes a passing mock-only test verifying nothing — conflicting outcome claims"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "B claims deterministic test failure, conflicting with A's implicit claim that the mock-based spec passes while verifying nothing."
+   }
+  ]
+ },
+ "usage": {
+  "glm-5.3-background": {
+   "input_tokens": 2927,
+   "cache_read_input_tokens": 384,
+   "cache_creation_input_tokens": 0,
+   "output_tokens": 4374,
+   "reasoning_output_tokens": 1158,
+   "cost_usd": 0.0,
+   "total_tokens": 8843
+  }
+ },
+ "status": "complete",
+ "error_type": null,
+ "elapsed_s": 26.295642852783203
+}

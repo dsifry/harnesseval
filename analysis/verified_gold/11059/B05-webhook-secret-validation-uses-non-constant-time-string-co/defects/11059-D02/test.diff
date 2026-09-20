@@ -1,0 +1,68 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+describe("app-credential webhook secret header", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.restoreAllMocks();
+  });
+
+  it("accepts a lowercase incoming header key even when CALCOM_WEBHOOK_HEADER_NAME has uppercase characters", async () => {
+    process.env.CALCOM_WEBHOOK_HEADER_NAME = "X-Calcom-Webhook-Secret";
+    process.env.CALCOM_WEBHOOK_SECRET = "test-secret";
+
+    vi.doMock("@calcom/lib/constants", () => ({
+      APP_CREDENTIAL_SHARING_ENABLED: true,
+    }));
+
+    vi.doMock("@calcom/prisma", () => ({
+      default: {
+        user: {
+          findUnique: vi.fn().mockResolvedValue(null),
+        },
+        app: {
+          findUnique: vi.fn(),
+        },
+        credential: {
+          findFirst: vi.fn(),
+          update: vi.fn(),
+          create: vi.fn(),
+        },
+      },
+    }));
+
+    vi.doMock("@calcom/lib/crypto", () => ({
+      symmetricDecrypt: vi.fn(),
+    }));
+
+    vi.doMock("@calcom/app-store/appStoreMetaData", () => ({
+      appStoreMetadata: {},
+    }));
+
+    const { default: handler } = await import("./app-credential");
+
+    // Node/Next lower-cases incoming header names
+    const req = {
+      headers: {
+        "x-calcom-webhook-secret": "test-secret",
+      },
+      body: {
+        userId: 1,
+        appSlug: "test-app",
+        keys: "encrypted",
+      },
+    } as any;
+
+    const json = vi.fn();
+    const status = vi.fn().mockReturnValue({ json });
+    const res = { status, json } as any;
+
+    await handler(req, res);
+
+    // The fixed code lower-cases the env var name before reading req.headers,
+    // so the secret check passes and the handler proceeds to the user lookup (404).
+    // The buggy code does a case-sensitive lookup, misses the header, and returns 403.
+    expect(status).not.toHaveBeenCalledWith(403);
+    expect(status).toHaveBeenCalledWith(404);
+    expect(json).toHaveBeenCalledWith({ message: "User not found" });
+  });
+});

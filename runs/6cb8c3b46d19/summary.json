@@ -1,0 +1,1490 @@
+{
+  "tp": 4,
+  "fp": 42,
+  "fn": 1,
+  "precision": 0.08695652173913043,
+  "recall": 0.8,
+  "n_findings": 49,
+  "n_golden": 5,
+  "tokens_in": 64762,
+  "tokens_out": 8245,
+  "wall_ms": 46130.41305541992,
+  "per_model_usage": {},
+  "total_cost_usd": 0.0,
+  "resolved_model": "glm-5.3-vision-background",
+  "adjudicated_precision": 0.4444444444444444,
+  "incremental_recall": 0.9444444444444444,
+  "n_bug_ungold": 13,
+  "n_important_non_bug": 24,
+  "n_true_hallucination": 5,
+  "n_unresolved": 0,
+  "n_real_ungold": 13,
+  "n_hallucination": 5,
+  "decomposition": {
+    "deterministic_tp": 0,
+    "llm_lens_tp": 4,
+    "deterministic_gate_recall": 0.0,
+    "llm_lens_recall": 0.8
+  },
+  "findings": [
+    {
+      "issue_text": "[ADVISORY] ProvideAnonymousDeviceService's signature changed from (usageStats, authBroker, anonStore anonstore.AnonStore, ...) to (..., sqlStore db.DB, ...), but the generated wire file (pkg/server/wire_gen.go, which is committed in this repo, not shown in the diff) still calls it with the old argument list, so the package fails to compile until wire is regenerated. Every CI build and local developer build breaks at compile time on the unchanged wire_gen.go call site (`ProvideAnonymousDeviceService(..., anonStore, ...)` passed as db.DB); the author must regenerate wire and include it in the PR.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] ProvideAnonDBStore's signature gained a required deviceLimit int64 parameter, but the diff shows no update to the wire registration (pkg/server/wire_server.go) or any other out-of-tree call site that constructs the store, so any remaining caller using the old two-arg form fails to compile. The wire provider set still declares `wire.Bind(new(anonstore.AnonStore), new(*anonstore.AnonDBStore))` / ProvideAnonDBStore; while wire can inject cfg-derived values, the committed wire_gen.go calls ProvideAnonDBStore(sqlStore) with one argument and stops compiling; also the repo pattern of registering the store separately now double-constructs the store (once via wire, once inline in ProvideAnonymousDeviceService), so the API endpoints in api.go and the tagging path in impl.go use two independent AnonDBStore instances.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] AnonymousDeviceLimit is declared as `int64` with json tag `anonymousDeviceLimit` and no omitempty, so when the limit is unset (0, the ini default from setting.go:device_limit MustInt64(0)) the DTO serializes the number 0, while the frontend type `anonymousDeviceLimit: number | undefined` (packages/grafana-data/src/types/config.ts:200) and the runtime default `anonymousDeviceLimit = undefined` (packages/grafana-runtime/src/config.ts:97) both model unset as undefined. Any frontend consumer doing `config.anonymousDeviceLimit === undefined` to detect 'no limit configured' gets 0 instead, and consumers treating 0 as a usable limit (limit of zero devices) behave as if anonymous access is fully device-blocked; the two representations of 'unset' diverge across the process boundary.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] TagDevice was moved from a background goroutine with its own 2-minute timeout onto the synchronous request path using the request-scoped context, so every anonymous authentication now performs the DB count (CountDevices) plus update/insert inline, and inherits the HTTP request's cancellation/lifetime instead of an independent one. Anonymous users on slow DBs see their login latency grow by the anon-device query round trips, and a request cancellation aborts the device tag mid-transaction where it previously completed; also the recover() guard is gone, so a panic inside TagDevice now propagates out of Authenticate and takes down the request handler (previously logged as a warning).",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The device-limit check (SELECT CountDevices) and the subsequent insert/update run as separate statements without a transaction or row lock, so the limit is enforced on a count taken before the write rather than atomically at the write. Under concurrent first-time anonymous requests with deviceLimit=N, N+ devices are inserted because each request counts N-1 rows before any peer commits; operators who set the limit as a hard cap for licensing get over-limit device rows, and the updateDevice fallback then rejects legitimate returning devices whose rows exist.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] anonymousDeviceLimit is added to the frontend GrafanaConfig surface but no code anywhere in the diff reads it, so the value crosses into every browser page with zero consumers. The frontend half of this change is inert: backend settings expose the limit but no UI can surface 'device limit reached' to anonymous users, so when CreateOrUpdateDevice returns ErrDeviceLimitReached the anonymous user gets only a generic auth failure with no explanation of the configured cap.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] updateDevice's WHERE clause requires updated_at BETWEEN (UpdatedAt-30d) AND (UpdatedAt+1min), so a device that exists but whose stored updated_at is older than 30 days yields rowsAffected==0 and is reported as ErrDeviceLimitReached even though it is a returning, under-limit device. An anonymous user returning after a 30-day absence during a full device table (limit reached) gets ErrDeviceLimitReached instead of having their device row refreshed, permanently locking them out until the nightly DeleteDevicesOlderThan cleanup runs.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] Authenticate returns the raw anonstore.ErrDeviceLimitReached to the authn broker, surfacing an internal store error to the anonymous request instead of a defined auth outcome. When device limit is hit, the anonymous client returns a non-nil error that authn treats as an authentication failure (likely a 500/internal error response), not a deliberate 'device rejected' 4xx; every anonymous request from a blocked device sees an opaque server error, and no test covers this client-level path.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] CreateOrUpdateDevice enforces the limit with a non-atomic CountDevices-then-insert sequence, so concurrent requests exceed the configured device limit. N simultaneous anonymous requests against an empty table with device_limit=1 all observe count < 1 and all insert, permanently exceeding the limit; the check provides no guarantee under Grafana's concurrent request load.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] updateDevice conflates 'device not updated within the window' with 'device limit reached', rejecting known devices on MySQL when the UPDATE is a no-op. On MySQL, RowsAffected is 0 when the new values equal the existing ones: with the limit reached, a returning device whose client_ip/user_agent/updated_at are identical at timestamp precision gets ErrDeviceLimitReached and is blocked despite being a known device; similarly a device last seen just over 30 days ago (updated_at outside the BETWEEN window) is blocked instead of expiring/being re-created.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] TagDevice was moved from a background goroutine with a 2-minute timeout onto the synchronous authentication path, and the panic recovery was removed. Every anonymous request now performs an inline DB read+write before a response is produced: a slow or contended database adds latency to all anonymous auth (hot-path regression), a canceled request context aborts tagging that previously always completed, and a panic inside TagDevice now takes down the request handler instead of being logged and swallowed.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] TestIntegrationBeyondDeviceLimit only exercises the store's limit rejection; no test covers the client/authn behavior, the returning-device update path, or limit boundary (count == limit vs count > limit). The most user-visible new behavior \u2014 an anonymous request being rejected at the authn layer with ErrDeviceLimitReached (client.go:45-47) \u2014 has zero coverage, so a regression that turns this into a swallowed log line or a hard 500 ships undetected; the test also never verifies that an already-known device still updates successfully when the limit is reached.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] AnonymousDeviceLimit is declared as a non-pointer int64 serialized unconditionally, while the frontend types declare it number | undefined, and no frontend code in the diff consumes the value. The frontend settings payload always carries anonymousDeviceLimit (including 0), contradicting the optional TS type, and the field is shipped to the browser with no reader anywhere in the diff \u2014 operators configuring device_limit get no UI feedback and the payload contract between Go DTO and TS type silently drifts.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] TagDevice was moved from an async, timeout-guarded goroutine onto the synchronous authentication path, so every anonymous request now blocks on a DB write and any transient DB error escalates from a logged warning to an authentication failure. The removed code ran TagDevice in a goroutine with a 2-minute timeout and swallowed all errors; the new code awaits it inline and returns the error to authn, so a slow or failed anon_device write (or updateDevice error) makes every anonymous login fail and adds DB round-trip latency (plus the added COUNT query when device_limit>0) to the hot auth path \u2014 the stated requirement was only a device limit, not turning tagging into an auth gate.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] The device limit is enforced with a non-atomic COUNT-then-INSERT sequence, so the configured limit is not actually enforced under concurrent requests. Two anonymous clients arriving concurrently when count == limit-1 both pass the count check and both insert/upsert, exceeding the configured device_limit; the invariant this PR exists to enforce (at most N devices) is violated by a simple race, and once exceeded the limit can never shrink because updates-only mode keeps the extra rows.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] The PR plumbs anonymousDeviceLimit through the entire frontend settings surface (GrafanaConfig type, GrafanaBootConfig, FrontendSettingsDTO, getFrontendSettings) with no frontend consumer anywhere in the diff. This is implementation work not traceable to the stated requirement (a server-side device limit); it ships an inert config field to every browser. Operators reading the settings DTO may assume the limit is frontend-enforced or configurable client-side; if no UI follows, the DTO field and TS types are dead weight that must be maintained across refactors. Either the consuming UI belongs in this PR or the frontend plumbing should be deleted.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] updateDevice's WHERE updated_at BETWEEN (now-30d) AND (now+1min) clause conflates 'device limit reached' with 'device record stale', returning ErrDeviceLimitReached for a returning device whose last update is older than 30 days. A device absent for 31 days (thus not counted in the limit window) that returns when the limit is full fails the BETWEEN predicate, and the client in client.go translates ErrDeviceLimitReached into an auth rejection with a misleading 'device limit reached' error, when semantically it is an expired-device case that should be treated as a fresh insert occupying a real slot. The client has no way to distinguish these and the log/API surfaces the wrong cause.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The added CountDevices call runs on every CreateOrUpdateDevice when device_limit > 0, adding an unconditional full-window COUNT query to the per-request anonymous tagging path that previously issued only a single upsert. On high-traffic anonymous deployments, every request now pays a COUNT over 30 days of anon_device rows (index scan on updated_at window) plus the upsert, doubling the write-path DB cost of anonymous auth; a reviewer should confirm the count query is indexed or hoisted behind the local cache added in impl.go.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] CreateOrUpdateDevice enforces the device limit with a check-then-insert (CountDevices followed by a separate INSERT) with no transaction, unique constraint, or atomic guard, so the limit is not actually enforced under concurrency. Under a burst of concurrent anonymous requests, every request reads count < limit and inserts, so the device count exceeds AnonymousDeviceLimit by as much as the number of concurrent requests; operators who set device_limit=N see more than N devices, defeating the feature's contract.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] updateDevice conflates 'the device does not exist (or its updated_at is outside the 30-day window)' with 'device limit reached' by treating rowsAffected==0 as ErrDeviceLimitReached. An anonymous device whose row exists but whose updated_at is older than anonymousDeviceExpiration (e.g. a device returning after >30 days, whose row has not yet been purged by the cleanup job) falls into the limit-reached branch, the UPDATE matches no rows, and the user gets a device-limit auth error even when the count check would have admitted them; the same path also returns the misleading error for any genuinely new device, so callers cannot distinguish 'blocked' from 'stale-but-valid'.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] TagDevice moved from an async goroutine with a 2-minute timeout to a synchronous call on the anonymous authentication path, adding per-request DB round trips (a COUNT plus an INSERT/UPDATE when device_limit>0) with no timeout or degradation. Every anonymous request now pays DB latency inline; when the database is slow or down, anonymous page loads stall or fail on the count query instead of degrading to fire-and-forget tagging as before \u2014 a hot-path regression and cascading-failure path with no fallback.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] When device_limit>0, every tagged anonymous request issues CountDevices over a 30-day updated_at range, which is a full-table scan unless an index on anon_device.updated_at exists. On high-traffic anonymous deployments the count runs per request (cache miss) and scans the whole growing anon_device table each time; operators enabling device_limit see a linear-in-table-size query cost multiplied by request rate.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] TagDevice changed from swallowing tagDeviceUI errors (log-and-continue) to returning them, a sentinel-meaning change with no audit of other callers besides the authn client. Any caller of TagDevice outside client.go (or added later) that previously relied on best-effort semantics now fails on transient DB errors even when the operator has not set a device limit, turning a non-critical analytics write into a request-failing operation; the client.go path handles only ErrDeviceLimitReached specially and other callers get raw errors.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The Go DTO always serializes anonymousDeviceLimit as an int64 (no omitempty, zero when unset) while the frontend contract declares number | undefined, so the two copies of the shape already disagree. Frontend consumers checking `config.anonymousDeviceLimit === undefined` to detect 'feature not configured' never see undefined \u2014 they see 0 \u2014 so any future code distinguishing 'disabled' from 'limit of zero' silently misbehaves, and the client/server schema copies drift from day one.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] updateDevice's WHERE clause uses a bare time.Minute fudge added to the device's own client-supplied-timestamp-derived UpdatedAt (rather than server time) as the upper window bound, an unexplained dimensioned magic number whose correctness depends on clock alignment between the timestamp writer and this query. If TagDevice ever sets UpdatedAt from a skewed source (or a future code path passes an older UpdatedAt), the +1-minute bound silently stops matching and every returning device is misclassified as over-limit; the unit/provenance of the fudge is unreviewable, so the next editor can widen or drop it without any test catching the change.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] Removing the fire-and-forget goroutine and returning ErrDeviceLimitReached from Authenticate converts anonymous device tagging from best-effort telemetry into a hard authentication gate, so hitting the device limit rejects anonymous users from Grafana entirely instead of just skipping the tag. An operator who sets device_limit sees every new anonymous session (and every existing device with stale updated_at) fail authentication with an error propagated out of the authn client \u2014 previously the same store failure was logged as a warning and access continued. This changes the objective from 'limit tracked devices' to 'deny anonymous access at the limit' without any indication the reviewer accepted that semantic shift.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] Tagging was deliberately made asynchronous (with panic recovery and a 2-minute timeout) to keep it off the auth critical path; this diff makes it synchronous on the request context and deletes the recover() guard and timeout. Every anonymous request now performs at least one synchronous COUNT query plus an INSERT/UPDATE before the identity is returned, adding DB latency to the anonymous login hot path; the removed timeout also means a hung DB connection now stalls the request instead of a background goroutine. Who gets bitten: any deployment with anonymous access enabled under load.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] updateDevice conflates 'device not found or not updated within the 30-day window' with 'device limit reached' by returning ErrDeviceLimitReached whenever rowsAffected == 0, so a known returning device whose last update is older than 30 days is rejected as if it were a new device. A loyal anonymous user returning after a 31-day absence gets an authentication error (via the new return path in client.go) even though their device already exists in the table and consuming no new slot \u2014 the diff's own test only covers the fresh-device case, so this regression ships silently.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] The limit check (SELECT COUNT) and the subsequent INSERT are two separate non-transactional statements, so N concurrent requests at count == limit-1 all pass the check and all insert, exceeding the configured limit. Under concurrent load the device count exceeds AnonymousDeviceLimit by up to (concurrency-1) rows per burst; operators relying on the limit as a hard cap get silently violated bounds.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] AnonymousDeviceLimit is added to the frontend settings payload and the GrafanaConfig type, but nothing in this diff (frontend or backend) reads anonymousDeviceLimit from the config. The field crosses the process boundary into every browser session with zero consumers \u2014 dead public API surface that must now be maintained for compatibility; if frontend consumption was the accepted intent, it did not ship in this PR.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] TagDevice now propagates the tagDeviceUI error to all callers after it was previously logged-and-swallowed, which also changes behavior for the non-UI tagging paths and any future PostLoginHook usage, not just the new device-limit flow. Any transient store error in tagDeviceUI (previously a debug log) now bubbles up to Authenticate and, per client.go, only ErrDeviceLimitReached is fatal today, but any new caller of TagDevice inherits fail-closed semantics; the change in error contract is broader than the device-limit intent.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] The device-limit check in CreateOrUpdateDevice is a non-atomic count-then-act sequence, so the limit is bypassable under concurrent anonymous requests. CountDevices and the subsequent insert run in separate sessions with no locking; N concurrent requests all read count < limit and all insert, so an attacker (or natural burst of anonymous traffic) exceeds cfg.AnonymousDeviceLimit by an arbitrary amount \u2014 the enforcement the feature promises silently fails exactly under load.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] An unauthenticated party can deliberately exhaust the device quota to deny anonymous access to all new visitors. Any anonymous client (no credentials required) can mint device IDs up to the configured limit; once the table holds `device_limit` rows updated within the 30-day window, every request from a device not already in the table returns ErrDeviceLimitReached, and client.go returns that error from Authenticate \u2014 a trivial, unauthenticated denial-of-service against the anonymous access service that operators will experience as 'anonymous login broken' for 30 days unless they raise the limit or purge the table.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] When deviceLimit > 0, every tagged anonymous request now issues an extra unconditional COUNT query (plus the update/insert) on the hot authentication path, replacing the previous fire-and-forget goroutine. Operators who set a device limit on a high-traffic anonymous deployment add a synchronous COUNT over the anon_device table (scanning rows within the 30-day window) to every anonymous request; on MySQL/Postgres without a covering index on updated_at this is a table-scan per request, a self-inflicted load/DoS amplifier the config knob does not warn about.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] TagDevice is now executed synchronously in Authenticate with the request context, and the panic-recovery the old goroutine provided was removed, so a storage-layer panic in TagDevice now takes down the request instead of being logged. The previous code wrapped TagDevice in a goroutine with an explicit recover() (the authors clearly expected panics there); the replacement calls it inline in the auth path with no recover, so a driver-level panic during tagging crashes the anonymous authentication request \u2014 availability regression relative to the code being replaced.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] TestIntegrationBeyondDeviceLimit exercises only the failure sentinel of the new updateDevice path and never tests the success branch (rowsAffected > 0, i.e. an existing device within the 30-day window is actually updated when the limit is reached). A regression in the UPDATE statement's WHERE clause (e.g. wrong time-window bounds causing every update of a legitimate returning device to return 0 rows and ErrDeviceLimitReached) would lock out all anonymous devices past the limit while every existing test still passes; operators with device_limit configured get repeat anonymous users rejected as new-device-joins with no test catching it.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The new error-propagation branch in TagDevice (impl.go line ~147, `return err` after tagDeviceUI failure) has no test that triggers it \u2014 every case in TestIntegrationDeviceService_tag uses valid requests and require.NoError, which was the correct assertion only under the old swallow-and-log contract. The changed contract \u2014 TagDevice errors now propagate to Anonymous.Authenticate and reject authentication (client.go) instead of being logged \u2014 is verified by no test in the diff; a future refactor reverting the `return err` (restoring the silent swallow) passes the whole suite, and the device-limit rejection feature becomes a silent no-op for the UI path.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] TestIntegrationBeyondDeviceLimit mutates and reuses the same Device pointer across both CreateOrUpdateDevice calls without asserting the first insert's stored state (no ListDevices/field assertions after the first call), so the test proves only that the second call errors, not that the limit logic was what caused it. If the pre-insert CountDevices query were broken (e.g. always returning a count >= limit, making every first-time create fall through to updateDevice and fail), the first require.NoError in this test would catch it, but a subtle off-by-one in the window bounds that only miscounts at boundaries escapes detection; checked database_test.go and impl_test.go \u2014 neither asserts stored device contents under a non-zero limit.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] The device limit is enforced with a check-then-act race: CountDevices and the subsequent insert/update run in separate statements with no unique constraint, transaction, or lock, so concurrent anonymous requests all read count < limit and all insert, exceeding the configured device_limit. Under concurrent load the limit is silently bypassed: an operator setting device_limit = N gets many more than N tracked devices, defeating the feature's guarantee; the count also grows monotonically afterward, so the update-only fallback never triggers and no error surfaces.",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] updateDevice treats RowsAffected()==0 as 'device limit reached', but on MySQL a matched row whose values are unchanged reports 0 affected rows (no clientFoundRows), so a returning device within the expiration window whose client_ip/user_agent/updated_at already equal the new values is falsely rejected with ErrDeviceLimitReached. Once the limit is reached, a legitimate existing anonymous device making a request with identical IP/user-agent within the same timestamp gets its authentication rejected with the device-limit error instead of being served, on any MySQL-backed deployment.",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] Returning ErrDeviceLimitReached from Authenticate makes any new anonymous device (a device_id not already in the table) fail authentication entirely, so anonymous users are locked out of Grafana rather than merely not being tracked once the configured device limit is reached. An operator setting auth.anonymous device_limit = 100 gets a hard denial-of-service for all anonymous visitors after the 100th distinct device, with the raw 'device limit reached' error surfaced through the authn pipeline (500-class response) instead of the dashboard being served anonymously; rolling back the config requires a restart and there is no path to re-admit devices other than waiting 30 days for expiration/cleanup.",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] updateDevice's WHERE clause (updated_at BETWEEN updated-30d AND updated+1min) cannot match rows older than 30 days, so when the limit is reached and an existing device's row is stale (cleanup job not yet run), the update affects 0 rows and returns ErrDeviceLimitReached \u2014 the row can neither be updated nor re-inserted. A single expired-but-not-yet-deleted row (device_limit = 1 case demonstrated in the new test with a shifted UpdatedAt) permanently blocks that device from authenticating until the DeleteDevicesOlderThan cleanup happens to run; if the anonymous cleanup job is disabled, the block never lifts.",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] TagDevice moved from a fire-and-forget background goroutine (previous code) to the synchronous authentication path, adding a COUNT over anon_device plus an UPDATE/INSERT to every uncached anonymous auth request. Every anonymous request not served by the 29-minute local cache now pays two synchronous DB round-trips in the auth critical path, and any transient DB error that was previously swallowed (Warn log) now fails the request; high-traffic public Grafana instances see added latency and a new hard dependency of anonymous auth on DB availability.",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] TagDevice's tagDeviceUI error was previously only logged (a.log.Debug) and TagDevice returned nil; the diff changes it to propagate the error, so any DB hiccup during tagging now bubbles up through Authenticate and rejects otherwise valid anonymous requests. Anonymous access availability is now coupled to a write to the anon_device tracking table \u2014 a table that is pure telemetry; a brief DB outage or lock contention on that table turns into anonymous login failures rather than degraded device statistics.",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The device-limit check is a non-atomic count-then-write: CountDevices runs in one statement and the insert/update in another, so concurrent requests interleave and the limit is not actually enforced under load. A burst of concurrent anonymous requests each observe count < deviceLimit and all insert, letting the device count exceed the configured cap with no error anywhere; operators relying on the limit are silently misled. The strongest counter-argument is that this is a soft limit and approximate enforcement is acceptable, but the stored count then feeds future decisions and permanently drifts above the limit, so the soft-limit defense only holds if drift is bounded, which it is not.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] TagDevice moved from a fire-and-forget goroutine with its own 2-minute timeout to a synchronous call on the auth request path using the request context, adding a COUNT over the 30-day anon_device window plus an UPSERT to every anonymous request that misses the local cache. Every uncached anonymous login now pays DB round-trips inline: with device_limit > 0 the CountDevices query runs on every cache miss, so DB latency or a slow anon_device table directly delays anonymous page loads; previously only the response lagged and the tag was eventually recorded. The counter-argument is that the local cache absorbs repeats, but first-hit and 29-minute-expiry requests still hit the DB synchronously, and with device_limit configured the count query is unconditional on that path.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] updateDevice reports ErrDeviceLimitReached for any rowsAffected == 0, including the case where the device row exists but its updated_at falls outside the BETWEEN (t-30d, t+1min) window, so the error text misdescribes the actual condition (stale device, not limit exhaustion). An operator debugging 'device limit reached' errors from the anonymous auth path cannot distinguish a genuinely exhausted limit from a user presenting an expired (>30-day-old) device cookie; the deny outcome is the same but the error content misdirects debugging of the rate-limit/retention interaction.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] AnonymousDeviceLimit is serialized as an always-present int64 (0 when unset) while the frontend contract GrafanaConfig.anonymousDeviceLimit is typed `number | undefined`, and GrafanaBootConfig initializes it to undefined, so the wire value and the client-side type/domain disagree. Frontend code that follows the declared type and branches on `anonymousDeviceLimit` truthiness or undefined to detect 'no limit configured' will treat a configured limit of... actually 0 means unset server-side too, but any consumer reading the type expects undefined for unset and receives 0, and a limit configured to a truthy-but-low value vs absent cannot be distinguished the way the type promises, leading to dead `undefined` branches in the frontend.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] TagDevice now propagates tagDeviceUI errors to the caller (return err) instead of only logging them, and the Anonymous auth client returns ErrDeviceLimitReached as a hard authentication failure, so a store-side condition during device tagging converts what was previously a successful anonymous login into a rejected request. When the device limit is reached, anonymous users with no prior device row receive an auth error instead of service; combined with the count-then-update race this failure mode is reachable even for devices that were just created moments earlier. The counter-argument is that denying new devices is the feature's intent, but the same error also fires for existing rows outside the updated_at window (see updateDevice finding), so real users get rejected where the feature intends only new-device denial.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    }
+  ],
+  "goldens": [
+    {
+      "comment": "Race condition: Multiple concurrent requests could pass the device count check simultaneously and create devices beyond the limit. Consider using a database transaction or lock.",
+      "severity": "High",
+      "category": "concurrency"
+    },
+    {
+      "comment": "Anonymous authentication now fails entirely if anonDeviceService.TagDevice returns ErrDeviceLimitReached. Previously, device tagging was asynchronous and non-blocking. This change prevents anonymous users from authenticating when the device limit is reached.",
+      "severity": "Medium",
+      "category": "bug"
+    },
+    {
+      "comment": "The updateDevice function returns ErrDeviceLimitReached when rowsAffected == 0, but zero affected rows means the device doesn't exist or falls outside the time window, not that a limit was reached.",
+      "severity": "Low",
+      "category": "doc_defect"
+    },
+    {
+      "comment": "Time window calculation inconsistency: Using device.UpdatedAt.UTC().Add(-anonymousDeviceExpiration) as the lower bound but device.UpdatedAt as the current time may not match the intended logic. Consider using time.Now().UTC() consistently.",
+      "severity": "Low",
+      "category": "bug"
+    },
+    {
+      "comment": "The `tagDeviceUI` function populates the local cache with the device ID before the `CreateOrUpdateDevice` call. If `ErrDeviceLimitReached` is returned, the cache entry remains set, allowing subsequent requests to bypass the device limit until the cache expires after 29 minutes.",
+      "severity": "High",
+      "category": "bug"
+    }
+  ],
+  "per_golden_matches": [
+    {
+      "golden_comment": "Race condition: Multiple concurrent requests could pass the device count check simultaneously and create devices beyond the limit. Consider using a database transaction or lock.",
+      "severity": "High",
+      "category": "concurrency",
+      "matched_candidate": "[BUG] CreateOrUpdateDevice enforces the limit with a non-atomic CountDevices-then-insert sequence, so concurrent requests exceed the configured device limit. N simultaneous anonymous requests against an empty table with device_limit=1 all observe count < 1 and all insert, permanently exceeding the limit; the check provides no guarantee under Grafana's concurrent request load.",
+      "confidence": 0.97,
+      "reasoning": "The candidate describes the same race condition: a non-atomic count-then-insert sequence allowing concurrent requests to bypass the device limit and insert too many devices, matching the golden comment\u2019s concern and suggested mitigation (transaction/lock)."
+    },
+    {
+      "golden_comment": "Anonymous authentication now fails entirely if anonDeviceService.TagDevice returns ErrDeviceLimitReached. Previously, device tagging was asynchronous and non-blocking. This change prevents anonymous users from authenticating when the device limit is reached.",
+      "severity": "Medium",
+      "category": "bug",
+      "matched_candidate": "[BUG] Removing the fire-and-forget goroutine and returning ErrDeviceLimitReached from Authenticate converts anonymous device tagging from best-effort telemetry into a hard authentication gate, so hitting the device limit rejects anonymous users from Grafana entirely instead of just skipping the tag. An operator who sets device_limit sees every new anonymous session (and every existing device with stale updated_at) fail authentication with an error propagated out of the authn client \u2014 previously the same store failure was logged as a warning and access continued. This changes the objective from 'limit tracked devices' to 'deny anonymous access at the limit' without any indication the reviewer accepted that semantic shift.",
+      "confidence": 0.97,
+      "reasoning": "The candidate flags that making anonDeviceService.TagDevice synchronous and propagating ErrDeviceLimitReached turns device tagging into a hard authentication failure, blocking anonymous authentication when the device limit is reached\u2014exactly the behavior change described in the golden comment."
+    },
+    {
+      "golden_comment": "The updateDevice function returns ErrDeviceLimitReached when rowsAffected == 0, but zero affected rows means the device doesn't exist or falls outside the time window, not that a limit was reached.",
+      "severity": "Low",
+      "category": "doc_defect",
+      "matched_candidate": "[BUG] updateDevice conflates 'device not found or not updated within the 30-day window' with 'device limit reached' by returning ErrDeviceLimitReached whenever rowsAffected == 0, so a known returning device whose last update is older than 30 days is rejected as if it were a new device. A loyal anonymous user returning after a 31-day absence gets an authentication error (via the new return path in client.go) even though their device already exists in the table and consuming no new slot \u2014 the diff's own test only covers the fresh-device case, so this regression ships silently.",
+      "confidence": 0.96,
+      "reasoning": "The candidate flags the same core bug: updateDevice treats rowsAffected==0 as ErrDeviceLimitReached, but 0 affected rows can mean the device doesn\u2019t exist or doesn\u2019t meet the 30-day time-window condition (e.g., last update too old), not that a device limit was reached. It explicitly calls out the time-window case causing an existing device to be rejected as if new, matching the golden issue."
+    },
+    {
+      "golden_comment": "Time window calculation inconsistency: Using device.UpdatedAt.UTC().Add(-anonymousDeviceExpiration) as the lower bound but device.UpdatedAt as the current time may not match the intended logic. Consider using time.Now().UTC() consistently.",
+      "severity": "Low",
+      "category": "bug",
+      "matched_candidate": "[ADVISORY] updateDevice's WHERE clause requires updated_at BETWEEN (UpdatedAt-30d) AND (UpdatedAt+1min), so a device that exists but whose stored updated_at is older than 30 days yields rowsAffected==0 and is reported as ErrDeviceLimitReached even though it is a returning, under-limit device. An anonymous user returning after a 30-day absence during a full device table (limit reached) gets ErrDeviceLimitReached instead of having their device row refreshed, permanently locking them out until the nightly DeleteDevicesOlderThan cleanup runs.",
+      "confidence": 0.86,
+      "reasoning": "Both point to the same underlying flaw: the update query\u2019s time window is anchored on the device\u2019s existing UpdatedAt value (e.g., UpdatedAt-30d .. UpdatedAt+1min) rather than consistently using the current time (time.Now().UTC()). This can cause devices with stale updated_at timestamps to fall outside the window and not be updated, leading to incorrect behavior."
+    },
+    {
+      "golden_comment": "The `tagDeviceUI` function populates the local cache with the device ID before the `CreateOrUpdateDevice` call. If `ErrDeviceLimitReached` is returned, the cache entry remains set, allowing subsequent requests to bypass the device limit until the cache expires after 29 minutes.",
+      "severity": "High",
+      "category": "bug"
+    }
+  ],
+  "adjudication_records": [
+    {
+      "issue_text": "[ADVISORY] ProvideAnonymousDeviceService's signature changed from (usageStats, authBroker, anonStore anonstore.AnonStore, ...) to (..., sqlStore db.DB, ...), but the generated wire file (pkg/server/wire_gen.go, which is committed in this repo, not shown in the diff) still calls it with the old argument list, so the package fails to compile until wire is regenerated. Every CI build and local developer build breaks at compile time on the unchanged wire_gen.go call site (`ProvideAnonymousDeviceService(..., anonStore, ...)` passed as db.DB); the author must regenerate wire and include it in the PR.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "hallucination",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "hallucination",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.4,
+        "rationale": "The diff does show that `ProvideAnonymousDeviceService`\u2019s signature changed to accept `sqlStore db.DB` (and now constructs `anonStore` internally), which could require updating call sites. However, the finding\u2019s core claim\u2014that the committed generated file `pkg/server/wire_gen.go` still calls it with the old `(\u2026, anonStore, \u2026)` argument list and therefore the repo won\u2019t compile\u2014cannot be verified from the provided diff because `wire_gen.go` is not shown/changed here. The diff alone only demonstrates the signature change and some updated tests, not an actual broken call site.",
+        "diff_context_hash": "7b5e7fb56e70e08bf730044936caeed535f338b3"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] ProvideAnonDBStore's signature gained a required deviceLimit int64 parameter, but the diff shows no update to the wire registration (pkg/server/wire_server.go) or any other out-of-tree call site that constructs the store, so any remaining caller using the old two-arg form fails to compile. The wire provider set still declares `wire.Bind(new(anonstore.AnonStore), new(*anonstore.AnonDBStore))` / ProvideAnonDBStore; while wire can inject cfg-derived values, the committed wire_gen.go calls ProvideAnonDBStore(sqlStore) with one argument and stops compiling; also the repo pattern of registering the store separately now double-constructs the store (once via wire, once inline in ProvideAnonymousDeviceService), so the API endpoints in api.go and the tagging path in impl.go use two independent AnonDBStore instances.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "hallucination",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "hallucination",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.6,
+        "rationale": "While `ProvideAnonDBStore` does gain a new required `deviceLimit int64` parameter in the diff, the finding\u2019s concrete claims about broken wire registration (`pkg/server/wire_server.go`, `wire_gen.go` calling `ProvideAnonDBStore(sqlStore)`), and about \u201cdouble-constructing\u201d the store via wire plus inline construction, are not verifiable from the provided diff. In the shown changes, `ProvideAnonymousDeviceService` was refactored to accept `sqlStore db.DB` (not an `anonStore`) and it constructs exactly one store (`anonstore.ProvideAnonDBStore(sqlStore, cfg.AnonymousDeviceLimit)`) and passes that same instance to the API (`api.NewAnonDeviceServiceAPI(cfg, a.anonStore, ...)`), so the \u201ctwo independent AnonDBStore instances\u201d claim is contradicted by the diff. Any remaining out-of-tree/other-file call sites may exist, but they are not shown here.",
+        "diff_context_hash": "7b5e7fb56e70e08bf730044936caeed535f338b3"
+      }
+    },
+    {
+      "issue_text": "[BUG] AnonymousDeviceLimit is declared as `int64` with json tag `anonymousDeviceLimit` and no omitempty, so when the limit is unset (0, the ini default from setting.go:device_limit MustInt64(0)) the DTO serializes the number 0, while the frontend type `anonymousDeviceLimit: number | undefined` (packages/grafana-data/src/types/config.ts:200) and the runtime default `anonymousDeviceLimit = undefined` (packages/grafana-runtime/src/config.ts:97) both model unset as undefined. Any frontend consumer doing `config.anonymousDeviceLimit === undefined` to detect 'no limit configured' gets 0 instead, and consumers treating 0 as a usable limit (limit of zero devices) behave as if anonymous access is fully device-blocked; the two representations of 'unset' diverge across the process boundary.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.62,
+        "rationale": "Diff shows backend always serializes `AnonymousDeviceLimit` as an `int64` field with JSON tag `anonymousDeviceLimit` and no `omitempty` (FrontendSettingsDTO), and it is always set from `cfg.AnonymousDeviceLimit`, which defaults to `MustInt64(0)` when unset. So the frontend will receive `0` rather than `undefined`, while the TS config models it as `number | undefined` and GrafanaBootConfig defaults it to `undefined`. This is a verifiable cross-boundary representation mismatch for the \u201cunset\u201d state introduced by the diff.",
+        "diff_context_hash": "7b5e7fb56e70e08bf730044936caeed535f338b3"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] TagDevice was moved from a background goroutine with its own 2-minute timeout onto the synchronous request path using the request-scoped context, so every anonymous authentication now performs the DB count (CountDevices) plus update/insert inline, and inherits the HTTP request's cancellation/lifetime instead of an independent one. Anonymous users on slow DBs see their login latency grow by the anon-device query round trips, and a request cancellation aborts the device tag mid-transaction where it previously completed; also the recover() guard is gone, so a panic inside TagDevice now propagates out of Authenticate and takes down the request handler (previously logged as a warning).",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.86,
+        "rationale": "The diff clearly changes TagDevice from an async goroutine with its own `context.WithTimeout(context.Background(), 2*time.Minute)` and a `recover()` guard (removed from `pkg/services/anonymous/anonimpl/client.go`) to a synchronous call `a.anonDeviceService.TagDevice(ctx, ...)` on the request path. The anon-store logic now can do an inline `CountDevices(...)` before insert/update when `deviceLimit > 0` (`CreateOrUpdateDevice` in `anonstore/database.go`). This can increase request latency and makes the tagging work subject to request-context cancellation, and the explicit panic recovery in the goroutine is gone. These are real, diff-grounded behavioral/architecture/perf concerns, but not a provable functional defect from the diff alone (could be intended).",
+        "diff_context_hash": "7b5e7fb56e70e08bf730044936caeed535f338b3"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The device-limit check (SELECT CountDevices) and the subsequent insert/update run as separate statements without a transaction or row lock, so the limit is enforced on a count taken before the write rather than atomically at the write. Under concurrent first-time anonymous requests with deviceLimit=N, N+ devices are inserted because each request counts N-1 rows before any peer commits; operators who set the limit as a hard cap for licensing get over-limit device rows, and the updateDevice fallback then rejects legitimate returning devices whose rows exist.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "unjudged",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "unjudged",
+        "adjudicating_judge": null,
+        "confidence": null,
+        "rationale": null,
+        "diff_context_hash": "7b5e7fb56e70e08bf730044936caeed535f338b3"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] anonymousDeviceLimit is added to the frontend GrafanaConfig surface but no code anywhere in the diff reads it, so the value crosses into every browser page with zero consumers. The frontend half of this change is inert: backend settings expose the limit but no UI can surface 'device limit reached' to anonymous users, so when CreateOrUpdateDevice returns ErrDeviceLimitReached the anonymous user gets only a generic auth failure with no explanation of the configured cap.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "unjudged",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "unjudged",
+        "adjudicating_judge": null,
+        "confidence": null,
+        "rationale": null,
+        "diff_context_hash": "7b5e7fb56e70e08bf730044936caeed535f338b3"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] updateDevice's WHERE clause requires updated_at BETWEEN (UpdatedAt-30d) AND (UpdatedAt+1min), so a device that exists but whose stored updated_at is older than 30 days yields rowsAffected==0 and is reported as ErrDeviceLimitReached even though it is a returning, under-limit device. An anonymous user returning after a 30-day absence during a full device table (limit reached) gets ErrDeviceLimitReached instead of having their device row refreshed, permanently locking them out until the nightly DeleteDevicesOlderThan cleanup runs.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": [
+        "Time window calculation inconsistency: Using device.UpdatedAt.UTC().Add(-anonymousDeviceExpiration) as the lower bound but device.UpdatedAt as the current time may not match the intended logic. Consider using time.Now().UTC() consistently."
+      ],
+      "primary_judge_verdict": "matched",
+      "primary_judge": "gpt-5.2",
+      "primary_judge_confidence": 0.86,
+      "primary_judge_reasoning": "Both point to the same underlying flaw: the update query\u2019s time window is anchored on the device\u2019s existing UpdatedAt value (e.g., UpdatedAt-30d .. UpdatedAt+1min) rather than consistently using the current time (time.Now().UTC()). This can cause devices with stale updated_at timestamps to fall outside the window and not be updated, leading to incorrect behavior.",
+      "adjudication": {
+        "verdict": "matched",
+        "adjudicating_judge": null,
+        "confidence": null,
+        "rationale": null,
+        "diff_context_hash": "7b5e7fb56e70e08bf730044936caeed535f338b3"
+      }
+    },
+    {
+      "issue_text": "[BUG] Authenticate returns the raw anonstore.ErrDeviceLimitReached to the authn broker, surfacing an internal store error to the anonymous request instead of a defined auth outcome. When device limit is hit, the anonymous client returns a non-nil error that authn treats as an authentication failure (likely a 500/internal error response), not a deliberate 'device rejected' 4xx; every anonymous request from a blocked device sees an opaque server error, and no test covers this client-level path.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "unjudged",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "unjudged",
+        "adjudicating_judge": null,
+        "confidence": null,
+        "rationale": null,
+        "diff_context_hash": "7b5e7fb56e70e08bf730044936caeed535f338b3"
+      }
+    },
+    {
+      "issue_text": "[BUG] CreateOrUpdateDevice enforces the limit with a non-atomic CountDevices-then-insert sequence, so concurrent requests exceed the configured device limit. N simultaneous anonymous requests against an empty table with device_limit=1 all observe count < 1 and all insert, permanently exceeding the limit; the check provides no guarantee under Grafana's concurrent request load.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": [
+        "Race condition: Multiple concurrent requests could pass the device count check simultaneously and create devices beyond the limit. Consider using a database transaction or lock."
+      ],
+      "primary_judge_verdict": "matched",
+      "primary_judge": "gpt-5.2",
+      "primary_judge_confidence": 0.97,
+      "primary_judge_reasoning": "The candidate describes the same race condition: a non-atomic count-then-insert sequence allowing concurrent requests to bypass the device limit and insert too many devices, matching the golden comment\u2019s concern and suggested mitigation (transaction/lock).",
+      "adjudication": {
+        "verdict": "matched",
+        "adjudicating_judge": null,
+        "confidence": null,
+        "rationale": null,
+        "diff_context_hash": "7b5e7fb56e70e08bf730044936caeed535f338b3"
+      }
+    },
+    {
+      "issue_text": "[BUG] updateDevice conflates 'device not updated within the window' with 'device limit reached', rejecting known devices on MySQL when the UPDATE is a no-op. On MySQL, RowsAffected is 0 when the new values equal the existing ones: with the limit reached, a returning device whose client_ip/user_agent/updated_at are identical at timestamp precision gets ErrDeviceLimitReached and is blocked despite being a known device; similarly a device last seen just over 30 days ago (updated_at outside the BETWEEN window) is blocked instead of expiring/being re-created.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.78,
+        "rationale": "In `updateDevice` (pkg/services/anonymous/anonimpl/anonstore/database.go), the code treats `rowsAffected == 0` from the `UPDATE anon_device ... WHERE device_id = ? AND updated_at BETWEEN ? AND ?` as `ErrDeviceLimitReached`. But `rowsAffected == 0` can also mean (a) the device exists but its `updated_at` is outside the BETWEEN window, or (b) the UPDATE is a no-op in some DBs/drivers when values are unchanged. Since `CreateOrUpdateDevice` calls `updateDevice` specifically when the limit is reached, this conflates \u201ccannot update due to matching/window/no-op\u201d with \u201climit reached\u201d and can incorrectly reject a known device instead of expiring/recreating or treating it as updated.",
+        "diff_context_hash": "7b5e7fb56e70e08bf730044936caeed535f338b3"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] TagDevice was moved from a background goroutine with a 2-minute timeout onto the synchronous authentication path, and the panic recovery was removed. Every anonymous request now performs an inline DB read+write before a response is produced: a slow or contended database adds latency to all anonymous auth (hot-path regression), a canceled request context aborts tagging that previously always completed, and a panic inside TagDevice now takes down the request handler instead of being logged and swallowed.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.77,
+        "rationale": "The diff shows `Anonymous.Authenticate` no longer spawns a background goroutine with `context.WithTimeout(context.Background(), 2*time.Minute)` and a `recover()` wrapper. Instead it calls `a.anonDeviceService.TagDevice(ctx, ...)` synchronously on the request path and returns an error on `anonstore.ErrDeviceLimitReached` (pkg/services/anonymous/anonimpl/client.go). Since `TagDevice` ultimately persists device info via the store (and in this diff the store adds a `CountDevices` check and conditional `UPDATE`/`INSERT` logic in `CreateOrUpdateDevice`), anonymous auth can now incur inline DB work and can be aborted if `ctx` is canceled, whereas before tagging was decoupled from request completion. The panic-recovery removal is also verifiable (the `defer recover` block was deleted), but whether an upstream middleware recovers panics is not shown, so \u201ctakes down the request handler\u201d is a plausible risk rather than a guaranteed defect. Overall this is a concrete behavioral/architecture regression concern grounded in the diff, not a strictly provable correctness bug from the diff alone.",
+        "diff_context_hash": "7b5e7fb56e70e08bf730044936caeed535f338b3"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] TestIntegrationBeyondDeviceLimit only exercises the store's limit rejection; no test covers the client/authn behavior, the returning-device update path, or limit boundary (count == limit vs count > limit). The most user-visible new behavior \u2014 an anonymous request being rejected at the authn layer with ErrDeviceLimitReached (client.go:45-47) \u2014 has zero coverage, so a regression that turns this into a swallowed log line or a hard 500 ships undetected; the test also never verifies that an already-known device still updates successfully when the limit is reached.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.87,
+        "rationale": "The diff introduces user-visible authn behavior: `Anonymous.Authenticate` now calls `TagDevice` synchronously and returns an error when it is `anonstore.ErrDeviceLimitReached` (client.go, new `errors.Is(..., anonstore.ErrDeviceLimitReached)` branch). The only added test, `TestIntegrationBeyondDeviceLimit`, exercises only `AnonDBStore.CreateOrUpdateDevice` rejecting a *new* device when `count >= deviceLimit`, and it does not cover (a) the authn/client propagation behavior, (b) the \u201creturning device\u201d update path (`updateDevice`) succeeding when limit is reached, or (c) boundary distinctions beyond `count >= limit`. This is a concrete, diff-grounded test gap for newly added nontrivial logic, not a proven functional defect in the diff itself.",
+        "diff_context_hash": "7b5e7fb56e70e08bf730044936caeed535f338b3"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] AnonymousDeviceLimit is declared as a non-pointer int64 serialized unconditionally, while the frontend types declare it number | undefined, and no frontend code in the diff consumes the value. The frontend settings payload always carries anonymousDeviceLimit (including 0), contradicting the optional TS type, and the field is shipped to the browser with no reader anywhere in the diff \u2014 operators configuring device_limit get no UI feedback and the payload contract between Go DTO and TS type silently drifts.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.72,
+        "rationale": "The diff adds `AnonymousDeviceLimit` to the Go `FrontendSettingsDTO` as a non-pointer `int64` (`json:\"anonymousDeviceLimit\"`), and it is always populated in `getFrontendSettings` from `hs.Cfg.AnonymousDeviceLimit` (defaulted via `MustInt64(0)`), so the JSON payload will always include a number (including `0`). On the TS side, `GrafanaConfig` declares `anonymousDeviceLimit: number | undefined` and `GrafanaBootConfig` initializes it to `undefined`, which is a contract/type drift (TS suggests optional/possibly absent, but Go always sends it). This is not a clear runtime defect, but it is a concrete API/typing inconsistency introduced by the change. The claim that \"no frontend code consumes the value\" cannot be verified strictly from this diff alone (it may exist elsewhere), but the payload/type mismatch is verifiable here.",
+        "diff_context_hash": "7b5e7fb56e70e08bf730044936caeed535f338b3"
+      }
+    },
+    {
+      "issue_text": "[BUG] TagDevice was moved from an async, timeout-guarded goroutine onto the synchronous authentication path, so every anonymous request now blocks on a DB write and any transient DB error escalates from a logged warning to an authentication failure. The removed code ran TagDevice in a goroutine with a 2-minute timeout and swallowed all errors; the new code awaits it inline and returns the error to authn, so a slow or failed anon_device write (or updateDevice error) makes every anonymous login fail and adds DB round-trip latency (plus the added COUNT query when device_limit>0) to the hot auth path \u2014 the stated requirement was only a device limit, not turning tagging into an auth gate.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.74,
+        "rationale": "The diff does move tagging onto the synchronous auth path: `Anonymous.Authenticate` removes the goroutine/timeout and now calls `a.anonDeviceService.TagDevice(ctx, ...)` inline (pkg/services/anonymous/anonimpl/client.go). That can add latency to the hot authentication path and, when `AnonymousDeviceLimit>0`, `CreateOrUpdateDevice` now does an extra `CountDevices` query and may run an `UPDATE` (pkg/services/anonymous/anonimpl/anonstore/database.go). However, the finding overstates failure semantics: `Authenticate` only returns an error when `errors.Is(err, anonstore.ErrDeviceLimitReached)`; other TagDevice/DB errors are still logged and authentication proceeds. So this is a valid performance/behavioral concern, but not a clearly verifiable correctness bug as stated.",
+        "diff_context_hash": "7b5e7fb56e70e08bf730044936caeed535f338b3"
+      }
+    },
+    {
+      "issue_text": "[BUG] The device limit is enforced with a non-atomic COUNT-then-INSERT sequence, so the configured limit is not actually enforced under concurrent requests. Two anonymous clients arriving concurrently when count == limit-1 both pass the count check and both insert/upsert, exceeding the configured device_limit; the invariant this PR exists to enforce (at most N devices) is violated by a simple race, and once exceeded the limit can never shrink because updates-only mode keeps the extra rows.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.86,
+        "rationale": "In `AnonDBStore.CreateOrUpdateDevice`, enforcement is implemented as `CountDevices(...)` followed by an insert/upsert path when `count < s.deviceLimit`. This check and the subsequent insert/upsert are not performed atomically (no shared transaction/locking across the count and the write), so concurrent requests can both observe `count == limit-1` and both proceed to create, exceeding `deviceLimit` despite it being configured. The diff shows the COUNT-then-write sequence and no concurrency control around it, so the limit is not strictly enforced under contention.",
+        "diff_context_hash": "7b5e7fb56e70e08bf730044936caeed535f338b3"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The PR plumbs anonymousDeviceLimit through the entire frontend settings surface (GrafanaConfig type, GrafanaBootConfig, FrontendSettingsDTO, getFrontendSettings) with no frontend consumer anywhere in the diff. This is implementation work not traceable to the stated requirement (a server-side device limit); it ships an inert config field to every browser. Operators reading the settings DTO may assume the limit is frontend-enforced or configurable client-side; if no UI follows, the DTO field and TS types are dead weight that must be maintained across refactors. Either the consuming UI belongs in this PR or the frontend plumbing should be deleted.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.86,
+        "rationale": "The diff clearly adds `anonymousDeviceLimit` to frontend-facing config surfaces: `GrafanaConfig` (TS), `GrafanaBootConfig`, `FrontendSettingsDTO` (`json:\"anonymousDeviceLimit\"`), and plumbs it via `getFrontendSettings` from `hs.Cfg.AnonymousDeviceLimit`. In the same diff, the actual enforcement is server-side in `AnonDBStore` (`deviceLimit int64`, `CreateOrUpdateDevice` checks `CountDevices` and can return `ErrDeviceLimitReached`). There is no corresponding frontend consumer shown anywhere in the diff, so the field is effectively unused on the client side and increases API/typing surface area without demonstrated need. This is a concrete scope/maintenance concern grounded in the changes, not a functional defect by itself.",
+        "diff_context_hash": "7b5e7fb56e70e08bf730044936caeed535f338b3"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] updateDevice's WHERE updated_at BETWEEN (now-30d) AND (now+1min) clause conflates 'device limit reached' with 'device record stale', returning ErrDeviceLimitReached for a returning device whose last update is older than 30 days. A device absent for 31 days (thus not counted in the limit window) that returns when the limit is full fails the BETWEEN predicate, and the client in client.go translates ErrDeviceLimitReached into an auth rejection with a misleading 'device limit reached' error, when semantically it is an expired-device case that should be treated as a fresh insert occupying a real slot. The client has no way to distinguish these and the log/API surfaces the wrong cause.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.62,
+        "rationale": "The diff shows `updateDevice` does `UPDATE ... WHERE device_id = ? AND updated_at BETWEEN ? AND ?` (with bounds computed from `device.UpdatedAt`), and returns `ErrDeviceLimitReached` when `RowsAffected()==0`. When `CreateOrUpdateDevice` is in the `count >= s.deviceLimit` branch, a device record that exists but has `updated_at` older than the 30-day window will fail the `BETWEEN` predicate, yield 0 affected rows, and be reported as `ErrDeviceLimitReached`. `client.go` then treats `ErrDeviceLimitReached` specially by returning it (auth rejection). This does conflate \u201cno matching row due to staleness/missing record\u201d with \u201climit reached\u201d at the error-reporting level, making the surfaced reason ambiguous/misleading. However, the diff alone doesn\u2019t establish the intended product semantics (whether a >30d-stale device should be allowed to re-register when the limit is full), so it\u2019s more an edge-case/semantics concern than a definitively verifiable defect.",
+        "diff_context_hash": "7b5e7fb56e70e08bf730044936caeed535f338b3"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The added CountDevices call runs on every CreateOrUpdateDevice when device_limit > 0, adding an unconditional full-window COUNT query to the per-request anonymous tagging path that previously issued only a single upsert. On high-traffic anonymous deployments, every request now pays a COUNT over 30 days of anon_device rows (index scan on updated_at window) plus the upsert, doubling the write-path DB cost of anonymous auth; a reviewer should confirm the count query is indexed or hoisted behind the local cache added in impl.go.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.83,
+        "rationale": "In `pkg/services/anonymous/anonimpl/anonstore/database.go`, `CreateOrUpdateDevice` now executes `s.CountDevices(...)` on every call when `s.deviceLimit > 0` (before the upsert logic). This is an additional DB query over a 30-day `updated_at` window (`anonymousDeviceExpiration`) that did not exist previously, so it can increase per-tagging DB load in anonymous-heavy setups. The diff does not show any indexing/optimization or caching around this count at the store level; the existing service-level local cache may reduce calls, but the count still runs for every uncached tag. This is a concrete performance/architecture concern, not a correctness defect.",
+        "diff_context_hash": "7b5e7fb56e70e08bf730044936caeed535f338b3"
+      }
+    },
+    {
+      "issue_text": "[BUG] CreateOrUpdateDevice enforces the device limit with a check-then-insert (CountDevices followed by a separate INSERT) with no transaction, unique constraint, or atomic guard, so the limit is not actually enforced under concurrency. Under a burst of concurrent anonymous requests, every request reads count < limit and inserts, so the device count exceeds AnonymousDeviceLimit by as much as the number of concurrent requests; operators who set device_limit=N see more than N devices, defeating the feature's contract.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.73,
+        "rationale": "In `CreateOrUpdateDevice` (pkg/services/anonymous/anonimpl/anonstore/database.go), the limit is enforced via a non-atomic sequence: it calls `CountDevices(...)` and, only if `count >= s.deviceLimit`, it switches to `updateDevice`; otherwise it proceeds to insert/upsert. This check-then-write occurs without any transaction/locking shown in the diff, so concurrent callers can all observe `count < limit` and each insert, exceeding `deviceLimit` under load. The diff does not show any other atomic guard around this path.",
+        "diff_context_hash": "7b5e7fb56e70e08bf730044936caeed535f338b3"
+      }
+    },
+    {
+      "issue_text": "[BUG] updateDevice conflates 'the device does not exist (or its updated_at is outside the 30-day window)' with 'device limit reached' by treating rowsAffected==0 as ErrDeviceLimitReached. An anonymous device whose row exists but whose updated_at is older than anonymousDeviceExpiration (e.g. a device returning after >30 days, whose row has not yet been purged by the cleanup job) falls into the limit-reached branch, the UPDATE matches no rows, and the user gets a device-limit auth error even when the count check would have admitted them; the same path also returns the misleading error for any genuinely new device, so callers cannot distinguish 'blocked' from 'stale-but-valid'.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "hallucination",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "hallucination",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.62,
+        "rationale": "In this diff, `updateDevice` is only called from `CreateOrUpdateDevice` when `deviceLimit > 0` and `count >= s.deviceLimit` (i.e., the limit is already reached). In that situation, returning `ErrDeviceLimitReached` when the UPDATE affects 0 rows (device_id missing or `updated_at` outside the 30-day window) does not contradict the preceding count check\u2014the count check would *not* have \u201cadmitted them\u201d because it already determined the limit was reached. Whether a >30d-stale device should be treated as \u201callowed\u201d is a policy question not established by the diff; the code consistently treats devices outside `anonymousDeviceExpiration` as ineligible when at limit, so the finding\u2019s claimed correctness bug isn\u2019t verifiable from the changes shown.",
+        "diff_context_hash": "7b5e7fb56e70e08bf730044936caeed535f338b3"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] TagDevice moved from an async goroutine with a 2-minute timeout to a synchronous call on the anonymous authentication path, adding per-request DB round trips (a COUNT plus an INSERT/UPDATE when device_limit>0) with no timeout or degradation. Every anonymous request now pays DB latency inline; when the database is slow or down, anonymous page loads stall or fail on the count query instead of degrading to fire-and-forget tagging as before \u2014 a hot-path regression and cascading-failure path with no fallback.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.7,
+        "rationale": "The diff does move anonymous device tagging from an async goroutine with its own 2-minute timeout (`timeoutTag` + `go func(){... context.WithTimeout ... TagDevice ...}` in `anonimpl/client.go`) to a synchronous inline call (`a.anonDeviceService.TagDevice(ctx, ...)`), and removes the internal timeout entirely. This means anonymous authentication now waits on whatever DB work TagDevice performs. Additionally, when `deviceLimit > 0`, `CreateOrUpdateDevice` now performs a `CountDevices(...)` query before deciding whether to upsert (`anonstore/database.go`), adding an extra round trip. However, the finding overstates the failure mode: on generic DB errors the new code logs and still returns an anonymous identity (it only hard-fails the auth path for `ErrDeviceLimitReached`). The core hot-path latency/cascading-risk concern is real and grounded in the diff, but it\u2019s more of a performance/architecture regression risk than a clear correctness defect.",
+        "diff_context_hash": "7b5e7fb56e70e08bf730044936caeed535f338b3"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] When device_limit>0, every tagged anonymous request issues CountDevices over a 30-day updated_at range, which is a full-table scan unless an index on anon_device.updated_at exists. On high-traffic anonymous deployments the count runs per request (cache miss) and scans the whole growing anon_device table each time; operators enabling device_limit see a linear-in-table-size query cost multiplied by request rate.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.6,
+        "rationale": "The diff adds a per-call device-limit check in `AnonDBStore.CreateOrUpdateDevice`: when `s.deviceLimit > 0`, it calls `s.CountDevices(ctx, now-30d, now+1m)` before doing the upsert (see `database.go`), so each tagging operation can incur an extra COUNT query over a 30-day window. The finding\u2019s core performance concern (extra count per tag, cost growing with table size) is grounded in this change. However, the claim that it is definitively a full-table scan depends on whether an index on `anon_device.updated_at` exists, which is not shown in the diff.",
+        "diff_context_hash": "7b5e7fb56e70e08bf730044936caeed535f338b3"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] TagDevice changed from swallowing tagDeviceUI errors (log-and-continue) to returning them, a sentinel-meaning change with no audit of other callers besides the authn client. Any caller of TagDevice outside client.go (or added later) that previously relied on best-effort semantics now fails on transient DB errors even when the operator has not set a device limit, turning a non-critical analytics write into a request-failing operation; the client.go path handles only ErrDeviceLimitReached specially and other callers get raw errors.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.62,
+        "rationale": "The diff shows a concrete semantic change: in `pkg/services/anonymous/anonimpl/impl.go`, `TagDevice` now returns `err` from `a.tagDeviceUI(...)` (added `return err`), whereas it previously logged and continued. Only one caller is updated in this diff (`pkg/services/anonymous/anonimpl/client.go`), and it still swallows non-`ErrDeviceLimitReached` errors (logs and proceeds), so the specific claim that this *currently* turns requests into failures for that path isn\u2019t borne out. However, the finding\u2019s broader point\u2014this is a behavior/sentinel change that could impact any other `TagDevice` caller not shown/updated in the diff\u2014 is a real, diff-grounded review concern and warrants auditing/documenting intended semantics.",
+        "diff_context_hash": "7b5e7fb56e70e08bf730044936caeed535f338b3"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The Go DTO always serializes anonymousDeviceLimit as an int64 (no omitempty, zero when unset) while the frontend contract declares number | undefined, so the two copies of the shape already disagree. Frontend consumers checking `config.anonymousDeviceLimit === undefined` to detect 'feature not configured' never see undefined \u2014 they see 0 \u2014 so any future code distinguishing 'disabled' from 'limit of zero' silently misbehaves, and the client/server schema copies drift from day one.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.72,
+        "rationale": "Diff shows a concrete client/server shape mismatch: Go FrontendSettingsDTO adds `AnonymousDeviceLimit int64 `json:\"anonymousDeviceLimit\"`` with no `omitempty`, and `setting.go` always sets `Cfg.AnonymousDeviceLimit` via `MustInt64(0)`, so the API will always serialize a numeric value (defaulting to 0). Meanwhile the TS contract adds `anonymousDeviceLimit: number | undefined` and `GrafanaBootConfig` initializes it to `undefined`. That makes `undefined` effectively unreachable from the new backend (it will be 0 when unset), which is a drift/semantics concern, though the diff doesn\u2019t show any current frontend code relying on `=== undefined` so a present-day broken behavior can\u2019t be verified here.",
+        "diff_context_hash": "7b5e7fb56e70e08bf730044936caeed535f338b3"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] updateDevice's WHERE clause uses a bare time.Minute fudge added to the device's own client-supplied-timestamp-derived UpdatedAt (rather than server time) as the upper window bound, an unexplained dimensioned magic number whose correctness depends on clock alignment between the timestamp writer and this query. If TagDevice ever sets UpdatedAt from a skewed source (or a future code path passes an older UpdatedAt), the +1-minute bound silently stops matching and every returning device is misclassified as over-limit; the unit/provenance of the fudge is unreviewable, so the next editor can widen or drop it without any test catching the change.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.62,
+        "rationale": "The diff does introduce a hard-coded `time.Minute` tolerance in `updateDevice`\u2019s `WHERE ... updated_at BETWEEN ? AND ?` using bounds derived from `device.UpdatedAt` (`device.UpdatedAt.UTC().Add(-anonymousDeviceExpiration)` to `device.UpdatedAt.UTC().Add(time.Minute)`). That \u201c+1 minute\u201d window is unexplained and its behavior depends on what `device.UpdatedAt` the caller provides; if a future/older `UpdatedAt` is passed, the UPDATE can affect 0 rows and the code maps that to `ErrDeviceLimitReached`. The finding\u2019s broader claim about \u201cclient-supplied-timestamp-derived\u201d isn\u2019t verifiable from this diff, but the magic-number time window and its effect are real, diff-grounded concerns.",
+        "diff_context_hash": "7b5e7fb56e70e08bf730044936caeed535f338b3"
+      }
+    },
+    {
+      "issue_text": "[BUG] Removing the fire-and-forget goroutine and returning ErrDeviceLimitReached from Authenticate converts anonymous device tagging from best-effort telemetry into a hard authentication gate, so hitting the device limit rejects anonymous users from Grafana entirely instead of just skipping the tag. An operator who sets device_limit sees every new anonymous session (and every existing device with stale updated_at) fail authentication with an error propagated out of the authn client \u2014 previously the same store failure was logged as a warning and access continued. This changes the objective from 'limit tracked devices' to 'deny anonymous access at the limit' without any indication the reviewer accepted that semantic shift.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug",
+      "matched_golden_ids": [
+        "Anonymous authentication now fails entirely if anonDeviceService.TagDevice returns ErrDeviceLimitReached. Previously, device tagging was asynchronous and non-blocking. This change prevents anonymous users from authenticating when the device limit is reached."
+      ],
+      "primary_judge_verdict": "matched",
+      "primary_judge": "gpt-5.2",
+      "primary_judge_confidence": 0.97,
+      "primary_judge_reasoning": "The candidate flags that making anonDeviceService.TagDevice synchronous and propagating ErrDeviceLimitReached turns device tagging into a hard authentication failure, blocking anonymous authentication when the device limit is reached\u2014exactly the behavior change described in the golden comment.",
+      "adjudication": {
+        "verdict": "matched",
+        "adjudicating_judge": null,
+        "confidence": null,
+        "rationale": null,
+        "diff_context_hash": "7b5e7fb56e70e08bf730044936caeed535f338b3"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] Tagging was deliberately made asynchronous (with panic recovery and a 2-minute timeout) to keep it off the auth critical path; this diff makes it synchronous on the request context and deletes the recover() guard and timeout. Every anonymous request now performs at least one synchronous COUNT query plus an INSERT/UPDATE before the identity is returned, adding DB latency to the anonymous login hot path; the removed timeout also means a hung DB connection now stalls the request instead of a background goroutine. Who gets bitten: any deployment with anonymous access enabled under load.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.83,
+        "rationale": "The diff verifiably changes anonymous device tagging from async/background to synchronous on the auth request path: in `pkg/services/anonymous/anonimpl/client.go` the `go func(){... recover() ... context.WithTimeout(...)}()` block is removed and replaced with `a.anonDeviceService.TagDevice(ctx, ...)` inline. Separately, `CreateOrUpdateDevice` in `pkg/services/anonymous/anonimpl/anonstore/database.go` now performs a synchronous `CountDevices(...)` when `deviceLimit > 0`, and may then execute an UPDATE/INSERT. This can add DB latency to `Authenticate` before returning an identity, and the removed timeout/recover guard means the request can now be stalled by slow/hung DB work instead of being isolated in a background goroutine. This is a concrete performance/availability concern introduced by the change, but not a correctness defect per se.",
+        "diff_context_hash": "7b5e7fb56e70e08bf730044936caeed535f338b3"
+      }
+    },
+    {
+      "issue_text": "[BUG] updateDevice conflates 'device not found or not updated within the 30-day window' with 'device limit reached' by returning ErrDeviceLimitReached whenever rowsAffected == 0, so a known returning device whose last update is older than 30 days is rejected as if it were a new device. A loyal anonymous user returning after a 31-day absence gets an authentication error (via the new return path in client.go) even though their device already exists in the table and consuming no new slot \u2014 the diff's own test only covers the fresh-device case, so this regression ships silently.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": [
+        "The updateDevice function returns ErrDeviceLimitReached when rowsAffected == 0, but zero affected rows means the device doesn't exist or falls outside the time window, not that a limit was reached."
+      ],
+      "primary_judge_verdict": "matched",
+      "primary_judge": "gpt-5.2",
+      "primary_judge_confidence": 0.96,
+      "primary_judge_reasoning": "The candidate flags the same core bug: updateDevice treats rowsAffected==0 as ErrDeviceLimitReached, but 0 affected rows can mean the device doesn\u2019t exist or doesn\u2019t meet the 30-day time-window condition (e.g., last update too old), not that a device limit was reached. It explicitly calls out the time-window case causing an existing device to be rejected as if new, matching the golden issue.",
+      "adjudication": {
+        "verdict": "matched",
+        "adjudicating_judge": null,
+        "confidence": null,
+        "rationale": null,
+        "diff_context_hash": "7b5e7fb56e70e08bf730044936caeed535f338b3"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The limit check (SELECT COUNT) and the subsequent INSERT are two separate non-transactional statements, so N concurrent requests at count == limit-1 all pass the check and all insert, exceeding the configured limit. Under concurrent load the device count exceeds AnonymousDeviceLimit by up to (concurrency-1) rows per burst; operators relying on the limit as a hard cap get silently violated bounds.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.78,
+        "rationale": "In `CreateOrUpdateDevice` (pkg/services/anonymous/anonimpl/anonstore/database.go), the limit enforcement does `CountDevices(...)` and, if `count < s.deviceLimit`, proceeds to the INSERT/UPSERT path. These are separate DB operations not wrapped in a transaction or other concurrency control, so concurrent requests can all observe the same `count` and each insert a new row, exceeding `deviceLimit`. The diff shows no locking/unique constraint-based cap that would prevent this burst overrun, so the configured limit is not a hard cap under concurrency.",
+        "diff_context_hash": "7b5e7fb56e70e08bf730044936caeed535f338b3"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] AnonymousDeviceLimit is added to the frontend settings payload and the GrafanaConfig type, but nothing in this diff (frontend or backend) reads anonymousDeviceLimit from the config. The field crosses the process boundary into every browser session with zero consumers \u2014 dead public API surface that must now be maintained for compatibility; if frontend consumption was the accepted intent, it did not ship in this PR.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "hallucination",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "hallucination",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.9,
+        "rationale": "The diff shows multiple backend consumers of the new config value. `readAuthSettings` reads `auth.anonymous.device_limit` into `cfg.AnonymousDeviceLimit` (pkg/setting/setting.go), `getFrontendSettings` includes it in the payload (pkg/api/frontendsettings.go), and it is used to enforce behavior by passing `cfg.AnonymousDeviceLimit` into `anonstore.ProvideAnonDBStore` in `ProvideAnonymousDeviceService` (pkg/services/anonymous/anonimpl/impl.go), where `CreateOrUpdateDevice` checks `s.deviceLimit` to apply the limit (pkg/services/anonymous/anonimpl/anonstore/database.go). Therefore it is not \u201czero consumers\u201d nor \u201cnothing reads it from config.\u201d",
+        "diff_context_hash": "7b5e7fb56e70e08bf730044936caeed535f338b3"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] TagDevice now propagates the tagDeviceUI error to all callers after it was previously logged-and-swallowed, which also changes behavior for the non-UI tagging paths and any future PostLoginHook usage, not just the new device-limit flow. Any transient store error in tagDeviceUI (previously a debug log) now bubbles up to Authenticate and, per client.go, only ErrDeviceLimitReached is fatal today, but any new caller of TagDevice inherits fail-closed semantics; the change in error contract is broader than the device-limit intent.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.83,
+        "rationale": "The diff shows a contract/behavior change: in `pkg/services/anonymous/anonimpl/impl.go` `TagDevice` now returns the `tagDeviceUI` error (`a.log.Debug(...); return err`) instead of only logging and continuing. That broadens error propagation beyond the new device-limit case, affecting any direct callers of `TagDevice` (even though `Authenticate` in `client.go` still only fails the request on `ErrDeviceLimitReached` and otherwise logs and continues). This is a real, diff-grounded scope/behavior concern rather than a clearly verifiable defect.",
+        "diff_context_hash": "7b5e7fb56e70e08bf730044936caeed535f338b3"
+      }
+    },
+    {
+      "issue_text": "[BUG] The device-limit check in CreateOrUpdateDevice is a non-atomic count-then-act sequence, so the limit is bypassable under concurrent anonymous requests. CountDevices and the subsequent insert run in separate sessions with no locking; N concurrent requests all read count < limit and all insert, so an attacker (or natural burst of anonymous traffic) exceeds cfg.AnonymousDeviceLimit by an arbitrary amount \u2014 the enforcement the feature promises silently fails exactly under load.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.9,
+        "rationale": "In `CreateOrUpdateDevice`, the limit enforcement is implemented as a count-then-act sequence: it calls `s.CountDevices(...)` and, only if `count >= s.deviceLimit`, switches to `s.updateDevice`; otherwise it proceeds to insert/upsert. This count is performed before the insert/upsert and not within the same DB session/transaction or any explicit locking, so concurrent requests can all observe `count < limit` and all insert, exceeding `deviceLimit` under load. The diff shows no transactional wrapper spanning the count and the subsequent insert/upsert, making the bypass race real and directly tied to this change.",
+        "diff_context_hash": "7b5e7fb56e70e08bf730044936caeed535f338b3"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] An unauthenticated party can deliberately exhaust the device quota to deny anonymous access to all new visitors. Any anonymous client (no credentials required) can mint device IDs up to the configured limit; once the table holds `device_limit` rows updated within the 30-day window, every request from a device not already in the table returns ErrDeviceLimitReached, and client.go returns that error from Authenticate \u2014 a trivial, unauthenticated denial-of-service against the anonymous access service that operators will experience as 'anonymous login broken' for 30 days unless they raise the limit or purge the table.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.74,
+        "rationale": "The diff introduces a hard fail path for anonymous auth when the anon device table reaches `cfg.AnonymousDeviceLimit`. In `AnonDBStore.CreateOrUpdateDevice`, once `count >= s.deviceLimit` it calls `s.updateDevice`; if the `device_id` does not already exist with an `updated_at` in the 30-day window, `rowsAffected == 0` returns `ErrDeviceLimitReached` (database.go). `Anonymous.Authenticate` now calls `TagDevice` synchronously and explicitly returns the error if it is `ErrDeviceLimitReached` (client.go), which will deny anonymous authentication for any \u201cnew\u201d device IDs while the limit is saturated. Because this tagging occurs during anonymous requests (no credentials), the behavior enables an unauthenticated DoS-by-exhaustion scenario consistent with the finding.",
+        "diff_context_hash": "7b5e7fb56e70e08bf730044936caeed535f338b3"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] When deviceLimit > 0, every tagged anonymous request now issues an extra unconditional COUNT query (plus the update/insert) on the hot authentication path, replacing the previous fire-and-forget goroutine. Operators who set a device limit on a high-traffic anonymous deployment add a synchronous COUNT over the anon_device table (scanning rows within the 30-day window) to every anonymous request; on MySQL/Postgres without a covering index on updated_at this is a table-scan per request, a self-inflicted load/DoS amplifier the config knob does not warn about.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.77,
+        "rationale": "Diff adds a synchronous device-limit check in `AnonDBStore.CreateOrUpdateDevice`: when `s.deviceLimit > 0` it calls `s.CountDevices(...)` on every tag (`database.go`), and the anonymous auth client now calls `TagDevice` inline (removed goroutine/timeout) so this runs on the hot `Authenticate` path (`anonimpl/client.go`). This is a real perf/operational concern grounded in the diff (extra COUNT per request when enabled). The claim about table scans / missing covering index cannot be verified from the diff, but the added COUNT query per request when `device_limit` is set is verifiable.",
+        "diff_context_hash": "7b5e7fb56e70e08bf730044936caeed535f338b3"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] TagDevice is now executed synchronously in Authenticate with the request context, and the panic-recovery the old goroutine provided was removed, so a storage-layer panic in TagDevice now takes down the request instead of being logged. The previous code wrapped TagDevice in a goroutine with an explicit recover() (the authors clearly expected panics there); the replacement calls it inline in the auth path with no recover, so a driver-level panic during tagging crashes the anonymous authentication request \u2014 availability regression relative to the code being replaced.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.76,
+        "rationale": "The diff clearly removes the goroutine wrapper and its deferred recover() around TagDevice in `pkg/services/anonymous/anonimpl/client.go` (old code spawned a goroutine with `defer ... recover()`; new code calls `a.anonDeviceService.TagDevice(ctx, ...)` inline with no local recover). This is a diff-grounded behavioral change: any panic occurring inside TagDevice (or below it, e.g., DB driver/session code) would no longer be caught at this call site and would propagate through the auth request path. However, the diff alone does not prove TagDevice/storage will panic in practice, so it\u2019s not a strictly verifiable defect\u2014rather a concrete robustness/availability regression risk introduced by the change.",
+        "diff_context_hash": "7b5e7fb56e70e08bf730044936caeed535f338b3"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] TestIntegrationBeyondDeviceLimit exercises only the failure sentinel of the new updateDevice path and never tests the success branch (rowsAffected > 0, i.e. an existing device within the 30-day window is actually updated when the limit is reached). A regression in the UPDATE statement's WHERE clause (e.g. wrong time-window bounds causing every update of a legitimate returning device to return 0 rows and ErrDeviceLimitReached) would lock out all anonymous devices past the limit while every existing test still passes; operators with device_limit configured get repeat anonymous users rejected as new-device-joins with no test catching it.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.87,
+        "rationale": "The diff adds a new \u201climit reached => update-only\u201d path: CreateOrUpdateDevice() counts devices in the last 30 days and, when count >= deviceLimit, calls updateDevice(), which returns ErrDeviceLimitReached when the UPDATE affects 0 rows (pkg/services/anonymous/anonimpl/anonstore/database.go). The new test TestIntegrationBeyondDeviceLimit sets limit=1, inserts one device, then tries a different DeviceID and asserts ErrDeviceLimitReached\u2014this covers only the 0-rowsAffected/error branch. There is no test for the success branch where the limit is reached but an existing DeviceID within the time window is updated (rowsAffected > 0). Thus a regression in the UPDATE WHERE time bounds could break legitimate updates while current tests still pass.",
+        "diff_context_hash": "7b5e7fb56e70e08bf730044936caeed535f338b3"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The new error-propagation branch in TagDevice (impl.go line ~147, `return err` after tagDeviceUI failure) has no test that triggers it \u2014 every case in TestIntegrationDeviceService_tag uses valid requests and require.NoError, which was the correct assertion only under the old swallow-and-log contract. The changed contract \u2014 TagDevice errors now propagate to Anonymous.Authenticate and reject authentication (client.go) instead of being logged \u2014 is verified by no test in the diff; a future refactor reverting the `return err` (restoring the silent swallow) passes the whole suite, and the device-limit rejection feature becomes a silent no-op for the UI path.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.8,
+        "rationale": "The diff changes TagDevice to propagate errors from `tagDeviceUI` (impl.go: it now `return err` after logging). However, the integration tests shown (`TestIntegrationDeviceService_tag`) still assert `require.NoError` for all calls and do not exercise any failing path for `tagDeviceUI`/`TagDevice`. While a new test covers `ErrDeviceLimitReached` at the store layer (`TestIntegrationBeyondDeviceLimit` in database_test.go), there is no test validating that TagDevice returns that error (or any error) and that `Anonymous.Authenticate` reacts to it (client.go returns error only for `ErrDeviceLimitReached`). So the finding about a missing test for this new, nontrivial behavior change is grounded in the diff, but it is not itself a functional defect in the code as written.",
+        "diff_context_hash": "7b5e7fb56e70e08bf730044936caeed535f338b3"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] TestIntegrationBeyondDeviceLimit mutates and reuses the same Device pointer across both CreateOrUpdateDevice calls without asserting the first insert's stored state (no ListDevices/field assertions after the first call), so the test proves only that the second call errors, not that the limit logic was what caused it. If the pre-insert CountDevices query were broken (e.g. always returning a count >= limit, making every first-time create fall through to updateDevice and fail), the first require.NoError in this test would catch it, but a subtle off-by-one in the window bounds that only miscounts at boundaries escapes detection; checked database_test.go and impl_test.go \u2014 neither asserts stored device contents under a non-zero limit.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.72,
+        "rationale": "In pkg/services/anonymous/anonimpl/anonstore/database_test.go, TestIntegrationBeyondDeviceLimit reuses the same *Device across both CreateOrUpdateDevice calls (mutating DeviceID/UpdatedAt) and only asserts that the first call succeeds and the second returns ErrDeviceLimitReached. It never queries the DB (e.g., ListDevices/CountDevices) after the first call nor asserts any stored fields under a non-zero limit, so it doesn\u2019t validate that the limit/count window logic behaves correctly beyond the simple error case. This is a test coverage/robustness concern tied to the newly added deviceLimit/count+window behavior, not a proven functional bug in the diff.",
+        "diff_context_hash": "7b5e7fb56e70e08bf730044936caeed535f338b3"
+      }
+    },
+    {
+      "issue_text": "[BUG] The device limit is enforced with a check-then-act race: CountDevices and the subsequent insert/update run in separate statements with no unique constraint, transaction, or lock, so concurrent anonymous requests all read count < limit and all insert, exceeding the configured device_limit. Under concurrent load the limit is silently bypassed: an operator setting device_limit = N gets many more than N tracked devices, defeating the feature's guarantee; the count also grows monotonically afterward, so the update-only fallback never triggers and no error surfaces.",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.78,
+        "rationale": "In `AnonDBStore.CreateOrUpdateDevice`, the limit enforcement is implemented as a separate `CountDevices(...)` call followed by a later insert/upsert path when `count < s.deviceLimit` (and only falls back to `updateDevice` when `count >= limit`). These are distinct DB operations with no transaction, lock, or single-statement atomic check shown in the diff, so concurrent requests can all observe `count < limit` and proceed to insert new `device_id`s, exceeding `deviceLimit`. Nothing in the diff indicates an atomic constraint preventing multiple new rows from being created across concurrent calls, so the feature\u2019s guarantee can be bypassed under load.",
+        "diff_context_hash": "7b5e7fb56e70e08bf730044936caeed535f338b3"
+      }
+    },
+    {
+      "issue_text": "[BUG] updateDevice treats RowsAffected()==0 as 'device limit reached', but on MySQL a matched row whose values are unchanged reports 0 affected rows (no clientFoundRows), so a returning device within the expiration window whose client_ip/user_agent/updated_at already equal the new values is falsely rejected with ErrDeviceLimitReached. Once the limit is reached, a legitimate existing anonymous device making a request with identical IP/user-agent within the same timestamp gets its authentication rejected with the device-limit error instead of being served, on any MySQL-backed deployment.",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.74,
+        "rationale": "In `updateDevice` (pkg/services/anonymous/anonimpl/anonstore/database.go), the code executes an `UPDATE ... WHERE device_id = ? AND updated_at BETWEEN ? AND ?` and then treats `rowsAffected == 0` as `ErrDeviceLimitReached`. On MySQL, `RowsAffected()` can be 0 even when a row matches the WHERE clause but the updated values are identical to the existing values (common when not using `CLIENT_FOUND_ROWS`). Since the UPDATE sets `client_ip`, `user_agent`, and `updated_at` to the incoming values, an existing device could match but produce 0 affected rows if those values end up unchanged (e.g., same IP/UA and `updated_at` equal after DB time precision/truncation), causing a false `ErrDeviceLimitReached` once the limit is reached and leading to authentication failure in `Anonymous.Authenticate` where that error is returned.",
+        "diff_context_hash": "7b5e7fb56e70e08bf730044936caeed535f338b3"
+      }
+    },
+    {
+      "issue_text": "[BUG] Returning ErrDeviceLimitReached from Authenticate makes any new anonymous device (a device_id not already in the table) fail authentication entirely, so anonymous users are locked out of Grafana rather than merely not being tracked once the configured device limit is reached. An operator setting auth.anonymous device_limit = 100 gets a hard denial-of-service for all anonymous visitors after the 100th distinct device, with the raw 'device limit reached' error surfaced through the authn pipeline (500-class response) instead of the dashboard being served anonymously; rolling back the config requires a restart and there is no path to re-admit devices other than waiting 30 days for expiration/cleanup.",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.88,
+        "rationale": "The diff changes anonymous authentication to synchronously tag the device and to *fail authentication* when tagging returns `ErrDeviceLimitReached`: in `pkg/services/anonymous/anonimpl/client.go`, `Authenticate` now does `if errors.Is(err, anonstore.ErrDeviceLimitReached) { return nil, err }`. `ErrDeviceLimitReached` is returned by `AnonDBStore.updateDevice` when `rowsAffected == 0`, and `CreateOrUpdateDevice` calls `updateDevice` whenever `count >= s.deviceLimit`. For a new `device_id` (not already in `anon_device`), the UPDATE affects 0 rows, so once the limit is reached, new anonymous visitors will hit `ErrDeviceLimitReached` and be denied authentication rather than simply not being tracked. Previously tagging was in a goroutine and never blocked/failed auth.",
+        "diff_context_hash": "7b5e7fb56e70e08bf730044936caeed535f338b3"
+      }
+    },
+    {
+      "issue_text": "[BUG] updateDevice's WHERE clause (updated_at BETWEEN updated-30d AND updated+1min) cannot match rows older than 30 days, so when the limit is reached and an existing device's row is stale (cleanup job not yet run), the update affects 0 rows and returns ErrDeviceLimitReached \u2014 the row can neither be updated nor re-inserted. A single expired-but-not-yet-deleted row (device_limit = 1 case demonstrated in the new test with a shifted UpdatedAt) permanently blocks that device from authenticating until the DeleteDevicesOlderThan cleanup happens to run; if the anonymous cleanup job is disabled, the block never lifts.",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.78,
+        "rationale": "In anonstore/database.go, when s.deviceLimit > 0 and the recent-device count meets/exceeds the limit, CreateOrUpdateDevice() calls updateDevice() instead of using the normal upsert path. updateDevice() only updates rows where `device_id = ? AND updated_at BETWEEN (device.UpdatedAt-30d) AND (device.UpdatedAt+1min)`. If the returning device already exists in the DB but its stored `updated_at` is older than the 30-day window, the UPDATE matches 0 rows and updateDevice returns ErrDeviceLimitReached, and no insert/upsert is attempted. This can block an existing (but stale) device from being refreshed while the limit is reached until the cleanup deletes the stale row; if cleanup never runs, the block persists. This behavior is directly implied by the added WHERE clause and the limit-triggered control flow in the diff.",
+        "diff_context_hash": "7b5e7fb56e70e08bf730044936caeed535f338b3"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] TagDevice moved from a fire-and-forget background goroutine (previous code) to the synchronous authentication path, adding a COUNT over anon_device plus an UPDATE/INSERT to every uncached anonymous auth request. Every anonymous request not served by the 29-minute local cache now pays two synchronous DB round-trips in the auth critical path, and any transient DB error that was previously swallowed (Warn log) now fails the request; high-traffic public Grafana instances see added latency and a new hard dependency of anonymous auth on DB availability.",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.78,
+        "rationale": "The diff clearly moves anonymous device tagging onto the synchronous auth path: `Anonymous.Authenticate` now calls `a.anonDeviceService.TagDevice(ctx, ...)` directly instead of spawning a background goroutine (removed timeout/recover). In the store, `CreateOrUpdateDevice` adds a `CountDevices(...)` call when `deviceLimit > 0`, and may then do an `UPDATE` or the existing INSERT/UPSERT, meaning extra synchronous DB work for uncached requests. However, the finding\u2019s claim that \u201cany transient DB error \u2026 now fails the request\u201d is not fully supported: `Authenticate` only returns an error for `ErrDeviceLimitReached`; other TagDevice errors are still logged and the request proceeds. The latency/availability coupling concern remains diff-grounded and actionable as an architectural/perf issue.",
+        "diff_context_hash": "7b5e7fb56e70e08bf730044936caeed535f338b3"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] TagDevice's tagDeviceUI error was previously only logged (a.log.Debug) and TagDevice returned nil; the diff changes it to propagate the error, so any DB hiccup during tagging now bubbles up through Authenticate and rejects otherwise valid anonymous requests. Anonymous access availability is now coupled to a write to the anon_device tracking table \u2014 a table that is pure telemetry; a brief DB outage or lock contention on that table turns into anonymous login failures rather than degraded device statistics.",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "hallucination",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "hallucination",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.84,
+        "rationale": "The diff does change TagDevice to `return err` when `tagDeviceUI` fails (pkg/services/anonymous/anonimpl/impl.go), but `Authenticate` does *not* reject anonymous requests for general tagging/DB errors. In pkg/services/anonymous/anonimpl/client.go, `TagDevice` is now called synchronously and errors are only returned (thus rejecting auth) when `errors.Is(err, anonstore.ErrDeviceLimitReached)`; all other errors are just logged and authentication proceeds. Therefore the finding\u2019s claim that \u201cany DB hiccup\u2026bubbles up\u2026 and rejects otherwise valid anonymous requests\u201d is not supported by the shown diff.",
+        "diff_context_hash": "7b5e7fb56e70e08bf730044936caeed535f338b3"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The device-limit check is a non-atomic count-then-write: CountDevices runs in one statement and the insert/update in another, so concurrent requests interleave and the limit is not actually enforced under load. A burst of concurrent anonymous requests each observe count < deviceLimit and all insert, letting the device count exceed the configured cap with no error anywhere; operators relying on the limit are silently misled. The strongest counter-argument is that this is a soft limit and approximate enforcement is acceptable, but the stored count then feeds future decisions and permanently drifts above the limit, so the soft-limit defense only holds if drift is bounded, which it is not.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.85,
+        "rationale": "In `CreateOrUpdateDevice`, the device limit is enforced via a separate `CountDevices(...)` call followed by a later insert/upsert path when `count < s.deviceLimit` (see `pkg/services/anonymous/anonimpl/anonstore/database.go`). There is no transaction, lock, or single atomic SQL statement tying the count check to the subsequent write, so concurrent requests can interleave: multiple goroutines can observe `count < limit` and all proceed to insert, exceeding the configured cap without returning `ErrDeviceLimitReached`. This means the configured `AnonymousDeviceLimit` is not reliably enforced under load, matching the finding.",
+        "diff_context_hash": "7b5e7fb56e70e08bf730044936caeed535f338b3"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] TagDevice moved from a fire-and-forget goroutine with its own 2-minute timeout to a synchronous call on the auth request path using the request context, adding a COUNT over the 30-day anon_device window plus an UPSERT to every anonymous request that misses the local cache. Every uncached anonymous login now pays DB round-trips inline: with device_limit > 0 the CountDevices query runs on every cache miss, so DB latency or a slow anon_device table directly delays anonymous page loads; previously only the response lagged and the tag was eventually recorded. The counter-argument is that the local cache absorbs repeats, but first-hit and 29-minute-expiry requests still hit the DB synchronously, and with device_limit configured the count query is unconditional on that path.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.86,
+        "rationale": "The diff shows TagDevice is no longer invoked in a background goroutine with its own timeout; the goroutine/timeoutTag logic was removed and replaced with a synchronous `a.anonDeviceService.TagDevice(ctx, ...)` call on the auth path (pkg/services/anonymous/anonimpl/client.go). Separately, when `deviceLimit > 0`, `CreateOrUpdateDevice` now performs `CountDevices(...)` over the 30-day window before deciding whether to update vs upsert (pkg/services/anonymous/anonimpl/anonstore/database.go), adding an extra DB round-trip on each cache-miss tagging. This is a concrete perf/latency/architecture concern grounded in the diff, not a correctness bug by itself.",
+        "diff_context_hash": "7b5e7fb56e70e08bf730044936caeed535f338b3"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] updateDevice reports ErrDeviceLimitReached for any rowsAffected == 0, including the case where the device row exists but its updated_at falls outside the BETWEEN (t-30d, t+1min) window, so the error text misdescribes the actual condition (stale device, not limit exhaustion). An operator debugging 'device limit reached' errors from the anonymous auth path cannot distinguish a genuinely exhausted limit from a user presenting an expired (>30-day-old) device cookie; the deny outcome is the same but the error content misdirects debugging of the rate-limit/retention interaction.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.8,
+        "rationale": "In `updateDevice` (pkg/services/anonymous/anonimpl/anonstore/database.go), `ErrDeviceLimitReached` is returned whenever `rowsAffected == 0` after an `UPDATE ... WHERE device_id = ? AND updated_at BETWEEN ? AND ?`. That `0` can occur not only when the device ID doesn\u2019t exist, but also when it exists but its `updated_at` is outside the 30-day window (stale/expired). Since the anonymous auth path now treats `ErrDeviceLimitReached` specially (pkg/services/anonymous/anonimpl/client.go), the error message can mislead operators about whether the failure was due to true limit exhaustion vs an expired device record.",
+        "diff_context_hash": "7b5e7fb56e70e08bf730044936caeed535f338b3"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] AnonymousDeviceLimit is serialized as an always-present int64 (0 when unset) while the frontend contract GrafanaConfig.anonymousDeviceLimit is typed `number | undefined`, and GrafanaBootConfig initializes it to undefined, so the wire value and the client-side type/domain disagree. Frontend code that follows the declared type and branches on `anonymousDeviceLimit` truthiness or undefined to detect 'no limit configured' will treat a configured limit of... actually 0 means unset server-side too, but any consumer reading the type expects undefined for unset and receives 0, and a limit configured to a truthy-but-low value vs absent cannot be distinguished the way the type promises, leading to dead `undefined` branches in the frontend.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.84,
+        "rationale": "Diff shows a cross-layer contract mismatch: backend `FrontendSettingsDTO` defines `AnonymousDeviceLimit int64` with JSON tag `json:\"anonymousDeviceLimit\"` (no `omitempty`), and `getFrontendSettings` always assigns `hs.Cfg.AnonymousDeviceLimit`, which is read from ini with default `MustInt64(0)`. So the wire payload will always include a number (typically `0` when unset). Meanwhile frontend types add `GrafanaConfig.anonymousDeviceLimit: number | undefined` and `GrafanaBootConfig` initializes it to `undefined`, implying \u201cunset\u201d is represented by absence/undefined. This makes the declared frontend domain inconsistent with the actual serialized value and can break/disable `undefined`-based branching.",
+        "diff_context_hash": "7b5e7fb56e70e08bf730044936caeed535f338b3"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] TagDevice now propagates tagDeviceUI errors to the caller (return err) instead of only logging them, and the Anonymous auth client returns ErrDeviceLimitReached as a hard authentication failure, so a store-side condition during device tagging converts what was previously a successful anonymous login into a rejected request. When the device limit is reached, anonymous users with no prior device row receive an auth error instead of service; combined with the count-then-update race this failure mode is reachable even for devices that were just created moments earlier. The counter-argument is that denying new devices is the feature's intent, but the same error also fires for existing rows outside the updated_at window (see updateDevice finding), so real users get rejected where the feature intends only new-device denial.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.72,
+        "rationale": "The diff does show a concrete behavioral change: `AnonDeviceService.TagDevice` now returns the `tagDeviceUI` error to its caller (`impl.go`: added `return err`), and the anonymous auth client now calls `TagDevice` synchronously (removing the goroutine/timeout) and treats `anonstore.ErrDeviceLimitReached` as a hard authentication failure (`client.go`: `return nil, err`). This means a store-side \u201cdevice limit reached\u201d condition during tagging can now reject an otherwise-anonymous request, whereas previously tagging failures were only logged and authentication proceeded. Whether that is a defect vs intended feature policy isn\u2019t provable from the diff alone, but it is a significant, diff-grounded behavior/contract change worth flagging.",
+        "diff_context_hash": "7b5e7fb56e70e08bf730044936caeed535f338b3"
+      }
+    }
+  ],
+  "diff_context_hash": "7b5e7fb56e70e08bf730044936caeed535f338b3",
+  "primary_judge": "gpt-5.2",
+  "adjudicating_judge": "gpt-5.2",
+  "url": "https://github.com/grafana/grafana/pull/79265",
+  "framework": "metareview-realistic",
+  "model": "glm-5.3-vision-background",
+  "effort": "low",
+  "judge": "gpt-5.2",
+  "wall_s": 300.49557399749756,
+  "execution_mode": "api",
+  "run_batch": "20260910-mrv0120-manifold"
+}

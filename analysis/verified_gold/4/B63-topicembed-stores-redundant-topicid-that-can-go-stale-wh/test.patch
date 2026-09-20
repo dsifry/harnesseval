@@ -1,0 +1,87 @@
+require 'digest'
+require 'nokogiri'
+
+def require_dependency(name); end
+
+module I18n
+  def self.t(key, opts = {}); key.to_s; end
+end
+
+module ActiveRecord
+  class Base
+    def self.inherited(subclass)
+      subclass.instance_variable_set(:@records, [])
+    end
+
+    def self.records
+      @records ||= []
+    end
+
+    def self.belongs_to(*args); end
+    def self.validates_presence_of(*args); end
+
+    def self.where(conds)
+      rows = records.select do |r|
+        conds.all? { |k, v| r.instance_variable_get("@#{k}") == v }
+      end
+      Relation.new(rows)
+    end
+
+    def self.create!(attrs = {})
+      obj = new
+      attrs.each { |k, v| obj.instance_variable_set("@#{k}", v) }
+      records << obj
+      obj
+    end
+
+    def method_missing(name, *args)
+      str = name.to_s
+      if str.end_with?('=')
+        instance_variable_set("@#{str.chomp('=')}", args.first)
+      elsif instance_variable_defined?("@#{name}")
+        instance_variable_get("@#{name}")
+      else
+        super
+      end
+    end
+
+    def update_column(col, val)
+      instance_variable_set("@#{col}", val)
+    end
+
+    class Relation
+      def initialize(rows); @rows = rows; end
+      def first; @rows.first; end
+      def blank?; @rows.empty?; end
+      def pluck(col); @rows.map { |r| r.instance_variable_get("@#{col}") }; end
+      def to_a; @rows; end
+    end
+  end
+end
+
+require_relative '../../app/models/topic_embed'
+
+# Claim: TopicEmbed redundantly stores topic_id, which can go stale when the
+# embedded post is moved to another topic.  The controller reads only the stored
+# topic_id (via TopicEmbed.topic_id_for_embed) instead of deriving it from
+# post.topic_id.  Simulate a post move and observe that the lookup still returns
+# the old topic.
+
+embed = TopicEmbed.create!(
+  topic_id: 1,
+  post_id: 10,
+  embed_url: 'http://example.com/article',
+  content_sha1: 'deadbeef'
+)
+
+# Post 10 was moved to topic 2 (discourse supports moving posts).
+post = Struct.new(:id, :topic_id).new(10, 2)
+
+returned = TopicEmbed.topic_id_for_embed('http://example.com/article')
+
+if returned == post.topic_id
+  puts 'RESULT: PASS'
+else
+  puts "RESULT: FAIL: topic_id_for_embed returned #{returned.inspect} but post.topic_id is #{post.topic_id}; " \
+       'the stored topic_id is stale and is not derived from the post'
+end

@@ -1,0 +1,121 @@
+diff --git a/spec/verify/group_member_verify.rb b/spec/verify/group_member_verify.rb
+new file mode 100644
+--- /dev/null
++++ b/spec/verify/group_member_verify.rb
+@@ -0,0 +1,116 @@
++# frozen_string_literal: true
++#
++# Regression evidence for the claimed defect in
++#   app/assets/javascripts/admin/templates/group_member.hbs
++#
++# The file under test is a Handlebars/Ember template. We load the REAL file
++# from its repo-relative path and interpret it with Handlebars identifier
++# lookup semantics: a mustache resolves against the current context only and
++# does not automatically fall back to the enclosing parent context. That is
++# how the compiled template sees the member item context produced by an
++# {{#each}} over the group's members.
++
++template_path = File.expand_path(
++  '../../app/assets/javascripts/admin/templates/group_member.hbs',
++  __dir__
++)
++unless File.exist?(template_path)
++  template_path = File.expand_path(
++    'app/assets/javascripts/admin/templates/group_member.hbs',
++    Dir.pwd
++  )
++end
++
++raise "template not found: #{template_path}" unless File.exist?(template_path)
++source = File.read(template_path)
++
++# --- minimal Handlebars-ish evaluator (the file itself is the real logic) ---
++
++def lookup(path, ctx)
++  cur = ctx
++  path.to_s.split('.').each do |k|
++    case cur
++    when Hash
++      if cur.key?(k.to_sym)
++        cur = cur[k.to_sym]
++      elsif cur.key?(k.to_s)
++        cur = cur[k]
++      else
++        return nil
++      end
++    when nil
++      return nil
++    else
++      return nil unless cur.respond_to?(k)
++      cur = cur.public_send(k)
++    end
++  end
++  cur
++end
++
++def truthy?(value)
++  return false if value.nil? || value == false
++  return false if value.respond_to?(:empty?) && value.empty?
++  true
++end
++
++AVATAR  = ->(_args, _ctx) { '<img class="avatar">' }
++ACTION  = ->(_args, _ctx) { '<action>' }
++FA_ICON = ->(_args, _ctx) { '<i class="fa fa-times"></i>' }
++HELPERS = { 'avatar' => AVATAR, 'action' => ACTION, 'fa-icon' => FA_ICON }.freeze
++
++def eval_mustache(inner, ctx, helpers)
++  name, args = inner.split(/\s+/, 2)
++  return helpers[name].call(args, ctx) if helpers.key?(name)
++  lookup(name, ctx).to_s
++end
++
++def render_source(template, ctx, helpers)
++  out = +''
++  emit = [true]
++  template.scan(/\{\{[^{}]*\}\}|[^{]+/).each do |tok|
++    if tok.start_with?('{{#unless ')
++      var = tok[10..-3].strip
++      emit.push(emit.last && !truthy?(lookup(var, ctx)))
++    elsif tok == '{{/unless}}'
++      emit.pop
++    elsif tok.start_with?('{{')
++      out << eval_mustache(tok[2..-3].strip, ctx, helpers) if emit.all?
++    else
++      out << tok if emit.all?
++    end
++  end
++  out
++end
++
++# --- scenario -------------------------------------------------------------
++# The template is rendered once per member. The current context is the member
++# item (as provided by an {{#each}} over the group's members); the enclosing
++# group -- which carries the authoritative `automatic` flag -- lives in the
++# parent context.
++member_item_context = { 'member' => { 'username' => 'alice' } }
++group_is_automatic  = true
++
++rendered         = render_source(source, member_item_context, HELPERS)
++link_shown       = !!(rendered =~ /class=['"]remove['"]/)
++unless_var       = source[/\{\{#unless\s+([^\s}]+)\s*\}\}/, 1]
++
++# Control: when `automatic` IS visible in the evaluated context the template
++# must suppress the remove link. This confirms the unless-block helper works
++# and isolates the defect to context resolution.
++control_ctx        = member_item_context.merge('automatic' => true)
++control_link_shown = !!(render_source(source, control_ctx, HELPERS) =~ /class=['"]remove['"]/)
++
++defect_present = group_is_automatic &&
++                 unless_var == 'automatic' &&
++                 link_shown &&
++                 !control_link_shown
++
++if defect_present
++  puts "RESULT: FAIL: remove-member link rendered for an automatic group because " \
++       "`automatic` was resolved against the member item context (which lacks it) " \
++       "instead of the enclosing group context; rendered=#{rendered.inspect}"
++  exit 1
++else
++  puts 'RESULT: PASS'
++end

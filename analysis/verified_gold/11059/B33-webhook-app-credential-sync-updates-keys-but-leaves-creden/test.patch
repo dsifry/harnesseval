@@ -1,0 +1,100 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const { prismaMock, appStoreMetadataMock, symmetricDecryptMock } = vi.hoisted(() => {
+  const symmetricDecryptMock = vi.fn();
+
+  const appStoreMetadataMock = {
+    zoom: {
+      slug: "zoom",
+      // Simulate app type evolution / reclassification
+      type: "newType",
+    },
+  };
+
+  const prismaMock = {
+    user: {
+      findUnique: vi.fn(),
+    },
+    app: {
+      findUnique: vi.fn(),
+    },
+    credential: {
+      findFirst: vi.fn(),
+      update: vi.fn(),
+      create: vi.fn(),
+    },
+  };
+
+  return { prismaMock, appStoreMetadataMock, symmetricDecryptMock };
+});
+
+vi.mock("@calcom/lib/constants", () => ({
+  APP_CREDENTIAL_SHARING_ENABLED: true,
+}));
+
+vi.mock("@calcom/lib/crypto", () => ({
+  symmetricDecrypt: symmetricDecryptMock,
+}));
+
+vi.mock("@calcom/app-store/appStoreMetaData", () => ({
+  appStoreMetadata: appStoreMetadataMock,
+}));
+
+vi.mock("@calcom/prisma", () => ({
+  default: prismaMock,
+}));
+
+describe("apps/web/pages/api/webhook/app-credential", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+
+    process.env.CALCOM_WEBHOOK_SECRET = "secret";
+    process.env.CALCOM_WEBHOOK_HEADER_NAME = "calcom-webhook-secret";
+    process.env.CALCOM_APP_CREDENTIAL_ENCRYPTION_KEY = "enc";
+
+    symmetricDecryptMock.mockReturnValue(JSON.stringify({ token: "new" }));
+
+    prismaMock.user.findUnique.mockResolvedValue({ id: 1 });
+    prismaMock.app.findUnique.mockResolvedValue({ slug: "zoom" });
+    prismaMock.credential.findFirst.mockResolvedValue({ id: 123 });
+    prismaMock.credential.update.mockResolvedValue({});
+  });
+
+  it("updates keys AND refreshes credential type to avoid stale discriminator after app type evolution", async () => {
+    vi.resetModules();
+    const { default: handler } = await import("./app-credential");
+
+    const req = {
+      headers: {
+        "calcom-webhook-secret": "secret",
+      },
+      body: {
+        userId: 1,
+        appSlug: "zoom",
+        keys: "encrypted-payload",
+      },
+    } as any;
+
+    const res = {
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn().mockReturnThis(),
+    } as any;
+
+    await handler(req, res);
+
+    expect(prismaMock.credential.update).toHaveBeenCalledTimes(1);
+    const updateArg = prismaMock.credential.update.mock.calls[0][0];
+
+    // Key is updated
+    expect(updateArg.data.key).toEqual({ token: "new" });
+
+    // Claimed behavior: type must also be refreshed on update to avoid stale discriminator
+    expect(
+      updateArg.data.type,
+      "Webhook app-credential sync should refresh credential type to avoid stale discriminator"
+    ).toBe("newType");
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.json).toHaveBeenCalledWith({ message: "Credentials updated for userId: 1" });
+  });
+});

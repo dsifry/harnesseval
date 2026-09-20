@@ -1,0 +1,217 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const H = vi.hoisted(() => {
+  const noop = vi.fn(async () => undefined);
+  const noopSync = vi.fn();
+  // Raw prisma row for a calendar credential. Note: no `app` relation and no `appName`.
+  const credentialRow = {
+    id: 999,
+    appId: "google-calendar",
+    type: "google_calendar",
+    userId: 7,
+    teamId: null,
+    key: {},
+    encryptedKey: "",
+    invalid: false,
+  };
+  const deleteEvent = vi.fn(async () => ({ deleted: true }));
+  const logger: any = {
+    error: noopSync,
+    warn: noopSync,
+    info: noopSync,
+    debug: noopSync,
+    silly: noopSync,
+    trace: noopSync,
+    fatal: noopSync,
+  };
+  logger.getSubLogger = () => logger;
+  return { noop, noopSync, credentialRow, deleteEvent, logger };
+});
+
+// Simulates the real getCalendar: it needs the calendar app slug/name carried on the
+// credential, otherwise the app cannot be resolved and no calendar service is returned.
+vi.mock("@calcom/app-store/_utils/getCalendar", () => ({
+  getCalendar: vi.fn(async (credential: any) => {
+    const appName = credential?.appName ?? credential?.app?.slug;
+    if (!appName) return null;
+    return { deleteEvent: H.deleteEvent };
+  }),
+}));
+
+// Prisma double that honours relation loading: the `app` relation is only present when
+// the query actually asks for it (include/select), like the real database does.
+vi.mock("@calcom/prisma", () => {
+  const model = (name: string) =>
+    new Proxy(
+      {},
+      {
+        get: (_t, method: any) => {
+          if (typeof method !== "string" || method === "then") return undefined;
+          if (name === "credential" && method === "findUnique") {
+            return vi.fn(async (args: any) => {
+              const wantsApp = Boolean(args?.include?.app || args?.select?.app);
+              return wantsApp ? { ...H.credentialRow, app: { slug: "google-calendar" } } : { ...H.credentialRow };
+            });
+          }
+          return vi.fn(async () => null);
+        },
+      }
+    );
+  const prisma: any = new Proxy(
+    {},
+    { get: (_t, modelName: any) => (typeof modelName === "string" ? model(modelName) : undefined) }
+  );
+  return { default: prisma, prisma, bookingMinimalSelect: {} };
+});
+
+vi.mock("@calcom/app-store", () => ({ default: new Proxy({}, { get: () => vi.fn(async () => ({})) }) }));
+vi.mock("@calcom/app-store/locations", () => ({ DailyLocationType: { CalVideo: "integrations:daily" } }));
+vi.mock("@calcom/app-store/dailyvideo/lib/VideoApiAdapter", () => ({ FAKE_DAILY_CREDENTIAL: {} }));
+vi.mock("@calcom/app-store/zapier/lib/nodeScheduler", () => ({ cancelScheduledJobs: H.noopSync }));
+vi.mock("@calcom/core/videoClient", () => ({ deleteMeeting: H.noop, updateMeeting: H.noop }));
+vi.mock("@calcom/dayjs", () => {
+  let chain: any;
+  chain = new Proxy(function () {} as any, { get: () => chain, apply: () => chain });
+  return { default: () => chain };
+});
+vi.mock("@calcom/emails", () => ({ sendCancelledEmails: H.noop, sendCancelledSeatEmails: H.noop }));
+vi.mock("@calcom/features/bookings/lib/getCalEventResponses", () => ({
+  getCalEventResponses: vi.fn(() => ({ responses: {} })),
+}));
+vi.mock("@calcom/features/ee/workflows/lib/isEventTypeOwnerKYCVerified", () => ({
+  isEventTypeOwnerKYCVerified: vi.fn(async () => true),
+}));
+vi.mock("@calcom/features/ee/workflows/lib/reminders/emailReminderManager", () => ({
+  deleteScheduledEmailReminder: H.noopSync,
+}));
+vi.mock("@calcom/features/ee/workflows/lib/reminders/smsReminderManager", () => ({
+  deleteScheduledSMSReminder: H.noopSync,
+}));
+vi.mock("@calcom/features/ee/workflows/lib/reminders/whatsappReminderManager", () => ({
+  deleteScheduledWhatsappReminder: H.noopSync,
+}));
+vi.mock("@calcom/features/ee/workflows/lib/reminders/reminderScheduler", () => ({
+  sendCancelledReminders: H.noop,
+}));
+vi.mock("@calcom/features/webhooks/lib/getWebhooks", () => ({ default: vi.fn(async () => []) }));
+vi.mock("@calcom/features/webhooks/lib/sendPayload", () => ({ default: H.noop }));
+vi.mock("@calcom/lib", () => ({
+  isPrismaObjOrUndefined: vi.fn(() => undefined),
+  parseRecurringEvent: vi.fn(() => null),
+}));
+vi.mock("@calcom/lib/getTeamIdFromEventType", () => ({ getTeamIdFromEventType: vi.fn(() => null) }));
+vi.mock("@calcom/lib/http-error", () => {
+  class HttpError extends Error {
+    statusCode: number;
+    constructor(o: any) {
+      super(o?.message);
+      this.statusCode = o?.statusCode;
+    }
+  }
+  return { default: HttpError, HttpError };
+});
+vi.mock("@calcom/lib/logger", () => ({ default: H.logger }));
+vi.mock("@calcom/lib/payment/handleRefundError", () => ({ handleRefundError: H.noop }));
+vi.mock("@calcom/lib/server/i18n", () => ({ getTranslation: vi.fn(async () => (k: string) => k) }));
+vi.mock("@calcom/lib/timeFormat", () => ({ getTimeFormatStringFromUserTimeFormat: vi.fn(() => "h:mm A") }));
+vi.mock("@calcom/prisma/enums", () => ({
+  BookingStatus: { CANCELLED: "CANCELLED", REJECTED: "REJECTED", ACCEPTED: "ACCEPTED", PENDING: "PENDING" },
+  MembershipRole: { OWNER: "OWNER", ADMIN: "ADMIN", MEMBER: "MEMBER" },
+  WorkflowMethods: { EMAIL: "EMAIL", SMS: "SMS", WHATSAPP: "WHATSAPP" },
+  WebhookTriggerEvents: new Proxy({}, { get: (_t, p) => (typeof p === "string" ? p : undefined) }),
+}));
+vi.mock("@calcom/prisma/zod-utils", () => ({ schemaBookingCancelParams: { parse: (v: unknown) => v } }));
+
+describe("handleCancelBooking – DB fallback calendar credential", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("resolves the calendar app from the credential fetched from the DB (collective booking reference)", async () => {
+    const { default: handler } = await import("./handleCancelBooking");
+
+    const booking: any = {
+      id: 1,
+      uid: "booking-uid",
+      title: "Team booking",
+      description: "",
+      startTime: new Date("2030-01-01T10:00:00Z"),
+      endTime: new Date("2030-01-01T11:00:00Z"),
+      location: "integrations:daily",
+      status: "ACCEPTED",
+      userId: 7,
+      recurringEventId: null,
+      seatsPerTimeSlot: null,
+      seatsReferences: [],
+      cancellationReason: null,
+      destinationCalendar: null,
+      payment: [],
+      workflowReminders: [],
+      attendees: [
+        { name: "Attendee", email: "attendee@example.com", timeZone: "UTC", locale: "en", phoneNumber: null },
+      ],
+      // Reference written by ANOTHER host of a collective booking: its credentialId is not
+      // part of bookingToDelete.user.credentials, so the DB fallback is taken.
+      references: [
+        {
+          id: 1,
+          type: "google_calendar",
+          uid: "external-uid",
+          externalCalendarId: "external-cal",
+          credentialId: 999,
+          bookingId: 1,
+          deleted: false,
+        },
+      ],
+      eventType: {
+        id: 1,
+        slug: "team-event",
+        eventName: "Team Event",
+        teamId: null,
+        team: null,
+        hosts: [],
+        users: [],
+        recurringEvent: null,
+        seatsPerTimeSlot: null,
+        metadata: {},
+        bookingFields: [],
+        price: 0,
+        currency: "usd",
+      },
+      user: {
+        id: 7,
+        username: "host",
+        name: "Host",
+        email: "host@example.com",
+        timeZone: "UTC",
+        locale: "en",
+        timeFormat: 12,
+        avatarUrl: null,
+        destinationCalendar: null,
+        metadata: {},
+        credentials: [],
+      },
+    };
+
+    const req: any = {
+      body: { id: 1, uid: "booking-uid", cancellationReason: "not needed", allRemainingBookings: false },
+      statusCode: 200,
+      userId: 7,
+      bookingToDelete: booking,
+    };
+
+    let thrown: unknown = null;
+    try {
+      await handler(req);
+    } catch (e) {
+      thrown = e;
+    }
+
+    expect(
+      H.deleteEvent,
+      `The credential fetched from the DB and passed to getCalendar must carry the calendar app slug/name (appName), otherwise getCalendar cannot resolve the calendar app for this booking reference and the member-host external calendar event is never deleted. handlerError=${
+        thrown ? String(thrown) : "none"
+      }`
+    ).toHaveBeenCalled();
+  });
+});

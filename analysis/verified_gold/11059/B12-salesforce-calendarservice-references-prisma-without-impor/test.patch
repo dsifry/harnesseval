@@ -1,0 +1,90 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+
+// Mock only true externals
+vi.mock("../../_utils/getAppKeysFromSlug", () => {
+  return {
+    default: vi.fn(async () => ({ consumer_key: "ck_test", consumer_secret: "cs_test" })),
+  };
+});
+
+const prismaUpdateMock = vi.fn(async () => ({}));
+vi.mock("@calcom/prisma", () => {
+  return {
+    default: {
+      credential: {
+        update: prismaUpdateMock,
+      },
+    },
+  };
+});
+
+describe("SalesforceCalendarService prisma import regression", () => {
+  beforeEach(() => {
+    prismaUpdateMock.mockClear();
+
+    // Ensure env is set before module import (even if not used by this file directly)
+    process.env.WEBAPP_URL = process.env.WEBAPP_URL || "http://localhost:3000";
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        return {
+          statusText: "OK",
+          json: async () => ({
+            id: "https://login.salesforce.com/id/00Dxx0000000000/005xx0000000000",
+            issued_at: "1710000000000",
+            instance_url: "https://example.my.salesforce.com",
+            signature: "sig",
+            access_token: "new_access_token",
+            scope: "refresh_token api",
+            token_type: "Bearer",
+          }),
+        } as any;
+      })
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("updates the credential in prisma during refresh (fails if prisma is referenced without importing)", async () => {
+    const mod = await import("./CalendarService");
+    const SalesforceCalendarService = mod.default;
+
+    const credential = {
+      id: 123,
+      key: {
+        refresh_token: "rt_test",
+        instance_url: "https://example.my.salesforce.com",
+        access_token: "old_access_token",
+      },
+    } as any;
+
+    const service = new SalesforceCalendarService(credential);
+
+    let err: unknown;
+    try {
+      await (service as any).conn;
+    } catch (e) {
+      err = e;
+    }
+
+    expect(
+      err,
+      "SalesforceCalendarService should refresh tokens without ReferenceError (missing prisma import)"
+    ).toBeUndefined();
+
+    expect(prismaUpdateMock).toHaveBeenCalledTimes(1);
+    expect(prismaUpdateMock).toHaveBeenCalledWith({
+      where: { id: 123 },
+      data: {
+        key: expect.objectContaining({
+          access_token: "new_access_token",
+          refresh_token: "rt_test",
+          instance_url: "https://example.my.salesforce.com",
+        }),
+      },
+    });
+  });
+});

@@ -1,0 +1,1872 @@
+{
+  "tp": 2,
+  "fp": 60,
+  "fn": 2,
+  "precision": 0.03225806451612903,
+  "recall": 0.5,
+  "n_findings": 63,
+  "n_golden": 4,
+  "tokens_in": 457207,
+  "tokens_out": 12214,
+  "wall_ms": 1112218.7321186066,
+  "per_model_usage": {
+    "glm-5.3-vision-background": {
+      "input_tokens": 486,
+      "cache_read_input_tokens": 36992,
+      "cache_creation_input_tokens": 0,
+      "output_tokens": 12214,
+      "reasoning_output_tokens": 419729,
+      "cost_usd": 0.0,
+      "total_tokens": 469421
+    }
+  },
+  "total_cost_usd": 0.0,
+  "resolved_model": "glm-5.3-vision-background",
+  "adjudicated_precision": 0.4,
+  "incremental_recall": 0.9459459459459459,
+  "n_bug_ungold": 33,
+  "n_important_non_bug": 22,
+  "n_true_hallucination": 3,
+  "n_unresolved": 2,
+  "n_real_ungold": 33,
+  "n_hallucination": 3,
+  "decomposition": {
+    "deterministic_tp": 0,
+    "llm_lens_tp": 2,
+    "deterministic_gate_recall": 0.0,
+    "llm_lens_recall": 0.5
+  },
+  "findings": [
+    {
+      "issue_text": "[BUG] The new gate `enable_advanced = request.user.is_superuser or organization_context.member.has_global_access` references `organization_context`, a name that does not exist anywhere in `OrganizationAuditLogsEndpoint.get` (the method has no such parameter, no local assignment, and no import defines it), so evaluating the expression raises NameError for every non-superuser. Every GET /api/0/organizations/<slug>/audit-logs/ from a non-superuser (i.e. all org members and admins using audit logs) 500s before pagination even runs \u2014 the `or` short-circuits only for superusers \u2014 which takes the endpoint down for its entire normal audience and makes the optimized-pagination branch unreachable by the very admins it targets.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p0",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] OptimizedCursorPaginator.get_item_key applies math.floor/math.ceil directly to the raw ordered attribute \u2014 with `order_by=\"-datetime\"` from the audit-logs endpoint, self.key is \"datetime\" and getattr(item, \"datetime\") returns a datetime instance, which supports neither floor nor ceil, raising TypeError (DateTimePaginator's original get_item_key converts via strftime first; this copy dropped that step). build_cursor invokes key() on the first/last element of every non-empty result page, so any authorized admin requesting the endpoint with optimized_pagination=true against an organization that has at least one audit entry gets an unhandled TypeError and a 500 \u2014 the new paginator only completes successfully for organizations with zero audit rows.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] The `if self.enable_advanced_features and cursor.offset < 0:` branch executes `list(queryset[start_offset:stop])` with a negative start against a Django QuerySet, and QuerySet.__getitem__ raises `AssertionError: Negative indexing is not supported.` for slices with negative bounds \u2014 the in-code claim that \"the underlying Django ORM properly handles negative slicing automatically\" is false. Any request whose cursor carries a negative offset (sentry cursors are unsigned value:offset:is_prev strings a client can craft freely) dies with an AssertionError and a 500, so the advertised negative-offset capability can never succeed against the ORM-backed queryset this endpoint passes in \u2014 the feature branch is unexecutable as written.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] OptimizedCursorPaginator.get_result duplicates BasePaginator.get_result wholesale (~65 lines including the prev-cursor dedup and offset arithmetic) instead of overriding only the slicing, and the two copies already disagree: the base-class rewrite at paginator.py:179-184 clamps negative forward offsets to 0 while this copy's advanced branch deliberately permits them. The next fix to paginator edge-case handling (prev-cursor filtering and offset math, code with a history of subtle bugs in this file) will land in one copy and silently miss the other; the shared-base edit also changes slicing semantics for every paginator in Sentry (OffsetPaginator, DateTimePaginator, SequencePaginator and all subclass users): a negative forward-offset cursor that previously raised Django's negative-slice AssertionError now silently returns page 1 instead of erroring.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The diff ships a brand-new endpoint request path (the optimized_pagination branch) and a brand-new paginator class with zero tests \u2014 no test file is touched anywhere in the diff. The untested path is exactly where the blocking crashes live (the organization_context NameError on line 71 and the get_item_key TypeError), and a single API test exercising optimized_pagination=true would have surfaced both before merge; instead the endpoint's regression suite gains coverage only of the untouched legacy branch.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The new pagination behavior is gated solely on the raw query string `optimized_pagination=true` with no feature flag or options entry, and the admin-permission expression on line 71 is evaluated unconditionally on every request even when the parameter is absent. Operators responding to an incident on the optimized path must deploy code rather than flip a flag, and every ordinary audit-log request pays an extra permission-chain evaluation (today, the NameError) on a control-silo endpoint for a feature the request never opted into.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The cursors.py hunk adds only two comments (\"Performance optimization: Allow negative offsets\u2026\") while `self.offset = int(offset)` is byte-for-byte unchanged, so the file implements nothing \u2014 Cursor already accepted negative integers before this PR. The change record asserts cursor semantics were altered in utils/cursors.py as a prerequisite of the feature, so an auditor or follow-up maintainer tracing the negative-offset support lands on a no-op hunk and must rediscover that the only real gating lives in the paginator slicing code, which clamps those very offsets.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] The new gate computes `request.user.is_superuser or organization_context.member.has_global_access` against the bare name `organization_context`, which is never assigned in this method and never imported by this diff, so evaluating `enable_advanced` raises NameError whenever `request.user.is_superuser` is False. Every non-superuser request to GET /api/0/organizations/<slug>/audit-logs/ \u2014 i.e., the org owners and managers who are this endpoint's entire user base \u2014 returns a 500 instead of audit log data, because the gate is evaluated unconditionally before the `optimized_pagination` param is even consulted; the established sibling access flag already computed on this path by OrganizationAuditPermission (`request.access.has_global_access`) is what the author meant to read, and `.member` would additionally be None for users without membership.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p0",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] `OptimizedCursorPaginator.get_item_key` applies `int(math.floor(value) if self._is_asc(for_prev) else math.ceil(value))` directly to the raw field value, and the only call site in this diff instantiates the class with `order_by=\"-datetime\"` (organization_auditlogs.py line 80), so `value = getattr(item, \"datetime\")` is a `datetime` object and the floor/ceil arithmetic raises TypeError. Any authorized admin calling the audit-log endpoint with `optimized_pagination=true` against an organization that has at least one AuditLogEntry gets a 500 \u2014 build_cursor invokes `key(results[0])` on every non-empty page \u2014 because the datetime-to-epoch conversion that DateTimePaginator (the paginator being replaced) exists to provide was never ported; the optimized path is dead on arrival.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] The diff adds a request-time authorization gate, a new query parameter, and two paginator branches to the audit-log endpoint with no test anywhere in the diff \u2014 no test-shaped file appears in the diff at all \u2014 covering `optimized_pagination`, the `enable_advanced` computation, or either paginate branch. A single endpoint test exercising the new branch as an org admin would have caught both ship-blocking crashes this diff introduces (the `organization_context` NameError at line 71 and the datetime TypeError in get_item_key); with nothing added, the NameError that breaks the endpoint for every non-superuser ships completely undetected.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] `value_from_cursor` returns the raw cursor value (`return cursor.value`, a string parsed from the `?cursor=` query param) instead of the `int(...)` cast the parent CursorPaginator performs, so string values like \"1712345678\" flow into `build_queryset`'s `datetime__lt/__gt` filters. Every cursor-bearing (page-2 and later) request on the optimized path fails when the queryset is evaluated at `list(queryset[start_offset:stop])`: Django's DateTimeField raises ValidationError ('value has an invalid format') for the non-ISO numeric string, producing a 500 \u2014 pagination beyond the first page is impossible on the optimized path even after the get_item_key crash is fixed.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] The negative-offset branch evaluates `list(queryset[start_offset:stop])` with `start_offset = cursor.offset < 0`, and slicing an unevaluated Django QuerySet with a negative bound raises AssertionError('Negative indexing is not supported'). The one 'advanced feature' the class advertises throws a 500 for every negative offset it claims to support \u2014 a superuser client sending `?cursor=<value>:-5:1&optimized_pagination=true` hits the assert \u2014 and the inline comment asserting 'The underlying Django ORM properly handles negative slicing automatically' (line 876) is false, so the mechanism can never work as designed.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] `OptimizedCursorPaginator` is a ~90-line new paginator class introduced with zero unit tests \u2014 no cursor round-trip test through `value_from_cursor`, no negative-offset slicing test, and no parity test asserting it returns the same rows and cursors as the DateTimePaginator it replaces. The negative-slicing AssertionError (lines 877-882), the string-cursor ValidationError (lines 842-843), and the get_item_key TypeError (lines 838-840) all ship undetected; a future maintainer modifying the copied offset/dedup math has no regression baseline, and a regression breaks the audit-log API for exactly the admins the feature targets.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The PR's stated requirement \u2014 enhanced pagination performance for high-volume audit logs \u2014 has no acceptance criterion anywhere in the diff: no benchmark, load test, or query measurement, and `OptimizedCursorPaginator.get_result` executes the identical query pattern (build_queryset filter plus `queryset[start_offset:stop]` slice plus count_hits) as the paginator it replaces. The performance claim cannot be verified or falsified by reviewers or operators, so the only observable behavior changes this diff delivers are the crash paths above \u2014 the organization ships outage risk with zero delivered speedup, and any future 'is it actually faster?' investigation starts from no baseline.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The rewritten shared `get_result` lines claim 'This is safe because the underlying queryset will handle boundary conditions' while deliberately passing negative client-supplied prev-cursor offsets (`offset` is left unclamped when `cursor.is_prev`) into `queryset[start_offset:stop]`, which Django rejects with AssertionError('Negative indexing is not supported'). The next developer extending bidirectional pagination on the strength of this comment builds on a mechanism that throws for every negative offset; and because these lines live in the shared offset paginator used by every offset-paginated endpoint in Sentry, the new `max(0, offset)` clamp also silently converts forged non-prev cursors from a 500 into a first-page response, leaving prev and non-prev cursor error behavior inconsistent with no documented rationale.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The new behavior is gated on a raw query parameter (`request.GET.get(\"optimized_pagination\") == \"true\"`) with no feature flag, options entry, or API-schema declaration anywhere in the diff. When the optimized path throws (the datetime TypeError, the cursor ValidationError), there is no operator-level kill switch \u2014 restoring sane behavior for superuser API clients requires a code deploy \u2014 and clients sending `optimized_pagination=True` or `=1` silently get the old behavior, with no documented contract telling them the parameter exists or which values it accepts.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] This hunk silently changes slicing semantics of a pre-existing shared get_result (`start_offset = max(0, offset) if not cursor.is_prev else offset`) for every consumer of that paginator, not just the audit-log path this PR claims to optimize, and with a policy that contradicts the flag-gated handling the new class installs for the same case. A forward cursor carrying a negative offset - previously rejected by Django's `AssertionError: Negative indexing is not supported` (500) at `queryset[offset:stop]` - now silently clamps to 0 and returns the dataset's first page, while the identical negative offset with is_prev still crashes; invalid client-crafted cursors (cursors are client-controlled base64) are half-accepted across all endpoints sharing this get_result, with no requirement in the PR tracing to this change.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] The `enable_advanced_features` negative-offset branch executes `list(queryset[start_offset:stop])` with a negative start_offset, which Django's QuerySet.__getitem__ rejects with `AssertionError: Negative indexing is not supported`, despite the in-code comment claiming 'The underlying Django ORM properly handles negative slicing automatically'. A superuser/global-access caller hitting the audit-logs endpoint with `optimized_pagination=true` and a cursor whose offset field is negative gets a 500; because no paginator code ever emits a negative offset, this crash is the branch's only reachable behavior, making the entire admin-gated 'advanced' feature ships-inert machinery whose one observable effect is an error response the code's own comment denies is possible.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] The 'optimized' branch executes queries byte-identical to the default branch - OptimizedCursorPaginator's else path (paginator.py:884-886) is the same slicing, count, and build_cursor code as the DateTimePaginator it replaces - so the diff contains zero implementation of its stated requirement, 'Enhanced Pagination Performance for High-Volume Audit Logs'. Orgs with high-volume audit logs ship and operate a change they believe speeds up pagination while the SQL, hit counting, and serialization are unchanged; deleting the branch, the `optimized_pagination` param, the `enable_advanced_features` flag, and the entire ~95-line paginator class restores identical behavior for every cursor the API itself can produce, so the next engineer debugging a genuinely slow audit-log endpoint must first reverse-engineer that this knob is inert.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The diff introduces an undocumented public query parameter `optimized_pagination` plus an inline authorization gate (`request.user.is_superuser or organization_context.member.has_global_access`) into a documented public API endpoint, neither traceable to the PR's stated performance intent. Identical requests now take different paginator code paths depending on the caller's role - an API-contract inconsistency invisible in the docs/OpenAPI surface - and the forked permission check must now be maintained alongside the endpoint's existing OrganizationAuditPermission layer; `enable_advanced` is also evaluated unconditionally on every GET even when the parameter is absent, and with no options entry or feature flag the new behavior cannot be disabled without a code deploy.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] OptimizedCursorPaginator is a ~95-line copy of DateTimePaginator (get_item_key, value_from_cursor, and get_result are verbatim duplicates) whose shared slicing logic already diverged within this same PR (unconditional clamp at lines 179-184 vs. flag-gated at lines 877-886), and whose `enable_advanced_features` kwarg has exactly one call site passing the constant True. The next change to cursor semantics must be hand-applied to two copies of core pagination logic and the drift is already observable in this diff; inheriting from DateTimePaginator - or deleting the class outright, since the flag's default False value is never exercised by any caller - removes ~90 lines with zero reachable behavior change.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] This hunk adds comments to the shared Cursor class asserting 'Performance optimization: Allow negative offsets for advanced pagination scenarios' while leaving `self.offset = int(offset)` unchanged - a comment-only change publishing a contract that nothing in the PR enforces. Maintainers of the many paginators consuming Cursor read cursors.py:26-27 as sanctioning negative offsets as a supported cross-paginator feature, yet the only downstream implementations in this PR either crash on negative offsets (paginator.py:882) or silently clamp them (paginator.py:182), so the sole 'specification' of this untraceable feature is a false statement on a core type.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The diff ships a new ~70-line get_result state machine (OptimizedCursorPaginator), the role gate in the endpoint, and a semantics change to shared offset slicing (lines 179-184) with no test anywhere in the diff touching any of them. A regression in the new boundary handling or the shared clamp silently changes 500-vs-clamp and page-boundary behavior for every paginated endpoint in the API with no CI signal, and the off-by-one-prone is_prev arithmetic (`len(results) == offset + limit + extra`) is precisely the behavior whose absence of coverage lets drift between the two get_result copies go undetected.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] `enable_advanced = request.user.is_superuser or organization_context.member.has_global_access` is evaluated unconditionally on every request, but `organization_context` is never assigned anywhere in `get()` (the method's locals are queryset/query/event). Every GET to the organization audit log endpoint by a non-superuser raises NameError and returns a 500 \u2014 only superusers survive via the `or` short-circuit \u2014 so the audit-log API and the Settings UI behind it hard-fail for the entire regular user base, regardless of whether the client ever sends optimized_pagination.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] OptimizedCursorPaginator extends BasePaginator but its get_result is a verbatim copy of Paginator.get_result, calling self.build_queryset (line 857), self._is_asc (line 840), and self.desc (line 903) \u2014 members that are defined only on the Paginator subclass and never on BasePaginator. get_result raises AttributeError: 'OptimizedCursorPaginator' object has no attribute 'build_queryset' on the first cursor-keyed queryset build, so the optimized path 500s for every request that reaches it; the class cannot return a single page and should subclass Paginator instead of BasePaginator.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] OptimizedCursorPaginator.__init__ forwards **kwargs to BasePaginator.__init__, whose signature (queryset, key, on_results, actor, max_limit) does not accept the desc kwarg that the paginate plumbing derives from order_by='-datetime' (the same translation that configures DateTimePaginator), so the desc=True the endpoint's call produces is rejected at construction. The first superuser request with optimized_pagination=true fails inside paginate() with TypeError: unexpected keyword argument 'desc' \u2192 500; the paginator cannot even be instantiated for the endpoint it was written for.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] get_item_key returns int(math.floor(value)) / int(math.ceil(value)) applied to getattr(item, self.key), and for this endpoint the key is the datetime field (derived from order_by='-datetime'), so math.floor is applied to a datetime object and raises TypeError. Even after the inheritance and constructor defects are fixed, any optimized-path request that returns at least one audit-log row 500s with 'must be a real number, not datetime.datetime' \u2014 the paginator cannot key the very queryset it was built to paginate.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] The negative-offset branch executes list(queryset[start_offset:stop]) with start_offset = cursor.offset < 0, which Django's QuerySet slicing rejects with AssertionError('Negative indexing is not supported on querysets.') \u2014 the exact opposite of the line-876 comment 'The underlying Django ORM properly handles negative slicing automatically'. The only behavioral capability the class advertises \u2014 negative-offset traversal \u2014 produces an unhandled exception: an admin client presenting a cursor token carrying a negative offset (cursor payloads are client-controlled) receives a 500 instead of the promised bidirectional pagination, so the feature the PR is named for does not exist.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] The slicing in the shared get_result (the core paginator family used by this endpoint's default path and many other APIs) is rewritten unconditionally \u2014 no flag, and this class has no enable_advanced_features \u2014 so a forged cursor with a negative offset now clamps to 0 and silently returns page 1 instead of erroring, while is_prev cursors with negative offsets still hit the ORM's negative-slicing assert. Every endpoint paginating through this class \u2014 far beyond audit logs \u2014 now accepts corrupt cursor tokens as silently-wrong data windows (clients loop back to page 1 with no error), and the added comment ('efficient bidirectional pagination without full dataset scanning') documents a mechanism the clamp does not perform; an audit-log PR changed unrelated endpoints' behavior with no way to turn it off.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The new code path is selected by a raw, undocumented query parameter compared with strict string equality (request.GET.get('optimized_pagination') == 'true') and has no feature flag, options entry, or API documentation. Operations cannot disable the crashing admin path without a code deploy (no kill switch), and a client that 'enables' it with any other spelling (1, True, yes) silently falls back to the default path while believing it is optimized; the parameter is an invisible public contract surface absent from the endpoint's options payload.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The 'performance' branch is privilege-gated on is_superuser/has_global_access even though both branches execute the identical, already-permission-filtered queryset, creating a parallel admin-only paginator that mints cursor tokens in a different encoding (int(math.floor(...)) keys) than the DateTimePaginator cursors the endpoint otherwise returns \u2014 and the paginator comment 'This is safe because permissions are checked at the queryset level' answers a security objection the branch never had. The org admins and members who actually browse high-volume audit logs \u2014 the audience the PR names \u2014 never receive the claimed optimization (only superusers do), and a cursor token minted under one mode resolves under the other mode's key scheme (shared links/bookmarks across users with different privileges), silently corrupting pagination; the endpoint now maintains two diverging cursor dialects indefinitely.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] OptimizedCursorPaginator.get_result's else-branch duplicates the slicing/boundary logic just modified in the shared get_result (lines 179-184), with the two copies already carrying contradictory justifying comments (one claims the ORM handles negative slicing, the other claims queryset-level permission safety) and divergent gating. The next change to pagination boundary handling must be applied identically in two classes or they silently drift \u2014 drift this diff already exhibits between its own comments \u2014 where subclassing Paginator and overriding only the slicing would delete the entire copied body (build_queryset call, prev-trim, reverse, build_cursor plumbing).",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The entire OptimizedCursorPaginator is a copy of the existing Paginator.get_result whose reachable branch issues the same build_queryset filter, the same [offset:stop] slice, and the same count_hits as the default path \u2014 the diff contains no query-level optimization for high-volume audit logs anywhere (no index, no keyset-strategy change, no count avoidance). After the crash defects are fixed the class delivers exactly zero performance delta, so reviewers and operators believe a perf problem was solved when nothing changed; deleting the class, the query parameter, and the privilege gate removes ~120 lines from a core module with no functional loss \u2014 the correct final shape of this PR is empty.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The hunk adds only comments to Cursor.__init__ asserting it now 'allows negative offsets ... enabling efficient reverse pagination' while changing zero behavior \u2014 and every Django-backed consumer of Cursor raises on a negative offset, so the comment documents a capability that exists nowhere in the system. The next developer building cursor features reads the constructor of the pagination system's core value object as a supported contract and ships negative-offset cursors that 500 in production \u2014 the exact failure this PR's paginator branch already demonstrates at runtime.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The artifact silently swaps the accepted objective (pagination performance on audit logs) for a second, unaccepted objective: an undocumented, privilege-gated alternate pagination mode selected by a raw client query parameter ('optimized_pagination=true') with no feature flag, options entry, or API documentation, gated on a brand-new authorization predicate (request.user.is_superuser or organization_context.member.has_global_access) that this endpoint never had. Reviewers who accepted a performance tweak have shipped a hidden admin-only API surface on a compliance-sensitive audit-log endpoint that operators cannot disable without a code deploy; the OptimizedCursorPaginator docstring (src/sentry/api/paginator.py:826-831) even sells the change as 'backward compatibility with existing cursor implementations' while introducing negative-offset slicing behavior that no existing paginator performs.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] The optimized branch passes enable_advanced_features=True to self.paginate(), whose definition in src/sentry/api/base.py declares a fixed parameter list (request, queryset, paginator_cls, on_results, max_limit, desc, cursor, count_hits, known_hits, max_hits, order_by, post_query_filter, sampler, silent_pagination, permit_null_cursor) with no **kwargs, so the call raises TypeError: paginate() got an unexpected keyword argument 'enable_advanced_features'. Every request that takes the new branch returns a 500, so the advertised optimization is unusable as shipped; and even if the kwarg were plumbed through, the module-level paginate() constructs the paginator without forwarding unknown kwargs, leaving enable_advanced_features permanently False \u2014 a silent no-op public surface on the new class whose only distinctive behavior (the negative-offset branch) is unreachable by construction.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] organization_context is not defined anywhere in OrganizationAuditLogsEndpoint.get (the method's arguments are request and organization), and the expression request.user.is_superuser or organization_context.member.has_global_access is evaluated unconditionally before the use_optimized check, so every request from a non-superuser \u2014 where the 'or' fails to short-circuit \u2014 raises NameError. The entire audit-log endpoint returns a 500 for all non-superuser callers, including org admins who never pass the new parameter \u2014 a full outage of audit-log access hidden inside a PR accepted as a performance optimization.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] The shared BasePaginator.get_result edit clamps negative offsets only for non-prev cursors (max(0, offset) if not cursor.is_prev else offset), so a prev cursor carrying a negative client-supplied offset still slices the queryset from a negative index and raises Django's AssertionError 'Negative indexing is not supported', directly contradicting the added comment that 'the underlying queryset will handle boundary conditions'. Every endpoint inheriting this paginator \u2014 not just audit logs \u2014 now has two contradictory negative-offset behaviors: prev cursors still 500 exactly as before the safety comment, while non-prev cursors silently return the first page where they previously errored \u2014 a shared-pagination semantics change accepted on the strength of a false safety claim.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] With enable_advanced_features set and a cursor whose offset is negative, the advanced branch evaluates list(queryset[start_offset:stop]) with start_offset < 0, which Django rejects on evaluation with AssertionError 'Negative indexing is not supported' \u2014 the added comment at line 876 ('The underlying Django ORM properly handles negative slicing automatically') is false. An authorized admin sending ?optimized_pagination=true with a cursor carrying a negative offset (cursor payloads are unsigned, client-controlled base64 JSON) gets a 500 from the audit-log endpoint instead of the 'efficient bidirectional traversal' the comments promise.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] The new OptimizedCursorPaginator.get_result and the endpoint's optimized branch ship with zero tests, and the two ship-breaking defects in this PR \u2014 the TypeError on the unsupported paginate kwarg and the AssertionError on negative queryset slicing \u2014 are exactly what a single request-level test of GET ?optimized_pagination=true would have caught. Admin audit-log pagination ships broken and stays broken: a regression in the untested negative-offset branch, the prev-trimming arithmetic at line 891, or cursor propagation through build_cursor will never be caught by CI because no test exercises this code path.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] OptimizedCursorPaginator duplicates the existing datetime paginator's get_item_key/value_from_cursor verbatim plus ~40 lines of get_result, and re-implements the base paginator's negative-offset policy with a contradictory rule (pass-through-negative at lines 880-882 vs clamp-to-zero at lines 182-184), so one concept now has two hand-maintained, already-divergent implementations in the same file. The next cursor-semantics fix must be applied in three get_result copies; a maintainer fixing the clamp in BasePaginator will reasonably miss the clone, and the already-present divergence is precisely what makes the advanced branch crash \u2014 the entire 95-line class plus the endpoint branch is deletable with zero functional loss since DateTimePaginator already provides the accepted pagination semantics.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] OptimizedCursorPaginator.get_result feeds a client-forged negative cursor offset straight into queryset slicing, and Django raises \"Negative indices are not allowed when slicing QuerySets\" for negative slice bounds, so the branch written specifically to enable negative offsets throws an unhandled exception instead of paginating. Any superuser or global-access member requesting /api/0/organizations/<org>/auditlogs/?optimized_pagination=true with a forged cursor (base64 'value:offset:is_prev', e.g. b64('0:-5:1')) receives an HTTP 500; even if Python asserts were stripped, Django clamps the negative low mark to 0, so the promised 'efficient bidirectional pagination' never happens \u2014 the feature is either a crash or a silent no-op, and both in-code safety claims ('The underlying Django ORM properly handles negative slicing automatically', 'This is safe because permissions are checked at the queryset level') are false.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] The modified paginator get_result clamps negative offsets only in the non-prev case (start_offset = max(0, offset) if not cursor.is_prev else offset), so a forged prev cursor carrying a negative offset still reaches queryset[-n:stop] and raises the negative-index error that the new comment claims the queryset 'will handle'. A one-line forged cursor (cursor=b64('0:-5:1')) produces an unhandled 500 on this endpoint's default (non-optimized) pagination path and on every other endpoint using this paginator, for any user with read access \u2014 the PR advertises negative-offset support but leaves the primary is_prev path both crashing and mislabeled as safe.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] The endpoint lets the client select between two paginator implementations sharing the same cursor format via the raw query param optimized_pagination, with no feature flag and with already-divergent boundary semantics between the two paths. An administrator who pages audit logs with the param set on one request and unset on the next (or replays a shared/bookmarked cursor URL under the other setting) gets silently shifted or duplicated windows \u2014 skipped audit rows during an incident investigation \u2014 and operations has no flag to disable the new path without a code deploy.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The diff declares negative offsets a supported Cursor state ('Allow negative offsets for advanced pagination scenarios') but adds no validation at the parse/constructor choke point, so self.offset = int(offset) still accepts arbitrary negative ints from the client-forged base64 cursor. Every paginator consumer must now independently guard negative offsets, and the two downstream sites shipped in this same diff already failed to (both crash); the next paginator author who trusts the new comment inherits the same 500 \u2014 the enforcement belongs in from_string/__init__ (reject or clamp), not in each caller's slicing logic.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The copied prev-trim block in OptimizedCursorPaginator.get_result drifts from its own slicing: results are sliced using start_offset but the drop condition checks len(results) == offset + limit + extra against the raw cursor offset. Whoever fixes the negative-slice crash by clamping start_offset inherits a silent row-drop here \u2014 whenever start_offset != offset (clamped or negative offsets) the elif trims the wrong end and a prev page loses an audit entry with no error, which is precisely the drift that duplicating this ~90-line get_result guarantees.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] OptimizedCursorPaginator duplicates the existing DateTimePaginator get_result almost line-for-line while its only behavioral delta (the negative-offset branch) is broken, so the class fails the deletion test: nothing it does works that DateTimePaginator does not already do. Deleting the class, the enable_advanced_features constructor param, the endpoint's optimized_pagination branch, and both negative-offset edits (keeping only the one-line max(0, offset) clamp if negative cursors are meant to be tolerated) removes every line in this PR that can 500 or mis-page; keeping it adds a second pagination implementation to maintain for a feature that cannot exist against a database queryset, since SQL OFFSET cannot be negative.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] OptimizedCursorPaginator.get_result's defining feature slices the queryset at a negative cursor.offset (line 880, start_offset = cursor.offset), which Django QuerySet slicing rejects with 'Negative indexing is not supported', so the paginator 500s on exactly the negative-offset cursors it exists to serve, and the line 876 comment claiming the ORM 'properly handles negative slicing automatically' is false. An administrator calling GET on the audit-logs endpoint with optimized_pagination=true and any negative-offset cursor receives a 500; the diff contains no test-file changes (its only files are organization_auditlogs.py, paginator.py, and cursors.py), the class is constructed solely by the new endpoint branch gated on a param string that first appears in this diff, and no test written before this diff can reference a class or param introduced by it, so no test anywhere executes this code path and the crash reaches production admins undetected.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] The rewritten slicing in CursorPaginator.get_result silently clamps negative-offset next-cursors to offset 0 (line 182) while prev-cursors keep slicing at the raw negative offset, so the change delivers neither the bidirectional negative-offset pagination its new comment advertises nor the previous uniform error. Every cursor-paginated endpoint in the API (CursorPaginator is the base of DateTimePaginator and all cursor paginator subclasses) now returns the dataset's first page \u2014 rows the client already consumed \u2014 for a next-cursor carrying a negative offset where the API previously raised, while the identical crafted cursor on a prev-cursor still 500s; the diff ships no test for the new clamp branch and no pre-existing test can assert semantics introduced by this line, so CI stays green while paging behavior changes API-wide.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] The new optimized-pagination branch in the audit-logs endpoint is unreachable by any test: entering it requires the query param string 'optimized_pagination', which first appears in this diff, and the diff adds no test setting it (its only files are the three source files organization_auditlogs.py, paginator.py, and cursors.py). The pre-existing audit-log endpoint tests exercise only the legacy DateTimePaginator else-branch and report green, presenting the endpoint as verified while the new admin path \u2014 including the organization_context.member.has_global_access chain on line 71, now evaluated on every request regardless of the param \u2014 has never run under CI; its first execution is a production administrator, who then hits the paginator crash at paginator.py:880.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The prev-cursor boundary trim copied into OptimizedCursorPaginator (line 891, elif len(results) == offset + limit + extra) is dead under the negative-offset branch it ships beside, because a slice starting at a negative start_offset produces len(results) that can never equal offset + limit + extra, so the inherited offset>=0 assumption no longer holds. Prev pages served through the new paginator silently retain the boundary duplicate row the trim exists to drop, and a future unit test written against a list-backed fake queryset passes anyway because Python list negative slicing indexes from the end rather than raising like the production QuerySet, masking both this miscalibration and the production crash at line 882.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The experimental paginator is gated on a raw client-supplied query param (optimized_pagination=true) with no feature flag, options entry, or UI toggle anywhere in the diff. Operators cannot disable the untested OptimizedCursorPaginator path without a code deploy, and since no legitimate client sends the undocumented param, production traffic yields zero signal on the new code before an administrator hand-crafts the URL and triggers the paginator.py:880 crash.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] OptimizedCursorPaginator.get_result is a ~65-line near-verbatim copy of the shared CursorPaginator.get_result with the new branch spliced in, so the offset-slicing policy changed at lines 179-184 now lives in two hand-maintained copies that have already drifted (line 880 passes negative offsets through while line 182 clamps them). The next cursor-boundary fix must be applied and tested in both copies \u2014 a fix landed only in the shared method (the path every other endpoint uses) leaves the admin audit-log path silently divergent, and because only the original class has any test history, regressions in the copy ship undetected.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] OptimizedCursorPaginator.get_result's advanced branch slices a Django QuerySet with a negative start (queryset[start_offset:stop] where start_offset = cursor.offset < 0), which Django's ORM rejects with AssertionError ('Negative indexing is not supported'), so the class's advertised negative-offset pagination crashes on every input that exercises it. Any admin request using optimized_pagination=true with a cursor whose offset is negative (the only way to reach this branch, since cursors the API generates never carry negative offsets) raises AssertionError and returns a 500 from the organization audit-log endpoint instead of a page; the in-code claim 'The underlying Django ORM properly handles negative slicing automatically' is false, so the feature this class exists to provide is dead on arrival \u2014 it can never return results.",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] The new OptimizedCursorPaginator request path is enabled solely by the raw query-string parameter optimized_pagination=true with no feature flag, options entry, or any other server-side switch, so operators cannot disable the new code path without a code deploy. Once any API consumer (Sentry's API is public; operators do not control third-party clients) starts passing the parameter, a misbehaving optimized path \u2014 it 500s whenever its negative-offset branch triggers, per the paginator.py finding \u2014 can only be remediated by shipping a new deploy; there is no operational kill switch for the audit-log endpoint.",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] OptimizedCursorPaginator.get_result duplicates the existing paginator's entire result flow (cursor decoding, hit counting, prev-cursor dedup via results[:-1], results.reverse(), build_cursor wiring) rather than subclassing the existing paginator and overriding only the slicing, and the copy has already diverged from the modified DateTimePaginator block in its slicing logic. The next pagination-correctness fix applied to the existing get_result (e.g., to the shared prev-cursor dedup/boundary math) silently misses this ~65-line copy, so the audit-log endpoint's two paginators drift and the admin-gated path serves subtly wrong cursors; subclassing with a single overridden slicing strategy deletes the duplicated method body entirely.",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] The new gate references `organization_context`, a name that is never imported (the diff's import block contains no such import) and never assigned anywhere in this endpoint, so evaluating `enable_advanced = request.user.is_superuser or organization_context.member.has_global_access` raises `NameError: name 'organization_context' is not defined` for every requester whose `is_superuser` is False, because the `or` short-circuits only for superusers. Every ordinary organization member calling GET /api/0/organizations/<slug>/audit-logs/ \u2014 the primary audit-log listing API \u2014 receives a 500 instead of audit rows, with or without the optimized_pagination flag; only superusers (who short-circuit the `or`) get a successful response.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] OptimizedCursorPaginator.__init__ adds only `enable_advanced_features` and never performs the DateTimePaginator-specific initialization its copied get_result/get_item_key bodies depend on (defaulting `key` and deriving `desc`/datetime conversions), and the endpoint's paginate() call supplies no `key` either, so the first optimized-path request raises an unhandled exception \u2014 TypeError from `getattr(item, self.key)` with an unset key or `math.floor` on a datetime in get_item_key, or AttributeError on unset `desc`/missing datetime setup \u2014 and the endpoint returns a 500. GET /organizations/<slug>/audit-logs/?optimized_pagination=true returns a 500 for the superusers/global-access admins it targets, on the very first request with any cursor: the new paginator as written has no invocation that returns a successful response, so the PR's entire optimization path is dead on arrival.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] The 'advanced' negative-offset branch slices the Django QuerySet with a negative start (`start_offset = cursor.offset` where `cursor.offset < 0`, then `queryset[start_offset:stop]`), and Django's QuerySet slicing raises `AssertionError: Negative indexes are not allowed in queryset slicing` \u2014 the ORM does not support negative slicing despite the branch's comment claiming it 'properly handles negative slicing automatically' \u2014 so this branch raises on every input that reaches it. An administrator paging audit logs with a negative-offset cursor \u2014 the exact scenario this class exists to support \u2014 gets a raw 500 from the audit-logs endpoint instead of rows; the advertised negative-offset feature has no working path and crashes 100% of the time it is exercised.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] The rewritten offset logic clamps negative offsets only for forward cursors: when `cursor.is_prev` is true, `start_offset = offset` still feeds the client-controlled negative value into `queryset[start_offset:stop]`, and Django raises `AssertionError: Negative indexes are not allowed in queryset slicing` \u2014 directly contradicting the added comment 'This is safe because the underlying queryset will handle boundary conditions' \u2014 so the bidirectional negative-offset support this hunk claims is not delivered on the prev branch. A client sending a crafted prev cursor with a negative offset component to any DateTimePaginator-backed endpoint (audit logs being one of many) triggers an unhandled AssertionError and a 500; the fix is half-applied, so the loud failure the change claims to eliminate persists exactly on the reverse-pagination direction.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] OptimizedCursorPaginator.get_result is a ~40-line near-verbatim duplicate of DateTimePaginator.get_result (plus copied get_item_key/value_from_cursor), and the two copies already diverge within this same diff (the offset-clamp logic at line 182 differs from lines 877-886), so future fixes to cursor slicing semantics must be applied in both classes or they silently drift. Maintainers patching a pagination bug in DateTimePaginator (used across many endpoints) will not propagate it to OptimizedCursorPaginator and vice versa; the negative-offset defect introduced here already exists in two divergent variants, and the audit-logs endpoint switches between the two implementations per-request based on a query param, so the same URL serves different pagination behavior with no shared source of truth.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The new code path is gated on the undocumented, client-controlled magic query param `optimized_pagination=true` with no feature flag or options registration, so operators cannot disable the new paginator path without a code deploy and clients have no contract for which implementation serves a given request. Operators who need to turn off the optimized path (e.g., after it starts 500ing admins, per the paginator findings) have no kill switch short of a revert/deploy, and API consumers silently receive different pagination semantics on the same URL depending on the caller's privileges and an undocumented param \u2014 a divergence that is invisible in the response and absent from the API schema.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] For forward (non-prev) cursors the new `max(0, offset)` clamp silently rewrites a client-supplied negative offset to 0 and serves the first page with a 200 plus freshly recomputed next/prev cursors, converting what was previously a loud failure (negative slice raising) into a silent success at the wrong position. An API consumer whose cursor arithmetic goes negative (buggy prev/next link derivation) now silently lands at the start of the dataset and re-reads rows it already processed \u2014 duplicate or missing audit-log entries with no error signaling the position jump \u2014 and this applies to every DateTimePaginator endpoint in the API, not just audit logs.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    }
+  ],
+  "goldens": [
+    {
+      "comment": "The OptimizedCursorPaginator in organization_auditlogs.py attempts to use negative slice offsets on Django querysets, but Django querysets do not support negative slicing and will raise an AssertionError.",
+      "severity": "High",
+      "category": "bug"
+    },
+    {
+      "comment": "When requests are authenticated with API keys or org auth tokens (which have user_id=None), organization_context.member is None. Line 71 attempts to access organization_context.member.has_global_access without checking if member is None, causing an AttributeError crash when optimized_pagination=true is used, even though the request passed all permission checks with valid org:write scope.",
+      "severity": "High",
+      "category": "bug"
+    },
+    {
+      "comment": "get_item_key assumes a numeric key, but the paginator is used with order_by=-datetime in the audit logs endpoint; calling math.floor/ceil on a datetime will raise a TypeError.",
+      "severity": "High",
+      "category": "bug"
+    },
+    {
+      "comment": "Importing non-existent OptimizedCursorPaginator",
+      "severity": "Low",
+      "category": "bug"
+    }
+  ],
+  "per_golden_matches": [
+    {
+      "golden_comment": "The OptimizedCursorPaginator in organization_auditlogs.py attempts to use negative slice offsets on Django querysets, but Django querysets do not support negative slicing and will raise an AssertionError.",
+      "severity": "High",
+      "category": "bug",
+      "matched_candidate": "[BUG] The negative-offset branch evaluates `list(queryset[start_offset:stop])` with `start_offset = cursor.offset < 0`, and slicing an unevaluated Django QuerySet with a negative bound raises AssertionError('Negative indexing is not supported'). The one 'advanced feature' the class advertises throws a 500 for every negative offset it claims to support \u2014 a superuser client sending `?cursor=<value>:-5:1&optimized_pagination=true` hits the assert \u2014 and the inline comment asserting 'The underlying Django ORM properly handles negative slicing automatically' (line 876) is false, so the mechanism can never work as designed.",
+      "confidence": 0.98,
+      "reasoning": "Yes. The candidate explicitly describes the OptimizedCursorPaginator taking a negative cursor offset and then slicing a Django QuerySet with a negative bound, which triggers Django's AssertionError because QuerySets do not support negative slicing. This is the same underlying issue as the golden comment."
+    },
+    {
+      "golden_comment": "get_item_key assumes a numeric key, but the paginator is used with order_by=-datetime in the audit logs endpoint; calling math.floor/ceil on a datetime will raise a TypeError.",
+      "severity": "High",
+      "category": "bug",
+      "matched_candidate": "[BUG] OptimizedCursorPaginator.get_item_key applies math.floor/math.ceil directly to the raw ordered attribute \u2014 with `order_by=\"-datetime\"` from the audit-logs endpoint, self.key is \"datetime\" and getattr(item, \"datetime\") returns a datetime instance, which supports neither floor nor ceil, raising TypeError (DateTimePaginator's original get_item_key converts via strftime first; this copy dropped that step). build_cursor invokes key() on the first/last element of every non-empty result page, so any authorized admin requesting the endpoint with optimized_pagination=true against an organization that has at least one audit entry gets an unhandled TypeError and a 500 \u2014 the new paginator only completes successfully for organizations with zero audit rows.",
+      "confidence": 0.97,
+      "reasoning": "The candidate describes the same underlying bug: get_item_key applies math.floor/ceil to the ordered field value, and when the audit logs endpoint orders by -datetime, the value is a datetime object, causing a TypeError. This matches the golden comment\u2019s issue exactly."
+    },
+    {
+      "golden_comment": "When requests are authenticated with API keys or org auth tokens (which have user_id=None), organization_context.member is None. Line 71 attempts to access organization_context.member.has_global_access without checking if member is None, causing an AttributeError crash when optimized_pagination=true is used, even though the request passed all permission checks with valid org:write scope.",
+      "severity": "High",
+      "category": "bug"
+    },
+    {
+      "golden_comment": "Importing non-existent OptimizedCursorPaginator",
+      "severity": "Low",
+      "category": "bug"
+    }
+  ],
+  "adjudication_records": [
+    {
+      "issue_text": "[BUG] The new gate `enable_advanced = request.user.is_superuser or organization_context.member.has_global_access` references `organization_context`, a name that does not exist anywhere in `OrganizationAuditLogsEndpoint.get` (the method has no such parameter, no local assignment, and no import defines it), so evaluating the expression raises NameError for every non-superuser. Every GET /api/0/organizations/<slug>/audit-logs/ from a non-superuser (i.e. all org members and admins using audit logs) 500s before pagination even runs \u2014 the `or` short-circuits only for superusers \u2014 which takes the endpoint down for its entire normal audience and makes the optimized-pagination branch unreachable by the very admins it targets.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p0",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.86,
+        "rationale": "In `OrganizationAuditLogsEndpoint.get`, the new line `enable_advanced = request.user.is_superuser or organization_context.member.has_global_access` references `organization_context`, but the diff shows no local assignment, parameter, or import that defines `organization_context` in this scope. That would raise `NameError` for any request where `request.user.is_superuser` is false (i.e., most users), causing a 500 before pagination runs.",
+        "diff_context_hash": "d3edaa64462e26e206610346744c105115c32659"
+      }
+    },
+    {
+      "issue_text": "[BUG] OptimizedCursorPaginator.get_item_key applies math.floor/math.ceil directly to the raw ordered attribute \u2014 with `order_by=\"-datetime\"` from the audit-logs endpoint, self.key is \"datetime\" and getattr(item, \"datetime\") returns a datetime instance, which supports neither floor nor ceil, raising TypeError (DateTimePaginator's original get_item_key converts via strftime first; this copy dropped that step). build_cursor invokes key() on the first/last element of every non-empty result page, so any authorized admin requesting the endpoint with optimized_pagination=true against an organization that has at least one audit entry gets an unhandled TypeError and a 500 \u2014 the new paginator only completes successfully for organizations with zero audit rows.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug",
+      "matched_golden_ids": [
+        "get_item_key assumes a numeric key, but the paginator is used with order_by=-datetime in the audit logs endpoint; calling math.floor/ceil on a datetime will raise a TypeError."
+      ],
+      "primary_judge_verdict": "matched",
+      "primary_judge": "gpt-5.2",
+      "primary_judge_confidence": 0.97,
+      "primary_judge_reasoning": "The candidate describes the same underlying bug: get_item_key applies math.floor/ceil to the ordered field value, and when the audit logs endpoint orders by -datetime, the value is a datetime object, causing a TypeError. This matches the golden comment\u2019s issue exactly.",
+      "adjudication": {
+        "verdict": "matched",
+        "adjudicating_judge": null,
+        "confidence": null,
+        "rationale": null,
+        "diff_context_hash": "d3edaa64462e26e206610346744c105115c32659"
+      }
+    },
+    {
+      "issue_text": "[BUG] The `if self.enable_advanced_features and cursor.offset < 0:` branch executes `list(queryset[start_offset:stop])` with a negative start against a Django QuerySet, and QuerySet.__getitem__ raises `AssertionError: Negative indexing is not supported.` for slices with negative bounds \u2014 the in-code claim that \"the underlying Django ORM properly handles negative slicing automatically\" is false. Any request whose cursor carries a negative offset (sentry cursors are unsigned value:offset:is_prev strings a client can craft freely) dies with an AssertionError and a 500, so the advertised negative-offset capability can never succeed against the ORM-backed queryset this endpoint passes in \u2014 the feature branch is unexecutable as written.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "unjudged",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "unjudged",
+        "adjudicating_judge": null,
+        "confidence": null,
+        "rationale": null,
+        "diff_context_hash": "d3edaa64462e26e206610346744c105115c32659"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] OptimizedCursorPaginator.get_result duplicates BasePaginator.get_result wholesale (~65 lines including the prev-cursor dedup and offset arithmetic) instead of overriding only the slicing, and the two copies already disagree: the base-class rewrite at paginator.py:179-184 clamps negative forward offsets to 0 while this copy's advanced branch deliberately permits them. The next fix to paginator edge-case handling (prev-cursor filtering and offset math, code with a history of subtle bugs in this file) will land in one copy and silently miss the other; the shared-base edit also changes slicing semantics for every paginator in Sentry (OffsetPaginator, DateTimePaginator, SequencePaginator and all subclass users): a negative forward-offset cursor that previously raised Django's negative-slice AssertionError now silently returns page 1 instead of erroring.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.7,
+        "rationale": "The diff does add `OptimizedCursorPaginator.get_result` with a largely copy-pasted implementation of pagination logic (offset/extra computation, prev-cursor trimming, reversing, `build_cursor` call), rather than reusing/overriding a smaller portion, and it already diverges from the updated base slicing behavior: `BasePaginator.get_result` now clamps non-prev negative offsets via `start_offset = max(0, offset) if not cursor.is_prev else offset`, while `OptimizedCursorPaginator` has an `enable_advanced_features` branch that explicitly allows `start_offset = cursor.offset` when `cursor.offset < 0`. This is a concrete maintainability/edge-case risk grounded in the diff (future fixes to subtle cursor math could land in one copy but not the other, and slicing semantics differ between the two). However, whether negative offsets previously raised (or whether the new behavior is a user-visible correctness/security defect) is not fully verifiable from the diff alone.",
+        "diff_context_hash": "d3edaa64462e26e206610346744c105115c32659"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The diff ships a brand-new endpoint request path (the optimized_pagination branch) and a brand-new paginator class with zero tests \u2014 no test file is touched anywhere in the diff. The untested path is exactly where the blocking crashes live (the organization_context NameError on line 71 and the get_item_key TypeError), and a single API test exercising optimized_pagination=true would have surfaced both before merge; instead the endpoint's regression suite gains coverage only of the untouched legacy branch.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.73,
+        "rationale": "The new optimized_pagination branch wires `OptimizedCursorPaginator` into `organization_auditlogs.py` while still ordering by `-datetime`. But `OptimizedCursorPaginator.get_item_key()` does `math.floor/ceil(value)` on `value = getattr(item, self.key)`, which will raise a `TypeError` if `self.key` resolves to a datetime field (very likely given `order_by=\"-datetime\"`). Also, the new branch references `organization_context.member.has_global_access` even though `organization_context` is not shown being defined in this function, making a `NameError` plausible. Regardless of tests, the diff introduces a new request path that can crash at runtime.",
+        "diff_context_hash": "d3edaa64462e26e206610346744c105115c32659"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The new pagination behavior is gated solely on the raw query string `optimized_pagination=true` with no feature flag or options entry, and the admin-permission expression on line 71 is evaluated unconditionally on every request even when the parameter is absent. Operators responding to an incident on the optimized path must deploy code rather than flip a flag, and every ordinary audit-log request pays an extra permission-chain evaluation (today, the NameError) on a control-silo endpoint for a feature the request never opted into.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.72,
+        "rationale": "The diff shows the optimized path is enabled purely via `request.GET.get(\"optimized_pagination\") == \"true\"` with no feature-flag/options gating, and `enable_advanced = request.user.is_superuser or organization_context.member.has_global_access` is computed unconditionally before the `if use_optimized and enable_advanced:` branch, so every request evaluates that permission-chain even when the query param is absent. The finding\u2019s mention of a \"NameError\" is not verifiable from the provided diff alone (it depends on whether `organization_context` is defined in the full function signature/context), but the operational/architecture concern about runtime toggling and unnecessary permission evaluation is diff-grounded.",
+        "diff_context_hash": "d3edaa64462e26e206610346744c105115c32659"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The cursors.py hunk adds only two comments (\"Performance optimization: Allow negative offsets\u2026\") while `self.offset = int(offset)` is byte-for-byte unchanged, so the file implements nothing \u2014 Cursor already accepted negative integers before this PR. The change record asserts cursor semantics were altered in utils/cursors.py as a prerequisite of the feature, so an auditor or follow-up maintainer tracing the negative-offset support lands on a no-op hunk and must rediscover that the only real gating lives in the paginator slicing code, which clamps those very offsets.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.87,
+        "rationale": "In `src/sentry/utils/cursors.py`, the only change is adding comments above `self.offset = int(offset)`; the assignment itself is unchanged, so there is no diff-verifiable semantic change in `Cursor` to \u201callow negative offsets\u201d (it already stores whatever `int(offset)` yields). The actual behavioral changes around negative/clamped offsets are in `src/sentry/api/paginator.py` (e.g., `start_offset = max(0, offset) if not cursor.is_prev else offset` and the new `OptimizedCursorPaginator` branch that conditionally allows negative slicing). This makes the cursors.py hunk effectively a no-op that can mislead maintainers about where the feature is implemented/gated, but it\u2019s not a direct correctness defect by itself.",
+        "diff_context_hash": "d3edaa64462e26e206610346744c105115c32659"
+      }
+    },
+    {
+      "issue_text": "[BUG] The new gate computes `request.user.is_superuser or organization_context.member.has_global_access` against the bare name `organization_context`, which is never assigned in this method and never imported by this diff, so evaluating `enable_advanced` raises NameError whenever `request.user.is_superuser` is False. Every non-superuser request to GET /api/0/organizations/<slug>/audit-logs/ \u2014 i.e., the org owners and managers who are this endpoint's entire user base \u2014 returns a 500 instead of audit log data, because the gate is evaluated unconditionally before the `optimized_pagination` param is even consulted; the established sibling access flag already computed on this path by OrganizationAuditPermission (`request.access.has_global_access`) is what the author meant to read, and `.member` would additionally be None for users without membership.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p0",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.96,
+        "rationale": "In `organization_auditlogs.py`, the new line `enable_advanced = request.user.is_superuser or organization_context.member.has_global_access` references `organization_context`, which is not defined anywhere in the shown method or imported in this diff. Because `enable_advanced` is evaluated unconditionally (before the `if use_optimized and enable_advanced:`), any request where `request.user.is_superuser` is False will attempt to evaluate `organization_context...` and raise `NameError`, causing a 500 regardless of the `optimized_pagination` query param.",
+        "diff_context_hash": "d3edaa64462e26e206610346744c105115c32659"
+      }
+    },
+    {
+      "issue_text": "[BUG] `OptimizedCursorPaginator.get_item_key` applies `int(math.floor(value) if self._is_asc(for_prev) else math.ceil(value))` directly to the raw field value, and the only call site in this diff instantiates the class with `order_by=\"-datetime\"` (organization_auditlogs.py line 80), so `value = getattr(item, \"datetime\")` is a `datetime` object and the floor/ceil arithmetic raises TypeError. Any authorized admin calling the audit-log endpoint with `optimized_pagination=true` against an organization that has at least one AuditLogEntry gets a 500 \u2014 build_cursor invokes `key(results[0])` on every non-empty page \u2014 because the datetime-to-epoch conversion that DateTimePaginator (the paginator being replaced) exists to provide was never ported; the optimized path is dead on arrival.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.9,
+        "rationale": "In `organization_auditlogs.py`, the optimized path uses `paginator_cls=OptimizedCursorPaginator` with `order_by=\"-datetime\"`. `OptimizedCursorPaginator.get_item_key` does `value = getattr(item, self.key)` and then applies `math.floor/ceil` to that value. With `order_by=-datetime`, `self.key` will be `\"datetime\"` (as is typical for these paginator bases), making `value` a `datetime` object; `math.floor/ceil(datetime)` will raise `TypeError`. Since `build_cursor(...)` is called on every non-empty page and uses the `key` function, any request hitting the optimized path with at least one result would 500. The diff shows no datetime-to-numeric conversion like `DateTimePaginator` would provide.",
+        "diff_context_hash": "d3edaa64462e26e206610346744c105115c32659"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The diff adds a request-time authorization gate, a new query parameter, and two paginator branches to the audit-log endpoint with no test anywhere in the diff \u2014 no test-shaped file appears in the diff at all \u2014 covering `optimized_pagination`, the `enable_advanced` computation, or either paginate branch. A single endpoint test exercising the new branch as an org admin would have caught both ship-blocking crashes this diff introduces (the `organization_context` NameError at line 71 and the datetime TypeError in get_item_key); with nothing added, the NameError that breaks the endpoint for every non-superuser ships completely undetected.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.9,
+        "rationale": "The endpoint change introduces a definite runtime failure: `enable_advanced = request.user.is_superuser or organization_context.member.has_global_access` references `organization_context`, which is not defined anywhere in the shown function/file, causing a NameError when `optimized_pagination=true` is evaluated (and also whenever that line executes for non-superusers). Additionally, the new `OptimizedCursorPaginator.get_item_key()` applies `math.floor/ceil` to `getattr(item, self.key)`, which is incompatible with a datetime-valued key; this paginator is wired into the audit log endpoint with `order_by=\"-datetime\"`, making a datetime TypeError plausible. Regardless of tests, the NameError is directly verifiable from the diff.",
+        "diff_context_hash": "d3edaa64462e26e206610346744c105115c32659"
+      }
+    },
+    {
+      "issue_text": "[BUG] `value_from_cursor` returns the raw cursor value (`return cursor.value`, a string parsed from the `?cursor=` query param) instead of the `int(...)` cast the parent CursorPaginator performs, so string values like \"1712345678\" flow into `build_queryset`'s `datetime__lt/__gt` filters. Every cursor-bearing (page-2 and later) request on the optimized path fails when the queryset is evaluated at `list(queryset[start_offset:stop])`: Django's DateTimeField raises ValidationError ('value has an invalid format') for the non-ISO numeric string, producing a 500 \u2014 pagination beyond the first page is impossible on the optimized path even after the get_item_key crash is fixed.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "unresolved",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "unresolved",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.48,
+        "rationale": "In the new `OptimizedCursorPaginator`, `value_from_cursor` returns `cursor.value` unchanged (`return cursor.value`), and `Cursor.__init__` in `utils/cursors.py` does not cast/normalize `value` (only `offset` is cast). `OptimizedCursorPaginator.get_result` then passes this raw `cursor_value` into `self.build_queryset(cursor_value, cursor.is_prev)`. For this endpoint the pagination is ordered by `-datetime`, so `build_queryset` is very likely to apply `datetime` comparisons; feeding an unparsed query-param string (e.g. a numeric cursor token) into a `DateTimeField` filter would raise a validation error at queryset evaluation time, breaking pagination beyond the first page on the optimized path.",
+        "diff_context_hash": "d3edaa64462e26e206610346744c105115c32659"
+      }
+    },
+    {
+      "issue_text": "[BUG] The negative-offset branch evaluates `list(queryset[start_offset:stop])` with `start_offset = cursor.offset < 0`, and slicing an unevaluated Django QuerySet with a negative bound raises AssertionError('Negative indexing is not supported'). The one 'advanced feature' the class advertises throws a 500 for every negative offset it claims to support \u2014 a superuser client sending `?cursor=<value>:-5:1&optimized_pagination=true` hits the assert \u2014 and the inline comment asserting 'The underlying Django ORM properly handles negative slicing automatically' (line 876) is false, so the mechanism can never work as designed.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": [
+        "The OptimizedCursorPaginator in organization_auditlogs.py attempts to use negative slice offsets on Django querysets, but Django querysets do not support negative slicing and will raise an AssertionError."
+      ],
+      "primary_judge_verdict": "matched",
+      "primary_judge": "gpt-5.2",
+      "primary_judge_confidence": 0.98,
+      "primary_judge_reasoning": "Yes. The candidate explicitly describes the OptimizedCursorPaginator taking a negative cursor offset and then slicing a Django QuerySet with a negative bound, which triggers Django's AssertionError because QuerySets do not support negative slicing. This is the same underlying issue as the golden comment.",
+      "adjudication": {
+        "verdict": "matched",
+        "adjudicating_judge": null,
+        "confidence": null,
+        "rationale": null,
+        "diff_context_hash": "d3edaa64462e26e206610346744c105115c32659"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] `OptimizedCursorPaginator` is a ~90-line new paginator class introduced with zero unit tests \u2014 no cursor round-trip test through `value_from_cursor`, no negative-offset slicing test, and no parity test asserting it returns the same rows and cursors as the DateTimePaginator it replaces. The negative-slicing AssertionError (lines 877-882), the string-cursor ValidationError (lines 842-843), and the get_item_key TypeError (lines 838-840) all ship undetected; a future maintainer modifying the copied offset/dedup math has no regression baseline, and a regression breaks the audit-log API for exactly the admins the feature targets.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.78,
+        "rationale": "The new `OptimizedCursorPaginator.get_result()` explicitly allows negative offsets when `enable_advanced_features` is true (`start_offset = cursor.offset` when `cursor.offset < 0`) and then slices the Django queryset with a negative start (`queryset[start_offset:stop]`). Django ORM queryset slicing does not support negative indexing and will raise at runtime, so an admin using `optimized_pagination=true` can break the audit-log endpoint by supplying a cursor with a negative offset. The finding\u2019s exact line-number references and other claimed exceptions aren\u2019t verifiable from this diff, but the negative-offset slicing behavior is a concrete defect introduced here.",
+        "diff_context_hash": "d3edaa64462e26e206610346744c105115c32659"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The PR's stated requirement \u2014 enhanced pagination performance for high-volume audit logs \u2014 has no acceptance criterion anywhere in the diff: no benchmark, load test, or query measurement, and `OptimizedCursorPaginator.get_result` executes the identical query pattern (build_queryset filter plus `queryset[start_offset:stop]` slice plus count_hits) as the paginator it replaces. The performance claim cannot be verified or falsified by reviewers or operators, so the only observable behavior changes this diff delivers are the crash paths above \u2014 the organization ships outage risk with zero delivered speedup, and any future 'is it actually faster?' investigation starts from no baseline.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.68,
+        "rationale": "The diff introduces a new `OptimizedCursorPaginator` and an `optimized_pagination=true` switch for audit logs, but the new paginator\u2019s core query execution is still `build_queryset(...)` followed by Django slicing `queryset[start_offset:stop]` and optional `count_hits`, which is broadly the same pattern as existing pagination. The PR also contains no benchmarks, query metrics, or tests demonstrating a performance improvement, so the stated \u201cperformance optimization\u201d claim is not verifiable from the diff and adds complexity/risk without a diff-grounded proof of benefit.",
+        "diff_context_hash": "d3edaa64462e26e206610346744c105115c32659"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The rewritten shared `get_result` lines claim 'This is safe because the underlying queryset will handle boundary conditions' while deliberately passing negative client-supplied prev-cursor offsets (`offset` is left unclamped when `cursor.is_prev`) into `queryset[start_offset:stop]`, which Django rejects with AssertionError('Negative indexing is not supported'). The next developer extending bidirectional pagination on the strength of this comment builds on a mechanism that throws for every negative offset; and because these lines live in the shared offset paginator used by every offset-paginated endpoint in Sentry, the new `max(0, offset)` clamp also silently converts forged non-prev cursors from a 500 into a first-page response, leaving prev and non-prev cursor error behavior inconsistent with no documented rationale.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.87,
+        "rationale": "In `src/sentry/api/paginator.py` the shared offset-based `get_result` now sets `start_offset = max(0, offset) if not cursor.is_prev else offset` and then slices `queryset[start_offset:stop]`. This means `cursor.is_prev` requests can still pass a negative `offset` through to Django queryset slicing, which is not supported (negative slice bounds raise). Separately, the new `OptimizedCursorPaginator.get_result` explicitly allows `start_offset = cursor.offset` when `cursor.offset < 0` and claims Django ORM \"properly handles negative slicing automatically\", but it still performs `queryset[start_offset:stop]` with negative bounds, so the optimized path will also throw rather than paginate. The non-prev clamp to `0` also changes behavior for negative offsets only on one branch, making prev/non-prev handling inconsistent as described.",
+        "diff_context_hash": "d3edaa64462e26e206610346744c105115c32659"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The new behavior is gated on a raw query parameter (`request.GET.get(\"optimized_pagination\") == \"true\"`) with no feature flag, options entry, or API-schema declaration anywhere in the diff. When the optimized path throws (the datetime TypeError, the cursor ValidationError), there is no operator-level kill switch \u2014 restoring sane behavior for superuser API clients requires a code deploy \u2014 and clients sending `optimized_pagination=True` or `=1` silently get the old behavior, with no documented contract telling them the parameter exists or which values it accepts.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.74,
+        "rationale": "The diff does introduce a new behavior switch purely via a raw query param check (`use_optimized = request.GET.get(\"optimized_pagination\") == \"true\"`) in `organization_auditlogs.py`, with no feature flag, API option/schema declaration, or other discoverability/kill-switch mechanism shown in the diff. That\u2019s a concrete, diff-grounded operational/contract concern (undocumented parameter and strict value matching), but the parts about specific exceptions (\"datetime TypeError\", \"cursor ValidationError\") are speculative and not evidenced here, so it\u2019s not a verifiable correctness defect from this diff alone.",
+        "diff_context_hash": "d3edaa64462e26e206610346744c105115c32659"
+      }
+    },
+    {
+      "issue_text": "[BUG] This hunk silently changes slicing semantics of a pre-existing shared get_result (`start_offset = max(0, offset) if not cursor.is_prev else offset`) for every consumer of that paginator, not just the audit-log path this PR claims to optimize, and with a policy that contradicts the flag-gated handling the new class installs for the same case. A forward cursor carrying a negative offset - previously rejected by Django's `AssertionError: Negative indexing is not supported` (500) at `queryset[offset:stop]` - now silently clamps to 0 and returns the dataset's first page, while the identical negative offset with is_prev still crashes; invalid client-crafted cursors (cursors are client-controlled base64) are half-accepted across all endpoints sharing this get_result, with no requirement in the PR tracing to this change.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.86,
+        "rationale": "The diff changes a pre-existing paginator get_result implementation from `results = list(queryset[offset:stop])` to clamping the start to 0 only when `not cursor.is_prev` (`start_offset = max(0, offset) if not cursor.is_prev else offset`). This affects all endpoints using that paginator method, not just the new audit-log optimized path. It also creates inconsistent behavior for negative offsets: a client-controlled cursor with a negative offset will no longer raise (as Django queryset negative slicing normally does) for forward pagination, but will still attempt negative slicing for `is_prev=True`, likely still erroring. This is a real, diff-grounded behavior change/inconsistency exactly as described in the finding.",
+        "diff_context_hash": "d3edaa64462e26e206610346744c105115c32659"
+      }
+    },
+    {
+      "issue_text": "[BUG] The `enable_advanced_features` negative-offset branch executes `list(queryset[start_offset:stop])` with a negative start_offset, which Django's QuerySet.__getitem__ rejects with `AssertionError: Negative indexing is not supported`, despite the in-code comment claiming 'The underlying Django ORM properly handles negative slicing automatically'. A superuser/global-access caller hitting the audit-logs endpoint with `optimized_pagination=true` and a cursor whose offset field is negative gets a 500; because no paginator code ever emits a negative offset, this crash is the branch's only reachable behavior, making the entire admin-gated 'advanced' feature ships-inert machinery whose one observable effect is an error response the code's own comment denies is possible.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.78,
+        "rationale": "The new `OptimizedCursorPaginator.get_result` introduces an `enable_advanced_features` branch that explicitly allows `start_offset = cursor.offset` when `cursor.offset < 0`, and then performs `list(queryset[start_offset:stop])` with a negative slice start. The diff provides no safeguard/clamp in that branch (unlike the non-advanced path which uses `max(0, offset)` in some cases), so a request-supplied cursor with a negative `offset` will drive a negative queryset slice and can crash the endpoint. The surrounding comments assert negative slicing is handled safely, but the code does not enforce boundary conditions there.",
+        "diff_context_hash": "d3edaa64462e26e206610346744c105115c32659"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The 'optimized' branch executes queries byte-identical to the default branch - OptimizedCursorPaginator's else path (paginator.py:884-886) is the same slicing, count, and build_cursor code as the DateTimePaginator it replaces - so the diff contains zero implementation of its stated requirement, 'Enhanced Pagination Performance for High-Volume Audit Logs'. Orgs with high-volume audit logs ship and operate a change they believe speeds up pagination while the SQL, hit counting, and serialization are unchanged; deleting the branch, the `optimized_pagination` param, the `enable_advanced_features` flag, and the entire ~95-line paginator class restores identical behavior for every cursor the API itself can produce, so the next engineer debugging a genuinely slow audit-log endpoint must first reverse-engineer that this knob is inert.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.62,
+        "rationale": "From the diff, the new `optimized_pagination` branch in `organization_auditlogs.py` changes only the paginator class (and passes `enable_advanced_features=True`) while keeping the same `queryset`, `order_by`, and serialization. The added `OptimizedCursorPaginator` largely duplicates the existing cursor-pagination flow (build queryset \u2192 slice \u2192 `build_cursor` \u2192 optional post filter), with the only clearly new behavior being an optional negative-offset slicing path when `enable_advanced_features` and `cursor.offset < 0`. Whether this yields any real performance improvement for typical cursors is not demonstrated in the diff, so the review concern about adding an \"optimization\" knob that may be inert/duplicative is a valid, diff-grounded maintainability/scope issue. However, the finding\u2019s strong claim that queries are \"byte-identical\" to `DateTimePaginator` specifically cannot be fully verified here because `DateTimePaginator`\u2019s implementation is not shown in the diff.",
+        "diff_context_hash": "d3edaa64462e26e206610346744c105115c32659"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The diff introduces an undocumented public query parameter `optimized_pagination` plus an inline authorization gate (`request.user.is_superuser or organization_context.member.has_global_access`) into a documented public API endpoint, neither traceable to the PR's stated performance intent. Identical requests now take different paginator code paths depending on the caller's role - an API-contract inconsistency invisible in the docs/OpenAPI surface - and the forked permission check must now be maintained alongside the endpoint's existing OrganizationAuditPermission layer; `enable_advanced` is also evaluated unconditionally on every GET even when the parameter is absent, and with no options entry or feature flag the new behavior cannot be disabled without a code deploy.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.72,
+        "rationale": "The diff explicitly adds a new query parameter gate `optimized_pagination` (organization_auditlogs.py: `use_optimized = request.GET.get(\"optimized_pagination\") == \"true\"`) and a role-based branch (`enable_advanced = request.user.is_superuser or organization_context.member.has_global_access`) that selects a different paginator and passes `enable_advanced_features=True` only for privileged callers. This means identical requests can follow different pagination implementations depending on caller role, and it introduces an additional, endpoint-local authorization check alongside the existing `OrganizationAuditPermission` layer. While not a directly verifiable functional defect from the diff alone, it is a concrete API/maintenance concern created by the change.",
+        "diff_context_hash": "d3edaa64462e26e206610346744c105115c32659"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] OptimizedCursorPaginator is a ~95-line copy of DateTimePaginator (get_item_key, value_from_cursor, and get_result are verbatim duplicates) whose shared slicing logic already diverged within this same PR (unconditional clamp at lines 179-184 vs. flag-gated at lines 877-886), and whose `enable_advanced_features` kwarg has exactly one call site passing the constant True. The next change to cursor semantics must be hand-applied to two copies of core pagination logic and the drift is already observable in this diff; inheriting from DateTimePaginator - or deleting the class outright, since the flag's default False value is never exercised by any caller - removes ~90 lines with zero reachable behavior change.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.72,
+        "rationale": "The diff introduces a new `OptimizedCursorPaginator` class (~100 lines) in `sentry/api/paginator.py` that re-implements core cursor pagination logic (including offset/extra handling, queryset slicing, prev reversal, and `build_cursor` wiring) that already exists in the file, creating duplication and immediate behavioral drift: the earlier paginator logic clamps `start_offset = max(0, offset)` for non-prev requests, while `OptimizedCursorPaginator` adds a separate branch that can allow negative offsets when `enable_advanced_features` is set. In this PR\u2019s shown usage (`organization_auditlogs.py`), the only call site that uses `OptimizedCursorPaginator` passes `enable_advanced_features=True`, making the flag effectively constant in the introduced path and increasing maintenance burden without clear need for a separate class. This is a concrete maintainability/architecture issue grounded in the added duplicated logic, not a directly verifiable correctness defect from the diff alone.",
+        "diff_context_hash": "d3edaa64462e26e206610346744c105115c32659"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] This hunk adds comments to the shared Cursor class asserting 'Performance optimization: Allow negative offsets for advanced pagination scenarios' while leaving `self.offset = int(offset)` unchanged - a comment-only change publishing a contract that nothing in the PR enforces. Maintainers of the many paginators consuming Cursor read cursors.py:26-27 as sanctioning negative offsets as a supported cross-paginator feature, yet the only downstream implementations in this PR either crash on negative offsets (paginator.py:882) or silently clamp them (paginator.py:182), so the sole 'specification' of this untraceable feature is a false statement on a core type.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.7,
+        "rationale": "The diff adds a new comment in `sentry/utils/cursors.py` implying negative offsets are an intended/allowed feature of the shared `Cursor` type, but `Cursor.__init__` behavior is unchanged (`self.offset = int(offset)`), so the only \u201cspec\u201d for negative offsets here is documentation. In the same PR, offset handling is inconsistent across paginator paths: the existing paginator now clamps offsets to `>=0` only when `not cursor.is_prev` (`start_offset = max(0, offset) if not cursor.is_prev else offset`), while the new `OptimizedCursorPaginator` explicitly permits negative offsets when `enable_advanced_features` is set and `cursor.offset < 0` by slicing the queryset with a negative start. This mismatch supports the finding\u2019s core point that the shared Cursor comment suggests a broader contract than the PR consistently enforces.",
+        "diff_context_hash": "d3edaa64462e26e206610346744c105115c32659"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The diff ships a new ~70-line get_result state machine (OptimizedCursorPaginator), the role gate in the endpoint, and a semantics change to shared offset slicing (lines 179-184) with no test anywhere in the diff touching any of them. A regression in the new boundary handling or the shared clamp silently changes 500-vs-clamp and page-boundary behavior for every paginated endpoint in the API with no CI signal, and the off-by-one-prone is_prev arithmetic (`len(results) == offset + limit + extra`) is precisely the behavior whose absence of coverage lets drift between the two get_result copies go undetected.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.74,
+        "rationale": "The diff adds substantial new pagination logic (new `OptimizedCursorPaginator.get_result` ~70+ lines) and changes shared slicing behavior in `paginator.py` (`start_offset = max(0, offset) if not cursor.is_prev else offset` vs previously using `offset` directly). It also adds a new endpoint feature gate (`optimized_pagination` + admin checks) that changes which paginator is used. No tests are added/modified in this diff to cover the new boundary/`is_prev` handling, the new shared clamping semantics, or the risk of drift between the two similar `get_result` implementations, making regressions hard to detect. The finding is specific to concrete code paths introduced/changed here, not generic \u201cadd tests\u201d advice.",
+        "diff_context_hash": "d3edaa64462e26e206610346744c105115c32659"
+      }
+    },
+    {
+      "issue_text": "[BUG] `enable_advanced = request.user.is_superuser or organization_context.member.has_global_access` is evaluated unconditionally on every request, but `organization_context` is never assigned anywhere in `get()` (the method's locals are queryset/query/event). Every GET to the organization audit log endpoint by a non-superuser raises NameError and returns a 500 \u2014 only superusers survive via the `or` short-circuit \u2014 so the audit-log API and the Settings UI behind it hard-fail for the entire regular user base, regardless of whether the client ever sends optimized_pagination.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.98,
+        "rationale": "In `organization_auditlogs.py`, `enable_advanced = request.user.is_superuser or organization_context.member.has_global_access` references `organization_context`, but no such local (or otherwise visible) name is defined anywhere in the shown `get()` method. Because this assignment is executed unconditionally (before the `if use_optimized and enable_advanced:` guard), any request where `request.user.is_superuser` is false will attempt to evaluate the RHS and raise `NameError`, causing a 500 even when `optimized_pagination` is not requested. Only superusers avoid the crash due to `or` short-circuiting.",
+        "diff_context_hash": "d3edaa64462e26e206610346744c105115c32659"
+      }
+    },
+    {
+      "issue_text": "[BUG] OptimizedCursorPaginator extends BasePaginator but its get_result is a verbatim copy of Paginator.get_result, calling self.build_queryset (line 857), self._is_asc (line 840), and self.desc (line 903) \u2014 members that are defined only on the Paginator subclass and never on BasePaginator. get_result raises AttributeError: 'OptimizedCursorPaginator' object has no attribute 'build_queryset' on the first cursor-keyed queryset build, so the optimized path 500s for every request that reaches it; the class cannot return a single page and should subclass Paginator instead of BasePaginator.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "unresolved",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "unresolved",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.45,
+        "rationale": "The added `OptimizedCursorPaginator` subclasses `BasePaginator` but its implementation calls/uses attributes and helpers it does not define (`build_queryset(...)` in `get_result`, `_is_asc(...)` in `get_item_key`, and `self.desc` passed to `build_cursor`). From the diff alone, none of these members are implemented on `OptimizedCursorPaginator`; if they are only provided by the existing `Paginator` subclass (as the finding states), this would raise `AttributeError` at runtime as soon as the optimized paginator path is used.",
+        "diff_context_hash": "d3edaa64462e26e206610346744c105115c32659"
+      }
+    },
+    {
+      "issue_text": "[BUG] OptimizedCursorPaginator.__init__ forwards **kwargs to BasePaginator.__init__, whose signature (queryset, key, on_results, actor, max_limit) does not accept the desc kwarg that the paginate plumbing derives from order_by='-datetime' (the same translation that configures DateTimePaginator), so the desc=True the endpoint's call produces is rejected at construction. The first superuser request with optimized_pagination=true fails inside paginate() with TypeError: unexpected keyword argument 'desc' \u2192 500; the paginator cannot even be instantiated for the endpoint it was written for.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "hallucination",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "hallucination",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.45,
+        "rationale": "The diff shows OptimizedCursorPaginator forwards **kwargs to BasePaginator.__init__, and the endpoint selects it via paginate(order_by='-datetime'). However, the diff does not show paginate()\u2019s plumbing nor BasePaginator.__init__\u2019s signature, so the claim that a 'desc' kwarg is passed and rejected (TypeError) is not verifiable from the provided changes alone. Also, OptimizedCursorPaginator references self.desc and self._is_asc(), suggesting BasePaginator likely supports a desc concept.",
+        "diff_context_hash": "d3edaa64462e26e206610346744c105115c32659"
+      }
+    },
+    {
+      "issue_text": "[BUG] get_item_key returns int(math.floor(value)) / int(math.ceil(value)) applied to getattr(item, self.key), and for this endpoint the key is the datetime field (derived from order_by='-datetime'), so math.floor is applied to a datetime object and raises TypeError. Even after the inheritance and constructor defects are fixed, any optimized-path request that returns at least one audit-log row 500s with 'must be a real number, not datetime.datetime' \u2014 the paginator cannot key the very queryset it was built to paginate.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.85,
+        "rationale": "In the optimized path, `organization_auditlogs.py` calls `self.paginate(..., paginator_cls=OptimizedCursorPaginator, order_by='-datetime', ...)`, so the paginator will be keying items by the `datetime` field. But `OptimizedCursorPaginator.get_item_key()` does `value = getattr(item, self.key)` and then applies `math.floor`/`math.ceil` to `value`. Applying `math.floor/ceil` to a `datetime` object raises `TypeError` (\u201cmust be a real number, not datetime.datetime\u201d), so any request that uses the optimized paginator and returns at least one row will break when building cursors.",
+        "diff_context_hash": "d3edaa64462e26e206610346744c105115c32659"
+      }
+    },
+    {
+      "issue_text": "[BUG] The negative-offset branch executes list(queryset[start_offset:stop]) with start_offset = cursor.offset < 0, which Django's QuerySet slicing rejects with AssertionError('Negative indexing is not supported on querysets.') \u2014 the exact opposite of the line-876 comment 'The underlying Django ORM properly handles negative slicing automatically'. The only behavioral capability the class advertises \u2014 negative-offset traversal \u2014 produces an unhandled exception: an admin client presenting a cursor token carrying a negative offset (cursor payloads are client-controlled) receives a 500 instead of the promised bidirectional pagination, so the feature the PR is named for does not exist.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.78,
+        "rationale": "In `OptimizedCursorPaginator.get_result`, when `enable_advanced_features` is true and `cursor.offset < 0`, the code sets `start_offset = cursor.offset` and does `results = list(queryset[start_offset:stop])` (negative start index). The diff provides no guard/sanitization for negative offsets, and cursor values are derived from the request cursor payload. This creates a path where a client-provided negative offset can reach queryset slicing, which (for Django QuerySets) raises on negative indexing, yielding a 500\u2014contradicting the comment that negative slicing is \u201cproperly handled automatically.\u201d",
+        "diff_context_hash": "d3edaa64462e26e206610346744c105115c32659"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The slicing in the shared get_result (the core paginator family used by this endpoint's default path and many other APIs) is rewritten unconditionally \u2014 no flag, and this class has no enable_advanced_features \u2014 so a forged cursor with a negative offset now clamps to 0 and silently returns page 1 instead of erroring, while is_prev cursors with negative offsets still hit the ORM's negative-slicing assert. Every endpoint paginating through this class \u2014 far beyond audit logs \u2014 now accepts corrupt cursor tokens as silently-wrong data windows (clients loop back to page 1 with no error), and the added comment ('efficient bidirectional pagination without full dataset scanning') documents a mechanism the clamp does not perform; an audit-log PR changed unrelated endpoints' behavior with no way to turn it off.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.78,
+        "rationale": "In `src/sentry/api/paginator.py` the shared `get_result` slicing logic is changed unconditionally from `queryset[offset:stop]` to `start_offset = max(0, offset) if not cursor.is_prev else offset` and then `queryset[start_offset:stop]`. This means a negative `offset` on non-`is_prev` cursors is now silently clamped to 0 (returning the first page/window) instead of triggering Django's negative-slice assertion/error as before, while `is_prev` still uses the raw (potentially negative) `offset` and can still error. This is a real cross-endpoint behavioral change (not gated by a flag) and can cause corrupt/forged cursor tokens to yield silently incorrect pagination results.",
+        "diff_context_hash": "d3edaa64462e26e206610346744c105115c32659"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The new code path is selected by a raw, undocumented query parameter compared with strict string equality (request.GET.get('optimized_pagination') == 'true') and has no feature flag, options entry, or API documentation. Operations cannot disable the crashing admin path without a code deploy (no kill switch), and a client that 'enables' it with any other spelling (1, True, yes) silently falls back to the default path while believing it is optimized; the parameter is an invisible public contract surface absent from the endpoint's options payload.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.74,
+        "rationale": "The diff adds an alternate pagination path in `organization_auditlogs.py` gated solely by `request.GET.get(\"optimized_pagination\") == \"true\"` and an admin check (`is_superuser`/`has_global_access`). There is no feature flag, settings knob, or options/API-surfaced declaration added alongside `response.data = {\"rows\": ..., \"options\": ...}`; the parameter is not reflected in the endpoint\u2019s returned `options`. The strict string equality also means other common truthy spellings (e.g., `1`, `True`, `yes`) silently fall back to the default paginator, creating an implicit/fragile public contract surface. This is a concrete, diff-grounded operational/contract concern rather than a directly verifiable correctness failure.",
+        "diff_context_hash": "d3edaa64462e26e206610346744c105115c32659"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The 'performance' branch is privilege-gated on is_superuser/has_global_access even though both branches execute the identical, already-permission-filtered queryset, creating a parallel admin-only paginator that mints cursor tokens in a different encoding (int(math.floor(...)) keys) than the DateTimePaginator cursors the endpoint otherwise returns \u2014 and the paginator comment 'This is safe because permissions are checked at the queryset level' answers a security objection the branch never had. The org admins and members who actually browse high-volume audit logs \u2014 the audience the PR names \u2014 never receive the claimed optimization (only superusers do), and a cursor token minted under one mode resolves under the other mode's key scheme (shared links/bookmarks across users with different privileges), silently corrupting pagination; the endpoint now maintains two diverging cursor dialects indefinitely.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.66,
+        "rationale": "The diff introduces two mutually exclusive paginator implementations for the same endpoint: `DateTimePaginator` (default) vs `OptimizedCursorPaginator` when `optimized_pagination=true` and `(request.user.is_superuser or organization_context.member.has_global_access)`. This means the same `cursor` query param can be generated under one paginator and later interpreted under the other, depending on the viewer\u2019s privileges/flags. Since `OptimizedCursorPaginator` defines its own `get_item_key()` (int(math.floor/ceil(...))) and cursor-building path, its cursor semantics/encoding are likely divergent from `DateTimePaginator` for the same `order_by=\"-datetime\"`, making shared/bookmarked links prone to broken or corrupted pagination when the branch changes. This is a behavioral correctness regression grounded in the diff\u2019s new branching and new paginator implementation.",
+        "diff_context_hash": "d3edaa64462e26e206610346744c105115c32659"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] OptimizedCursorPaginator.get_result's else-branch duplicates the slicing/boundary logic just modified in the shared get_result (lines 179-184), with the two copies already carrying contradictory justifying comments (one claims the ORM handles negative slicing, the other claims queryset-level permission safety) and divergent gating. The next change to pagination boundary handling must be applied identically in two classes or they silently drift \u2014 drift this diff already exhibits between its own comments \u2014 where subclassing Paginator and overriding only the slicing would delete the entire copied body (build_queryset call, prev-trim, reverse, build_cursor plumbing).",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.86,
+        "rationale": "The diff shows OptimizedCursorPaginator.get_result re-implements (copies) substantial pagination logic, including the slicing/boundary handling just changed in the existing paginator get_result (new start_offset/max(0, offset) logic around lines 176-184). In OptimizedCursorPaginator, the else-branch repeats that same slicing code, while also adding a separate negative-offset branch gated by enable_advanced_features and cursor.offset < 0. This duplication creates a clear maintenance/architecture risk: future fixes to boundary behavior would need to be applied in two places, and the comments already reflect drift/contradictory rationales between the two implementations. This is a diff-grounded concern but not a demonstrable correctness defect by itself.",
+        "diff_context_hash": "d3edaa64462e26e206610346744c105115c32659"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The entire OptimizedCursorPaginator is a copy of the existing Paginator.get_result whose reachable branch issues the same build_queryset filter, the same [offset:stop] slice, and the same count_hits as the default path \u2014 the diff contains no query-level optimization for high-volume audit logs anywhere (no index, no keyset-strategy change, no count avoidance). After the crash defects are fixed the class delivers exactly zero performance delta, so reviewers and operators believe a perf problem was solved when nothing changed; deleting the class, the query parameter, and the privilege gate removes ~120 lines from a core module with no functional loss \u2014 the correct final shape of this PR is empty.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.74,
+        "rationale": "The diff adds an `OptimizedCursorPaginator` and a gated query param (`optimized_pagination=true`) in `organization_auditlogs.py`, but the new paginator\u2019s `get_result` largely duplicates the existing pagination flow: it still calls `build_queryset(...)`, still slices the queryset (`queryset[start_offset:stop]` / `queryset[start_offset:stop]`), and still uses the same `count_hits`/`known_hits` logic. No diff-shown change introduces a keyset strategy, removes/avoids counts, changes ordering/index usage, or otherwise optimizes the underlying audit-log query. The only material delta is optional negative-offset slicing when `enable_advanced_features` and `cursor.offset < 0`, which is not a demonstrated performance optimization for \u201chigh-volume audit logs\u201d and adds significant complexity/maintenance surface plus a public API knob. Thus the finding that the PR claims performance benefits without implementing query-level optimizations is diff-grounded (though the \u201cPR should be empty\u201d part is opinion).",
+        "diff_context_hash": "d3edaa64462e26e206610346744c105115c32659"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The hunk adds only comments to Cursor.__init__ asserting it now 'allows negative offsets ... enabling efficient reverse pagination' while changing zero behavior \u2014 and every Django-backed consumer of Cursor raises on a negative offset, so the comment documents a capability that exists nowhere in the system. The next developer building cursor features reads the constructor of the pagination system's core value object as a supported contract and ships negative-offset cursors that 500 in production \u2014 the exact failure this PR's paginator branch already demonstrates at runtime.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.78,
+        "rationale": "The diff introduces/relies on negative offsets being acceptable for queryset slicing. In `DateTimePaginator.get_result` it now uses `start_offset = ... if not cursor.is_prev else offset`, meaning a negative `cursor.offset` with `is_prev=True` will flow directly into `queryset[start_offset:stop]`. The new `OptimizedCursorPaginator.get_result` goes further and explicitly allows `start_offset = cursor.offset` when `enable_advanced_features` and `cursor.offset < 0`, then slices `queryset[start_offset:stop]`. Separately, `Cursor.__init__` only adds comments implying negative offsets are supported without adding any validation/behavior. If negative queryset slicing is not supported (as is typical for Django QuerySet slicing), these paths can raise at runtime, so the finding\u2019s concern about documenting/encouraging unsupported negative offsets is grounded in the introduced code paths.",
+        "diff_context_hash": "d3edaa64462e26e206610346744c105115c32659"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The artifact silently swaps the accepted objective (pagination performance on audit logs) for a second, unaccepted objective: an undocumented, privilege-gated alternate pagination mode selected by a raw client query parameter ('optimized_pagination=true') with no feature flag, options entry, or API documentation, gated on a brand-new authorization predicate (request.user.is_superuser or organization_context.member.has_global_access) that this endpoint never had. Reviewers who accepted a performance tweak have shipped a hidden admin-only API surface on a compliance-sensitive audit-log endpoint that operators cannot disable without a code deploy; the OptimizedCursorPaginator docstring (src/sentry/api/paginator.py:826-831) even sells the change as 'backward compatibility with existing cursor implementations' while introducing negative-offset slicing behavior that no existing paginator performs.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.8,
+        "rationale": "The diff does introduce a new, undocumented alternate behavior path on a compliance-sensitive endpoint: `optimized_pagination=true` selects `OptimizedCursorPaginator` only when `request.user.is_superuser or organization_context.member.has_global_access` (new gating logic in `organization_auditlogs.py`). There is no feature flag, options exposure, or doc change shown in the diff, so it is a real scope/API-surface concern rather than a purely internal perf tweak. The finding\u2019s claim that this introduces negative-offset behavior is also diff-grounded: `OptimizedCursorPaginator.get_result()` explicitly allows `start_offset = cursor.offset` when negative and `enable_advanced_features` is true.",
+        "diff_context_hash": "d3edaa64462e26e206610346744c105115c32659"
+      }
+    },
+    {
+      "issue_text": "[BUG] The optimized branch passes enable_advanced_features=True to self.paginate(), whose definition in src/sentry/api/base.py declares a fixed parameter list (request, queryset, paginator_cls, on_results, max_limit, desc, cursor, count_hits, known_hits, max_hits, order_by, post_query_filter, sampler, silent_pagination, permit_null_cursor) with no **kwargs, so the call raises TypeError: paginate() got an unexpected keyword argument 'enable_advanced_features'. Every request that takes the new branch returns a 500, so the advertised optimization is unusable as shipped; and even if the kwarg were plumbed through, the module-level paginate() constructs the paginator without forwarding unknown kwargs, leaving enable_advanced_features permanently False \u2014 a silent no-op public surface on the new class whose only distinctive behavior (the negative-offset branch) is unreachable by construction.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "hallucination",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "hallucination",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.42,
+        "rationale": "The diff does show `organization_auditlogs.py` calling `self.paginate(..., enable_advanced_features=True)` and `OptimizedCursorPaginator.__init__` accepting `enable_advanced_features`, but the finding\u2019s core claim (that `paginate()` has a fixed signature with no `**kwargs` and that it does not forward kwargs into the paginator constructor) depends on code in `src/sentry/api/base.py`, which is not included in the provided diff. From the diff alone, we cannot verify that this kwarg will raise a `TypeError` or that it will be silently ignored.",
+        "diff_context_hash": "d3edaa64462e26e206610346744c105115c32659"
+      }
+    },
+    {
+      "issue_text": "[BUG] organization_context is not defined anywhere in OrganizationAuditLogsEndpoint.get (the method's arguments are request and organization), and the expression request.user.is_superuser or organization_context.member.has_global_access is evaluated unconditionally before the use_optimized check, so every request from a non-superuser \u2014 where the 'or' fails to short-circuit \u2014 raises NameError. The entire audit-log endpoint returns a 500 for all non-superuser callers, including org admins who never pass the new parameter \u2014 a full outage of audit-log access hidden inside a PR accepted as a performance optimization.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.92,
+        "rationale": "In `organization_auditlogs.py`, the new line `enable_advanced = request.user.is_superuser or organization_context.member.has_global_access` references `organization_context`, which is not defined anywhere in the shown method/diff. Because `enable_advanced` is computed unconditionally before the `if use_optimized and enable_advanced:` branch, any non-superuser request will evaluate the second operand and raise `NameError`, breaking the endpoint for non-superusers regardless of whether `optimized_pagination=true` is provided.",
+        "diff_context_hash": "d3edaa64462e26e206610346744c105115c32659"
+      }
+    },
+    {
+      "issue_text": "[BUG] The shared BasePaginator.get_result edit clamps negative offsets only for non-prev cursors (max(0, offset) if not cursor.is_prev else offset), so a prev cursor carrying a negative client-supplied offset still slices the queryset from a negative index and raises Django's AssertionError 'Negative indexing is not supported', directly contradicting the added comment that 'the underlying queryset will handle boundary conditions'. Every endpoint inheriting this paginator \u2014 not just audit logs \u2014 now has two contradictory negative-offset behaviors: prev cursors still 500 exactly as before the safety comment, while non-prev cursors silently return the first page where they previously errored \u2014 a shared-pagination semantics change accepted on the strength of a false safety claim.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.9,
+        "rationale": "In `src/sentry/api/paginator.py` the shared `BasePaginator.get_result` was changed to compute `start_offset = max(0, offset) if not cursor.is_prev else offset`, and then slice `queryset[start_offset:stop]`. If a client supplies a negative `cursor.offset` with `cursor.is_prev == True`, `start_offset` remains negative and Django queryset slicing with a negative start is not supported (raises `AssertionError: Negative indexing is not supported`). This directly contradicts the added comment claiming boundary conditions are handled safely, and it introduces inconsistent behavior: non-prev cursors now clamp negatives to 0 while prev cursors can still error. The diff also explicitly preserves/encourages negative offsets (`Cursor.offset = int(offset)` with a comment), making the issue reachable.",
+        "diff_context_hash": "d3edaa64462e26e206610346744c105115c32659"
+      }
+    },
+    {
+      "issue_text": "[BUG] With enable_advanced_features set and a cursor whose offset is negative, the advanced branch evaluates list(queryset[start_offset:stop]) with start_offset < 0, which Django rejects on evaluation with AssertionError 'Negative indexing is not supported' \u2014 the added comment at line 876 ('The underlying Django ORM properly handles negative slicing automatically') is false. An authorized admin sending ?optimized_pagination=true with a cursor carrying a negative offset (cursor payloads are unsigned, client-controlled base64 JSON) gets a 500 from the audit-log endpoint instead of the 'efficient bidirectional traversal' the comments promise.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.72,
+        "rationale": "The new `OptimizedCursorPaginator.get_result` explicitly allows `start_offset = cursor.offset` when `enable_advanced_features` is true and `cursor.offset < 0`, and then slices `queryset[start_offset:stop]` with a negative start. There is no validation/clamping in that branch, and the comments claim negative slicing is handled automatically. Separately, the earlier change to the existing paginator also allows `start_offset = offset` when `cursor.is_prev` (which can also be negative). This introduces a concrete risk of runtime failure when a negative offset is present, rather than providing the advertised behavior.",
+        "diff_context_hash": "d3edaa64462e26e206610346744c105115c32659"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The new OptimizedCursorPaginator.get_result and the endpoint's optimized branch ship with zero tests, and the two ship-breaking defects in this PR \u2014 the TypeError on the unsupported paginate kwarg and the AssertionError on negative queryset slicing \u2014 are exactly what a single request-level test of GET ?optimized_pagination=true would have caught. Admin audit-log pagination ships broken and stays broken: a regression in the untested negative-offset branch, the prev-trimming arithmetic at line 891, or cursor propagation through build_cursor will never be caught by CI because no test exercises this code path.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.78,
+        "rationale": "The diff introduces/expands negative-offset queryset slicing paths that can break at runtime. In `src/sentry/api/paginator.py` the modified `get_result` now does `start_offset = ... if not cursor.is_prev else offset` and then slices `queryset[start_offset:stop]`; if `cursor.is_prev` and `cursor.offset` is negative, this becomes negative slicing. The newly added `OptimizedCursorPaginator.get_result` goes further and explicitly slices with a negative start when `enable_advanced_features` and `cursor.offset < 0` (`results = list(queryset[start_offset:stop])` with `start_offset = cursor.offset`). Django QuerySets do not support negative indexing/slicing and will raise (commonly an `AssertionError`). The finding\u2019s mention of an unsupported `paginate` kwarg is not verifiable from this diff alone, but the negative-slicing failure mode is grounded in the added code path and would break the optimized/admin branch.",
+        "diff_context_hash": "d3edaa64462e26e206610346744c105115c32659"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] OptimizedCursorPaginator duplicates the existing datetime paginator's get_item_key/value_from_cursor verbatim plus ~40 lines of get_result, and re-implements the base paginator's negative-offset policy with a contradictory rule (pass-through-negative at lines 880-882 vs clamp-to-zero at lines 182-184), so one concept now has two hand-maintained, already-divergent implementations in the same file. The next cursor-semantics fix must be applied in three get_result copies; a maintainer fixing the clamp in BasePaginator will reasonably miss the clone, and the already-present divergence is precisely what makes the advanced branch crash \u2014 the entire 95-line class plus the endpoint branch is deletable with zero functional loss since DateTimePaginator already provides the accepted pagination semantics.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.74,
+        "rationale": "The diff clearly adds a new 95-line `OptimizedCursorPaginator` that re-implements substantial pagination logic already present in `BasePaginator.get_result` (including offset/extra handling, prev-cursor trimming, reverse, `build_cursor`, and `post_query_filter`). It also introduces a second, different negative-offset policy: `BasePaginator.get_result` clamps `start_offset = max(0, offset)` for non-`is_prev` but otherwise uses `offset` directly, while `OptimizedCursorPaginator.get_result` has an additional branch that explicitly passes through negative offsets only when `enable_advanced_features` and `cursor.offset < 0`, otherwise falling back to the (already nontrivial) shared logic. This duplication/divergence is a concrete maintainability/architecture issue created by the change (future cursor/offset fixes must be applied in multiple places), but the finding\u2019s claims about a definite crash and that it\u2019s deletable \u201cwith zero functional loss\u201d are not verifiable from the diff alone.",
+        "diff_context_hash": "d3edaa64462e26e206610346744c105115c32659"
+      }
+    },
+    {
+      "issue_text": "[BUG] OptimizedCursorPaginator.get_result feeds a client-forged negative cursor offset straight into queryset slicing, and Django raises \"Negative indices are not allowed when slicing QuerySets\" for negative slice bounds, so the branch written specifically to enable negative offsets throws an unhandled exception instead of paginating. Any superuser or global-access member requesting /api/0/organizations/<org>/auditlogs/?optimized_pagination=true with a forged cursor (base64 'value:offset:is_prev', e.g. b64('0:-5:1')) receives an HTTP 500; even if Python asserts were stripped, Django clamps the negative low mark to 0, so the promised 'efficient bidirectional pagination' never happens \u2014 the feature is either a crash or a silent no-op, and both in-code safety claims ('The underlying Django ORM properly handles negative slicing automatically', 'This is safe because permissions are checked at the queryset level') are false.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.86,
+        "rationale": "In `OptimizedCursorPaginator.get_result`, when `enable_advanced_features` is true and `cursor.offset < 0`, it slices the Django `QuerySet` with a negative start (`queryset[start_offset:stop]` where `start_offset` is negative). Django QuerySet slicing does not permit negative indices and will raise an exception (commonly an `AssertionError` about negative indexing), which would surface as a 500 if not caught. The diff also shows `Cursor.offset` is accepted as any int (no validation), and the endpoint explicitly enables this paginator/feature for privileged users (`enable_advanced_features=True`), making the crash reachable via a forged cursor.",
+        "diff_context_hash": "d3edaa64462e26e206610346744c105115c32659"
+      }
+    },
+    {
+      "issue_text": "[BUG] The modified paginator get_result clamps negative offsets only in the non-prev case (start_offset = max(0, offset) if not cursor.is_prev else offset), so a forged prev cursor carrying a negative offset still reaches queryset[-n:stop] and raises the negative-index error that the new comment claims the queryset 'will handle'. A one-line forged cursor (cursor=b64('0:-5:1')) produces an unhandled 500 on this endpoint's default (non-optimized) pagination path and on every other endpoint using this paginator, for any user with read access \u2014 the PR advertises negative-offset support but leaves the primary is_prev path both crashing and mislabeled as safe.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.78,
+        "rationale": "In `sentry/api/paginator.py:get_result`, the new logic clamps negatives only when `not cursor.is_prev` (`start_offset = max(0, offset) if not cursor.is_prev else offset`). If a client forges a cursor with `is_prev=True` and a negative `offset`, `queryset[start_offset:stop]` will slice with a negative start. Django QuerySets do not support negative indexing/slicing and typically raise an exception (500). This contradicts the added comment claiming the queryset will \"handle boundary conditions\" and affects the default (non-optimized) pagination path used by `DateTimePaginator` and others calling this `get_result`.",
+        "diff_context_hash": "d3edaa64462e26e206610346744c105115c32659"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The endpoint lets the client select between two paginator implementations sharing the same cursor format via the raw query param optimized_pagination, with no feature flag and with already-divergent boundary semantics between the two paths. An administrator who pages audit logs with the param set on one request and unset on the next (or replays a shared/bookmarked cursor URL under the other setting) gets silently shifted or duplicated windows \u2014 skipped audit rows during an incident investigation \u2014 and operations has no flag to disable the new path without a code deploy.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.74,
+        "rationale": "The endpoint now switches paginator implementation based on the raw query param `optimized_pagination` (`use_optimized = request.GET.get(\"optimized_pagination\") == \"true\"`) and an admin check, with no server-side feature flag or cursor-versioning. Both paths still accept the same request cursor inputs via `self.paginate(...)` and both operate on `Cursor.offset`, but the diff explicitly introduces divergent boundary semantics around negative offsets: `DateTimePaginator.get_result` now clamps `start_offset = max(0, offset)` when not `cursor.is_prev`, while `OptimizedCursorPaginator.get_result` conditionally allows negative slicing when `enable_advanced_features` and `cursor.offset < 0`. Because the cursor URL/format does not encode which paginator/semantics were used, replaying/bookmarking a cursor under the other setting (or toggling the param between requests) can produce shifted/duplicated/skipped windows without any error, which is a correctness defect for audit log investigations.",
+        "diff_context_hash": "d3edaa64462e26e206610346744c105115c32659"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The diff declares negative offsets a supported Cursor state ('Allow negative offsets for advanced pagination scenarios') but adds no validation at the parse/constructor choke point, so self.offset = int(offset) still accepts arbitrary negative ints from the client-forged base64 cursor. Every paginator consumer must now independently guard negative offsets, and the two downstream sites shipped in this same diff already failed to (both crash); the next paginator author who trusts the new comment inherits the same 500 \u2014 the enforcement belongs in from_string/__init__ (reject or clamp), not in each caller's slicing logic.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.88,
+        "rationale": "The diff explicitly promotes/implements \u201cnegative offset\u201d cursor behavior but does not prevent clients from supplying arbitrary negative `Cursor.offset` (`self.offset = int(offset)` in `sentry/utils/cursors.py`). Downstream, both modified paginator slicing sites can pass negative starts into Django `QuerySet` slicing: (1) `src/sentry/api/paginator.py` existing `get_result` now uses `start_offset = ... if not cursor.is_prev else offset`, so `cursor.is_prev=True` with a negative offset leads to `queryset[start_offset:stop]`; (2) the new `OptimizedCursorPaginator.get_result` has an `enable_advanced_features` branch that explicitly sets `start_offset = cursor.offset` when negative. Django QuerySet slicing does not support negative indices and will raise, yielding a 500. This is a real, diff-grounded crash vector and contradicts the comments claiming it\u2019s safe.",
+        "diff_context_hash": "d3edaa64462e26e206610346744c105115c32659"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The copied prev-trim block in OptimizedCursorPaginator.get_result drifts from its own slicing: results are sliced using start_offset but the drop condition checks len(results) == offset + limit + extra against the raw cursor offset. Whoever fixes the negative-slice crash by clamping start_offset inherits a silent row-drop here \u2014 whenever start_offset != offset (clamped or negative offsets) the elif trims the wrong end and a prev page loses an audit entry with no error, which is precisely the drift that duplicating this ~90-line get_result guarantees.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "hallucination",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "hallucination",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.67,
+        "rationale": "In `OptimizedCursorPaginator.get_result`, the `start_offset` used for slicing is always equal to `offset` in the only path where the \u201cprev-trim\u201d block runs (`if cursor.is_prev and cursor.value:`). Specifically: in the non-advanced branch `start_offset = ... if not cursor.is_prev else offset` so for `is_prev=True`, `start_offset == offset`; in the advanced negative-offset branch `start_offset = cursor.offset` and `offset = cursor.offset`, so again `start_offset == offset`. Therefore the described drift \u201cwhenever start_offset != offset\u201d cannot occur based on this diff alone, and the claimed silent row-drop due to that mismatch is not verifiable from the changes shown.",
+        "diff_context_hash": "d3edaa64462e26e206610346744c105115c32659"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] OptimizedCursorPaginator duplicates the existing DateTimePaginator get_result almost line-for-line while its only behavioral delta (the negative-offset branch) is broken, so the class fails the deletion test: nothing it does works that DateTimePaginator does not already do. Deleting the class, the enable_advanced_features constructor param, the endpoint's optimized_pagination branch, and both negative-offset edits (keeping only the one-line max(0, offset) clamp if negative cursors are meant to be tolerated) removes every line in this PR that can 500 or mis-page; keeping it adds a second pagination implementation to maintain for a feature that cannot exist against a database queryset, since SQL OFFSET cannot be negative.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.88,
+        "rationale": "The diff introduces/expands paths that can slice a Django queryset with a negative start index. In `OptimizedCursorPaginator.get_result`, when `enable_advanced_features` is true and `cursor.offset < 0`, it does `results = list(queryset[start_offset:stop])` with `start_offset` negative. Django ORM queryset slicing does not support negative indexing and typically raises an exception, so this can 500 if a client supplies a cursor with a negative offset. Additionally, the earlier change in `paginator.py` sets `start_offset = max(0, offset) if not cursor.is_prev else offset`, meaning `cursor.is_prev` requests can still use a negative `offset` directly in slicing. Since `Cursor.offset` is now explicitly allowed to be any int (no validation/clamp added), these negative offsets are plausibly reachable via request cursors and represent a real correctness/runtime defect introduced by the diff.",
+        "diff_context_hash": "d3edaa64462e26e206610346744c105115c32659"
+      }
+    },
+    {
+      "issue_text": "[BUG] OptimizedCursorPaginator.get_result's defining feature slices the queryset at a negative cursor.offset (line 880, start_offset = cursor.offset), which Django QuerySet slicing rejects with 'Negative indexing is not supported', so the paginator 500s on exactly the negative-offset cursors it exists to serve, and the line 876 comment claiming the ORM 'properly handles negative slicing automatically' is false. An administrator calling GET on the audit-logs endpoint with optimized_pagination=true and any negative-offset cursor receives a 500; the diff contains no test-file changes (its only files are organization_auditlogs.py, paginator.py, and cursors.py), the class is constructed solely by the new endpoint branch gated on a param string that first appears in this diff, and no test written before this diff can reference a class or param introduced by it, so no test anywhere executes this code path and the crash reaches production admins undetected.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.82,
+        "rationale": "In `OptimizedCursorPaginator.get_result`, when `enable_advanced_features` is true and `cursor.offset < 0`, the code sets `start_offset = cursor.offset` and then does `queryset[start_offset:stop]` (negative start). Django QuerySet slicing does not support negative indexes/offsets and raises an error (e.g., \u201cNegative indexing is not supported\u201d), so this path is likely to 500 specifically for the negative-offset cursors it claims to support. The comment asserting the ORM \u201cproperly handles negative slicing automatically\u201d is contradicted by Django\u2019s documented/known behavior.",
+        "diff_context_hash": "d3edaa64462e26e206610346744c105115c32659"
+      }
+    },
+    {
+      "issue_text": "[BUG] The rewritten slicing in CursorPaginator.get_result silently clamps negative-offset next-cursors to offset 0 (line 182) while prev-cursors keep slicing at the raw negative offset, so the change delivers neither the bidirectional negative-offset pagination its new comment advertises nor the previous uniform error. Every cursor-paginated endpoint in the API (CursorPaginator is the base of DateTimePaginator and all cursor paginator subclasses) now returns the dataset's first page \u2014 rows the client already consumed \u2014 for a next-cursor carrying a negative offset where the API previously raised, while the identical crafted cursor on a prev-cursor still 500s; the diff ships no test for the new clamp branch and no pre-existing test can assert semantics introduced by this line, so CI stays green while paging behavior changes API-wide.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.9,
+        "rationale": "In `CursorPaginator.get_result` the new logic sets `start_offset = max(0, offset) if not cursor.is_prev else offset` and then slices `queryset[start_offset:stop]`. This clamps a negative `cursor.offset` to `0` for \u201cnext\u201d cursors (`is_prev == False`), returning the first page instead of erroring, while \u201cprev\u201d cursors keep using the raw (possibly negative) `offset` and will still trigger Django\u2019s negative-slice error. This inconsistent behavior (silent rewind for next vs error for prev) is directly introduced by the diff and affects all paginators inheriting this base method (e.g., `DateTimePaginator`).",
+        "diff_context_hash": "d3edaa64462e26e206610346744c105115c32659"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The new optimized-pagination branch in the audit-logs endpoint is unreachable by any test: entering it requires the query param string 'optimized_pagination', which first appears in this diff, and the diff adds no test setting it (its only files are the three source files organization_auditlogs.py, paginator.py, and cursors.py). The pre-existing audit-log endpoint tests exercise only the legacy DateTimePaginator else-branch and report green, presenting the endpoint as verified while the new admin path \u2014 including the organization_context.member.has_global_access chain on line 71, now evaluated on every request regardless of the param \u2014 has never run under CI; its first execution is a production administrator, who then hits the paginator crash at paginator.py:880.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.67,
+        "rationale": "The diff adds a new conditional path in `organization_auditlogs.py` gated by a new query param (`optimized_pagination`) and an admin check, but this PR contains only source changes (no tests), so there is no diff-evidence that the new `OptimizedCursorPaginator` branch is exercised. Also, `enable_advanced = request.user.is_superuser or organization_context.member.has_global_access` is computed unconditionally (outside the `if use_optimized` block), introducing new runtime attribute access on every request even when `optimized_pagination` is not set. The finding\u2019s claim about a specific \u201cpaginator crash at paginator.py:880\u201d and CI/test suite behavior cannot be verified from the diff alone.",
+        "diff_context_hash": "d3edaa64462e26e206610346744c105115c32659"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The prev-cursor boundary trim copied into OptimizedCursorPaginator (line 891, elif len(results) == offset + limit + extra) is dead under the negative-offset branch it ships beside, because a slice starting at a negative start_offset produces len(results) that can never equal offset + limit + extra, so the inherited offset>=0 assumption no longer holds. Prev pages served through the new paginator silently retain the boundary duplicate row the trim exists to drop, and a future unit test written against a list-backed fake queryset passes anyway because Python list negative slicing indexes from the end rather than raising like the production QuerySet, masking both this miscalibration and the production crash at line 882.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.78,
+        "rationale": "The new OptimizedCursorPaginator explicitly allows `start_offset = cursor.offset` when `enable_advanced_features` and `cursor.offset < 0`, and then slices `queryset[start_offset:stop]`. Django QuerySets do not support negative indexing/slicing, so this can crash in production. Additionally, the copied prev-page trimming logic uses `len(results) == offset + limit + extra`, but `offset` may be negative in this branch, so its assumptions are no longer valid and can lead to incorrect boundary handling (duplicate row retention). The diff itself contains the negative-slice path and the unchanged trim condition beside it.",
+        "diff_context_hash": "d3edaa64462e26e206610346744c105115c32659"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The experimental paginator is gated on a raw client-supplied query param (optimized_pagination=true) with no feature flag, options entry, or UI toggle anywhere in the diff. Operators cannot disable the untested OptimizedCursorPaginator path without a code deploy, and since no legitimate client sends the undocumented param, production traffic yields zero signal on the new code before an administrator hand-crafts the URL and triggers the paginator.py:880 crash.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.72,
+        "rationale": "The diff shows the new path is enabled solely via a raw query param (`use_optimized = request.GET.get(\"optimized_pagination\") == \"true\"`) plus an admin-ish check (`request.user.is_superuser or organization_context.member.has_global_access`), with no feature flag/config hook/options discovery in the diff. That makes rollout/disablement purely client-controlled and undocumented from this change. The finding\u2019s specific claim about a guaranteed `paginator.py:880` crash is not directly verifiable from the diff alone (line number/behavior depends on runtime/framework), but the rollout-gating concern is clearly grounded.",
+        "diff_context_hash": "d3edaa64462e26e206610346744c105115c32659"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] OptimizedCursorPaginator.get_result is a ~65-line near-verbatim copy of the shared CursorPaginator.get_result with the new branch spliced in, so the offset-slicing policy changed at lines 179-184 now lives in two hand-maintained copies that have already drifted (line 880 passes negative offsets through while line 182 clamps them). The next cursor-boundary fix must be applied and tested in both copies \u2014 a fix landed only in the shared method (the path every other endpoint uses) leaves the admin audit-log path silently divergent, and because only the original class has any test history, regressions in the copy ship undetected.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.83,
+        "rationale": "The diff adds a new `OptimizedCursorPaginator.get_result` (~80 lines) that largely duplicates the existing paginator `get_result` logic (limit/cursor handling, `extra`, slicing, prev handling, cursor building). At the same time, the existing shared method\u2019s slicing policy was changed (`start_offset = max(0, offset) if not cursor.is_prev else offset`), while the new class contains its own slicing logic with an additional branch that can pass negative offsets through when `enable_advanced_features` is set. This creates two separate, hand-maintained implementations of the same pagination boundary logic that can drift and require parallel fixes/tests, exactly as the finding describes.",
+        "diff_context_hash": "d3edaa64462e26e206610346744c105115c32659"
+      }
+    },
+    {
+      "issue_text": "[BUG] OptimizedCursorPaginator.get_result's advanced branch slices a Django QuerySet with a negative start (queryset[start_offset:stop] where start_offset = cursor.offset < 0), which Django's ORM rejects with AssertionError ('Negative indexing is not supported'), so the class's advertised negative-offset pagination crashes on every input that exercises it. Any admin request using optimized_pagination=true with a cursor whose offset is negative (the only way to reach this branch, since cursors the API generates never carry negative offsets) raises AssertionError and returns a 500 from the organization audit-log endpoint instead of a page; the in-code claim 'The underlying Django ORM properly handles negative slicing automatically' is false, so the feature this class exists to provide is dead on arrival \u2014 it can never return results.",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.78,
+        "rationale": "In `OptimizedCursorPaginator.get_result`, the `enable_advanced_features` branch explicitly allows `start_offset = cursor.offset` when `cursor.offset < 0` and then slices `queryset[start_offset:stop]` (negative start). Django QuerySet slicing does not support negative indices, so exercising this branch would raise an exception and break pagination. The diff also adds comments claiming negative slicing is handled automatically, but the implementation relies on that assumption.",
+        "diff_context_hash": "d3edaa64462e26e206610346744c105115c32659"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The new OptimizedCursorPaginator request path is enabled solely by the raw query-string parameter optimized_pagination=true with no feature flag, options entry, or any other server-side switch, so operators cannot disable the new code path without a code deploy. Once any API consumer (Sentry's API is public; operators do not control third-party clients) starts passing the parameter, a misbehaving optimized path \u2014 it 500s whenever its negative-offset branch triggers, per the paginator.py finding \u2014 can only be remediated by shipping a new deploy; there is no operational kill switch for the audit-log endpoint.",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.73,
+        "rationale": "In `organization_auditlogs.py`, the new code path is gated by `request.GET.get(\"optimized_pagination\") == \"true\"` plus an admin check (`request.user.is_superuser or organization_context.member.has_global_access`), with no feature flag or server-side configuration shown in the diff. That means any authorized client can opt into the new paginator behavior and there is no operator-controlled kill switch evident in this change. However, the finding\u2019s claim that it \"500s whenever its negative-offset branch triggers\" is not verifiable from this diff alone (no exception shown), so the actionable, diff-grounded issue is operational controllability rather than a proven defect.",
+        "diff_context_hash": "d3edaa64462e26e206610346744c105115c32659"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] OptimizedCursorPaginator.get_result duplicates the existing paginator's entire result flow (cursor decoding, hit counting, prev-cursor dedup via results[:-1], results.reverse(), build_cursor wiring) rather than subclassing the existing paginator and overriding only the slicing, and the copy has already diverged from the modified DateTimePaginator block in its slicing logic. The next pagination-correctness fix applied to the existing get_result (e.g., to the shared prev-cursor dedup/boundary math) silently misses this ~65-line copy, so the audit-log endpoint's two paginators drift and the admin-gated path serves subtly wrong cursors; subclassing with a single overridden slicing strategy deletes the duplicated method body entirely.",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.78,
+        "rationale": "The diff adds a new `OptimizedCursorPaginator.get_result` that largely copies an existing paginator result-flow (cursor defaulting, hit counting, prev-page extra item/dedup, reverse, `build_cursor`, `post_query_filter`). This duplication is verifiable in the added ~80-line method body and creates an immediate maintainability/drift risk: changes to the shared pagination math (like the just-modified slicing logic in `paginator.py` using `start_offset = max(0, offset) ...`) must now be kept in sync manually. The finding\u2019s core point (should subclass/override only slicing to avoid divergence) is a concrete, diff-grounded architecture concern, even if it may not yet be a demonstrable runtime defect from the diff alone.",
+        "diff_context_hash": "d3edaa64462e26e206610346744c105115c32659"
+      }
+    },
+    {
+      "issue_text": "[BUG] The new gate references `organization_context`, a name that is never imported (the diff's import block contains no such import) and never assigned anywhere in this endpoint, so evaluating `enable_advanced = request.user.is_superuser or organization_context.member.has_global_access` raises `NameError: name 'organization_context' is not defined` for every requester whose `is_superuser` is False, because the `or` short-circuits only for superusers. Every ordinary organization member calling GET /api/0/organizations/<slug>/audit-logs/ \u2014 the primary audit-log listing API \u2014 receives a 500 instead of audit rows, with or without the optimized_pagination flag; only superusers (who short-circuit the `or`) get a successful response.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.78,
+        "rationale": "In `organization_auditlogs.py`, the diff introduces `enable_advanced = request.user.is_superuser or organization_context.member.has_global_access`, but within the shown changes there is no import, parameter, or local assignment for `organization_context`. That makes `organization_context` an unbound name in this scope, and for non-superusers the RHS of the `or` will be evaluated, raising `NameError` at runtime.",
+        "diff_context_hash": "d3edaa64462e26e206610346744c105115c32659"
+      }
+    },
+    {
+      "issue_text": "[BUG] OptimizedCursorPaginator.__init__ adds only `enable_advanced_features` and never performs the DateTimePaginator-specific initialization its copied get_result/get_item_key bodies depend on (defaulting `key` and deriving `desc`/datetime conversions), and the endpoint's paginate() call supplies no `key` either, so the first optimized-path request raises an unhandled exception \u2014 TypeError from `getattr(item, self.key)` with an unset key or `math.floor` on a datetime in get_item_key, or AttributeError on unset `desc`/missing datetime setup \u2014 and the endpoint returns a 500. GET /organizations/<slug>/audit-logs/?optimized_pagination=true returns a 500 for the superusers/global-access admins it targets, on the very first request with any cursor: the new paginator as written has no invocation that returns a successful response, so the PR's entire optimization path is dead on arrival.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.7,
+        "rationale": "The new `OptimizedCursorPaginator` defines `get_item_key()` as `getattr(item, self.key)` and then applies `math.floor/ceil` to that value, but the class never sets a default `self.key` nor any datetime-specific conversion logic. In `organization_auditlogs.py`, the optimized path calls `self.paginate(... paginator_cls=OptimizedCursorPaginator, order_by=\"-datetime\", enable_advanced_features=True)` and (per the diff) does not supply any `key` argument. With `order_by` targeting a datetime field, this paginator\u2019s `get_item_key` will either (a) fail if `self.key` is unset, or (b) attempt `math.floor`/`math.ceil` on a datetime attribute if `self.key` ends up being `\"datetime\"`, both of which would raise at runtime and produce a 500 on the optimized path.",
+        "diff_context_hash": "d3edaa64462e26e206610346744c105115c32659"
+      }
+    },
+    {
+      "issue_text": "[BUG] The 'advanced' negative-offset branch slices the Django QuerySet with a negative start (`start_offset = cursor.offset` where `cursor.offset < 0`, then `queryset[start_offset:stop]`), and Django's QuerySet slicing raises `AssertionError: Negative indexes are not allowed in queryset slicing` \u2014 the ORM does not support negative slicing despite the branch's comment claiming it 'properly handles negative slicing automatically' \u2014 so this branch raises on every input that reaches it. An administrator paging audit logs with a negative-offset cursor \u2014 the exact scenario this class exists to support \u2014 gets a raw 500 from the audit-logs endpoint instead of rows; the advertised negative-offset feature has no working path and crashes 100% of the time it is exercised.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.9,
+        "rationale": "In `OptimizedCursorPaginator.get_result`, the \u201cadvanced\u201d branch explicitly allows `cursor.offset < 0` and then slices the queryset with a negative start: `start_offset = cursor.offset` followed by `results = list(queryset[start_offset:stop])`. Django QuerySet slicing does not permit negative indexes, so this path will raise at runtime whenever exercised. The diff\u2019s comments claim negative slicing is handled safely, but the code as written will crash for any negative-offset cursor reaching this branch.",
+        "diff_context_hash": "d3edaa64462e26e206610346744c105115c32659"
+      }
+    },
+    {
+      "issue_text": "[BUG] The rewritten offset logic clamps negative offsets only for forward cursors: when `cursor.is_prev` is true, `start_offset = offset` still feeds the client-controlled negative value into `queryset[start_offset:stop]`, and Django raises `AssertionError: Negative indexes are not allowed in queryset slicing` \u2014 directly contradicting the added comment 'This is safe because the underlying queryset will handle boundary conditions' \u2014 so the bidirectional negative-offset support this hunk claims is not delivered on the prev branch. A client sending a crafted prev cursor with a negative offset component to any DateTimePaginator-backed endpoint (audit logs being one of many) triggers an unhandled AssertionError and a 500; the fix is half-applied, so the loud failure the change claims to eliminate persists exactly on the reverse-pagination direction.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.92,
+        "rationale": "In `DateTimePaginator.get_result` the new logic sets `start_offset = max(0, offset) if not cursor.is_prev else offset` and then slices `queryset[start_offset:stop]`. Since `Cursor.offset` is directly `int(offset)` from the cursor payload (no clamping in `sentry/utils/cursors.py`), a crafted prev-cursor with a negative `offset` will pass a negative start index into Django queryset slicing, which Django rejects (`AssertionError: Negative indexes are not allowed in queryset slicing`). This contradicts the added comment claiming boundary conditions are handled safely, and creates an unhandled 500 on the reverse-pagination path for any DateTimePaginator-backed endpoint.",
+        "diff_context_hash": "d3edaa64462e26e206610346744c105115c32659"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] OptimizedCursorPaginator.get_result is a ~40-line near-verbatim duplicate of DateTimePaginator.get_result (plus copied get_item_key/value_from_cursor), and the two copies already diverge within this same diff (the offset-clamp logic at line 182 differs from lines 877-886), so future fixes to cursor slicing semantics must be applied in both classes or they silently drift. Maintainers patching a pagination bug in DateTimePaginator (used across many endpoints) will not propagate it to OptimizedCursorPaginator and vice versa; the negative-offset defect introduced here already exists in two divergent variants, and the audit-logs endpoint switches between the two implementations per-request based on a query param, so the same URL serves different pagination behavior with no shared source of truth.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.78,
+        "rationale": "The diff adds a new `OptimizedCursorPaginator.get_result` implementation in `src/sentry/api/paginator.py` that is substantially the same structure/logic as existing paginator `get_result` code (offset/extra/stop slicing, prev handling, reverse, `build_cursor`, `post_query_filter`). Within the same diff, the slicing/offset handling logic is already not fully shared: `DateTimePaginator.get_result` was modified to use `start_offset = max(0, offset) if not cursor.is_prev else offset`, while `OptimizedCursorPaginator` has its own variant plus an additional branch that explicitly allows negative offsets when `enable_advanced_features` is set. This creates a real maintenance/architecture risk (pagination semantics can drift and bugfixes must be duplicated), and the audit logs endpoint conditionally switches between paginator classes based on a query param, so behavior can diverge by request. However, the finding mainly concerns duplication/drift risk rather than a directly provable runtime defect from the diff alone.",
+        "diff_context_hash": "d3edaa64462e26e206610346744c105115c32659"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The new code path is gated on the undocumented, client-controlled magic query param `optimized_pagination=true` with no feature flag or options registration, so operators cannot disable the new paginator path without a code deploy and clients have no contract for which implementation serves a given request. Operators who need to turn off the optimized path (e.g., after it starts 500ing admins, per the paginator findings) have no kill switch short of a revert/deploy, and API consumers silently receive different pagination semantics on the same URL depending on the caller's privileges and an undocumented param \u2014 a divergence that is invisible in the response and absent from the API schema.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.83,
+        "rationale": "The diff adds a new behavior switch in `organization_auditlogs.py` that is controlled by a client-supplied, undocumented query param (`use_optimized = request.GET.get(\"optimized_pagination\") == \"true\"`) and a privilege check (`enable_advanced = request.user.is_superuser or organization_context.member.has_global_access`). There is no feature flag, settings toggle, or API options/contract surfaced in the response to indicate which paginator semantics were used. This is a real, diff-grounded operational/API-contract concern (hard to disable without deploy; same endpoint can yield different pagination behavior based on hidden param + caller privilege), but it\u2019s not a direct correctness defect proven by the diff alone.",
+        "diff_context_hash": "d3edaa64462e26e206610346744c105115c32659"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] For forward (non-prev) cursors the new `max(0, offset)` clamp silently rewrites a client-supplied negative offset to 0 and serves the first page with a 200 plus freshly recomputed next/prev cursors, converting what was previously a loud failure (negative slice raising) into a silent success at the wrong position. An API consumer whose cursor arithmetic goes negative (buggy prev/next link derivation) now silently lands at the start of the dataset and re-reads rows it already processed \u2014 duplicate or missing audit-log entries with no error signaling the position jump \u2014 and this applies to every DateTimePaginator endpoint in the API, not just audit logs.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.9,
+        "rationale": "In `src/sentry/api/paginator.py` the slicing logic changed from `queryset[offset:stop]` to `queryset[start_offset:stop]` where `start_offset = max(0, offset)` for non-`prev` cursors. This means a client-supplied negative `cursor.offset` will no longer propagate to the queryset slice (which previously would raise on negative slicing for Django QuerySets), but will be silently coerced to `0`, returning the first page and generating new cursors from that incorrect position. This is a behavior change that can cause silent duplication/missing entries for consumers with buggy cursor arithmetic, and it affects any endpoint using this paginator method (not just the audit log endpoint).",
+        "diff_context_hash": "d3edaa64462e26e206610346744c105115c32659"
+      }
+    }
+  ],
+  "diff_context_hash": "d3edaa64462e26e206610346744c105115c32659",
+  "primary_judge": "gpt-5.2",
+  "adjudicating_judge": "gpt-5.2",
+  "url": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/1",
+  "framework": "metareview-realistic",
+  "model": "glm-5.3-vision-background",
+  "effort": "medium",
+  "judge": "gpt-5.2",
+  "wall_s": 1204.7316873073578,
+  "execution_mode": "api",
+  "run_batch": "20260910-mrv0120-manifold"
+}

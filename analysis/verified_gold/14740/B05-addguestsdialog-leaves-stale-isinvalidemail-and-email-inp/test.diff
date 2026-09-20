@@ -1,0 +1,126 @@
+diff --git a/apps/web/components/dialog/AddGuestsDialog.verified.test.tsx b/apps/web/components/dialog/AddGuestsDialog.verified.test.tsx
+new file mode 100644
+--- /dev/null
++++ b/apps/web/components/dialog/AddGuestsDialog.verified.test.tsx
+@@ -0,0 +1,121 @@
++import React, { useState } from "react";
++import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
++import { render, screen, fireEvent, act, cleanup } from "@testing-library/react";
++
++const { mockInvalidate, mockShowToast, mockMutate, mutationState } = vi.hoisted(() => {
++  return {
++    mockInvalidate: vi.fn(),
++    mockShowToast: vi.fn(),
++    mockMutate: vi.fn(),
++    mutationState: {
++      onSuccess: undefined as undefined | ((...args: unknown[]) => unknown),
++      onError: undefined as undefined | ((...args: unknown[]) => unknown),
++      isPending: false,
++    },
++  };
++});
++
++vi.mock("@calcom/lib/hooks/useLocale", () => ({
++  useLocale: () => ({ t: (k: string) => k }),
++}));
++
++vi.mock("@calcom/trpc/react", () => ({
++  trpc: {
++    useUtils: () => ({ viewer: { bookings: { invalidate: mockInvalidate } } }),
++    viewer: {
++      bookings: {
++        addGuests: {
++          useMutation: (opts: { onSuccess?: unknown; onError?: unknown }) => {
++            mutationState.onSuccess = opts?.onSuccess as typeof mutationState.onSuccess;
++            mutationState.onError = opts?.onError as typeof mutationState.onError;
++            return { mutate: mockMutate, isPending: mutationState.isPending };
++          },
++        },
++      },
++    },
++  },
++}));
++
++vi.mock("@calcom/ui", () => ({
++  Button: (props: Record<string, unknown> & { children?: React.ReactNode; onClick?: () => void }) => {
++    const { children, onClick, loading: _loading, color: _color, ...rest } = props;
++    return (
++      <button type="button" onClick={onClick} {...(rest as object)}>
++        {children}
++      </button>
++    );
++  },
++  Dialog: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
++  DialogContent: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
++  DialogFooter: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
++  DialogHeader: ({ title }: { title?: React.ReactNode }) => <div>{title}</div>,
++  Icon: () => <span />,
++  showToast: (...args: unknown[]) => mockShowToast(...args),
++  MultiEmail: ({ value, setValue }: { value: string[]; setValue: (v: string[]) => void }) => (
++    <input
++      data-testid="multi-email"
++      value={Array.isArray(value) ? value.join(",") : ""}
++      onChange={(e) => setValue(e.target.value.split(","))}
++    />
++  ),
++}));
++
++import { AddGuestsDialog } from "./AddGuestsDialog";
++
++const openRef: { current: ((v: boolean) => void) | null } = { current: null };
++
++function Harness() {
++  const [open, setOpen] = useState(true);
++  openRef.current = setOpen;
++  return <AddGuestsDialog isOpenDialog={open} setIsOpenDialog={setOpen} bookingId={42} />;
++}
++
++describe("AddGuestsDialog - stale isInvalidEmail state", () => {
++  beforeEach(() => {
++    mockInvalidate.mockReset();
++    mockShowToast.mockReset();
++    mockMutate.mockReset();
++    mutationState.onSuccess = undefined;
++    mutationState.onError = undefined;
++    mutationState.isPending = false;
++    openRef.current = null;
++  });
++
++  afterEach(() => {
++    cleanup();
++  });
++
++  it("clears isInvalidEmail after a successful submit so the validation banner does not reappear on reopen", async () => {
++    render(<Harness />);
++
++    const input = screen.getByTestId("multi-email");
++
++    // Enter duplicate emails so the schema's uniqueness refinement fails.
++    fireEvent.change(input, { target: { value: "dup@example.com,dup@example.com" } });
++    fireEvent.click(screen.getByTestId("add_members"));
++
++    expect(screen.queryByText("emails_must_be_unique_valid")).not.toBeNull();
++
++    // Fix the emails and submit again. Validation now succeeds.
++    fireEvent.change(input, { target: { value: "a@example.com,b@example.com" } });
++    fireEvent.click(screen.getByTestId("add_members"));
++
++    expect(mockMutate).toHaveBeenCalledWith({
++      bookingId: 42,
++      guests: ["a@example.com", "b@example.com"],
++    });
++
++    // Simulate the server-side success callback (dialog closes, state should be reset).
++    await act(async () => {
++      await mutationState.onSuccess?.();
++    });
++
++    // Reopen the dialog as the user would from the bookings page.
++    await act(async () => {
++      openRef.current?.(true);
++    });
++
++    // Claimed defect: stale validation banner should NOT be present after a successful submit.
++    expect(screen.queryByText("emails_must_be_unique_valid")).toBeNull();
++  });
++});

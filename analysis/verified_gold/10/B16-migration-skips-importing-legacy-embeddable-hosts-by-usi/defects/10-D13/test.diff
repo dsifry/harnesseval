@@ -1,0 +1,92 @@
+# spec/verify/20150818190757_create_embeddable_hosts_verify.rb
+# Run: ruby -I. spec/verify/20150818190757_create_embeddable_hosts_verify.rb
+
+# --- Stubs to load and run the migration without Rails ---
+module ActiveRecord
+  class Migration
+    def create_table(name, force: false)
+      yield TableDefinition.new if block_given?
+    end
+
+    class TableDefinition
+      def string(*args); end
+      def integer(*args); end
+      def timestamps; end
+    end
+  end
+end
+
+class String
+  def present?
+    !empty?
+  end
+end
+
+class Array
+  def present?
+    !empty?
+  end
+end
+
+# Fake DB state
+$site_settings = [
+  { 'name' => 'embed_category', 'value' => 'Some Category' },
+  { 'name' => 'uncategorized_category_id', 'value' => '1' },
+  { 'name' => 'embeddable_hosts', 'value' => "example.com\nfoo.com" }
+]
+$categories = [ { 'id' => 1, 'name' => 'Some Category' } ]
+$embeddable_hosts = []
+
+class FakeResult < Array
+  attr_reader :cmd_tuples, :ntuples
+  def initialize(rows, cmd: 0, ntuples: rows.size)
+    super(rows)
+    @cmd_tuples = cmd
+    @ntuples = ntuples
+  end
+end
+
+# Stub execute on Migration
+class ActiveRecord::Migration
+  def execute(sql)
+    sql = sql.strip
+    if sql =~ /SELECT c\.id FROM categories/i
+      FakeResult.new([{ 'id' => '1' }], cmd: 0, ntuples: 1)
+    elsif sql =~ /SELECT value FROM site_settings WHERE name = 'uncategorized_category_id'/i
+      FakeResult.new([{ 'value' => '1' }], cmd: 0, ntuples: 1)
+    elsif sql =~ /SELECT value FROM site_settings WHERE name = 'embeddable_hosts'/i
+      row = $site_settings.find { |s| s['name'] == 'embeddable_hosts' }
+      if row
+        FakeResult.new([{ 'value' => row['value'] }], cmd: 0, ntuples: 1)
+      else
+        FakeResult.new([], cmd: 0, ntuples: 0)
+      end
+    elsif sql =~ /INSERT INTO embeddable_hosts/i
+      host = sql[/VALUES \('(.+?)'/, 1]
+      $embeddable_hosts << { 'host' => host }
+      FakeResult.new([], cmd: 1, ntuples: 0)
+    elsif sql =~ /DELETE FROM site_settings WHERE name IN \('embeddable_hosts', 'embed_category'\)/i
+      $site_settings.reject! { |s| ['embeddable_hosts', 'embed_category'].include?(s['name']) }
+      FakeResult.new([], cmd: 2, ntuples: 0)
+    else
+      FakeResult.new([], cmd: 0, ntuples: 0)
+    end
+  end
+end
+
+# --- Load the REAL file under test ---
+require_relative '../../db/migrate/20150818190757_create_embeddable_hosts.rb'
+
+# --- Exercise the migration ---
+migration = CreateEmbeddableHosts.new
+migration.change
+
+# --- Assert observable behaviour ---
+expected_hosts = ['example.com', 'foo.com']
+imported_hosts = $embeddable_hosts.map { |h| h['host'] }
+
+if expected_hosts.all? { |h| imported_hosts.include?(h) }
+  puts "RESULT: PASS"
+else
+  puts "RESULT: FAIL: migration skipped import (used cmd_tuples on SELECT) and deleted the embeddable_hosts setting, losing configured hosts"
+end

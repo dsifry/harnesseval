@@ -1,0 +1,98 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+
+vi.mock("@calcom/lib/constants", () => ({
+  APP_CREDENTIAL_SHARING_ENABLED: true,
+}));
+
+vi.mock("@calcom/app-store/appStoreMetaData", () => ({
+  appStoreMetadata: {
+    testapp: { slug: "testapp", type: "test" },
+  },
+}));
+
+vi.mock("@calcom/lib/crypto", () => ({
+  symmetricDecrypt: vi.fn(() => JSON.stringify({ token: "decrypted" })),
+}));
+
+vi.mock("@calcom/prisma", () => {
+  const prisma = {
+    user: {
+      findUnique: vi.fn(async () => ({ id: 1 })),
+    },
+    app: {
+      findUnique: vi.fn(async () => ({ slug: "testapp" })),
+    },
+    credential: {
+      findFirst: vi.fn(async () => null),
+      update: vi.fn(async () => ({ id: 123 })),
+      create: vi.fn(async () => ({ id: 123 })),
+    },
+  };
+  return { default: prisma };
+});
+
+describe("apps/web/pages/api/webhook/app-credential webhook auth", () => {
+  const OLD_ENV = { ...process.env };
+
+  beforeEach(() => {
+    vi.resetModules();
+    process.env = { ...OLD_ENV };
+
+    // Reproduce claimed misconfig: secret is UNSET and header is absent.
+    delete process.env.CALCOM_WEBHOOK_SECRET;
+    delete process.env.CALCOM_WEBHOOK_HEADER_NAME;
+
+    process.env.CALCOM_APP_CREDENTIAL_ENCRYPTION_KEY = "dummy";
+  });
+
+  afterEach(() => {
+    process.env = OLD_ENV;
+    vi.clearAllMocks();
+  });
+
+  it("Webhook auth should fail closed when CALCOM_WEBHOOK_SECRET is unset (missing header must not authenticate)", async () => {
+    const { default: handler } = await import("./app-credential");
+    const { default: prisma } = await import("@calcom/prisma");
+
+    const req = {
+      headers: {},
+      body: {
+        userId: 1,
+        appSlug: "testapp",
+        keys: "encrypted-payload",
+      },
+    } as any;
+
+    const res = (() => {
+      const state: any = { statusCode: 200, jsonBody: undefined };
+      return {
+        status(code: number) {
+          state.statusCode = code;
+          return this;
+        },
+        json(body: any) {
+          state.jsonBody = body;
+          return this;
+        },
+        get statusCode() {
+          return state.statusCode;
+        },
+        get jsonBody() {
+          return state.jsonBody;
+        },
+      } as any;
+    })();
+
+    await handler(req, res);
+
+    expect(
+      res.statusCode,
+      "Webhook auth should fail closed when CALCOM_WEBHOOK_SECRET is unset (missing header must not authenticate)"
+    ).toBe(500);
+    expect(res.jsonBody).toEqual({ message: "Webhook secret is not configured" });
+
+    // Should not touch downstream systems when auth cannot be validated.
+    expect(prisma.user.findUnique).not.toHaveBeenCalled();
+    expect(prisma.credential.create).not.toHaveBeenCalled();
+  });
+});

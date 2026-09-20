@@ -1,0 +1,454 @@
+{
+ "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/8",
+ "pass_digest": "9c5f733ce7a3f996c90c67f262cc4a77e2b234bc415c197afa7c73477ad320be",
+ "request_sha256": "806c7792e8ae6de04d721408e44388132a92d3e565cd3da25574bd94a15017fe",
+ "request": {
+  "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/8",
+  "model": "glm-5.3-background",
+  "system": "You are clustering code review findings from one PR. Always respond with valid JSON.",
+  "prompt": "You are clustering code review findings from the same PR. For each PAIR below, decide whether the two findings describe the SAME underlying issue — same root cause in the same code location. Different wording is fine. A finding about a DIFFERENT defect in the same file or function is NOT the same issue. Severity or aspect differences of the same root cause ARE the same issue.\n\n\nFor THIS scoring pass, duplicate equivalence is stricter than sharing a root cause.\nYou must compare the COMPLETE MATERIAL CLAIMS, including mechanism, triggering\nconditions, execution path, and consequence. The same line or broad concern does\nnot establish equivalence. A report of wrong-category selection, a case/rename\nmismatch, a crash, and a silent fallback are different claims even at one lookup.\nAn inactive/unbound API concern and an alleged active user-facing failure differ.\nA compound report with an additional material claim does NOT equal its subset.\nDifferences only in wording, severity, or hedging do not create separate claims.\nIf the claimed mechanisms, triggers or consequences conflict, or one report adds\nan unsupported/different material factual claim, return same=false. You are NOT\nverifying which claim is true; do not repair or reinterpret either report to make\nthem match. If unsure whether their full claims are equivalent, return false.\n\nFor every numbered pair, extract what A and B actually CLAIM into mechanism,\ntrigger and consequence. Then list material_differences and give your equivalence\nverdict, confidence and reason. same=true requires no material differences.\nReturn ONLY this JSON object, with EVERY pair index exactly once:\n{\"pairs\":[{\"pair\":1,\"a\":{\"mechanism\":\"...\",\"trigger\":\"...\",\"consequence\":\"...\"},\"b\":{\"mechanism\":\"...\",\"trigger\":\"...\",\"consequence\":\"...\"},\"material_differences\":[],\"same\":true,\"confidence\":0.9,\"reason\":\"...\"}]}\n\nPAIRS:\nPAIR 1:\nA: `remove_member` uses `group.users.delete(user_id)` followed by `group.save`, which deletes the join row without executing GroupUser callbacks and does not recompute `group.user_count`. After a successful removal through this endpoint the group's denormalized `user_count` (displayed as `({{user_count}})` in the new admin template and used for pagination via `meta.total`) is stale until something else refreshes it, so the member pagination shows a wrong total and a phantom page.\nB: groups_controller#remove_member uses `group.users.delete(user_id)` which skips destroy callbacks, so the user_count counter cache on the group is never decremented, leaving UI user_count and pagination totals stale\n\nPAIR 2:\nA: remove_member uses `group.users.delete(user_id)`, which deletes the join row directly and bypasses the Group membership callbacks (user_count maintenance, automatic-group refresh hooks) that Group#remove goes through. After removing a member the group's cached user_count is stale until refresh_automatic_groups/reload; any logic keyed on user_count (visibility checks, 'groups.visible' behavior, admin UI pagination totals) reports a member count that includes the removed user, and any future callback added to Group#remove (e.g. primary-group downgrade) silently never fires for this path.\nB: groups_controller#remove_member uses `group.users.delete(user_id)` which skips destroy callbacks, so the user_count counter cache on the group is never decremented, leaving UI user_count and pagination totals stale\n\nPAIR 3:\nA: remove_member calls group.users.delete(user_id) then group.save and returns success_json even when the user was never a member, and group.save is a no-op on an unchanged record so validation cannot report the miss. A request with a stale or wrong user_id gets a 200 success while no membership was removed; the admin UI (which reloads the list and trusts the response) treats the no-op as a confirmed removal, hiding the real state from the operator.\nB: remove_member silently no-ops (and returns success) when user_id is not a member of the group, and group.save on an untouched record can never fail so the 422 branch is dead. A stale UI or double-invocation sends a user_id that was already removed; the endpoint returns success, the client reloads and shows the member still present or the removal 'succeed' with nothing done — no error distinguishes a real removal from a no-op.\n\nPAIR 4:\nA: remove_member calls group.users.delete(user_id) then group.save and returns success_json even when the user was never a member, and group.save is a no-op on an unchanged record so validation cannot report the miss. A request with a stale or wrong user_id gets a 200 success while no membership was removed; the admin UI (which reloads the list and trusts the response) treats the no-op as a confirmed removal, hiding the real state from the operator.\nB: Removing a non-member silently succeeds with success_json, indistinguishable from an actual removal\n\nPAIR 5:\nA: remove_member silently no-ops (and returns success) when user_id is not a member of the group, and group.save on an untouched record can never fail so the 422 branch is dead. A stale UI or double-invocation sends a user_id that was already removed; the endpoint returns success, the client reloads and shows the member still present or the removal 'succeed' with nothing done — no error distinguishes a real removal from a no-op.\nB: Removing a non-member silently succeeds with success_json, indistinguishable from an actual removal\n\nPAIR 6:\nA: Breaking removal of GET /admin/groups/users route with no deprecation or alias, breaking external consumers\nB: GET /admin/groups/:id/users endpoint is removed with no deprecation or alias, a breaking API change for existing consumers\n\nPAIR 7:\nA: No spec exists in spec/controllers/groups_controller_spec.rb covering the rewritten groups#members pagination, limit/offset/total behavior, and meta envelope\nB: No test coverage added for groups_controller.rb#members endpoint's new meta/pagination JSON shape or limit/offset handling\n\nPAIR 8:\nA: Tests rely on magic id: 1 / group_id: 1 being an existing automatic group via implicit seed state instead of creating groups with Fabricate(:group, automatic: true) as done elsewhere in the file, making them brittle against seed/schema changes\nB: `update` test uses `id: 1` assuming group id 1 is an automatic group via undocumented fixture/seed dependency instead of explicitly `Fabricate(:group, automatic: true)`\n\nPAIR 9:\nA: The public GET members endpoint changed its response from a bare serialized array to a `{members: [...], meta: {...}}` envelope, breaking every existing consumer of this public JSON shape. Any external consumer or integration parsing `GET /groups/:name/members` as an array now receives an object and breaks; this contract change is bundled into a UI-focused 'fix group memberships' PR with no migration note.\nB: Breaking API change without versioning: GET /groups/:name/members changed from a flat JSON array to {members: [...], meta: {...}}, breaking external consumers/plugins\n\nPAIR 10:\nA: The public GET members endpoint changed its response from a bare serialized array to a `{members: [...], meta: {...}}` envelope, breaking every existing consumer of this public JSON shape. Any external consumer or integration parsing `GET /groups/:name/members` as an array now receives an object and breaks; this contract change is bundled into a UI-focused 'fix group memberships' PR with no migration note.\nB: Breaking shape change to the public /groups/:name/members.json response: the endpoint went from a bare serialized array to {members: [...], meta: {...}} with no versioning or compatibility shim, silently breaking plugins/external clients that may consume this guardian-guarded API\n\nPAIR 11:\nA: The public GET members endpoint changed its response from a bare serialized array to a `{members: [...], meta: {...}}` envelope, breaking every existing consumer of this public JSON shape. Any external consumer or integration parsing `GET /groups/:name/members` as an array now receives an object and breaks; this contract change is bundled into a UI-focused 'fix group memberships' PR with no migration note.\nB: groups_controller#members response shape changed from a bare array to `{members, meta}`, breaking external API consumers/plugins of /groups/:name/members.json with no versioning or changelog note\n\nPAIR 12:\nA: The public GET members endpoint changed its response from a bare serialized array to a `{members: [...], meta: {...}}` envelope, breaking every existing consumer of this public JSON shape. Any external consumer or integration parsing `GET /groups/:name/members` as an array now receives an object and breaks; this contract change is bundled into a UI-focused 'fix group memberships' PR with no migration note.\nB: Public /groups/:name/members response shape changed from a serialized array to {members, meta}, a breaking API change for existing consumers\n\nPAIR 13:\nA: The public GET members endpoint changed its response from a bare serialized array to a `{members: [...], meta: {...}}` envelope, breaking every existing consumer of this public JSON shape. Any external consumer or integration parsing `GET /groups/:name/members` as an array now receives an object and breaks; this contract change is bundled into a UI-focused 'fix group memberships' PR with no migration note.\nB: Public /groups/:name/members response shape changed from bare JSON array to enveloped object { members: [...], meta: { total, limit, offset } }, breaking external API consumers, theme components, and plugins that iterate the response as an array\n\nPAIR 14:\nA: Breaking API change without versioning: GET /groups/:name/members changed from a flat JSON array to {members: [...], meta: {...}}, breaking external consumers/plugins\nB: Breaking shape change to the public /groups/:name/members.json response: the endpoint went from a bare serialized array to {members: [...], meta: {...}} with no versioning or compatibility shim, silently breaking plugins/external clients that may consume this guardian-guarded API\n\nPAIR 15:\nA: Breaking API change without versioning: GET /groups/:name/members changed from a flat JSON array to {members: [...], meta: {...}}, breaking external consumers/plugins\nB: groups_controller#members response shape changed from a bare array to `{members, meta}`, breaking external API consumers/plugins of /groups/:name/members.json with no versioning or changelog note\n\nPAIR 16:\nA: Breaking API change without versioning: GET /groups/:name/members changed from a flat JSON array to {members: [...], meta: {...}}, breaking external consumers/plugins\nB: Public /groups/:name/members response shape changed from a serialized array to {members, meta}, a breaking API change for existing consumers\n\nPAIR 17:\nA: Breaking API change without versioning: GET /groups/:name/members changed from a flat JSON array to {members: [...], meta: {...}}, breaking external consumers/plugins\nB: Public /groups/:name/members response shape changed from bare JSON array to enveloped object { members: [...], meta: { total, limit, offset } }, breaking external API consumers, theme components, and plugins that iterate the response as an array\n\nPAIR 18:\nA: Breaking shape change to the public /groups/:name/members.json response: the endpoint went from a bare serialized array to {members: [...], meta: {...}} with no versioning or compatibility shim, silently breaking plugins/external clients that may consume this guardian-guarded API\nB: groups_controller#members response shape changed from a bare array to `{members, meta}`, breaking external API consumers/plugins of /groups/:name/members.json with no versioning or changelog note\n\nPAIR 19:\nA: Breaking shape change to the public /groups/:name/members.json response: the endpoint went from a bare serialized array to {members: [...], meta: {...}} with no versioning or compatibility shim, silently breaking plugins/external clients that may consume this guardian-guarded API\nB: Public /groups/:name/members response shape changed from a serialized array to {members, meta}, a breaking API change for existing consumers\n\nPAIR 20:\nA: Breaking shape change to the public /groups/:name/members.json response: the endpoint went from a bare serialized array to {members: [...], meta: {...}} with no versioning or compatibility shim, silently breaking plugins/external clients that may consume this guardian-guarded API\nB: Public /groups/:name/members response shape changed from bare JSON array to enveloped object { members: [...], meta: { total, limit, offset } }, breaking external API consumers, theme components, and plugins that iterate the response as an array\n",
+  "effort": "low",
+  "pairs": [
+   [
+    72,
+    936
+   ],
+   [
+    73,
+    936
+   ],
+   [
+    190,
+    195
+   ],
+   [
+    190,
+    1081
+   ],
+   [
+    195,
+    1081
+   ],
+   [
+    841,
+    900
+   ],
+   [
+    979,
+    982
+   ],
+   [
+    1189,
+    1232
+   ],
+   [
+    129,
+    840
+   ],
+   [
+    129,
+    843
+   ],
+   [
+    129,
+    932
+   ],
+   [
+    129,
+    1043
+   ],
+   [
+    129,
+    1044
+   ],
+   [
+    840,
+    843
+   ],
+   [
+    840,
+    932
+   ],
+   [
+    840,
+    1043
+   ],
+   [
+    840,
+    1044
+   ],
+   [
+    843,
+    932
+   ],
+   [
+    843,
+    1043
+   ],
+   [
+    843,
+    1044
+   ]
+  ]
+ },
+ "parsed_response": {
+  "pairs": [
+   {
+    "pair": 1,
+    "a": {
+     "mechanism": "group.users.delete skips GroupUser callbacks and save doesn't recompute counter",
+     "trigger": "remove_member endpoint used",
+     "consequence": "stale user_count, wrong pagination total / phantom page in admin UI"
+    },
+    "b": {
+     "mechanism": "group.users.delete skips destroy callbacks",
+     "trigger": "remove_member endpoint used",
+     "consequence": "user_count counter cache never decremented; UI count and pagination totals stale"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.95,
+    "reason": "Same mechanism and consequence; A just elaborates pagination details."
+   },
+   {
+    "pair": 2,
+    "a": {
+     "mechanism": "delete bypasses membership callbacks incl. user_count, automatic-group refresh, and any future Group#remove callbacks",
+     "trigger": "remove_member called",
+     "consequence": "stale user_count affecting visibility checks, plus future callbacks (e.g. primary-group downgrade) silently never fire"
+    },
+    "b": {
+     "mechanism": "delete skips destroy callbacks",
+     "trigger": "remove_member called",
+     "consequence": "user_count never decremented; stale UI count and pagination totals"
+    },
+    "material_differences": [
+     "A additionally claims automatic-group refresh hooks are skipped and future callbacks never fire for this path"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "A is a compound report with additional material claims (refresh hooks, future callbacks) beyond B's counter-cache-only claim."
+   },
+   {
+    "pair": 3,
+    "a": {
+     "mechanism": "delete of non-member is a no-op; group.save on unchanged record can't fail so success returned without validation",
+     "trigger": "stale/wrong user_id request",
+     "consequence": "200 success for no removal; admin UI treats no-op as confirmed removal"
+    },
+    "b": {
+     "mechanism": "silent no-op with success; group.save on untouched record can't fail so 422 branch is dead",
+     "trigger": "stale UI or double-invocation with already-removed user_id",
+     "consequence": "success indistinguishable from real removal; client can't tell no-op"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Same mechanism (no-op success, dead 422 branch) and consequence."
+   },
+   {
+    "pair": 4,
+    "a": {
+     "mechanism": "delete no-op for non-member; save can't fail, so validation cannot report miss",
+     "trigger": "stale/wrong user_id",
+     "consequence": "200 success with no removal; admin UI hides real state"
+    },
+    "b": {
+     "mechanism": "removing a non-member silently returns success_json",
+     "trigger": "non-member user_id",
+     "consequence": "indistinguishable from actual removal"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "B is a terse subset; A elaborates the same core claim without conflicting facts."
+   },
+   {
+    "pair": 5,
+    "a": {
+     "mechanism": "silent no-op + success; save on untouched record can't fail, dead 422 branch",
+     "trigger": "stale UI / double invocation",
+     "consequence": "success with nothing done; member still present on reload"
+    },
+    "b": {
+     "mechanism": "non-member removal silently returns success_json",
+     "trigger": "non-member user_id",
+     "consequence": "indistinguishable from actual removal"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "Same core claim; B is a subset restatement."
+   },
+   {
+    "pair": 6,
+    "a": {
+     "mechanism": "removal of GET /admin/groups/users route with no deprecation/alias",
+     "trigger": "external consumers calling the route",
+     "consequence": "breaking API change"
+    },
+    "b": {
+     "mechanism": "GET /admin/groups/:id/users removed with no deprecation/alias",
+     "trigger": "existing consumers",
+     "consequence": "breaking API change"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Same route removal concern, near-identical."
+   },
+   {
+    "pair": 7,
+    "a": {
+     "mechanism": "no spec covering members pagination/limit/offset/total/meta envelope",
+     "trigger": "running the rewritten members endpoint",
+     "consequence": "untested new behavior"
+    },
+    "b": {
+     "mechanism": "no tests for new meta/pagination JSON shape or limit/offset handling",
+     "trigger": "new members endpoint JSON",
+     "consequence": "untested behavior"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.95,
+    "reason": "Same missing-test-coverage claim."
+   },
+   {
+    "pair": 8,
+    "a": {
+     "mechanism": "tests rely on magic id: 1/group_id: 1 being an automatic group via seed state instead of Fabricate",
+     "trigger": "seed/schema changes",
+     "consequence": "brittle tests"
+    },
+    "b": {
+     "mechanism": "update test uses id: 1 assuming automatic group via undocumented fixture instead of Fabricate(:group, automatic: true)",
+     "trigger": "fixture/seed changes",
+     "consequence": "brittle test"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Same root cause; A generalizes over tests, B cites the update test specifically — same location/claim family."
+   },
+   {
+    "pair": 9,
+    "a": {
+     "mechanism": "public members endpoint response changed from bare array to {members, meta} envelope",
+     "trigger": "external consumers parsing array",
+     "consequence": "breaks consumers; contract change without migration note"
+    },
+    "b": {
+     "mechanism": "response changed from flat array to {members, meta} without versioning",
+     "trigger": "external consumers/plugins",
+     "consequence": "breaking API change"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.95,
+    "reason": "Same shape-change claim."
+   },
+   {
+    "pair": 10,
+    "a": {
+     "mechanism": "members endpoint changed from bare array to {members, meta} envelope",
+     "trigger": "consumers parsing array",
+     "consequence": "breaks all existing consumers, no migration note"
+    },
+    "b": {
+     "mechanism": "shape change to members.json with no versioning/shim",
+     "trigger": "plugins/external clients consuming API",
+     "consequence": "silent breaking of consumers"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.95,
+    "reason": "Same claim; B adds 'guardian-guarded' descriptor only."
+   },
+   {
+    "pair": 11,
+    "a": {
+     "mechanism": "members response changed from array to {members, meta} envelope",
+     "trigger": "external consumers/integrations",
+     "consequence": "breaking change bundled in UI PR, no migration note"
+    },
+    "b": {
+     "mechanism": "members response changed from bare array to {members, meta}",
+     "trigger": "external API consumers/plugins of members.json",
+     "consequence": "breaking change, no versioning or changelog note"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.95,
+    "reason": "Same claim."
+   },
+   {
+    "pair": 12,
+    "a": {
+     "mechanism": "members response changed from array to {members, meta} envelope",
+     "trigger": "external consumers",
+     "consequence": "breaking change, no migration note"
+    },
+    "b": {
+     "mechanism": "response shape changed from serialized array to {members, meta}",
+     "trigger": "existing consumers",
+     "consequence": "breaking API change"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.95,
+    "reason": "Same claim."
+   },
+   {
+    "pair": 13,
+    "a": {
+     "mechanism": "members response changed from array to {members, meta} envelope",
+     "trigger": "external consumers parsing array",
+     "consequence": "breaking change, no migration note"
+    },
+    "b": {
+     "mechanism": "response changed from bare array to {members, meta{total,limit,offset}}",
+     "trigger": "consumers iterating as array (plugins, theme components)",
+     "consequence": "breaking external consumers"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.95,
+    "reason": "Same claim; B only enumerates meta fields and consumer types."
+   },
+   {
+    "pair": 14,
+    "a": {
+     "mechanism": "members response changed from flat array to {members, meta} without versioning",
+     "trigger": "external consumers/plugins",
+     "consequence": "breaking change"
+    },
+    "b": {
+     "mechanism": "shape change to members.json with no versioning/shim",
+     "trigger": "plugins/external clients",
+     "consequence": "silent breaking of consumers"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.95,
+    "reason": "Same claim."
+   },
+   {
+    "pair": 15,
+    "a": {
+     "mechanism": "members response changed from flat array to {members, meta} without versioning",
+     "trigger": "external consumers/plugins",
+     "consequence": "breaking change"
+    },
+    "b": {
+     "mechanism": "members response changed from array to {members, meta}",
+     "trigger": "external consumers/plugins",
+     "consequence": "breaking change, no versioning/changelog note"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.95,
+    "reason": "Same claim."
+   },
+   {
+    "pair": 16,
+    "a": {
+     "mechanism": "members response changed from flat array to {members, meta} without versioning",
+     "trigger": "external consumers/plugins",
+     "consequence": "breaking change"
+    },
+    "b": {
+     "mechanism": "response shape changed from array to {members, meta}",
+     "trigger": "existing consumers",
+     "consequence": "breaking API change"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.95,
+    "reason": "Same claim."
+   },
+   {
+    "pair": 17,
+    "a": {
+     "mechanism": "members response changed from flat array to {members, meta} without versioning",
+     "trigger": "external consumers/plugins",
+     "consequence": "breaking change"
+    },
+    "b": {
+     "mechanism": "response changed from bare array to {members, meta{total,limit,offset}}",
+     "trigger": "consumers iterating as array",
+     "consequence": "breaking external consumers, theme components, plugins"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.95,
+    "reason": "Same claim."
+   },
+   {
+    "pair": 18,
+    "a": {
+     "mechanism": "shape change to members.json from array to {members, meta}, no versioning/shim",
+     "trigger": "plugins/external clients consuming API",
+     "consequence": "silent breaking"
+    },
+    "b": {
+     "mechanism": "members response changed from array to {members, meta}",
+     "trigger": "external consumers/plugins of members.json",
+     "consequence": "breaking change, no versioning/changelog note"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.95,
+    "reason": "Same claim."
+   },
+   {
+    "pair": 19,
+    "a": {
+     "mechanism": "shape change to members.json from array to {members, meta}, no versioning/shim",
+     "trigger": "plugins/external clients",
+     "consequence": "silent breaking"
+    },
+    "b": {
+     "mechanism": "response shape changed from array to {members, meta}",
+     "trigger": "existing consumers",
+     "consequence": "breaking API change"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.95,
+    "reason": "Same claim."
+   },
+   {
+    "pair": 20,
+    "a": {
+     "mechanism": "shape change to members.json from array to {members, meta}, no versioning/shim",
+     "trigger": "plugins/external clients",
+     "consequence": "silent breaking"
+    },
+    "b": {
+     "mechanism": "response changed from bare array to {members, meta{total,limit,offset}}",
+     "trigger": "consumers iterating as array",
+     "consequence": "breaking external consumers, theme components, plugins"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.95,
+    "reason": "Same claim."
+   }
+  ]
+ },
+ "usage": {
+  "glm-5.3-background": {
+   "input_tokens": 2313,
+   "cache_read_input_tokens": 384,
+   "cache_creation_input_tokens": 0,
+   "output_tokens": 2223,
+   "reasoning_output_tokens": 300,
+   "cost_usd": 0.0,
+   "total_tokens": 5220
+  }
+ },
+ "status": "complete",
+ "error_type": null,
+ "elapsed_s": 14.386868000030518
+}

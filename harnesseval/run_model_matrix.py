@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import sys
 import time
 from pathlib import Path
 
@@ -289,6 +290,18 @@ def main():
                     s = json.load(open(sp))
                 except Exception:
                     continue
+                # HEALTH GATE (2026-09-15, third root cause): a registry status of "pass" is NOT
+                # sufficient to lock a cell out of re-runs. The batch accumulated 48 ZERO-TOKEN
+                # "pass" entries (vision-high and others) whose summaries show no error but no
+                # tokens/findings either. skip-batch trusted only status=="pass", so those cells
+                # entered the skip set while the campaign's health census still (correctly) reported
+                # them missing: the runner would print "running 0 cells", exit rc=1 instantly, and
+                # the finisher would re-select the same pair forever (the observed instant-fail
+                # loop, present in yesterday's thrash too). Mirror the health rules the verifier
+                # uses: an errored or zero-token run never counts as an already-passed cell.
+                tok = (s.get("tokens_in") or 0) + (s.get("tokens_out") or 0)
+                if s.get("error") or tok == 0:
+                    continue
                 url = s.get("url", "")
                 skip_keys.add((r["framework"], r["model"], r["effort"], url))
             print(f"[mx] --skip-batch {sb}: +{len(skip_keys)-n_before} already-pass cells")
@@ -315,7 +328,7 @@ def main():
                         for spec in fill:
                             if len(spec) == 3 and (fw, model, effort) == spec:
                                 matched = True; break
-                            if len(spec) == 4 and (fw, model, effort) == spec[:3] and spec[3] == pr_num:
+                            if len(spec) == 4 and (fw, model, effort) == spec[:3] and (spec[3] == pr_num or spec[3] == url):  # url form: unambiguous single-PR targeting (bare PR numbers collide across repos: 11 PRs are "#1")
                                 matched = True; break
                         if not matched:
                             continue
@@ -340,9 +353,18 @@ def main():
                 tag = f"[{i+1}/{len(cells)}] {fw} {model} {effort}"
                 print(f"[mx] {tag} ...", flush=True)
                 try:
+                    from harnesseval import model_router as _mr
+                    _mr.set_session(f"{fw}/{model}/{effort}/{pr.url}")
                     res = await _run_cell_async(pr, fw, model, effort, judge, mode=args.mode)
                 except Exception as e:
-                    res = {"error": str(e)[:120]}
+                    # capture the failing call site, not just the truncated message — the
+                    # bare-400 poison hunt needed three attempts because str(e)[:120] hides origin
+                    tb = e.__traceback__
+                    origin = "?"
+                    while tb is not None:
+                        origin = tb.tb_frame.f_code.co_name
+                        tb = tb.tb_next
+                    res = {"error": f"{type(e).__name__} in {origin}: {e}"[:400]}
                 dt = time.time() - t0
                 if "error" in res and res.get("tp") is None:
                     print(f"[mx] {tag} ERR {dt:.0f}s: {res['error'][:70]}", flush=True)
@@ -357,7 +379,16 @@ def main():
                 res["run_batch"] = batch_id
                 # register
                 register(phase="B", model=model, framework=fw, effort=effort, run_n=0,
-                         status="pass" if res.get("tp") is not None else "fail",
+                         # zero-token "pass" is laundering: a swallowed adapter failure returns
+                         # a clean-looking run (tp=0) with no tokens — the #159 poison class.
+                         # Second laundering form: 0 findings + >100k tokens = a mid-review
+                         # failure whose empty-content loop consumed a full budget (observed
+                         # on vision-medium: 723k tokens -> zero findings, registered pass).
+                         status=("pass" if (res.get("tp") is not None
+                                            and (res.get("tokens_in",0) or 0)+(res.get("tokens_out",0) or 0) > 0
+                                            and not ((res.get("tokens_in",0) or 0) > 100000
+                                                     and len(res.get("findings",[])) == 0))
+                                 else "fail"),
                          metrics={"tp": res.get("tp",0), "fp": res.get("fp",0), "fn": res.get("fn",0),
                                   "precision": res.get("precision",0), "recall": res.get("recall",0),
                                   "adjudicated_precision": res.get("adjudicated_precision",0),
@@ -390,6 +421,18 @@ def main():
                 rec=tp/(tp+fn) if (tp+fn) else 0; ap_=tp/(tp+hal) if (tp+hal) else 0
                 ir=(tp+ru)/((tp+fn+ru)) if (tp+fn+ru) else 0
                 print(f"{fw:18s} {model:30s} {effort:5s} {tp:>3} {fp:>4} {fn:>3} {rec:>5.2f} {ap_:>5.2f} {ir:>6.2f} {ru:>4} {hal:>4} {tok:>8,}")
+
+    # poison guard: a sweep that leaves errored/zero-token cells has NOT succeeded,
+    # no matter how many cells printed metrics. Fail loudly (nonzero exit) so chain
+    # scripts and humans cannot mistake a partial batch for a complete one.
+    from harnesseval.validate import scan_batch
+    _, poisoned = scan_batch(batch_id)
+    if poisoned:
+        print(f"\n[mx] *** POISON: {len(poisoned)} cell(s) errored or zero-token — batch INCOMPLETE ***")
+        for p in poisoned:
+            print(f"[mx] ***   {p['url']} — {p['why']}")
+        print("[mx] *** repair via --fill specs above, or rerun; refusing to report success ***", flush=True)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

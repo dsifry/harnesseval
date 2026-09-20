@@ -74,6 +74,34 @@ Steps:
    this design and find it. Do NOT confirm the artifact is well-shaped. Each finding carries
    a confidence anchor (100/75/50/25/0) + severity (P0-P3); SUPPRESS findings below confidence
    50 unless they are P0. Cite file:line + the verbatim code + the failure mode for every finding.
+   DEFECT-CLAIM PHRASING (applies to ALL 9 lenses): state every finding as a definite claim
+   about a concrete failure mode ("X crashes with NoMethodError when Y is nil, returning a
+   500 instead of the 4xx the contract promises") — never hedge the mechanism (no "may",
+   "could potentially", "presumably"). Uncertainty belongs in the confidence anchor, not the
+   finding text: a finding you believe in is phrased assertively at anchor 50; one you don't
+   believe in is dropped. Measured basis: hedged phrasing is the largest single cause of real
+   findings being mis-adjudicated (same-issue flip rate ~9%).
+   ADVISORY FINDINGS (applies to ALL 9 lenses): each lens may additionally report advisories —
+   latent defects, design risks, simplification opportunities, code smells — the things a
+   staff-level reviewer would say that are not blocking defects. NO numeric cap; the guard
+   against flooding is a quality bar: (1) stated consequence — name the trigger and who
+   gets bitten, no consequence means taste, suppress; (2) rebuttal gate — state the author's
+   strongest counter-argument and show why the finding survives it, if the rebuttal wins,
+   drop it; (3) report at your honest anchor — convergence weighting across lenses is
+   applied at the consolidation stage, not per-lens. Smell/nit boundary: a smell is structure
+   that degrades change-safety or comprehension; the test is "does the next change get
+   harder or riskier because of this?" — formatting/convention/deprecated-but-equivalent
+   syntax stays suppressed. Simplification claims must pass the deletion test: name what
+   becomes unnecessary (branches, places-to-update, lines). Advisory hunt families
+   (recognition aids, not quotas): flag-trios/parallel booleans -> state enum or lookup
+   table; parallel hand-maintained enumerations (client+server schemas, config
+   writer+reader, fixture producer+scorer) -> single source of truth; conditional sprawl
+   -> data-driven dispatch; duplicated logic blocks -> extraction (note observed drift);
+   speculative generality/over-abstraction -> deletion opportunity; happy-path-only specs
+   where the diff adds an edge case. Per-lens advisory mandates: Architecture reports
+   wrong-shape/simplification/coupling; Testing-quality reports spec-coverage gaps and
+   fragile test structure; Completeness reports scope/architecture risk; Runtime-reliability
+   reports latent fragility ("works today, breaks when...").
 
    The 9 lenses (each subagent gets the diff context — run `git diff {base_ref}..HEAD` — + its lens focus):
    - Feasibility: attack the assumption that paths/commands/dependencies are correct against the
@@ -152,7 +180,15 @@ Steps:
      compiles against duck-typing and silently misroutes, e.g. always hitting the default calendar
      path; advertised routes with no controller action; an accepted request envelope changed or
      dropped so existing callers send fields that are silently ignored; strict-equality param parsing
-     that silently inverts booleans — params[:visible] == "true" vs JSON true). Does NOT flag:
+     that silently inverts booleans — params[:visible] == "true" vs JSON true; a client-side and
+     server-side copy of the same schema/validation that duplicate and drift — the two copies
+     already disagree on a refinement in this diff). Also hunt: an update path that writes only a
+     subset of fields, leaving a pre-existing row's unwritten field stale (an update that never sets
+     `type`, so an old value survives silently); a changed default (page size, limit, fallback
+     value) that silently truncates or alters behavior for existing callers; a query fetched without
+     the include/association a downstream consumer needs, so service resolution returns undefined
+     or the wrong instance; a loop over references x credentials (or any reference-x-credential
+     fan-out) issuing N x M external API calls for one logical action. Does NOT flag:
      security (Security), test quality (Testing-quality), migration
      safety (Data-migration), concrete runtime error-path handling in this diff's code
      (Runtime-reliability — design-level failure propagation shape stays here).
@@ -248,7 +284,10 @@ Steps:
      message); CROSS-BOUNDARY-CREDENTIAL-TOKEN-LIFECYCLE (a response schema that cannot
      structurally satisfy the parser on one path — every refresh fails; a connection/client rebuilt
      from the pre-refresh token after persisting the new one; response.ok/status never checked
-     before parsing). Block on a user-facing operation whose failure is invisible, an API that
+     before parsing); a loop over references x credentials that issues N x M duplicate remote
+     operations for the same logical action; an outbound header or list built by appending
+     per-recipient with no bound, growing with collection size until the recipient rejects it
+     (unbounded reply-to/CC lists). Block on a user-facing operation whose failure is invisible, an API that
      reports success while dropping work, an unbounded or timeout-less outbound call on a request
      path, or a raw 500 where a 4xx belongs. Does NOT flag: security vulnerabilities (Security);
      test quality (Testing-quality); migration safety, including runtime error paths inside the
@@ -485,9 +524,12 @@ async def review_realistic_async(pr: PRSample, model: str, effort: str = "medium
             # claude/codex extractor path.
             if work_root is not None:
                 shutil.rmtree(work_root, ignore_errors=True)
+            # propagate r.error: a failed api-direct review must NOT launder through as a
+            # clean-looking empty run (that class poisoned 38+ cells during the flap window)
             return ReviewRun(framework=name, model=model, effort=effort, execution_mode="api-fallback",
                              raw_output=r.raw_output, findings=_skip_gate_session_findings(r.findings),
-                             tokens_in=r.tokens_in, tokens_out=r.tokens_out, wall_ms=r.wall_ms)
+                             tokens_in=r.tokens_in, tokens_out=r.tokens_out, wall_ms=r.wall_ms,
+                             per_model_usage=r.per_model_usage, error=r.error)
     except Exception as e:  # noqa: BLE001
         if work_root is not None:
             shutil.rmtree(work_root, ignore_errors=True)

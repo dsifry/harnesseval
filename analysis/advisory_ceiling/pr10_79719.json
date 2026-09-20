@@ -1,0 +1,87 @@
+{
+ "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/10",
+ "mrv_adv": 1,
+ "dchars": 35089,
+ "concerns": [
+  {
+   "advisory": "The `_hydrateEmbedded` regex change from `/(.+)\\_id$/` to `/(.+)\\_id(s?)$/` applies to every model loaded through the shared REST store, so any existing payload key ending in `_ids` will now be deleted and replaced by a pluralized hydrated array \u2014 a global behavior change whose blast radius extends well beyond embedding.",
+   "kind": "backward-compatibility",
+   "why": "app/assets/javascripts/discourse/models/store.js.es6 `_hydrateEmbedded` now branches on `m[2]` and does `delete obj[k]` unconditionally in the plural branch."
+  },
+  {
+   "advisory": "The migration hard-codes `force: true` on `create_table :embeddable_hosts`, so re-running or running it on a database that already has the table silently drops it and all its rows.",
+   "kind": "migration/re-run hazard",
+   "why": "db/migrate/20150818190757_create_embeddable_hosts.rb: `create_table :embeddable_hosts, force: true`."
+  },
+  {
+   "advisory": "The migration interpolates the raw `embeddable_hosts` site-setting value directly into an INSERT string with no quoting/escaping, so a host containing a single quote (or any SQL metacharacter) breaks or alters the migration.",
+   "kind": "security-hardening",
+   "why": "`execute \"INSERT INTO embeddable_hosts (host, category_id, ...) VALUES ('#{h}', #{category_id}, ...)\"`."
+  },
+  {
+   "advisory": "The migration inserts host values via raw SQL, bypassing the model's `before_validation` normalization, so legacy values stored as `http://foo.com` or `example.com/1234` are persisted verbatim and will never match `record_for_host`, silently breaking embedding for those sites after upgrade.",
+   "kind": "migration/re-run hazard",
+   "why": "Migration `records.each { |h| execute \"INSERT ...('#{h}'...)\" }` vs `EmbeddableHost` `before_validation` that strips scheme and path."
+  },
+  {
+   "advisory": "The migration derives the default category by joining `site_settings.value` to `categories.name` and immediately indexes `[0]['id']`, which assumes a row exists; sites with no `embed_category` setting or a renamed category get a nil-dereference during deploy.",
+   "kind": "migration/re-run hazard",
+   "why": "`execute(\"SELECT c.id FROM categories ... WHERE s.name = 'embed_category'\")[0]['id'].to_i`."
+  },
+  {
+   "advisory": "The migration deletes the `embeddable_hosts` and `embed_category` site-setting rows, so during a rolling deploy any old app process still calling `SiteSetting.allows_embeddable_host?` (also removed from the model) loses its host allowlist and rejects embeds.",
+   "kind": "deploy/version-skew",
+   "why": "Migration's `DELETE FROM site_settings WHERE name IN ('embeddable_hosts', 'embed_category')` combined with removal of `allows_embeddable_host?` from app/models/site_setting.rb."
+  },
+  {
+   "advisory": "Removing the public `embeddable_hosts` and `embed_category` site settings is a breaking API change for plugins, themes, deployment automation, and the site-settings API that read or set them, and there is no deprecation shim.",
+   "kind": "api-contract",
+   "why": "config/site_settings.yml drops both keys; config/locales/server.en.yml drops both descriptions."
+  },
+  {
+   "advisory": "`EmbeddableHost.record_for_host` runs `where(\"lower(host) = ?\", host)` on every embed request and every topic-retriever check, against a table with no index on `host` and with `lower()` on the column defeating any plain index, so allowlist checks become a full scan on the public embed path.",
+   "kind": "performance",
+   "why": "app/models/embeddable_host.rb `record_for_host`; migration creates no index on `host`."
+  },
+  {
+   "advisory": "There is no uniqueness validation or unique index on `host`, so the new admin UI happily creates duplicate host rows and `record_for_host` picks an arbitrary one \u2014 meaning the effective posting category for a duplicated host is nondeterministic.",
+   "kind": "other",
+   "why": "app/models/embeddable_host.rb has only `validates_format_of :host`; migration adds no unique index."
+  },
+  {
+   "advisory": "The two new admin controllers ship with specs that only assert class inheritance \u2014 nothing covers create/update/destroy behavior, parameter handling, or that non-staff users are rejected \u2014 leaving an untested admin write surface.",
+   "kind": "test-coverage",
+   "why": "spec/controllers/admin/embeddable_hosts_controller_spec.rb and embedding_controller_spec.rb each contain a single `is a subclass of AdminController` example."
+  },
+  {
+   "advisory": "`Admin::EmbeddingController#update` performs no mutation \u2014 it re-serializes the same `OpenStruct` \u2014 while the client controller exposes a `saveChanges` action calling `embedding.update({})`, so the PUT endpoint and its route are a no-op contract that will mislead future callers.",
+   "kind": "api-contract",
+   "why": "app/controllers/admin/embedding_controller.rb `update` body is identical to `show`; admin-embedding.js.es6 `saveChanges()` calls `this.get('embedding').update({})`."
+  },
+  {
+   "advisory": "`basePath` normalizes the model type with `type.replace('_', '-')`, which replaces only the first underscore, so any admin model name with two or more underscores would not be matched and would be routed to `/` instead of `/admin/`.",
+   "kind": "other",
+   "why": "app/assets/javascripts/discourse/adapters/rest.js.es6: `ADMIN_MODELS.indexOf(type.replace('_', '-'))`."
+  },
+  {
+   "advisory": "`expandable_first_post?` no longer gates on any embeddable-host configuration, so sites with `embed_truncate` enabled and no hosts configured now get expandable first posts where they previously did not \u2014 and the surviving spec named \"is false if embeddable_host is blank\" no longer tests that condition at all.",
+   "kind": "test-coverage",
+   "why": "app/models/topic.rb drops `SiteSetting.embeddable_hosts.present? &&`; spec/models/topic_spec.rb keeps the same example name with all setup removed."
+  },
+  {
+   "advisory": "The category fabricators were moved verbatim into `spec/fabricators/embeddable_host_fabricator.rb` while the embeddable-host fabricator now lives in `spec/fabricators/category_fabricator.rb`, so both files' contents contradict their filenames.",
+   "kind": "other",
+   "why": "The diff swaps the bodies of spec/fabricators/category_fabricator.rb and the new spec/fabricators/embeddable_host_fabricator.rb."
+  },
+  {
+   "advisory": "The new admin embedding screen has no JavaScript acceptance test; only the underlying store hydration is covered, leaving the route, controller actions (addHost/deleteHost/saveChanges) and the embeddable-host component untested.",
+   "kind": "test-coverage",
+   "why": "test/javascripts changes touch only create-pretender.js.es6 and models/store-test.js.es6; no acceptance test for `adminEmbedding`."
+  },
+  {
+   "advisory": "The added `admin.embedding.edit` locale key is never referenced by any new template, leaving dead translation strings for translators to maintain.",
+   "kind": "documentation/UX",
+   "why": "config/locales/client.en.yml adds `edit: \"edit\"` under `embedding:`; templates/components/embeddable-host.hbs uses an icon-only `d-button` for edit."
+  }
+ ]
+}

@@ -1,0 +1,32 @@
+{
+ "url": "https://github.com/grafana/grafana/pull/90939",
+ "mrv_adv": 0,
+ "dchars": 1197,
+ "concerns": [
+  {
+   "advisory": "The write lock is acquired with `defer` before the entire asset-loading body, so the exclusive lock is held across manifest file reads, JSON parsing, and licensing calls \u2014 in `setting.Dev` mode the cache is never consulted, so every single request serializes behind that lock and does full file I/O.",
+   "kind": "performance consideration",
+   "why": "`entryPointAssetsCacheMu.Lock(); defer entryPointAssetsCacheMu.Unlock()` is placed immediately before `var err error; var result *dtos.EntryPointAssets` and the subsequent load path, and the fast-path early return is gated on `cfg.Env != setting.Dev`."
+  },
+  {
+   "advisory": "The lock upgrade is not a proper double-checked lock: after taking the write lock the code never re-reads `entryPointAssetsCache`, so N concurrent cold-start requests each redo the full asset load and each overwrite the cache, wasting work on startup even though the result is correct.",
+   "kind": "performance consideration",
+   "why": "The read-lock snapshot `ret := entryPointAssetsCache` is taken and released, then `Lock()` is taken with no second `if entryPointAssetsCache != nil { return ... }` check inside the critical section."
+  },
+  {
+   "advisory": "No test accompanies this concurrency fix, so the race it repairs (and any future regression, e.g. someone reintroducing an unguarded read) would not be caught \u2014 this needs a `-race` test that calls `GetWebAssets` from multiple goroutines.",
+   "kind": "test-coverage gap",
+   "why": "The diff touches only `webassets.go`; no `webassets_test.go` change is included alongside the new `sync.RWMutex`."
+  },
+  {
+   "advisory": "The mutex protects only the cache pointer, not the `*dtos.EntryPointAssets` it points to; the same struct is handed to every concurrent caller, so any caller that mutates the returned value (or a field within it) still races despite this change.",
+   "kind": "API-contract or backward-compatibility note",
+   "why": "`return ret, nil` returns the shared cached pointer rather than a copy, and `dtos.EntryPointAssets` fields are exported and mutable."
+  },
+  {
+   "advisory": "The change adds a `// TODO: get rid of global state` marker that documents package-level mutable state as known debt without an owner or tracking issue, which is worth deciding on now since the mutex makes the global state easier to live with and therefore easier to leave in place.",
+   "kind": "other",
+   "why": "The new `var (...)` block comment `// TODO: get rid of global state` on `entryPointAssetsCache`."
+  }
+ ]
+}

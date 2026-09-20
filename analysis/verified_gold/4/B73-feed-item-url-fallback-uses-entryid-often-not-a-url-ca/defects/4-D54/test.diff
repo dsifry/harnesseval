@@ -1,0 +1,88 @@
+require 'cgi'
+require 'open-uri'
+
+# Stub Kernel#require to avoid loading the 'simple-rss' gem
+module Kernel
+  alias_method :original_require, :require
+  def require(name)
+    return false if name == 'simple-rss'
+    original_require(name)
+  end
+end
+
+# Stub open (open-uri redefines Kernel#open; we override to avoid network)
+def open(*args)
+  "dummy feed"
+end
+
+# Stub require_dependency
+def require_dependency(name); end
+
+# Stub Rails/ActiveSupport pieces
+class Object
+  def blank?; false; end
+end
+
+class String
+  def blank?; strip.empty?; end
+  def scrub; self; end unless method_defined?(:scrub)
+end
+
+module Jobs
+  class Scheduled
+    def self.recurrence(&block); end
+    def self.sidekiq_options(*args); end
+  end
+end
+
+class SiteSetting
+  def self.feed_polling_enabled?; true; end
+  def self.feed_polling_url; "http://example.com/feed"; end
+  def self.embed_by_username; "system"; end
+end
+
+class User
+  def self.where(*args)
+    Struct.new(:first).new(Object.new)
+  end
+end
+
+IMPORTED = []
+
+module TopicEmbed
+  def self.import(user, url, title, content)
+    IMPORTED << { user: user, url: url, title: title, content: content }
+  end
+end
+
+module SimpleRSS
+  class << self
+    attr_accessor :next_result
+    def parse(_)
+      @next_result
+    end
+  end
+end
+
+# Load the real file under test
+real_file = File.expand_path('../../../app/jobs/scheduled/poll_feed.rb', __FILE__)
+require real_file
+
+# Build a fake feed item with blank link and non-URL id
+FakeItem = Struct.new(:link, :id, :title, :content)
+item = FakeItem.new("", "tag:example.com,2015:not-a-url", "Title", "Content")
+rss = Struct.new(:items).new([item])
+SimpleRSS.next_result = rss
+
+IMPORTED.clear
+
+job = Jobs::PollFeed.new
+job.poll_feed
+
+bad_import = IMPORTED.find { |i| i[:url] == item.id }
+
+if bad_import
+  puts "RESULT: FAIL: poll_feed fell back to non-URL entry.id (#{item.id.inspect}) and passed it to TopicEmbed.import, causing silent skipping"
+else
+  puts "RESULT: PASS"
+end

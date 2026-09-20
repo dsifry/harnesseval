@@ -1,0 +1,62 @@
+# Standalone regression check for db/migrate/20131223171005_create_top_topics.rb
+# Claim: force: true was added to an already-shipped migration's create_table,
+# so any re-run (db:migrate:redo, replay, missing schema_migrations row) silently
+# DROPs and recreates top_topics instead of failing on the existing table.
+
+$create_table_calls = []
+$add_index_calls    = []
+
+class FakeTable
+  def initialize(_name); end
+  def belongs_to(*); end
+  def integer(*); end
+  def string(*); end
+  def timestamps; end
+end
+
+module ActiveRecord
+  class Migration
+    # Accept both positional-hash and keyword forms (Ruby 2/3 compatible).
+    def create_table(name, options = {}, **kw, &block)
+      opts = options.merge(kw)
+      $create_table_calls << { name: name, options: opts }
+      block.call(FakeTable.new(name)) if block
+    end
+
+    def add_index(*args, **kw)
+      $add_index_calls << [args, kw]
+    end
+  end
+end
+
+class TopTopic
+  def self.periods;     [:daily, :weekly]; end
+  def self.sort_orders; [:hot, :new];      end
+end
+
+# Load the REAL file under test (no filesystem search, no redefinition).
+require_relative '../../db/migrate/20131223171005_create_top_topics.rb'
+
+unless defined?(CreateTopTopics)
+  puts 'RESULT: FAIL: CreateTopTopics was not defined by the loaded migration'
+  exit
+end
+
+migration = CreateTopTopics.new
+migration.change
+
+call = $create_table_calls.find { |c| c[:name] == :top_topics }
+if call.nil?
+  puts 'RESULT: FAIL: create_table :top_topics was never called by the migration'
+  exit
+end
+
+force = call[:options][:force] || call[:options]['force']
+
+if force
+  puts "RESULT: FAIL: shipped migration calls create_table :top_topics with force: true " \
+       "(#{call[:options].inspect}); a re-run will DROP and recreate top_topics instead of " \
+       'failing on the existing table, wiping all rows'
+else
+  puts 'RESULT: PASS'
+end

@@ -1,0 +1,86 @@
+diff --git a/spec/verify/topic_retriever_verify.rb b/spec/verify/topic_retriever_verify.rb
+new file mode 100644
+--- /dev/null
++++ b/spec/verify/topic_retriever_verify.rb
+@@ -0,0 +1,81 @@
++require 'socket'
++require 'open-uri'
++require 'uri'
++
++# ---- Minimal stubs so the REAL lib/topic_retriever.rb can load & run ----
++class User
++  def self.where(*); self; end
++  def self.first; new; end
++  def blank?; false; end
++end
++
++# Stub the fetch path. The real TopicEmbed.import_remote ultimately uses
++# open-uri, which follows redirects without any host re-validation.
++class TopicEmbed
++  def self.where(*); self; end
++  def self.exists?; false; end
++  def self.import_remote(_user, url)
++    URI.open(url).read
++  end
++end
++
++module SiteSetting
++  class << self
++    attr_accessor :embeddable_host
++    def feed_polling_enabled?; false; end
++    def embed_by_username; 'system'; end
++  end
++end
++
++class FakeRedis
++  def initialize; @h = {}; end
++  def setnx(k, _v); return false if @h[k]; @h[k] = true; end
++  def expire(_k, _t); true; end
++end
++$redis = FakeRedis.new
++
++# ---- Load the REAL file under test (no redefinition) ----
++require_relative '../../lib/topic_retriever'
++
++# ---- Local server representing an INTERNAL-only service ----
++internal = TCPServer.new('127.0.0.1', 0)
++internal_port = internal.addr[1]
++Thread.new do
++  loop do
++    c = internal.accept rescue break
++    c.readpartial(4096) rescue nil
++    body = 'INTERNAL-SECRET'
++    c.write("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: #{body.bytesize}\r\n\r\n#{body}") rescue nil
++    c.close rescue nil
++  end
++end
++
++# ---- Approved host server that 302-redirects to that internal service ----
++approved = TCPServer.new('127.0.0.1', 0)
++approved_port = approved.addr[1]
++Thread.new do
++  loop do
++    c = approved.accept rescue break
++    c.readpartial(4096) rescue nil
++    c.write("HTTP/1.1 302 Found\r\nLocation: http://localhost:#{internal_port}/secret\r\nContent-Length: 0\r\n\r\n") rescue nil
++    c.close rescue nil
++  end
++end
++
++SiteSetting.embeddable_host = '127.0.0.1'
++embed_url = "http://127.0.0.1:#{approved_port}/topic"
++
++fetched = begin
++  TopicRetriever.new(embed_url).retrieve
++rescue => e
++  "ERROR: #{e.class}: #{e.message}"
++end
++
++# The initial URL host was validated (127.0.0.1 == embeddable_host).
++# The redirect target host is 'localhost' (different string, same box here) -
++# a private/internal address the code never re-validates.
++if fetched.to_s.include?('INTERNAL-SECRET')
++  puts "RESULT: FAIL: redirect to unvalidated host was followed - initial host '127.0.0.1' validated, redirect target 'localhost' fetched without revalidation (SSRF)"
++else
++  puts 'RESULT: PASS'
++end

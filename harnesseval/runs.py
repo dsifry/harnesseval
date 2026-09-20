@@ -109,7 +109,10 @@ def query(**filters) -> list[dict]:
     for line in REGISTRY.read_text().splitlines():
         if not line.strip():
             continue
-        e = json.loads(line)
+        try:
+            e = json.loads(line)
+        except Exception:
+            continue  # torn line (e.g. concurrent-writer collision): skip, don't crash the runner
         if all(e.get(k) == v for k, v in filters.items()):
             out.append(e)
     return out

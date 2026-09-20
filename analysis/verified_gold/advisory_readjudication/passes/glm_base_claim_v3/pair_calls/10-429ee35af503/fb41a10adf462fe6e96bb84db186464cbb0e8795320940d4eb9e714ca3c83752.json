@@ -1,0 +1,477 @@
+{
+ "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/10",
+ "pass_digest": "9c5f733ce7a3f996c90c67f262cc4a77e2b234bc415c197afa7c73477ad320be",
+ "request_sha256": "fb41a10adf462fe6e96bb84db186464cbb0e8795320940d4eb9e714ca3c83752",
+ "request": {
+  "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/10",
+  "model": "glm-5.3-background",
+  "system": "You are clustering code review findings from one PR. Always respond with valid JSON.",
+  "prompt": "You are clustering code review findings from the same PR. For each PAIR below, decide whether the two findings describe the SAME underlying issue — same root cause in the same code location. Different wording is fine. A finding about a DIFFERENT defect in the same file or function is NOT the same issue. Severity or aspect differences of the same root cause ARE the same issue.\n\n\nFor THIS scoring pass, duplicate equivalence is stricter than sharing a root cause.\nYou must compare the COMPLETE MATERIAL CLAIMS, including mechanism, triggering\nconditions, execution path, and consequence. The same line or broad concern does\nnot establish equivalence. A report of wrong-category selection, a case/rename\nmismatch, a crash, and a silent fallback are different claims even at one lookup.\nAn inactive/unbound API concern and an alleged active user-facing failure differ.\nA compound report with an additional material claim does NOT equal its subset.\nDifferences only in wording, severity, or hedging do not create separate claims.\nIf the claimed mechanisms, triggers or consequences conflict, or one report adds\nan unsupported/different material factual claim, return same=false. You are NOT\nverifying which claim is true; do not repair or reinterpret either report to make\nthem match. If unsure whether their full claims are equivalent, return false.\n\nFor every numbered pair, extract what A and B actually CLAIM into mechanism,\ntrigger and consequence. Then list material_differences and give your equivalence\nverdict, confidence and reason. same=true requires no material differences.\nReturn ONLY this JSON object, with EVERY pair index exactly once:\n{\"pairs\":[{\"pair\":1,\"a\":{\"mechanism\":\"...\",\"trigger\":\"...\",\"consequence\":\"...\"},\"b\":{\"mechanism\":\"...\",\"trigger\":\"...\",\"consequence\":\"...\"},\"material_differences\":[],\"same\":true,\"confidence\":0.9,\"reason\":\"...\"}]}\n\nPAIRS:\nPAIR 1:\nA: No frontend component or acceptance tests exist for the admin embedding UI: the edit/change-category/save flow wiring categoryId into props.category_id and manually setting host category after save is untested\nB: The new admin frontend logic - the embeddable-host component's buffered rollback on cancel, dropping unsaved records on cancel, category_id propagation on save, and deleteHost bubbling, plus the admin-embedding controller - has no JS tests\n\nPAIR 2:\nA: The PUT /customize/embedding endpoint is inert: update re-renders the same OpenStruct without persisting anything, yet the client's saveChanges action calls embedding.update({}) against it. An admin who clicks the settings save on the embedding screen gets a success response for a no-op; the route and controller action shipped in this diff give operators a save affordance that cannot do anything, which is dead surface area that the next change to this screen will have to reason about.\nB: EmbeddingController#update is a server-side no-op - it serializes without applying anything - yet the frontend saveChanges calls into it\n\nPAIR 3:\nA: The PUT /customize/embedding endpoint is inert: update re-renders the same OpenStruct without persisting anything, yet the client's saveChanges action calls embedding.update({}) against it. An admin who clicks the settings save on the embedding screen gets a success response for a no-op; the route and controller action shipped in this diff give operators a save affordance that cannot do anything, which is dead surface area that the next change to this screen will have to reason about.\nB: `PUT /admin/customize/embedding` update action fetches and re-renders but never persists anything, making it a silent no-op that returns 200 OK while discarding request bodies\n\nPAIR 4:\nA: ensure_embeddable now runs an uncached SQL query on every request (`EmbeddableHost.host_allowed?` → `where(\"lower(host) = ?\").first`, unindexed on `lower(host)`), replacing a check that previously read an in-memory site setting. Every /embed/comments and /embed/count request — one per article page-view iframe for forums using embedding — now pays a per-request query plus ActiveRecord instantiation (`record_for_host` returns `.first` where `exists?` would suffice) on one of the highest-traffic endpoints, with no caching layer in the diff.\nB: ensure_embeddable now runs EmbeddableHost.host_allowed? — an uncached SQL query with no index on embeddable_hosts.host (the migration creates none, and the lower() wrapping defeats a plain btree) — on every /embed/comments request, and TopicRetriever#invalid_host? issues the same query per retrieval. Forums with many embedded pages pay a new DB roundtrip on every comment-widget view and every feed poll, with nothing to serve the lookup efficiently; DB slowdowns now degrade the hot public embed path where the previous check was a site-settings lookup, so operators of embed-heavy forums inherit fresh per-request DB load.\n\nPAIR 5:\nA: ensure_embeddable now runs an uncached SQL query on every request (`EmbeddableHost.host_allowed?` → `where(\"lower(host) = ?\").first`, unindexed on `lower(host)`), replacing a check that previously read an in-memory site setting. Every /embed/comments and /embed/count request — one per article page-view iframe for forums using embedding — now pays a per-request query plus ActiveRecord instantiation (`record_for_host` returns `.first` where `exists?` would suffice) on one of the highest-traffic endpoints, with no caching layer in the diff.\nB: record_for_host issues WHERE lower(host) = ? on every embed request (embed_controller#ensure_embeddable and TopicRetriever#invalid_host? both call it per request), replacing the previous in-memory SiteSetting check, and the migration creates no index on host — which the lower() comparison would bypass anyway. Every embedded-comments pageview on a host site now costs an unindexed DB roundtrip that the old code served from the cached settings store; high-traffic embeds multiply database load on a hot path the diff previously served from cache.\n\nPAIR 6:\nA: ensure_embeddable now runs an uncached SQL query on every request (`EmbeddableHost.host_allowed?` → `where(\"lower(host) = ?\").first`, unindexed on `lower(host)`), replacing a check that previously read an in-memory site setting. Every /embed/comments and /embed/count request — one per article page-view iframe for forums using embedding — now pays a per-request query plus ActiveRecord instantiation (`record_for_host` returns `.first` where `exists?` would suffice) on one of the highest-traffic endpoints, with no caching layer in the diff.\nB: Hot-path host check regressed from in-memory lookup to a per-request DB query: EmbeddableHost.host_allowed? (record_for_host) issues a Postgres query on every call instead of the previous in-memory SiteSetting.allows_embeddable_host? check, adding DB load and latency to every /embed/comments and /embed/count request and each imported post, with no memoization or cache invalidated on host create/update/destroy\n\nPAIR 7:\nA: Admin embeddable_hosts_controller_spec and embedding_controller_spec only assert the superclass; no coverage for create/update/destroy, uncategorized fallback, missing-id handling, invalid host rejection, or the `show` payload shape (`embeddable_host_ids` sideloading)\nB: Both new admin controllers (Admin::EmbeddableHostsController and Admin::EmbeddingController) have placeholder-only specs asserting superclass inheritance; no request specs cover create/update/destroy happy paths, the render_json_error branch on invalid hosts, the blank-category_id defaulting to uncategorized, or the serialization shape, giving a false impression the controllers are tested\n\nPAIR 8:\nA: Admin embeddable_hosts_controller_spec and embedding_controller_spec only assert the superclass; no coverage for create/update/destroy, uncategorized fallback, missing-id handling, invalid host rejection, or the `show` payload shape (`embeddable_host_ids` sideloading)\nB: Controller specs for embeddable_hosts and embedding only assert superclass identity; create/update/destroy, param handling, nil-record behavior, and staff authorization are untested\n\nPAIR 9:\nA: Admin embeddable_hosts_controller_spec and embedding_controller_spec only assert the superclass; no coverage for create/update/destroy, uncategorized fallback, missing-id handling, invalid host rejection, or the `show` payload shape (`embeddable_host_ids` sideloading)\nB: Controller specs for embeddable_hosts_controller and embedding_controller only check the AdminController subclass, with no coverage of create/update/destroy or the nil-host 500 paths\n\nPAIR 10:\nA: Admin embeddable_hosts_controller_spec and embedding_controller_spec only assert the superclass; no coverage for create/update/destroy, uncategorized fallback, missing-id handling, invalid host rejection, or the `show` payload shape (`embeddable_host_ids` sideloading)\nB: New admin embeddable_hosts/embedding controller specs are placeholders asserting only Controller < AdminController, with no behavioral coverage for create/update, invalid host errors, category_id blank fallback, embedding#show payload shape, or embedding#update\n\nPAIR 11:\nA: Admin embeddable_hosts_controller_spec and embedding_controller_spec only assert the superclass; no coverage for create/update/destroy, uncategorized fallback, missing-id handling, invalid host rejection, or the `show` payload shape (`embeddable_host_ids` sideloading)\nB: New controller behavior is untested: both controller specs only assert `Controller < Admin::AdminController`, a static fact, leaving the actual new logic (param handling, uncategorized defaulting, error rendering, 404s) with no coverage\n\nPAIR 12:\nA: Admin embeddable_hosts_controller_spec and embedding_controller_spec only assert the superclass; no coverage for create/update/destroy, uncategorized fallback, missing-id handling, invalid host rejection, or the `show` payload shape (`embeddable_host_ids` sideloading)\nB: No controller tests for EmbeddableHostsController CRUD; only subclass assertions exist, leaving create/update/destroy, blank category defaulting, validation-error rendering, the NoMethodError crash when params[:embeddable_host] is nil, and destroy succeeding on nil host untested\n\nPAIR 13:\nA: Admin embeddable_hosts_controller_spec and embedding_controller_spec only assert the superclass; no coverage for create/update/destroy, uncategorized fallback, missing-id handling, invalid host rejection, or the `show` payload shape (`embeddable_host_ids` sideloading)\nB: P2: Admin endpoint specs only assert controller subclassing — no tests cover create/update/destroy authorization, validation failures, ensure_staff filter, param handling, or category_id blanking\n\nPAIR 14:\nA: Admin embeddable_hosts_controller_spec and embedding_controller_spec only assert the superclass; no coverage for create/update/destroy, uncategorized fallback, missing-id handling, invalid host rejection, or the `show` payload shape (`embeddable_host_ids` sideloading)\nB: Specs for embeddable_hosts_controller and embedding_controller only assert inheritance hierarchy; no tests for create/update/destroy, error handling, auth rejection, or blank category_id defaulting\n\nPAIR 15:\nA: The only spec for the new Admin::EmbeddingController asserts subclass-ness, leaving the show serialization contract — root 'embedding' with embeddable_host_ids plus the side-loaded records that the new store plural-ids hydration consumes — untested. A regression in EmbeddingSerializer's embed: :ids output or in store.js's newly added _ids hydration branch silently renders the entire admin embedding page as an empty host table, with no failing spec anywhere in this diff to catch it.\nB: The only spec for Admin::EmbeddingController asserts subclassing; no test ever requests show or update, so the suite passes regardless of what those actions do. The controller's actual behavior — including that `update` persists nothing (see the no-op PUT finding) — can never fail this spec; a regression in fetch_embedding or the serializer wiring would also land green.\n\nPAIR 16:\nA: The only spec for the new Admin::EmbeddingController asserts subclass-ness, leaving the show serialization contract — root 'embedding' with embeddable_host_ids plus the side-loaded records that the new store plural-ids hydration consumes — untested. A regression in EmbeddingSerializer's embed: :ids output or in store.js's newly added _ids hydration branch silently renders the entire admin embedding page as an empty host table, with no failing spec anywhere in this diff to catch it.\nB: The only test asserts `Admin::EmbeddingController < Admin::AdminController` and never issues a request, so the show/update serialization contract that the new JS store hydration depends on is completely unverified. The payload shape the new _hydrateEmbedded plural-ids path consumes (root 'embedding' with embeddable_host_ids side-load) has no test — if the serializer emits a shape the store mishandles, the admin embedding page renders an empty hosts table with CI green; the update action, which persists nothing (it only re-renders the OpenStruct built in fetch_embedding), also ships unverified.\n\nPAIR 17:\nA: The save success handler re-derives the category from local state (`Discourse.Category.findById(categoryId)`) instead of using the serialized host returned by the server, which is the component that applies the blank-to-uncategorized fallback. When an admin clears the category chooser and saves, the server stores `uncategorized_category_id` but the row renders a blank category badge (findById(null) is undefined) until the next full page reload, and the discarded response already contained the correct value.\nB: On save success the component overwrites host.category with Discourse.Category.findById(this.get('categoryId')), which returns undefined when no category was chosen, clobbering whatever the server response hydrated. An admin who saves a new host without picking a category (the save button is enabled as soon as a hostname is typed) sees a blank category badge even though the server stored Uncategorized, and believes the category was not saved until a full page reload.\n\nPAIR 18:\nA: The save success handler re-derives the category from local state (`Discourse.Category.findById(categoryId)`) instead of using the serialized host returned by the server, which is the component that applies the blank-to-uncategorized fallback. When an admin clears the category chooser and saves, the server stores `uncategorized_category_id` but the row renders a blank category badge (findById(null) is undefined) until the next full page reload, and the discarded response already contained the correct value.\nB: The save handler overwrites host.category with Discourse.Category.findById(this.get('categoryId')), which returns undefined when no category was chosen, discarding the category the server actually assigned in its response. The first-use flow (add host, type a hostname, save without picking a category — cantSave only requires the hostname) renders the saved row with a blank category badge even though the server stored Uncategorized, and re-editing it shows an empty chooser until a full page reload.\n\nPAIR 19:\nA: The save success handler re-derives the category from local state (`Discourse.Category.findById(categoryId)`) instead of using the serialized host returned by the server, which is the component that applies the blank-to-uncategorized fallback. When an admin clears the category chooser and saves, the server stores `uncategorized_category_id` but the row renders a blank category badge (findById(null) is undefined) until the next full page reload, and the discarded response already contained the correct value.\nB: app/assets/javascripts/admin/components/embeddable-host.js.es6:38 — After save the component sets `category` from `Discourse.Category.findById(categoryId)` instead of the server response, so the server-side blank->uncategorized coercion and any concurrent edit are invisible in the UI\n\nPAIR 20:\nA: The save success handler re-derives the category from local state (`Discourse.Category.findById(categoryId)`) instead of using the serialized host returned by the server, which is the component that applies the blank-to-uncategorized fallback. When an admin clears the category chooser and saves, the server stores `uncategorized_category_id` but the row renders a blank category badge (findById(null) is undefined) until the next full page reload, and the discarded response already contained the correct value.\nB: app/assets/javascripts/admin/components/embeddable-host.js.es6:38 — After save the component sets `category` from its local `categoryId` (null for a new host) rather than the server-returned `category_id`, so a host the server assigned to Uncategorized displays no category until reload; the buffer is also never committed, so a server-normalized host (`http://foo.com/x` -> `foo.com`) reappears un-normalized in the input on the next edit.\n",
+  "effort": "low",
+  "pairs": [
+   [
+    1395,
+    1688
+   ],
+   [
+    133,
+    1266
+   ],
+   [
+    133,
+    1451
+   ],
+   [
+    35,
+    36
+   ],
+   [
+    35,
+    54
+   ],
+   [
+    35,
+    1303
+   ],
+   [
+    362,
+    913
+   ],
+   [
+    362,
+    955
+   ],
+   [
+    362,
+    956
+   ],
+   [
+    362,
+    1388
+   ],
+   [
+    362,
+    1389
+   ],
+   [
+    362,
+    1394
+   ],
+   [
+    362,
+    1417
+   ],
+   [
+    362,
+    1647
+   ],
+   [
+    121,
+    278
+   ],
+   [
+    121,
+    280
+   ],
+   [
+    141,
+    197
+   ],
+   [
+    141,
+    288
+   ],
+   [
+    141,
+    422
+   ],
+   [
+    141,
+    423
+   ]
+  ]
+ },
+ "parsed_response": {
+  "pairs": [
+   {
+    "pair": 1,
+    "a": {
+     "mechanism": "Missing acceptance/component tests for admin embedding UI",
+     "trigger": "Any edit/change-category/save flow run",
+     "consequence": "Save-flow wiring (categoryId→category_id, manual host category set after save) untested"
+    },
+    "b": {
+     "mechanism": "Missing JS tests for admin frontend and controller",
+     "trigger": "N/A",
+     "consequence": "Untested: buffered rollback on cancel, dropping unsaved records, category_id propagation, deleteHost bubbling, controller"
+    },
+    "material_differences": [
+     "B adds claims about rollback-on-cancel, dropping unsaved records, and deleteHost bubbling that A does not make; A's save-flow claim is a subset of B's compound report"
+    ],
+    "same": false,
+    "confidence": 0.8,
+    "reason": "B is a compound report with additional material claims beyond A's save-flow wiring subset."
+   },
+   {
+    "pair": 2,
+    "a": {
+     "mechanism": "PUT /customize/embedding update re-renders same OpenStruct without persisting; client saveChanges calls it",
+     "trigger": "Admin clicks save on embedding screen",
+     "consequence": "Success response for a no-op; dead surface area"
+    },
+    "b": {
+     "mechanism": "EmbeddingController#update serializes without applying anything; frontend saveChanges calls it",
+     "trigger": "Frontend save action",
+     "consequence": "Server-side no-op despite being called"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.95,
+    "reason": "Both claim the same no-op update endpoint actively called by the frontend save."
+   },
+   {
+    "pair": 3,
+    "a": {
+     "mechanism": "PUT /customize/embedding update re-renders OpenStruct without persisting; client calls embedding.update({})",
+     "trigger": "Admin clicks save",
+     "consequence": "200 success for a no-op save affordance"
+    },
+    "b": {
+     "mechanism": "PUT /admin/customize/embedding update fetches/re-renders, never persists, discards request bodies",
+     "trigger": "PUT request to the endpoint",
+     "consequence": "Silent no-op returning 200 OK"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.95,
+    "reason": "Identical claims: no-op update endpoint returning success while discarding payloads."
+   },
+   {
+    "pair": 4,
+    "a": {
+     "mechanism": "ensure_embeddable runs uncached unindexed lower(host) SQL per request, replacing in-memory site setting; .first instead of exists?",
+     "trigger": "Every /embed/comments and /embed/count request",
+     "consequence": "Per-request DB query + AR instantiation on high-traffic endpoints, no caching"
+    },
+    "b": {
+     "mechanism": "host_allowed? unindexed SQL on every /embed/comments request; TopicRetriever#invalid_host? issues same query per retrieval",
+     "trigger": "Every embed comment view and every feed poll/retrieval",
+     "consequence": "Per-request DB roundtrip on hot public path, degrading under DB slowdown"
+    },
+    "material_differences": [
+     "B adds the TopicRetriever#invalid_host? execution path issuing the same query per retrieval, which A does not claim",
+     "B claims the migration creates no index on host, a claim A does not make"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "B adds a distinct triggering path (TopicRetriever) and a migration-index claim; compound report ≠ A's subset under strict equivalence."
+   },
+   {
+    "pair": 5,
+    "a": {
+     "mechanism": "ensure_embeddable runs uncached unindexed lower(host) SQL per request via host_allowed?/record_for_host (.first), replacing in-memory site setting",
+     "trigger": "Every /embed/comments and /embed/count request",
+     "consequence": "Per-request unindexed query + AR instantiation on highest-traffic endpoints, no caching layer"
+    },
+    "b": {
+     "mechanism": "record_for_host issues WHERE lower(host)=? per request from both ensure_embeddable and TopicRetriever#invalid_host?, replacing cached settings check; migration has no index",
+     "trigger": "Every embed request and each retrieval",
+     "consequence": "Unindexed DB roundtrip per embedded-comments pageview and retrieval, DB load on hot path"
+    },
+    "material_differences": [
+     "B claims TopicRetriever#invalid_host? also issues the query per request — an execution path A does not mention",
+     "B makes a claim about the migration lacking an index that A does not make"
+    ],
+    "same": false,
+    "confidence": 0.65,
+    "reason": "Same core query defect, but B adds the TopicRetriever caller path and migration-index claim; strict pass treats these as additional material claims."
+   },
+   {
+    "pair": 6,
+    "a": {
+     "mechanism": "ensure_embeddable runs uncached unindexed lower(host) SQL per request, replacing in-memory site setting; .first where exists? suffices",
+     "trigger": "Every /embed/comments and /embed/count request",
+     "consequence": "Per-request DB query + AR instantiation on high-traffic endpoints, no caching layer"
+    },
+    "b": {
+     "mechanism": "host_allowed? issues per-request Postgres query instead of previous in-memory SiteSetting check; no memoization or cache invalidation on host create/update/destroy",
+     "trigger": "Every /embed/comments and /embed/count request and each imported post",
+     "consequence": "DB load and latency added to embed path and imports"
+    },
+    "material_differences": [
+     "B adds 'each imported post' as a triggering path A does not claim",
+     "B adds a claim about no cache invalidation on host create/update/destroy that A does not make"
+    ],
+    "same": false,
+    "confidence": 0.65,
+    "reason": "B adds an imported-post trigger and cache-invalidation-on-mutation claim beyond A's report."
+   },
+   {
+    "pair": 7,
+    "a": {
+     "mechanism": "Controller specs only assert superclass; no behavioral coverage",
+     "trigger": "N/A",
+     "consequence": "create/update/destroy, uncategorized fallback, missing-id, invalid host rejection, show payload untested"
+    },
+    "b": {
+     "mechanism": "Placeholder-only specs assert superclass inheritance",
+     "trigger": "N/A",
+     "consequence": "No request specs for CRUD happy paths, render_json_error branch, blank-category_id defaulting, serialization shape; false impression of testing"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Same finding: placeholder specs with essentially the same enumerated coverage gaps."
+   },
+   {
+    "pair": 8,
+    "a": {
+     "mechanism": "Controller specs only assert superclass",
+     "trigger": "N/A",
+     "consequence": "No coverage for CRUD, uncategorized fallback, missing-id, invalid host rejection, show payload"
+    },
+    "b": {
+     "mechanism": "Controller specs only assert superclass identity",
+     "trigger": "N/A",
+     "consequence": "create/update/destroy, param handling, nil-record behavior, staff authorization untested"
+    },
+    "material_differences": [
+     "B adds staff authorization as an untested concern; differences are enumerations of the same placeholder-spec defect"
+    ],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "Same root cause and location; enumeration differences are aspect detail of one coverage-gap issue."
+   },
+   {
+    "pair": 9,
+    "a": {
+     "mechanism": "Controller specs only assert superclass",
+     "trigger": "N/A",
+     "consequence": "CRUD, uncategorized fallback, missing-id handling, invalid host rejection, show payload untested"
+    },
+    "b": {
+     "mechanism": "Controller specs only check subclass",
+     "trigger": "N/A",
+     "consequence": "create/update/destroy and nil-host 500 paths untested"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "B is a subset enumeration of the same placeholder-spec defect at the same location."
+   },
+   {
+    "pair": 10,
+    "a": {
+     "mechanism": "Controller specs only assert superclass",
+     "trigger": "N/A",
+     "consequence": "CRUD, uncategorized fallback, missing-id, invalid host, show payload untested"
+    },
+    "b": {
+     "mechanism": "Placeholder specs assert only AdminController subclass",
+     "trigger": "N/A",
+     "consequence": "No behavioral coverage for create/update, invalid host errors, category_id blank fallback, embedding#show payload, embedding#update"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Same placeholder-spec finding with matching enumerated gaps."
+   },
+   {
+    "pair": 11,
+    "a": {
+     "mechanism": "Controller specs only assert superclass",
+     "trigger": "N/A",
+     "consequence": "CRUD, uncategorized fallback, missing-id, invalid host, show payload untested"
+    },
+    "b": {
+     "mechanism": "Specs only assert Controller < Admin::AdminController, a static fact",
+     "trigger": "N/A",
+     "consequence": "Param handling, uncategorized defaulting, error rendering, 404s uncovered"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "Same placeholder-spec defect; gap enumerations overlap substantially."
+   },
+   {
+    "pair": 12,
+    "a": {
+     "mechanism": "Controller specs only assert superclass",
+     "trigger": "N/A",
+     "consequence": "CRUD, uncategorized fallback, missing-id, invalid host, show payload untested"
+    },
+    "b": {
+     "mechanism": "Only subclass assertions for EmbeddableHostsController CRUD specs",
+     "trigger": "N/A",
+     "consequence": "create/update/destroy, blank category defaulting, validation-error rendering, nil-params crash, destroy-on-nil-host untested"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.8,
+    "reason": "Same placeholder-spec coverage-gap finding; B's crash mentions are examples of the uncovered behaviors A already lists (missing-id/invalid host handling)."
+   },
+   {
+    "pair": 13,
+    "a": {
+     "mechanism": "Controller specs only assert superclass",
+     "trigger": "N/A",
+     "consequence": "CRUD, uncategorized fallback, missing-id, invalid host, show payload untested"
+    },
+    "b": {
+     "mechanism": "Admin endpoint specs only assert subclassing",
+     "trigger": "N/A",
+     "consequence": "No tests for CRUD authorization, validation failures, ensure_staff filter, param handling, category_id blanking"
+    },
+    "material_differences": [
+     "B adds authorization/ensure_staff as untested aspects; same root finding"
+    ],
+    "same": true,
+    "confidence": 0.8,
+    "reason": "Same placeholder-spec defect at same location; authorization is an additional enumerated gap of the same issue."
+   },
+   {
+    "pair": 14,
+    "a": {
+     "mechanism": "Controller specs only assert superclass",
+     "trigger": "N/A",
+     "consequence": "CRUD, uncategorized fallback, missing-id, invalid host, show payload untested"
+    },
+    "b": {
+     "mechanism": "Specs only assert inheritance hierarchy",
+     "trigger": "N/A",
+     "consequence": "No tests for CRUD, error handling, auth rejection, blank category_id defaulting"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Same placeholder-spec finding with matching gaps."
+   },
+   {
+    "pair": 15,
+    "a": {
+     "mechanism": "Only spec for EmbeddingController asserts subclass-ness; show serialization contract untested",
+     "trigger": "Regression in serializer embed :ids or store _ids hydration",
+     "consequence": "Admin embedding page silently renders empty host table with green CI"
+    },
+    "b": {
+     "mechanism": "Only spec asserts subclassing; no request ever made for show or update",
+     "trigger": "Any regression in fetch_embedding, serializer wiring, or update behavior",
+     "consequence": "Suite passes regardless; update (which persists nothing) also ships unverified"
+    },
+    "material_differences": [
+     "B adds the material claim that update persists nothing (the separate no-op PUT finding), which A does not claim",
+     "A specifically claims the store's plural-ids hydration branch regression; B frames consequences differently but overlappingly"
+    ],
+    "same": false,
+    "confidence": 0.65,
+    "reason": "B adds the no-op update persistence claim absent from A; compound report ≠ subset."
+   },
+   {
+    "pair": 16,
+    "a": {
+     "mechanism": "Only spec asserts subclass-ness; show serialization (root 'embedding' + embeddable_host_ids sideload) consumed by store _ids hydration untested",
+     "trigger": "Regression in EmbeddingSerializer embed :ids output or store.js _ids hydration",
+     "consequence": "Admin embedding page renders empty host table, CI green"
+    },
+    "b": {
+     "mechanism": "Only test asserts subclass, never issues a request; show/update serialization contract that _hydrateEmbedded consumes unverified; update only re-renders OpenStruct and persists nothing",
+     "trigger": "Serializer emits shape store mishandles, or update regression",
+     "consequence": "Empty hosts table with CI green; update no-op ships unverified"
+    },
+    "material_differences": [
+     "B adds the claim that update persists nothing (a separate defect finding) which A does not assert",
+     "B frames the store hydration as _hydrateEmbedded vs A's _ids branch; mechanism equivalent"
+    ],
+    "same": false,
+    "confidence": 0.65,
+    "reason": "B's compound report includes the no-op update persistence claim beyond A's serialization-contract finding."
+   },
+   {
+    "pair": 17,
+    "a": {
+     "mechanism": "Save success handler re-derives category via Discourse.Category.findById(categoryId) instead of using serialized server host",
+     "trigger": "Admin clears category chooser and saves",
+     "consequence": "Server stores uncategorized_category_id but row shows blank badge until reload; server response with correct value discarded"
+    },
+    "b": {
+     "mechanism": "Save handler overwrites host.category with findById(categoryId), returning undefined when no category chosen, clobbering server-hydrated value",
+     "trigger": "Admin saves new host without picking a category (save enabled once hostname typed)",
+     "consequence": "Blank category badge though server stored Uncategorized; admin believes unsaved until reload"
+    },
+    "material_differences": [
+     "Trigger phrased as clearing chooser (A) vs saving new host without choosing (B) — same underlying local-state-derivation defect with same consequence"
+    ],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "Same mechanism (findById from local state discarding server response) and same blank-badge-until-reload consequence; trigger variants of the same defect."
+   },
+   {
+    "pair": 18,
+    "a": {
+     "mechanism": "Save success handler re-derives category via findById(categoryId) instead of server-serialized host",
+     "trigger": "Admin clears category chooser and saves",
+     "consequence": "Blank category badge until reload; server response with correct value discarded"
+    },
+    "b": {
+     "mechanism": "Save handler overwrites host.category with findById(categoryId), undefined when no category chosen, discarding server-assigned category",
+     "trigger": "First-use flow: add host, type hostname, save without picking category",
+     "consequence": "Blank category badge though server stored Uncategorized; re-edit shows empty chooser until reload"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "Same defect and consequence; the empty-chooser-on-re-edit is a direct downstream consequence of the same discarded-category state."
+   },
+   {
+    "pair": 19,
+    "a": {
+     "mechanism": "Save success handler re-derives category via findById(categoryId) instead of server-serialized host",
+     "trigger": "Admin clears category chooser and saves",
+     "consequence": "Blank category badge until reload; correct server value discarded"
+    },
+    "b": {
+     "mechanism": "After save, component sets category from findById(categoryId) instead of server response",
+     "trigger": "Save with blank category (server-side coercion) or concurrent edit",
+     "consequence": "Server-side blank→uncategorized coercion and concurrent edits invisible in UI"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.8,
+    "reason": "Same root cause at same line: ignoring server response in favor of local categoryId; concurrent-edit visibility is an aspect of the same discarded-response defect."
+   },
+   {
+    "pair": 20,
+    "a": {
+     "mechanism": "Save success handler re-derives category via findById(categoryId) instead of server-serialized host",
+     "trigger": "Admin clears category chooser and saves",
+     "consequence": "Blank category badge until reload; correct server value discarded"
+    },
+    "b": {
+     "mechanism": "Component sets category from local categoryId instead of server-returned category_id; buffer never committed",
+     "trigger": "Save of new host (categoryId null) and subsequent edit",
+     "consequence": "Uncategorized host displays no category until reload; server-normalized host reappears un-normalized on next edit"
+    },
+    "material_differences": [
+     "B adds a distinct defect claim: the buffer is never committed, so server-normalized hostnames reappear un-normalized on re-edit — a separate mechanism A does not mention"
+    ],
+    "same": false,
+    "confidence": 0.75,
+    "reason": "B is a compound report adding the buffer-not-committed/normalization-loss defect beyond A's category-derivation issue."
+   }
+  ]
+ },
+ "usage": {
+  "glm-5.3-background": {
+   "input_tokens": 3144,
+   "cache_read_input_tokens": 384,
+   "cache_creation_input_tokens": 0,
+   "output_tokens": 3233,
+   "reasoning_output_tokens": 2212,
+   "cost_usd": 0.0,
+   "total_tokens": 8973
+  }
+ },
+ "status": "complete",
+ "error_type": null,
+ "elapsed_s": 36.39302921295166
+}

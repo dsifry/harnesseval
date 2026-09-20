@@ -1,0 +1,69 @@
+require 'uri'
+
+$redis = Class.new do
+  def initialize; @h = {}; end
+  def setnx(k, v)
+    return false if @h.key?(k)
+    @h[k] = v
+    true
+  end
+  def expire(k, t); true; end
+  def get(k); @h[k]; end
+end.new
+
+module SiteSetting
+  def self.embeddable_host; 'example.com'; end
+  def self.feed_polling_enabled?; false; end
+  def self.embed_by_username; 'importer'; end
+end
+
+class User
+  def self.where(*); self; end
+  def self.first; Object.new; end
+end
+
+$import_calls = 0
+
+class TopicEmbed
+  def self.where(*); self; end
+  def self.exists?; false; end
+  def self.import_remote(user, url)
+    $import_calls += 1
+    raise 'fetch failed'
+  end
+end
+
+module Jobs
+  class PollFeed
+    def execute(*); end
+  end
+end
+
+require_relative '../../lib/topic_retriever'
+
+r = TopicRetriever.new('http://example.com/embed/1')
+
+begin
+  r.retrieve
+  puts 'UNEXPECTED: first retrieve did not raise'
+rescue StandardError
+  # expected: fetch_http failed mid-way
+end
+
+key_set = !$redis.get('retrieved:http://example.com/embed/1').nil?
+first_calls = $import_calls
+
+second_result = nil
+begin
+  second_result = r.retrieve
+rescue StandardError => e
+  second_result = :raised
+end
+
+second_calls = $import_calls
+
+if key_set && first_calls == 1 && second_calls == 1 && second_result.nil?
+  puts 'RESULT: FAIL: premature throttle key suppressed Sidekiq retry of a failed fetch'
+else
+  puts 'RESULT: PASS'
+end

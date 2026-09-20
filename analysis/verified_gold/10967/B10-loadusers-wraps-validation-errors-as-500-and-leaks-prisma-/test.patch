@@ -1,0 +1,139 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { Prisma } from "@prisma/client";
+import { HttpError } from "@calcom/lib/http-error";
+
+const mocks = vi.hoisted(() => {
+  const fakeEventType = {
+    id: 1,
+    schedulingType: null,
+    hosts: [],
+    users: [],
+    periodType: null,
+    periodDays: undefined,
+    periodEndDate: null,
+    periodStartDate: null,
+    periodCountCalendarDays: false,
+    metadata: {},
+    seatsPerTimeSlot: null,
+    seatsShowAttendees: false,
+    destinationCalendar: null,
+    hideCalendarNotes: false,
+    requiresConfirmation: false,
+    eventName: "Test Event",
+    slug: "test",
+    teamId: null,
+    userId: 1,
+    customInputs: [],
+    locations: [],
+    timeZone: "UTC",
+  };
+  return {
+    fakeEventType,
+    getBookingData: vi.fn(),
+  };
+});
+
+vi.mock("./getBookingData", () => ({
+  getBookingData: mocks.getBookingData,
+}));
+
+vi.mock("@calcom/prisma", () => {
+  const eventTypeMock = {
+    findFirst: vi.fn(),
+    findUnique: vi.fn(),
+  };
+  const userMock = {
+    findMany: vi.fn(),
+    findFirst: vi.fn(),
+    findUnique: vi.fn(),
+  };
+  return {
+    prisma: {
+      user: userMock,
+      eventType: eventTypeMock,
+    },
+  };
+});
+
+import { prisma } from "@calcom/prisma";
+
+describe("handleNewBooking loadUsers error handling", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(prisma.eventType.findFirst).mockResolvedValue(mocks.fakeEventType as any);
+    vi.mocked(prisma.eventType.findUnique).mockResolvedValue(mocks.fakeEventType as any);
+  });
+
+  it("should return a 4xx for empty dynamicUserList instead of a generic 500", async () => {
+    mocks.getBookingData.mockResolvedValue({
+      eventTypeId: undefined,
+      eventTypeSlug: "test",
+      hasHashedBookingLink: false,
+      language: "en",
+      appsStatus: [],
+      name: "Test Booker",
+      email: "booker@example.com",
+      guests: [],
+      location: "integrations:google:meet",
+      notes: "",
+      smsReminderNumber: null,
+      rescheduleReason: null,
+      user: [],
+      start: new Date().toISOString(),
+    });
+
+    const { default: handler } = await import("./handleNewBooking");
+
+    const req = { body: { eventTypeId: 1 }, query: {}, method: "POST", headers: {} } as any;
+    const res = { status: vi.fn().mockReturnThis(), json: vi.fn(), end: vi.fn() } as any;
+
+    try {
+      await handler(req, res);
+      expect.fail("Expected handler to throw");
+    } catch (error) {
+      expect(error).toBeInstanceOf(HttpError);
+      expect((error as HttpError).statusCode).toBe(400);
+    }
+  });
+
+  it("should not leak Prisma internal error details as a 400 client error", async () => {
+    mocks.getBookingData.mockResolvedValue({
+      eventTypeId: undefined,
+      eventTypeSlug: "test",
+      hasHashedBookingLink: false,
+      language: "en",
+      appsStatus: [],
+      name: "Test Booker",
+      email: "booker@example.com",
+      guests: [],
+      location: "integrations:google:meet",
+      notes: "",
+      smsReminderNumber: null,
+      rescheduleReason: null,
+      user: ["someuser"],
+      start: new Date().toISOString(),
+    });
+
+    vi.mocked(prisma.user.findMany).mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError("Internal database connection failure", {
+        code: "P2025",
+        clientVersion: "5.0.0",
+        meta: {},
+      })
+    );
+
+    const { default: handler } = await import("./handleNewBooking");
+
+    const req = { body: { eventTypeId: 1 }, query: {}, method: "POST", headers: {} } as any;
+    const res = { status: vi.fn().mockReturnThis(), json: vi.fn(), end: vi.fn() } as any;
+
+    try {
+      await handler(req, res);
+      expect.fail("Expected handler to throw");
+    } catch (error) {
+      expect(error).toBeInstanceOf(HttpError);
+      expect((error as HttpError).statusCode).not.toBe(400);
+      expect((error as Error).message).not.toContain("Internal database connection failure");
+    }
+  });
+});

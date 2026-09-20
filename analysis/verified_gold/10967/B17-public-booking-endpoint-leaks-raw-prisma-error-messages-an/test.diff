@@ -1,0 +1,133 @@
+diff --git a/packages/features/bookings/lib/handleNewBooking.verified.test.ts b/packages/features/bookings/lib/handleNewBooking.verified.test.ts
+new file mode 100644
+--- /dev/null
++++ b/packages/features/bookings/lib/handleNewBooking.verified.test.ts
+@@ -0,0 +1,128 @@
++import { describe, it, expect, vi } from "vitest";
++
++// Set env vars BEFORE importing modules that read them at import time.
++process.env.NEXTAUTH_SECRET = "vitest-secret";
++process.env.CALENDSO_ENCRYPTION_KEY = "vitest-encryption-key";
++process.env.NEXT_PUBLIC_WEBAPP_URL = "http://localhost:3000";
++
++const findManyMock = vi.fn();
++
++const fakePrisma: any = {
++  user: {
++    findMany: (...args: any[]) => findManyMock(...args),
++    findUnique: vi.fn(),
++  },
++  eventType: { findUnique: vi.fn() },
++  $transaction: vi.fn(),
++};
++
++vi.mock("@calcom/prisma", () => ({
++  default: fakePrisma,
++  prisma: fakePrisma,
++}));
++
++const sampleEventType: any = {
++  id: undefined,
++  schedulingType: null,
++  periodType: null,
++  periodDays: null,
++  periodEndDate: null,
++  periodStartDate: null,
++  periodCountCalendarDays: null,
++  locations: [],
++  customInputs: [],
++  hosts: [],
++  users: [],
++  eventName: "Demo",
++  slug: "demo",
++  length: 30,
++  userId: 10,
++  team: null,
++  payment: [],
++  metadata: null,
++  price: 0,
++  currency: "usd",
++  destinationCalendar: null,
++  seatsPerTimeSlot: null,
++  seatsShowAttendees: null,
++  requiresConfirmation: false,
++  hideCalendarNotes: false,
++  allowDynamicBooking: true,
++};
++
++vi.mock("./getBookingData", () => ({
++  getBookingData: vi.fn(async () => ({
++    eventType: sampleEventType,
++    eventTypeId: undefined,
++    // Adversarial input: a dynamic (non-eventTypeId) booking request whose
++    // user list resolves to the empty array. This is exactly the state the
++    // claim says is now turned into a generic unlogged 500.
++    user: [],
++    language: "en",
++    appsStatus: undefined,
++    name: "Booker",
++    email: "booker@example.com",
++    guests: [],
++    location: undefined,
++    notes: undefined,
++    smsReminderNumber: undefined,
++    rescheduleReason: undefined,
++    start: new Date(Date.now() + 86400000).toISOString(),
++    timeZone: "UTC",
++    customInputs: {},
++    responses: {},
++    metadata: {},
++  })),
++}));
++
++describe("handleNewBooking loadUsers() empty dynamicUserList guard", () => {
++  it("surfaces the descriptive 'dynamicUserList is not properly defined or empty.' error as an HTTP 400 rather than swallowing it into a generic 500", async () => {
++    // No DB hit is expected: the empty-list guard should fire before findMany.
++    findManyMock.mockResolvedValueOnce([]);
++
++    const mod: any = await import("./handleNewBooking");
++    const handler = mod.default ?? mod.handler;
++    expect(typeof handler).toBe("function");
++
++    let thrown: any = null;
++    try {
++      await handler({
++        body: {},
++        method: "POST",
++        headers: {},
++        query: {},
++        cookies: {},
++      } as any);
++    } catch (e: any) {
++      thrown = e;
++    }
++
++    expect(
++      thrown,
++      "handler did not throw; expected the empty dynamicUserList guard to surface an error"
++    ).toBeTruthy();
++
++    const statusCode =
++      typeof thrown?.statusCode === "number"
++        ? thrown.statusCode
++        : typeof thrown?.cause?.statusCode === "number"
++        ? thrown.cause.statusCode
++        : undefined;
++    const message = String(thrown?.message ?? "");
++
++    // Claim's specific consequence: the catch block in loadUsers() converts the
++    // descriptive guard error into an HttpError 500 with the generic
++    // "Unable to load users" message, so the descriptive text never reaches the
++    // client. We assert the opposite: the specific message must survive and be
++    // classified as a 400 (the "presumably-intended 400" from the claim).
++    expect(
++      statusCode,
++      "empty dynamicUserList misclassified as a non-400 (claimed 500 generic)"
++    ).toBe(400);
++    expect(
++      message,
++      "descriptive dynamicUserList guard message was swallowed by loadUsers() catch"
++    ).toMatch(/dynamicUserList is not properly defined or empty/);
++    expect(message).not.toBe("Unable to load users");
++  });
++});

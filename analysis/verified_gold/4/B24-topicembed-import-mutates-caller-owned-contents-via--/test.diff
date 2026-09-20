@@ -1,0 +1,74 @@
+diff --git a/spec/verify/topic_embed_verify.rb b/spec/verify/topic_embed_verify.rb
+new file mode 100644
+--- /dev/null
++++ b/spec/verify/topic_embed_verify.rb
+@@ -0,0 +1,69 @@
++#!/usr/bin/env ruby
++require 'digest'
++
++# --- Minimum stubs so the real file can load without Rails/DB ---
++def require_dependency(*); end
++
++module I18n
++  def self.t(*args, **opts)
++    link = opts[:link] || (args.last.is_a?(Hash) ? args.last[:link] : nil)
++    "imported from #{link}"
++  end
++end
++
++module ActiveRecord
++  class Base
++    def self.belongs_to(*); end
++    def self.validates_presence_of(*); end
++    def self.transaction; yield; end
++    def self.where(*); FakeRelation.new; end
++  end
++  class FakeRelation
++    def first; nil; end
++    def pluck(*); []; end
++    def update_column(*); end
++  end
++end
++
++# Load the REAL file under test (no redefinition of the class).
++require_relative '../../app/models/topic_embed'
++
++URL = 'http://example.com/article'.freeze
++
++# --- Observation 1: caller-owned mutable string is mutated in place ---
++mutable = +'original article body'
++begin
++  TopicEmbed.import(:fake_user, URL, 'Title', mutable)
++rescue StandardError
++  # Downstream stubs (PostCreator, Topic, etc.) are intentionally absent;
++  # we only need to observe the side effect on the argument.
++end
++mutated_in_place = mutable.include?('<hr>') || mutable.include?('imported from')
++
++# --- Observation 2: frozen input raises FrozenError (or frozen RuntimeError) ---
++frozen = 'original article body'.freeze
++frozen_raised = false
++begin
++  TopicEmbed.import(:fake_user, URL, 'Title', frozen)
++rescue Exception => e
++  frozen_raised = true if (defined?(FrozenError) && e.is_a?(FrozenError)) ||
++                          (e.is_a?(RuntimeError) && e.message =~ /frozen/i)
++end
++
++# --- Observation 3: calling twice with same string accumulates duplicates ---
++reused = +'article body'
++2.times do
++  begin
++    TopicEmbed.import(:fake_user, URL, 'Title', reused)
++  rescue StandardError
++  end
++end
++duplicate_footers = reused.scan(/<hr>/).length > 1 || reused.scan(/imported from/).length > 1
++
++if mutated_in_place && frozen_raised
++  puts "RESULT: FAIL: TopicEmbed.import mutates caller-owned `contents` via `<<`; frozen input raises, and reuse accumulates the imported-from footer"
++el_sif mutated_in_place || frozen_raised
++  puts "RESULT: FAIL: partial defect detected (mutated=#{mutated_in_place}, frozen_raised=#{frozen_raised}, duplicated=#{duplicate_footers})"
++else
++  puts 'RESULT: PASS'
++end

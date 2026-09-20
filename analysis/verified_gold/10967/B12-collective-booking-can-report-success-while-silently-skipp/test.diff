@@ -1,0 +1,124 @@
+diff --git a/packages/core/EventManager.verified.test.ts b/packages/core/EventManager.verified.test.ts
+new file mode 100644
+--- /dev/null
++++ b/packages/core/EventManager.verified.test.ts
+@@ -0,0 +1,119 @@
++import { describe, expect, it, vi, beforeEach } from "vitest";
++
++const { mockCreateEvent, mockFindUnique } = vi.hoisted(() => ({
++  mockCreateEvent: vi.fn(),
++  mockFindUnique: vi.fn(),
++}));
++
++vi.mock("@calcom/prisma", () => ({
++  default: {
++    credential: {
++      findUnique: (...args: unknown[]) => mockFindUnique(...args),
++    },
++  },
++}));
++
++vi.mock("./CalendarManager", () => ({
++  createEvent: (...args: unknown[]) => mockCreateEvent(...args),
++  updateEvent: vi.fn(),
++}));
++
++vi.mock("./videoClient", () => ({
++  createMeeting: vi.fn(),
++  updateMeeting: vi.fn(),
++}));
++
++vi.mock("@calcom/app-store/_utils/getCalendar", () => ({ getCalendar: vi.fn() }));
++vi.mock("@calcom/app-store/dailyvideo/lib/VideoApiAdapter", () => ({ FAKE_DAILY_CREDENTIAL: {} }));
++vi.mock("@calcom/app-store/dailyvideo/zod", () => ({ appKeysSchema: {} }));
++vi.mock("@calcom/app-store/locations", () => ({
++  getEventLocationTypeFromApp: vi.fn(),
++  MeetLocationType: "integrations:google:meet",
++}));
++vi.mock("@calcom/app-store/utils", () => ({ default: vi.fn() }));
++vi.mock("@calcom/prisma/zod-utils", () => ({ createdEventSchema: {} }));
++
++describe("EventManager collective destination credential regression", () => {
++  beforeEach(() => {
++    mockCreateEvent.mockReset();
++    mockFindUnique.mockReset();
++  });
++
++  it("does not silently skip a co-host calendar when their destination credential cannot be resolved", async () => {
++    const { default: EventManager } = await import("./EventManager");
++
++    const inMemoryCredential = {
++      id: 1,
++      type: "google_calendar",
++      appName: "google-calendar",
++      appId: "google-calendar",
++      key: {},
++      userId: 10,
++      invalid: false,
++    };
++
++    // Second co-host: credentialId is present but the credential is not in
++    // memory; the DB lookup returns a row whose app.slug is null, so the
++    // credential cannot be reconstructed.
++    mockFindUnique.mockResolvedValue({
++      id: 2,
++      type: "office365_calendar",
++      key: {},
++      userId: 11,
++      teamId: null,
++      invalid: false,
++      appId: "office365-calendar",
++      app: null,
++    });
++
++    mockCreateEvent.mockResolvedValue({
++      type: "google_calendar",
++      success: true,
++      uid: "uid-1",
++      createdEvent: { id: "event-1" },
++      credentialId: 1,
++    });
++
++    const event = {
++      type: "collective",
++      title: "Collective",
++      startTime: new Date().toISOString(),
++      endTime: new Date().toISOString(),
++      attendees: [],
++      organizer: { email: "org@example.com", name: "org", timeZone: "UTC", language: "en" },
++      destinationCalendar: [
++        { integration: "google_calendar", externalId: "ext-1", credentialId: 1, userId: 10 },
++        { integration: "office365_calendar", externalId: "ext-2", credentialId: 2, userId: 11 },
++      ],
++    } as never;
++
++    const em = new EventManager([inMemoryCredential] as never);
++
++    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
++    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
++
++    let threw = false;
++    let results: unknown[] = [];
++    try {
++      results = await (
++        em as unknown as { createAllCalendarEvents: (e: unknown) => Promise<unknown[]> }
++      ).createAllCalendarEvents(event);
++    } catch {
++      threw = true;
++    }
++
++    const surfaced =
++      threw ||
++      results.length === 2 ||
++      errorSpy.mock.calls.length > 0 ||
++      warnSpy.mock.calls.length > 0;
++
++    errorSpy.mockRestore();
++    warnSpy.mockRestore();
++
++    expect(
++      surfaced,
++      "co-host calendar creation was silently skipped: booking reports success even though the destination credential could not be resolved"
++    ).toBe(true);
++  });
++});

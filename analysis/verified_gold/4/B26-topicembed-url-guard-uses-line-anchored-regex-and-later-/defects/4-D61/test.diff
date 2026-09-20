@@ -1,0 +1,92 @@
+require 'uri'
+
+module Discourse
+  class InvalidAccess < StandardError; end
+end
+
+class String
+  def blank?
+    strip.empty?
+  end
+end
+
+class SiteSetting
+  def self.embeddable_host
+    'example.com'
+  end
+end
+
+class ApplicationController
+  def self.skip_before_filter(*); end
+  def self.before_filter(*); end
+  def self.layout(*); end
+end
+
+require_relative '../../app/controllers/embed_controller.rb'
+
+FakeRequest = Struct.new(:referer)
+
+class FakeResponse
+  attr_reader :headers
+  def initialize
+    @headers = {}
+  end
+end
+
+class TestEmbedController < EmbedController
+  attr_accessor :fake_request, :fake_response
+  def request;  fake_request;  end
+  def response; fake_response; end
+end
+
+def invoke_ensure_embeddable(referer)
+  c = TestEmbedController.allocate
+  c.fake_request  = FakeRequest.new(referer)
+  c.fake_response = FakeResponse.new
+  c.send(:ensure_embeddable)
+  c.fake_response
+end
+
+problems = []
+defect_confirmed = false
+
+# 1. Well-formed referer, matching host => should allow and set frame header.
+begin
+  resp = invoke_ensure_embeddable('http://example.com/foo')
+  problems << 'X-Frame-Options not set for good referer' unless resp.headers['X-Frame-Options'] == 'ALLOWALL'
+rescue => e
+  problems << "good referer raised #{e.class}: #{e.message}"
+end
+
+# 2. Well-formed referer, non-matching host => Discourse::InvalidAccess.
+begin
+  invoke_ensure_embeddable('http://evil.example.org/foo')
+  problems << 'non-matching host did not raise InvalidAccess'
+rescue Discourse::InvalidAccess
+  # expected
+rescue => e
+  problems << "non-matching host raised #{e.class}: #{e.message}"
+end
+
+# 3. Referer containing bytes that are not valid UTF-8.
+#    The controller is documented/expected to convert this to InvalidAccess
+#    (same as any other unusable referer).  If a raw parse/encoding error
+#    escapes, the rescue clause did not cover the failure mode.
+bad_referer = "http://evil.example.org/\xFF".dup.force_encoding('UTF-8')
+raise 'test setup: referer must be invalid UTF-8' if bad_referer.valid_encoding?
+
+begin
+  invoke_ensure_embeddable(bad_referer)
+  problems << 'bad-bytes referer did not raise InvalidAccess'
+rescue Discourse::InvalidAccess
+  # correct behaviour
+rescue => e
+  defect_confirmed = true
+  problems << "bad-bytes referer escaped rescue with #{e.class}: #{e.message}"
+end
+
+if defect_confirmed
+  puts "RESULT: FAIL: #{problems.join('; ')}"
+else
+  puts 'RESULT: PASS'
+end

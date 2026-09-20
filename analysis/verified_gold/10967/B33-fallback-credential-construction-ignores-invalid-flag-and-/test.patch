@@ -1,0 +1,77 @@
+import { describe, expect, it, vi } from "vitest";
+
+const mocks = vi.hoisted(() => ({
+  createEvent: vi.fn(),
+  updateEvent: vi.fn(),
+  createMeeting: vi.fn(),
+  updateMeeting: vi.fn(),
+  findUnique: vi.fn(),
+}));
+
+vi.mock("./CalendarManager", () => ({
+  createEvent: mocks.createEvent,
+  updateEvent: mocks.updateEvent,
+}));
+
+vi.mock("./videoClient", () => ({
+  createMeeting: mocks.createMeeting,
+  updateMeeting: mocks.updateMeeting,
+}));
+
+vi.mock("@calcom/prisma", () => ({
+  default: {
+    credential: { findUnique: mocks.findUnique },
+  },
+}));
+
+describe("EventManager createAllCalendarEvents fallback credential", () => {
+  it("must not use a DB credential marked invalid when a destination calendar credential is missing from the in-memory list", async () => {
+    mocks.createEvent.mockResolvedValue({
+      type: "google_calendar",
+      success: true,
+      uid: "ref-1",
+    });
+
+    mocks.findUnique.mockResolvedValue({
+      id: 999,
+      type: "google_calendar",
+      key: { access_token: "revoked-token" },
+      userId: 1,
+      teamId: null,
+      appId: "google-calendar",
+      invalid: true,
+      app: { slug: "google-calendar" },
+    });
+
+    const { default: EventManager } = await import("./EventManager");
+
+    const manager = Object.create(EventManager.prototype) as {
+      calendarCredentials: unknown[];
+      createAllCalendarEvents: (event: unknown) => Promise<unknown>;
+    };
+    manager.calendarCredentials = [];
+
+    const event = {
+      destinationCalendar: [
+        {
+          credentialId: 999,
+          integration: "google_calendar",
+          externalId: "ext-1",
+        },
+      ],
+    };
+
+    await manager.createAllCalendarEvents(event);
+
+    expect(mocks.findUnique).toHaveBeenCalledTimes(1);
+
+    expect(
+      mocks.createEvent,
+      "EventManager must not pass a credential with invalid:true to createEvent"
+    ).not.toHaveBeenCalledWith(
+      expect.objectContaining({ invalid: true }),
+      expect.anything(),
+      expect.anything()
+    );
+  });
+});

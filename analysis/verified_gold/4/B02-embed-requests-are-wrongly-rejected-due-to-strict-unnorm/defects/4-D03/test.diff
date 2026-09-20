@@ -1,0 +1,109 @@
+require 'uri'
+
+# ---- Minimal standalone stubs (no Rails, no DB) ----
+class String
+  def blank?; self.strip.empty?; end
+end
+
+class Object
+  def try(m, *a); respond_to?(m) ? send(m, *a) : nil; end
+end
+
+class NilClass
+  def try(*); nil; end
+end
+
+class Numeric
+  def minute; self * 60; end
+end
+
+module Discourse
+  class InvalidAccess < StandardError; end
+end
+
+module SiteSetting
+  class << self
+    attr_accessor :embeddable_host
+  end
+end
+
+module Jobs
+  class << self
+    attr_accessor :enqueued
+  end
+  self.enqueued = []
+  def self.enqueue(name, opts = {}); self.enqueued << [name, opts]; end
+end
+
+class TopicEmbed
+  def self.topic_id_for_embed(_url); nil; end
+end
+
+class TopicView
+  def initialize(*); end
+end
+
+class FakeParams < Hash
+  def require(key)
+    raise KeyError, "key not found: #{key}" unless key?(key)
+    self[key]
+  end
+end
+
+class FakeRequest
+  attr_accessor :referer
+end
+
+class FakeResponse
+  attr_reader :headers
+  def initialize; @headers = {}; end
+end
+
+class ApplicationController
+  def self.skip_before_filter(*); end
+  def self.before_filter(*); end
+  def self.layout(*); end
+
+  attr_accessor :_params, :_request, :_response
+
+  def initialize
+    @_params   = FakeParams.new
+    @_request  = FakeRequest.new
+    @_response = FakeResponse.new
+  end
+  def params;   @_params;   end
+  def request;  @_request;  end
+  def response; @_response; end
+  def current_user; nil; end
+  def render(*); @rendered = true; end
+  def discourse_expires_in(*); end
+end
+
+# Load the REAL controller under test.
+require_relative '../../app/controllers/embed_controller.rb'
+
+# ---- Scenario: unauthenticated non-browser client (e.g. curl) ----
+SiteSetting.embeddable_host = 'example.com'
+Jobs.enqueued.clear
+
+c = EmbedController.new
+# The Referer header is client-controlled; any HTTP client can set it.
+c.request.referer = 'https://example.com/'
+c._params[:embed_url] = 'https://attacker.example.org/topic/1'
+
+begin
+  # Simulate the before_filter that the real controller registers.
+  c.send(:ensure_embeddable)
+  c.best
+rescue Discourse::InvalidAccess
+  puts "RESULT: PASS: controller rejected the unauthenticated request despite the client-claimed Referer"
+  exit 0
+end
+
+if Jobs.enqueued.any? { |name, _| name == :retrieve_topic }
+  puts "RESULT: FAIL: embed endpoint trusted a client-supplied `Referer: https://example.com/` from an unauthenticated request and enqueued #{Jobs.enqueued.inspect}; the Referer header is the only gate and is trivially spoofed (curl -H 'Referer: https://example.com/')"
+  exit 1
+else
+  puts "RESULT: PASS"
+  exit 0
+end

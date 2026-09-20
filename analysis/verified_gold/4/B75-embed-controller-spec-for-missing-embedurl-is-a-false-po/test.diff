@@ -1,0 +1,88 @@
+diff --git a/spec/verify/embed_spec_claim_verify.rb b/spec/verify/embed_spec_claim_verify.rb
+new file mode 100644
+--- /dev/null
++++ b/spec/verify/embed_spec_claim_verify.rb
+@@ -0,0 +1,83 @@
++require "uri"
++# NOTE (disclosed in the bundle): actionpack 4.1 cannot be loaded standalone in this environment
++# (its transitive needs: rack, action_dispatch, ...), so the two Rails classes the controller touches
++# are SHAPE-STUBBED with identical semantics: Parameters#require raises ParameterMissing (which
++# Discourse renders as HTTP 400). The controller methods under test are the REAL post-PR methods.
++# minimal shape-stub of ActiveSupport's String#blank? / NilClass#blank? (used by the real filter)
++class NilClass;  def blank?; true; end; end
++class String;    def blank?; strip.empty?; end; end
++
++module ActionController
++  class ParameterMissing < StandardError
++    attr_reader :param
++    def initialize(param)
++      @param = param
++      super("param is missing or the value is empty: #{param}")
++    end
++  end
++  class Parameters
++    def initialize(h); @h = h; end
++    def [](k); @h[k]; end
++    def key?(k); @h.key?(k); end
++    def require(k)
++      v = @h[k]
++      raise ParameterMissing.new(k) if v.nil? || (v.respond_to?(:empty?) && v.empty?)
++      v
++    end
++  end
++end
++
++module Discourse
++  class InvalidAccess < StandardError; end
++end
++
++$host = nil
++class SiteSetting
++  def self.embeddable_host; $host; end
++end
++class TopicEmbed
++  def self.topic_id_for_embed(_u); nil; end
++end
++class TopicView; def initialize(*); end; end
++class Jobs
++  def self.enqueue(*); end
++end
++
++class ApplicationController
++  def self.before_filter(*); end
++  def self.skip_before_filter(*); end
++  def self.layout(*); end
++  def params; @params; end
++  def request; @request; end
++  def response; @response ||= Struct.new(:headers).new({}); end
++  def render(*); end
++  def current_user; nil; end
++  def discourse_expires_in(*); end
++end
++
++require File.expand_path("app/controllers/embed_controller.rb", Dir.pwd)
++
++c = EmbedController.new
++$host = nil
++path_a = begin
++  c.send(:ensure_embeddable); "reached the action"
++rescue Discourse::InvalidAccess => e
++  "blocked by the before_filter: #{e.message}"
++end
++
++$host = "eviltrout.com"
++c2 = EmbedController.new
++c2.instance_variable_set(:@params, ActionController::Parameters.new({}))
++begin
++  c2.send(:best); path_b = "no error"
++rescue ActionController::ParameterMissing => e
++  path_b = "missing param raises ActionController::ParameterMissing(#{e.param}) => HTTP 400, not 404"
++rescue Discourse::InvalidAccess => e
++  path_b = "InvalidAccess: #{e.message}"
++end
++
++puts "PATH A (spec's actual config, host unset): #{path_a}"
++puts "PATH B (host set, no embed_url):           #{path_b}"
++ok = path_a.start_with?("blocked by the before_filter") && path_b.include?("ParameterMissing")
++puts(ok ? "RESULT: PASS: the example passes vacuously (the filter decides before the missing-param path) and its 404 name is wrong (the path is a bad request)"
++        : "RESULT: FAIL: the claimed mechanism was not reproduced")

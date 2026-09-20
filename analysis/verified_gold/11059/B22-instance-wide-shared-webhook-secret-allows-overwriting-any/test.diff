@@ -1,0 +1,128 @@
+diff --git a/apps/web/pages/api/webhook/app-credential.verified.test.ts b/apps/web/pages/api/webhook/app-credential.verified.test.ts
+new file mode 100644
+--- /dev/null
++++ b/apps/web/pages/api/webhook/app-credential.verified.test.ts
+@@ -0,0 +1,123 @@
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++
++const prismaMock = {
++  user: {
++    findUnique: vi.fn(),
++  },
++  app: {
++    findUnique: vi.fn(),
++  },
++  credential: {
++    findFirst: vi.fn(),
++    update: vi.fn(),
++    create: vi.fn(),
++  },
++};
++
++vi.mock("@calcom/prisma", () => ({
++  default: prismaMock,
++}));
++
++vi.mock("@calcom/lib/constants", () => ({
++  APP_CREDENTIAL_SHARING_ENABLED: true,
++}));
++
++vi.mock("@calcom/lib/crypto", () => ({
++  symmetricDecrypt: vi.fn(() => JSON.stringify({ attacker: true })),
++}));
++
++vi.mock("@calcom/app-store/appStoreMetaData", () => ({
++  appStoreMetadata: {
++    googlecalendar: {
++      slug: "googlecalendar",
++      type: "google_calendar",
++    },
++  },
++}));
++
++function createRes() {
++  let statusCode = 200;
++  let jsonBody: any = undefined;
++  const res: any = {
++    status(code: number) {
++      statusCode = code;
++      return res;
++    },
++    json(body: any) {
++      jsonBody = body;
++      return res;
++    },
++  };
++  return {
++    res,
++    get statusCode() {
++      return statusCode;
++    },
++    get jsonBody() {
++      return jsonBody;
++    },
++  };
++}
++
++describe("/api/webhook/app-credential", () => {
++  const OLD_ENV = process.env;
++
++  beforeEach(() => {
++    vi.resetModules();
++    process.env = { ...OLD_ENV };
++
++    process.env.CALCOM_WEBHOOK_HEADER_NAME = "calcom-webhook-secret";
++    // Simulate an instance-wide shared secret that an attacker has obtained.
++    process.env.CALCOM_WEBHOOK_SECRET = "secret-user-1";
++
++    // Desired secure configuration: per-user secret mapping.
++    process.env.CALCOM_WEBHOOK_SECRETS = JSON.stringify({
++      "1": "secret-user-1",
++      "2": "secret-user-2",
++    });
++
++    process.env.CALCOM_APP_CREDENTIAL_ENCRYPTION_KEY = "test-key";
++
++    prismaMock.user.findUnique.mockReset();
++    prismaMock.app.findUnique.mockReset();
++    prismaMock.credential.findFirst.mockReset();
++    prismaMock.credential.update.mockReset();
++    prismaMock.credential.create.mockReset();
++  });
++
++  afterEach(() => {
++    process.env = OLD_ENV;
++    vi.clearAllMocks();
++  });
++
++  it("rejects overwriting another user's credentials even when the instance-wide webhook secret is known", async () => {
++    // Attacker knows user 1's secret but targets user 2.
++    const req: any = {
++      headers: {
++        "calcom-webhook-secret": "secret-user-1",
++      },
++      body: {
++        userId: 2,
++        appSlug: "googlecalendar",
++        keys: "<encrypted>",
++      },
++    };
++
++    prismaMock.user.findUnique.mockResolvedValue({ id: 2 });
++    prismaMock.app.findUnique.mockResolvedValue({ slug: "googlecalendar" });
++    prismaMock.credential.findFirst.mockResolvedValue({ id: "cred-2" });
++    prismaMock.credential.update.mockResolvedValue({ id: "cred-2" });
++
++    const { default: handler } = await import("./app-credential");
++
++    const resWrap = createRes();
++    await handler(req, resWrap.res);
++
++    expect(
++      resWrap.statusCode,
++      "Instance-wide shared webhook secret should NOT authorize overwriting another user's app credentials"
++    ).toBe(403);
++    expect(prismaMock.credential.update).not.toHaveBeenCalled();
++    expect(prismaMock.credential.create).not.toHaveBeenCalled();
++  });
++});

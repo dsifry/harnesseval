@@ -1,0 +1,158 @@
+diff --git a/packages/trpc/server/routers/viewer/bookings/addGuests.handler.verified.test.ts b/packages/trpc/server/routers/viewer/bookings/addGuests.handler.verified.test.ts
+new file mode 100644
+--- /dev/null
++++ b/packages/trpc/server/routers/viewer/bookings/addGuests.handler.verified.test.ts
+@@ -0,0 +1,153 @@
++import { vi, describe, it, expect } from "vitest";
++
++const mockState = vi.hoisted(() => {
++  const state = {
++    dbAttendees: ["existing@x.com"],
++    readSnapshots: [] as string[][],
++    calendarUpdates: [] as string[][],
++    readCount: 0,
++  };
++  let resolveGate: () => void = () => {};
++  const updateGate = new Promise<void>((resolve) => {
++    resolveGate = resolve;
++  });
++  return { state, updateGate, releaseUpdates: () => resolveGate() };
++});
++
++function buildBooking(attendeeEmails: string[]) {
++  return {
++    id: 1,
++    uid: "booking-uid",
++    title: "Test booking",
++    description: "",
++    startTime: new Date("2030-01-01T10:00:00Z"),
++    endTime: new Date("2030-01-01T11:00:00Z"),
++    location: "Zoom",
++    userId: 10,
++    userPrimaryEmail: "org@x.com",
++    eventTypeId: 1,
++    attendees: attendeeEmails.map((email, index) => ({
++      id: index + 1,
++      email,
++      name: "",
++      timeZone: "UTC",
++      locale: "en",
++    })),
++    eventType: {
++      id: 1,
++      title: "Test event type",
++      teamId: null,
++      recurringEvent: null,
++      seatsPerTimeSlot: null,
++      seatsShowAttendees: null,
++    },
++    destinationCalendar: null,
++    references: [],
++    user: { destinationCalendar: null, credentials: [] },
++  };
++}
++
++vi.mock("@calcom/prisma", () => ({
++  prisma: {
++    booking: {
++      findFirst: vi.fn(async () => {
++        mockState.state.readCount += 1;
++        if (mockState.state.readCount >= 2) mockState.releaseUpdates();
++        const snapshot = [...mockState.state.dbAttendees];
++        mockState.state.readSnapshots.push(snapshot);
++        return buildBooking(snapshot);
++      }),
++      update: vi.fn(async ({ data }: any) => {
++        await mockState.updateGate;
++        const newGuests: string[] = data.attendees.createMany.data.map((g: any) => g.email);
++        const snapshot =
++          mockState.state.readSnapshots.shift() ?? [...mockState.state.dbAttendees];
++        for (const guest of newGuests) {
++          if (!mockState.state.dbAttendees.includes(guest)) {
++            mockState.state.dbAttendees.push(guest);
++          }
++        }
++        return buildBooking([...snapshot, ...newGuests]);
++      }),
++    },
++    user: {
++      findFirstOrThrow: vi.fn(async () => ({
++        name: "Organizer",
++        email: "org@x.com",
++        timeZone: "UTC",
++        locale: "en",
++      })),
++    },
++  },
++}));
++
++vi.mock("@calcom/core/EventManager", () => ({
++  default: class {
++    async updateCalendarAttendees(evt: any) {
++      mockState.state.calendarUpdates.push(evt.attendees.map((a: any) => a.email));
++    }
++  },
++}));
++
++vi.mock("@calcom/lib/server/getUsersCredentials", () => ({
++  getUsersCredentials: vi.fn(async () => []),
++}));
++
++vi.mock("@calcom/lib/server/queries/teams", () => ({
++  isTeamAdmin: vi.fn().mockResolvedValue(true),
++  isTeamOwner: vi.fn().mockResolvedValue(true),
++}));
++
++vi.mock("@calcom/lib/server", () => ({
++  getTranslation: vi.fn().mockResolvedValue((key: string) => key),
++}));
++
++vi.mock("@calcom/emails", () => ({
++  sendAddGuestsEmails: vi.fn().mockResolvedValue(undefined),
++}));
++
++vi.mock("@calcom/lib", () => ({
++  parseRecurringEvent: vi.fn().mockReturnValue(null),
++}));
++
++vi.mock("@calcom/dayjs", () => ({
++  default: (value: unknown) => ({ format: () => String(value ?? "") }),
++}));
++
++const organizerUser = {
++  id: 10,
++  email: "org@x.com",
++  name: "Organizer",
++  timeZone: "UTC",
++  locale: "en",
++};
++
++const racingUser = { ...organizerUser, id: 11 };
++
++describe("addGuestsHandler — concurrent add-guests lost update", () => {
++  it("must not let a later calendar write drop guests committed by a concurrent add-guests request", async () => {
++    const { addGuestsHandler } = await import("./addGuests.handler");
++
++    await Promise.all([
++      addGuestsHandler({
++        ctx: { user: organizerUser as any },
++        input: { bookingId: 1, guests: ["a@x.com"] } as any,
++      }),
++      addGuestsHandler({
++        ctx: { user: racingUser as any },
++        input: { bookingId: 1, guests: ["b@x.com"] } as any,
++      }),
++    ]);
++
++    expect(mockState.state.dbAttendees).toEqual(
++      expect.arrayContaining(["existing@x.com", "a@x.com", "b@x.com"])
++    );
++
++    const lastCalendarWrite =
++      mockState.state.calendarUpdates[mockState.state.calendarUpdates.length - 1];
++
++    expect(lastCalendarWrite).toEqual(
++      expect.arrayContaining(["existing@x.com", "a@x.com", "b@x.com"])
++    );
++  });
++});

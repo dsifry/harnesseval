@@ -1,0 +1,128 @@
+diff --git a/spec/verify/embed_controller_verify.rb b/spec/verify/embed_controller_verify.rb
+new file mode 100644
+--- /dev/null
++++ b/spec/verify/embed_controller_verify.rb
+@@ -0,0 +1,123 @@
++#!/usr/bin/env ruby
++# frozen_string_literal: true
++require 'ostruct'
++
++# --- Minimal ActiveSupport-ish stubs so the real controller file loads ---
++class String
++  def present?; !strip.empty?; end
++  def blank?; strip.empty?; end
++end
++class NilClass
++  def present?; false; end
++  def blank?; true; end
++  def try(*); nil; end
++end
++class Object
++  def present?; true; end
++  def blank?; false; end
++  def try(m = nil, *a, &b)
++    return nil unless m && respond_to?(m)
++    b ? send(m, *a, &b) : send(m, *a)
++  end
++end
++class Integer
++  def minute; self * 60; end
++end
++
++module Rails
++  def self.env; OpenStruct.new(development?: false); end
++end
++module Discourse
++  class InvalidAccess < StandardError; end
++end
++module I18n
++  def self.t(*); 'x'; end
++end
++module SiteSetting
++  def self.embed_post_limit; 5; end
++end
++
++# Fake EmbeddableHost with a host category that permits ONLY that host's URLs.
++class EmbeddableHost
++  ALLOWED_REFERERS = ['http://allowed-host.com/page'].freeze
++  PERMITTED_URLS   = { 'allowed-host.com' => ['http://allowed-host.com'] }.freeze
++
++  def self.host_allowed?(referer)
++    return false if referer.nil?
++    ALLOWED_REFERERS.include?(referer)
++  end
++
++  def self.allowed_for?(host, url)
++    (PERMITTED_URLS[host] || []).any? { |p| url.start_with?(p) }
++  end
++end
++
++class TopicEmbed
++  def self.topic_id_for_embed(url)
++    url == 'http://foreign-host.com/t/42' ? 42 : nil
++  end
++end
++
++class TopicView
++  attr_reader :topic, :posts
++  def initialize(topic_id, *args, **opts)
++    @topic = OpenStruct.new(url: "/t/#{topic_id}", posts_count: 3)
++    @posts = [1, 2, 3]
++  end
++end
++
++module Jobs
++  def self.enqueue(*); end
++end
++
++class ApplicationController
++  def self.skip_before_filter(*); end
++  def self.before_filter(*); end
++  def self.skip_before_action(*); end
++  def self.before_action(*); end
++  def self.layout(*); end
++
++  attr_accessor :params, :request, :response, :current_user
++  def initialize
++    @params = {}
++    @response = OpenStruct.new(headers: {})
++    @request = OpenStruct.new(referer: nil)
++    @current_user = nil
++  end
++  def render(*a); @rendered = a; end
++  def rendered; @rendered; end
++  def discourse_expires_in(*); end
++end
++
++# Load the REAL file under test (never redefine EmbedController).
++require_relative '../../app/controllers/embed_controller'
++
++referer   = 'http://allowed-host.com/page'
++embed_url = 'http://foreign-host.com/t/42'
++
++# Sanity check: the target URL is NOT in the referer host's permitted category.
++if EmbeddableHost.allowed_for?('allowed-host.com', embed_url)
++  puts 'RESULT: FAIL: test setup error (URL unexpectedly permitted)'
++  exit 0
++end
++
++c = EmbedController.new
++c.request.referer = referer
++c.params = { embed_url: embed_url }
++
++defect = false
++begin
++  # Run the before_filter the campaign targets.
++  c.send(:ensure_embeddable)
++  # It only checks the referer host; the embed_url is never scoped to it.
++  c.comments
++  defect = !c.instance_variable_get(:@topic_view).nil?
++rescue Discourse::InvalidAccess
++  defect = false
++end
++
++if defect
++  puts "RESULT: FAIL: referer host 'allowed-host.com' is not permitted to embed '#{embed_url}', but EmbedController served that foreign topic \u2014 embed_url/topic_id is not scoped to the referer host's category"
++else
++  puts 'RESULT: PASS'
++end

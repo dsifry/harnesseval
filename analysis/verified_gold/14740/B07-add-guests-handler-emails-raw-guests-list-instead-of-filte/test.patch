@@ -1,0 +1,103 @@
+import { vi, describe, it, beforeEach, expect } from "vitest";
+import prismaMock from "../../../../../../tests/libs/__mocks__/prismaMock";
+
+vi.mock("@calcom/core/EventManager", () => {
+  const EventManager = vi.fn();
+  (EventManager.prototype as any).updateCalendarAttendees = vi.fn().mockResolvedValue(undefined);
+  return { default: EventManager };
+});
+
+vi.mock("@calcom/emails", () => ({
+  sendAddGuestsEmails: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("@calcom/lib/server/getUsersCredentials", () => ({
+  getUsersCredentials: vi.fn().mockResolvedValue([]),
+}));
+
+vi.mock("@calcom/lib/server/queries/teams", () => ({
+  isTeamAdmin: vi.fn().mockResolvedValue(false),
+  isTeamOwner: vi.fn().mockResolvedValue(false),
+}));
+
+vi.mock("@calcom/lib/server", () => ({
+  getTranslation: vi.fn().mockImplementation(() => Promise.resolve((key: string) => key)),
+}));
+
+vi.mock("@calcom/lib", () => ({
+  parseRecurringEvent: vi.fn().mockReturnValue(null),
+}));
+
+describe("addGuestsHandler email recipients", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    delete process.env.BLACKLISTED_GUEST_EMAILS;
+  });
+
+  it("sends AddGuests emails only to uniqueGuests, not the raw guests array", async () => {
+    const { addGuestsHandler } = await import("./addGuests.handler");
+    const emailsModule = await import("@calcom/emails");
+    const sendAddGuestsEmails = emailsModule.sendAddGuestsEmails as unknown as ReturnType<
+      typeof vi.fn
+    >;
+
+    const existingAttendee = {
+      name: "Existing Attendee",
+      email: "existing@example.com",
+      timeZone: "UTC",
+      locale: "en",
+    };
+
+    prismaMock.booking.findFirst.mockResolvedValue({
+      id: 42,
+      title: "Team Sync",
+      description: "",
+      startTime: new Date("2024-06-01T10:00:00Z"),
+      endTime: new Date("2024-06-01T11:00:00Z"),
+      uid: "uid-42",
+      location: "inPerson",
+      userId: 7,
+      userPrimaryEmail: "organizer@example.com",
+      attendees: [existingAttendee],
+      eventType: { title: "Team Sync", teamId: null, recurringEvent: null },
+      destinationCalendar: null,
+      references: [],
+      user: { destinationCalendar: null, credentials: [] },
+    });
+
+    prismaMock.user.findFirstOrThrow.mockResolvedValue({
+      name: "Organizer",
+      email: "organizer@example.com",
+      timeZone: "UTC",
+      locale: "en",
+    });
+
+    prismaMock.booking.update.mockResolvedValue({
+      id: 42,
+      attendees: [
+        existingAttendee,
+        { name: "", email: "new@example.com", timeZone: "UTC", locale: "en" },
+      ],
+    });
+
+    await addGuestsHandler({
+      ctx: {
+        user: {
+          id: 7,
+          email: "organizer@example.com",
+          name: "Organizer",
+          timeZone: "UTC",
+          locale: "en",
+        } as any,
+      },
+      input: {
+        bookingId: 42,
+        guests: ["existing@example.com", "new@example.com"],
+      },
+    });
+
+    expect(sendAddGuestsEmails).toHaveBeenCalledTimes(1);
+    const recipientsArg = sendAddGuestsEmails.mock.calls[0][1];
+    expect(recipientsArg).toEqual(["new@example.com"]);
+  });
+});

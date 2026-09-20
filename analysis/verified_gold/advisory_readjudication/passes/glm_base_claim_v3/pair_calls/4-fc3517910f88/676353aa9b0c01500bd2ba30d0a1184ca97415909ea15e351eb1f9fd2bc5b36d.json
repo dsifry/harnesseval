@@ -1,0 +1,491 @@
+{
+ "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/4",
+ "pass_digest": "9c5f733ce7a3f996c90c67f262cc4a77e2b234bc415c197afa7c73477ad320be",
+ "request_sha256": "676353aa9b0c01500bd2ba30d0a1184ca97415909ea15e351eb1f9fd2bc5b36d",
+ "request": {
+  "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/4",
+  "model": "glm-5.3-background",
+  "system": "You are clustering code review findings from one PR. Always respond with valid JSON.",
+  "prompt": "You are clustering code review findings from the same PR. For each PAIR below, decide whether the two findings describe the SAME underlying issue — same root cause in the same code location. Different wording is fine. A finding about a DIFFERENT defect in the same file or function is NOT the same issue. Severity or aspect differences of the same root cause ARE the same issue.\n\n\nFor THIS scoring pass, duplicate equivalence is stricter than sharing a root cause.\nYou must compare the COMPLETE MATERIAL CLAIMS, including mechanism, triggering\nconditions, execution path, and consequence. The same line or broad concern does\nnot establish equivalence. A report of wrong-category selection, a case/rename\nmismatch, a crash, and a silent fallback are different claims even at one lookup.\nAn inactive/unbound API concern and an alleged active user-facing failure differ.\nA compound report with an additional material claim does NOT equal its subset.\nDifferences only in wording, severity, or hedging do not create separate claims.\nIf the claimed mechanisms, triggers or consequences conflict, or one report adds\nan unsupported/different material factual claim, return same=false. You are NOT\nverifying which claim is true; do not repair or reinterpret either report to make\nthem match. If unsure whether their full claims are equivalent, return false.\n\nFor every numbered pair, extract what A and B actually CLAIM into mechanism,\ntrigger and consequence. Then list material_differences and give your equivalence\nverdict, confidence and reason. same=true requires no material differences.\nReturn ONLY this JSON object, with EVERY pair index exactly once:\n{\"pairs\":[{\"pair\":1,\"a\":{\"mechanism\":\"...\",\"trigger\":\"...\",\"consequence\":\"...\"},\"b\":{\"mechanism\":\"...\",\"trigger\":\"...\",\"consequence\":\"...\"},\"material_differences\":[],\"same\":true,\"confidence\":0.9,\"reason\":\"...\"}]}\n\nPAIRS:\nPAIR 1:\nA: perform_retrieve runs Jobs::PollFeed.new.execute({}) synchronously, performing a complete feed fetch plus import of every item inside a per-URL background job. Each first-time embed URL triggers full-feed processing — N TopicEmbed.import calls for an N-item feed — multiplying load on the polled site and delaying the embed's appearance while duplicating what the hourly schedule already does.\nB: P2: TopicRetriever#perform_retrieve calls Jobs::PollFeed.new.execute({}) directly, bypassing the job queue and coupling retriever to feed poller internals, side-stepping retry/queueing semantics\n\nPAIR 2:\nA: perform_retrieve runs Jobs::PollFeed.new.execute({}) synchronously, performing a complete feed fetch plus import of every item inside a per-URL background job. Each first-time embed URL triggers full-feed processing — N TopicEmbed.import calls for an N-item feed — multiplying load on the polled site and delaying the embed's appearance while duplicating what the hourly schedule already does.\nB: TopicRetriever synchronously instantiates and executes Jobs::PollFeed inline instead of using Jobs.enqueue(:poll_feed), bypassing the job driver's error/retry semantics and allowing a single user-triggered embed to synchronously import an entire feed\n\nPAIR 3:\nA: perform_retrieve runs Jobs::PollFeed.new.execute({}) synchronously, performing a complete feed fetch plus import of every item inside a per-URL background job. Each first-time embed URL triggers full-feed processing — N TopicEmbed.import calls for an N-item feed — multiplying load on the polled site and delaying the embed's appearance while duplicating what the hourly schedule already does.\nB: TopicRetriever#perform_retrieve executes Jobs::PollFeed.new.execute({}) synchronously instead of enqueueing the job or extracting a shared feed-polling service, causing a full RSS feed re-parse and import of all feed items per embed request, defeating the per-URL throttle and coupling the retriever to the scheduled job's internals\n\nPAIR 4:\nA: poll_feed iterates the entire feed with no item cap or last-modified cutoff, and TopicEmbed.import does a fresh SELECT + SHA1 per item every hour regardless of change. A large feed causes an hourly O(N) full pass with one query per item and one PostRevisor pass per changed item on whatever single process runs the scheduled job; nothing in the design bounds the work, so feed size directly scales background cost with no pagination or batching escape hatch.\nB: poll_feed runs `TopicEmbed.where(embed_url: url).first` plus a SHA1/full import attempt inside a loop over every feed item — an N+1 query pattern over an unbounded collection. A feed with hundreds of items issues hundreds of individual lookups and up to hundreds of PostCreator/topic transactions inside one Sidekiq job with no batching (a single IN/join lookup would serve the membership test), so runtime grows linearly with feed size on the hottest path of the feature and a large feed stalls the hourly job.\n\nPAIR 5:\nA: PostCreator assigns post.cook_method straight from @opts with no authorization guard anywhere in the diff, so any caller that forwards request-derived options into PostCreator lets the requester select the raw_html cook path and store arbitrary unsanitized HTML. If the posts endpoint passes client parameters into PostCreator opts (the same attribute-assignment pattern this line is added beside), any end user creates raw_html posts — unprivileged stored XSS sitewide; the privileged cook path ships with zero capability check at the sink.\nB: PostCreator now reads the render-pipeline bypass flag cook_method out of its public opts bag — the same bag Discourse's HTTP-facing post/topic creation endpoints populate from request params — so any logged-in user can submit cook_method=2 and have Post#cook return their raw HTML verbatim as `cooked`, skipping the markdown+sanitize pipeline (and the after_post_cook plugin filters). Arbitrary unsanitized HTML (including <script> tags) is persisted in `cooked` and rendered with `raw post.cooked` in topic views and the new embed iframe, giving any registered user a stored script-injection channel that the entire rendering architecture was built to prevent; a trusted-internal flag was welded onto a request-reachable constructor.\n\nPAIR 6:\nA: PostCreator assigns post.cook_method straight from @opts with no authorization guard anywhere in the diff, so any caller that forwards request-derived options into PostCreator lets the requester select the raw_html cook path and store arbitrary unsanitized HTML. If the posts endpoint passes client parameters into PostCreator opts (the same attribute-assignment pattern this line is added beside), any end user creates raw_html posts — unprivileged stored XSS sitewide; the privileged cook path ships with zero capability check at the sink.\nB: P0: TopicEmbed.import stores remote/feed HTML as raw_html, bypassing Post#cook sanitization pipeline and rendering unsanitized external HTML — stored XSS from attacker-controlled feed/remote content\n\nPAIR 7:\nA: PostCreator assigns post.cook_method straight from @opts with no authorization guard anywhere in the diff, so any caller that forwards request-derived options into PostCreator lets the requester select the raw_html cook path and store arbitrary unsanitized HTML. If the posts endpoint passes client parameters into PostCreator opts (the same attribute-assignment pattern this line is added beside), any end user creates raw_html posts — unprivileged stored XSS sitewide; the privileged cook path ships with zero capability check at the sink.\nB: P1: raw_html cook method makes Post#cook return raw HTML verbatim, rendered with raw in embed view — external attacker-controlled HTML (XSS/injection) bypasses sanitization pipeline entirely\n\nPAIR 8:\nA: The 'raises an error with a missing host' and 'raises an error with no referer' tests assert only response.should_not be_success, never that the status is the 403 that Discourse::InvalidAccess produces. An operator diagnosing a misconfigured embeddable_host gets no protection against a 500-class regression here: if the controller began raising an unhandled error (e.g. the rescue URI::InvalidURIError in ensure_embeddable is removed or misplaced relative to the raise), these tests still pass because any non-2xx satisfies the assertion, masking a crash as an intended access denial.\nB: The 'raises an error with a missing host' and 'raises an error with no referer' tests assert only response.should_not be_success, which cannot distinguish the intended Discourse::InvalidAccess 403 from an unrelated 500 crash, and no spec sends a malformed referer so the new rescue URI::InvalidURIError branch in ensure_embeddable is never triggered. If the guard regressed to raise an unhandled exception (or the rescue were dropped), requests with a malformed Referer would return a 500 crash page instead of a clean 403 and both tests would stay green.\n\nPAIR 9:\nA: The 'Supports updating the post' test probes with plain text ('muhahaha new contents!'), so post.cooked =~ /new contents/ passes whether the revision re-cooks via the raw_html path or mangles the HTML through the regular markdown pipeline — the only spec covering the hourly PostRevisor path cannot detect a cook_method regression on revise. A change that resets cook_method or re-cooks imported posts as markdown on revision strips embedded article HTML on every feed update while the suite stays green.\nB: The update test asserts only 'post.cooked.should =~ /new contents/' and never asserts that embed.content_sha1 was updated to the new digest — the very field whose comparison gates the update branch in TopicEmbed.import (lines 30-34). If the update branch stops persisting the new digest (e.g. the 'embed.update_column(:content_sha1, content_sha1)' line is dropped or writes the stale value), this test still passes because cooked matches the new content, while every subsequent feed poll re-enters the revise branch for the same content indefinitely — the test verifies the symptom (cooked text) but not the mechanism (digest persistence) it exists to cover.\n\nPAIR 10:\nA: The 'Supports updating the post' test probes with plain text ('muhahaha new contents!'), so post.cooked =~ /new contents/ passes whether the revision re-cooks via the raw_html path or mangles the HTML through the regular markdown pipeline — the only spec covering the hourly PostRevisor path cannot detect a cook_method regression on revise. A change that resets cook_method or re-cooks imported posts as markdown on revision strips embedded article HTML on every feed update while the suite stays green.\nB: P2: TopicEmbed.import re-import with unchanged content (content_sha1 no-op branch) is untested, and the update test doesn't assert content_sha1 persistence or that no duplicate TopicEmbed/topic is created (unique index on embed_url makes a duplicate-creation regression a hard 500)\n\nPAIR 11:\nA: The 'Supports updating the post' test probes with plain text ('muhahaha new contents!'), so post.cooked =~ /new contents/ passes whether the revision re-cooks via the raw_html path or mangles the HTML through the regular markdown pipeline — the only spec covering the hourly PostRevisor path cannot detect a cook_method regression on revise. A change that resets cook_method or re-cooks imported posts as markdown on revision strips embedded article HTML on every feed update while the suite stays green.\nB: The TopicEmbed update test cannot detect if revision loses raw_html cooking: post.cooked =~ /new contents/ would also pass if PostRevisor cooked the new raw through the regular markdown pipeline (the phrase survives markdown), so nothing verifies cook_method is preserved across revision. Also untested: importing identical content triggers no revision (the content_sha1 guard and embed.update_column(:content_sha1, ...)), and that update doesn't create a duplicate topic/embed (TopicEmbed.count == 1 never asserted).\n\nPAIR 12:\nA: The 'Supports updating the post' test probes with plain text ('muhahaha new contents!'), so post.cooked =~ /new contents/ passes whether the revision re-cooks via the raw_html path or mangles the HTML through the regular markdown pipeline — the only spec covering the hourly PostRevisor path cannot detect a cook_method regression on revise. A change that resets cook_method or re-cooks imported posts as markdown on revision strips embedded article HTML on every feed update while the suite stays green.\nB: TopicEmbed sha1 change-detection untested in the 'unchanged' direction — no test verifies that re-importing identical content does not create a revision, and the update test never asserts embed.content_sha1 was refreshed via update_column or checks revision count, so a regression re-revising on every hourly poll would pass the suite\n\nPAIR 13:\nA: The `--category`/`-c` CLI option and its handling code were deleted from the disqus import task, silently removing a previously working public interface without any replacement or migration note. Existing users/scripts that invoke `thor disqus:import -c Category` break with an unknown-option error on upgrade; the review iteration changed the task's contract with no explicit acceptance of that removal.\nB: The diff silently removes the public `--category`/`-c` CLI option and its category_id wiring from disqus:import, repurposing the importer to fetch remote article content via TopicEmbed.import_remote instead. Existing automation invoking `thor disqus:import -c \"Some Category\"` no longer assigns any category — imported topics land in the site default with no error and no migration path; a functional removal is buried inside a PR whose stated scope is embed URL handling and validation.\n\nPAIR 14:\nA: The `--category`/`-c` CLI option and its handling code were deleted from the disqus import task, silently removing a previously working public interface without any replacement or migration note. Existing users/scripts that invoke `thor disqus:import -c Category` break with an unknown-option error on upgrade; the review iteration changed the task's contract with no explicit acceptance of that removal.\nB: The Disqus importer silently loses its --category option and its permalink-post behavior, switching creation to TopicEmbed.import_remote with no migration note for existing callers. Existing automation invoking `thor disqus:import -c \"Some Category\"` now fails with an unknown-option error, and previously imported Disqus threads (which got a Permalink link post) would now create raw-HTML embed topics instead — a behavioral change to a public CLI surface with no counterpart or deprecation path in this diff.\n\nPAIR 15:\nA: The `--category`/`-c` CLI option and its handling code were deleted from the disqus import task, silently removing a previously working public interface without any replacement or migration note. Existing users/scripts that invoke `thor disqus:import -c Category` break with an unknown-option error on upgrade; the review iteration changed the task's contract with no explicit acceptance of that removal.\nB: The import loop's behavior was silently rewritten from creating a lightweight permalink post (`PostCreator.new(user, title:..., raw: \"\\[[Permalink](#{t[:link]})\\]\")`) to calling `TopicEmbed.import_remote`, which performs a blocking HTTP fetch per thread and imports full article HTML. Operators who re-run a previously working Disqus import get a different artifact than before: network-dependent imports (can hang/fail per URL), raw-HTML posts bypassing the cooking pipeline, and topics created via the embed path — a changed output contract never surfaced as a decision point.\n\nPAIR 16:\nA: The diff modifies an unrelated, already-applied migration (create_top_topics) to add `force: true`, work with no traceability to the embed URL handling intent. Reviewers and bisecters of the embedding feature must wade through unrelated migration churn; if this migration is ever re-run against a database that already has top_topics data (e.g. rebuilt dev/CI databases), force: true silently drops and recreates the table, discarding all rows.\nB: create_top_topics.rb migration changed to force: true, which drops and recreates the table destroying existing data (P1)\n\nPAIR 17:\nA: The diff modifies an unrelated, already-applied migration (create_top_topics) to add `force: true`, work with no traceability to the embed URL handling intent. Reviewers and bisecters of the embedding feature must wade through unrelated migration churn; if this migration is ever re-run against a database that already has top_topics data (e.g. rebuilt dev/CI databases), force: true silently drops and recreates the table, discarding all rows.\nB: Editing already-applied migration 20131223171005_create_top_topics to add force: true to create_table, which will DROP TABLE IF EXISTS on re-run and silently destroy all top_topics data with no rollback path\n\nPAIR 18:\nA: The diff modifies an unrelated, already-applied migration (create_top_topics) to add `force: true`, work with no traceability to the embed URL handling intent. Reviewers and bisecters of the embedding feature must wade through unrelated migration churn; if this migration is ever re-run against a database that already has top_topics data (e.g. rebuilt dev/CI databases), force: true silently drops and recreates the table, discarding all rows.\nB: force: true in create_table migrations silently drops an existing table and its data if the migration executes where the table already exists, and retroactively editing the already-released create_top_topics migration has no effect on databases that already applied it, diverging schema.rb-vs-migrations environments\n\nPAIR 19:\nA: The diff modifies an unrelated, already-applied migration (create_top_topics) to add `force: true`, work with no traceability to the embed URL handling intent. Reviewers and bisecters of the embedding feature must wade through unrelated migration churn; if this migration is ever re-run against a database that already has top_topics data (e.g. rebuilt dev/CI databases), force: true silently drops and recreates the table, discarding all rows.\nB: force: true in create_top_topics and create_topic_embeds migrations drops existing tables; adding it to the already-shipped create_top_topics migration destroys top_topics data on environments that rerun it\n\nPAIR 20:\nA: The diff modifies an unrelated, already-applied migration (create_top_topics) to add `force: true`, work with no traceability to the embed URL handling intent. Reviewers and bisecters of the embedding feature must wade through unrelated migration churn; if this migration is ever re-run against a database that already has top_topics data (e.g. rebuilt dev/CI databases), force: true silently drops and recreates the table, discarding all rows.\nB: Migrations create_top_topics.rb:3 and create_topic_embeds.rb:3 use `force: true`, silently dropping existing tables and data; editing already-shipped migrations is a red flag\n",
+  "effort": "low",
+  "pairs": [
+   [
+    81,
+    1386
+   ],
+   [
+    81,
+    1724
+   ],
+   [
+    81,
+    1729
+   ],
+   [
+    90,
+    91
+   ],
+   [
+    97,
+    263
+   ],
+   [
+    97,
+    1351
+   ],
+   [
+    97,
+    1356
+   ],
+   [
+    104,
+    105
+   ],
+   [
+    107,
+    199
+   ],
+   [
+    107,
+    1383
+   ],
+   [
+    107,
+    1698
+   ],
+   [
+    107,
+    1704
+   ],
+   [
+    108,
+    118
+   ],
+   [
+    108,
+    126
+   ],
+   [
+    108,
+    138
+   ],
+   [
+    117,
+    943
+   ],
+   [
+    117,
+    1057
+   ],
+   [
+    117,
+    1101
+   ],
+   [
+    117,
+    1102
+   ],
+   [
+    117,
+    1326
+   ]
+  ]
+ },
+ "parsed_response": {
+  "pairs": [
+   {
+    "pair": 1,
+    "a": {
+     "mechanism": "perform_retrieve calls Jobs::PollFeed.new.execute({}) synchronously, performing a full feed fetch plus per-item TopicEmbed.import inside a per-URL background job",
+     "trigger": "each first-time embed URL",
+     "consequence": "N imports for an N-item feed, multiplied load on polled site, delayed embed appearance, duplicating hourly schedule"
+    },
+    "b": {
+     "mechanism": "TopicRetriever#perform_retrieve calls Jobs::PollFeed.new.execute({}) directly instead of via queue",
+     "trigger": "embed retrieval",
+     "consequence": "bypasses retry/queueing semantics; couples retriever to poller internals"
+    },
+    "material_differences": [
+     "A claims full-feed fetch plus per-item TopicEmbed.import per embed, load multiplication, and duplication of hourly schedule; B contains none of these import/load claims"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "B is a subset reporting only queue bypass/coupling; A adds material claims about full-feed import per embed and site load that B lacks."
+   },
+   {
+    "pair": 2,
+    "a": {
+     "mechanism": "synchronous Jobs::PollFeed.new.execute({}) causing full feed fetch plus import of every item per embed URL",
+     "trigger": "first-time embed URL / user-triggered embed",
+     "consequence": "N TopicEmbed.import calls per N-item feed, load multiplication, delayed embed, duplicating hourly schedule, retry bypass"
+    },
+    "b": {
+     "mechanism": "TopicRetriever synchronously executes Jobs::PollFeed inline instead of Jobs.enqueue, bypassing error/retry semantics",
+     "trigger": "a single user-triggered embed",
+     "consequence": "synchronously imports an entire feed; bypasses retry semantics"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "Both claim synchronous inline PollFeed execution that imports the entire feed per user-triggered embed, bypassing job retry semantics."
+   },
+   {
+    "pair": 3,
+    "a": {
+     "mechanism": "synchronous Jobs::PollFeed.new.execute({}) performing full feed fetch plus per-item import",
+     "trigger": "first-time embed URL",
+     "consequence": "N imports per N-item feed, load multiplication, delayed embed, duplicating hourly schedule"
+    },
+    "b": {
+     "mechanism": "executes PollFeed synchronously instead of enqueueing/extracting shared service, causing full RSS re-parse and import of all items per embed request",
+     "trigger": "per embed request",
+     "consequence": "defeats per-URL throttle; couples retriever to scheduled job internals"
+    },
+    "material_differences": [
+     "B additionally claims the per-URL throttle is defeated, a specific mechanism not asserted in A"
+    ],
+    "same": false,
+    "confidence": 0.55,
+    "reason": "B adds a distinct material claim (defeating the per-URL throttle) not made by A; under strict equivalence the compound report is not equal to A's claim set."
+   },
+   {
+    "pair": 4,
+    "a": {
+     "mechanism": "poll_feed iterates entire feed with no cap/cutoff; TopicEmbed.import does fresh SELECT + SHA1 per item hourly",
+     "trigger": "hourly scheduled job on a large feed",
+     "consequence": "O(N) full pass with one query per item and one PostRevisor pass per changed item; cost scales with feed size, no batching/pagination"
+    },
+    "b": {
+     "mechanism": "N+1 pattern: TopicEmbed.where(embed_url).first plus SHA1/import inside loop over every feed item, unbounded, no batching",
+     "trigger": "large feed (hundreds of items) inside one Sidekiq job",
+     "consequence": "hundreds of individual lookups and topic transactions per run; linear runtime growth; large feed stalls hourly job"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.8,
+    "reason": "Both claim per-item lookups/imports inside an unbounded loop over the feed with linear scaling and no batching, harming the hourly job."
+   },
+   {
+    "pair": 5,
+    "a": {
+     "mechanism": "PostCreator assigns post.cook_method from @opts with no authorization guard",
+     "trigger": "caller forwards request-derived options (posts endpoint passing client params)",
+     "consequence": "any end user selects raw_html cook path, storing arbitrary unsanitized HTML — stored XSS"
+    },
+    "b": {
+     "mechanism": "PostCreator reads cook_method from public opts bag populated by HTTP endpoints from request params",
+     "trigger": "any logged-in user submits cook_method=2",
+     "consequence": "raw HTML persisted in cooked, rendered raw in views/embed, stored script injection for any registered user"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "Same mechanism (cook_method from request-reachable opts, no auth), same trigger, same stored-XSS consequence."
+   },
+   {
+    "pair": 6,
+    "a": {
+     "mechanism": "PostCreator assigns cook_method from @opts without authorization guard",
+     "trigger": "requester supplies cook_method via forwarded opts",
+     "consequence": "end user stores raw unsanitized HTML — stored XSS"
+    },
+    "b": {
+     "mechanism": "TopicEmbed.import stores remote/feed HTML as raw_html",
+     "trigger": "attacker-controlled feed/remote content",
+     "consequence": "stored XSS from feed content, bypassing Post#cook sanitization"
+    },
+    "material_differences": [
+     "Different code path: A concerns opts-driven cook_method selection by a requester; B concerns feed content imported as raw_html by design",
+     "Different trigger: user-supplied parameter vs external feed content"
+    ],
+    "same": false,
+    "confidence": 0.85,
+    "reason": "Different defects: missing authorization on cook_method vs raw_html rendering of feed content in TopicEmbed.import."
+   },
+   {
+    "pair": 7,
+    "a": {
+     "mechanism": "PostCreator assigns cook_method from @opts with no authorization guard",
+     "trigger": "request-derived options forwarded into PostCreator",
+     "consequence": "requester selects raw_html path, unprivileged stored XSS"
+    },
+    "b": {
+     "mechanism": "raw_html cook method makes Post#cook return raw HTML verbatim, rendered with raw in embed view",
+     "trigger": "external attacker-controlled HTML content",
+     "consequence": "XSS/injection bypassing sanitization pipeline"
+    },
+    "material_differences": [
+     "A's defect is the missing authorization on opts-driven cook_method selection; B's claim is about the raw_html rendering path for external content, with no opts/authorization claim"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "B describes the raw_html rendering of external content, not the missing-authorization-on-opts defect A reports; different mechanism and trigger."
+   },
+   {
+    "pair": 8,
+    "a": {
+     "mechanism": "tests assert only should_not be_success, cannot distinguish 403 from 500-class crash",
+     "trigger": "regression where guard raises unhandled error (rescue removed/misplaced)",
+     "consequence": "tests stay green masking a crash as intended denial"
+    },
+    "b": {
+     "mechanism": "tests assert only should_not be_success; additionally no spec sends malformed referer so rescue URI::InvalidURIError branch never triggered",
+     "trigger": "guard regresses to unhandled exception or rescue dropped",
+     "consequence": "500 crash page instead of clean 403 while both tests stay green"
+    },
+    "material_differences": [
+     "B adds a distinct claim: no spec exercises the new rescue URI::InvalidURIError branch (untested branch coverage)"
+    ],
+    "same": false,
+    "confidence": 0.6,
+    "reason": "Core weak-assertion claim matches, but B adds a separate material claim about missing malformed-referer spec coverage of the rescue branch."
+   },
+   {
+    "pair": 9,
+    "a": {
+     "mechanism": "update test probes with plain text so cooked =~ passes regardless of cook path",
+     "trigger": "cook_method reset / re-cook as markdown on revision",
+     "consequence": "suite cannot detect cook_method regression; embedded HTML stripped on updates"
+    },
+    "b": {
+     "mechanism": "update test never asserts content_sha1 was updated",
+     "trigger": "update branch stops persisting new digest",
+     "consequence": "every subsequent poll re-enters revise branch indefinitely; test passes"
+    },
+    "material_differences": [
+     "A concerns cook_method/raw_html preservation on revise; B concerns content_sha1 digest persistence — different fields, different regression mechanisms, different failure modes"
+    ],
+    "same": false,
+    "confidence": 0.9,
+    "reason": "Different defects: cook-path preservation vs digest persistence gating the update branch."
+   },
+   {
+    "pair": 10,
+    "a": {
+     "mechanism": "plain-text probe cannot detect cook_method regression on revise",
+     "trigger": "cook_method reset on revision",
+     "consequence": "HTML stripped on feed updates, suite green"
+    },
+    "b": {
+     "mechanism": "content_sha1 no-op branch untested; update test doesn't assert digest persistence or no duplicate creation",
+     "trigger": "digest not persisted / duplicate TopicEmbed created",
+     "consequence": "repeated revise or hard 500 from unique index"
+    },
+    "material_differences": [
+     "A is about cook_method; B is about content_sha1 persistence and duplicate-creation coverage"
+    ],
+    "same": false,
+    "confidence": 0.85,
+    "reason": "Different testing gaps and different mechanisms (cook pipeline vs digest/duplicates)."
+   },
+   {
+    "pair": 11,
+    "a": {
+     "mechanism": "plain-text probe passes under either cook path",
+     "trigger": "cook_method lost on revision",
+     "consequence": "cook_method regression undetectable; HTML stripped on updates"
+    },
+    "b": {
+     "mechanism": "cooked =~ passes even via markdown pipeline; also sha1 guard and duplicate-creation untested",
+     "trigger": "cook_method lost; identical-content revise; duplicate topic/embed",
+     "consequence": "cook_method preservation unverified; sha1 no-op branch and uniqueness unverified"
+    },
+    "material_differences": [
+     "B's first claim matches A, but B adds untested content_sha1 guard and duplicate-topic/embed creation claims"
+    ],
+    "same": false,
+    "confidence": 0.65,
+    "reason": "B is a compound report containing A's claim plus additional material claims (sha1 no-op branch, duplicate creation), so not equal under strict equivalence."
+   },
+   {
+    "pair": 12,
+    "a": {
+     "mechanism": "plain-text probe cannot detect cook_method regression",
+     "trigger": "cook_method reset/re-cook as markdown on revise",
+     "consequence": "HTML stripped on feed updates, suite green"
+    },
+    "b": {
+     "mechanism": "sha1 change-detection untested in unchanged direction; update test never asserts content_sha1 refresh or revision count",
+     "trigger": "regression re-revising on every poll",
+     "consequence": "hourly re-revision passes the suite"
+    },
+    "material_differences": [
+     "A concerns cook_method preservation; B concerns content_sha1 no-op direction — different mechanisms and regression modes"
+    ],
+    "same": false,
+    "confidence": 0.85,
+    "reason": "Different testing gaps: cook pipeline preservation vs digest no-op detection."
+   },
+   {
+    "pair": 13,
+    "a": {
+     "mechanism": "--category/-c option and handling deleted from disqus import task",
+     "trigger": "existing scripts invoke thor disqus:import -c Category after upgrade",
+     "consequence": "break with unknown-option error; no migration note"
+    },
+    "b": {
+     "mechanism": "--category/-c option and category_id wiring removed; task repurposed to TopicEmbed.import_remote",
+     "trigger": "existing automation invokes -c option",
+     "consequence": "no category assigned, topics land in site default with no error; no migration path; buried in unrelated PR scope"
+    },
+    "material_differences": [
+     "Conflicting consequences: A claims a hard unknown-option error; B claims silent no-error fallback to default category",
+     "B adds repurposing to import_remote as part of the claim"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "The claimed consequences conflict (hard CLI error vs silent default-category behavior); B also adds the import_remote repurposing claim."
+   },
+   {
+    "pair": 14,
+    "a": {
+     "mechanism": "--category/-c option and handling deleted",
+     "trigger": "existing scripts invoke -c",
+     "consequence": "unknown-option error on upgrade; contract change without acceptance"
+    },
+    "b": {
+     "mechanism": "category option and permalink-post behavior removed; creation switched to TopicEmbed.import_remote",
+     "trigger": "existing automation invoking -c; previously imported threads re-run",
+     "consequence": "unknown-option error; previously permalink-post imports now create raw-HTML embed topics"
+    },
+    "material_differences": [
+     "B adds the permalink-post vs raw-HTML embed behavioral change as an additional material claim"
+    ],
+    "same": false,
+    "confidence": 0.65,
+    "reason": "B is a compound report: it matches A's CLI-removal claim but adds a distinct behavioral-change claim about permalink posts vs embed topics."
+   },
+   {
+    "pair": 15,
+    "a": {
+     "mechanism": "--category/-c option deleted from import task",
+     "trigger": "existing scripts invoke -c after upgrade",
+     "consequence": "break with unknown-option error; no migration note"
+    },
+    "b": {
+     "mechanism": "import loop rewritten from permalink PostCreator to TopicEmbed.import_remote with blocking HTTP fetch",
+     "trigger": "operators re-run previously working Disqus import",
+     "consequence": "different artifact: network-dependent imports, raw-HTML posts, embed-path topics; changed output contract"
+    },
+    "material_differences": [
+     "A's central claim is CLI option removal breaking scripts with an error; B's central claim is the changed import artifact/behavior, with no unknown-option-error consequence stated"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "Different material claims: A reports the removed CLI option breaking invocations; B reports changed import behavior/artifacts via import_remote."
+   },
+   {
+    "pair": 16,
+    "a": {
+     "mechanism": "unrelated already-applied migration modified to add force:true",
+     "trigger": "migration re-run against DB with existing top_topics data",
+     "consequence": "unrelated churn for reviewers/bisecters; table silently dropped and recreated, rows lost"
+    },
+    "b": {
+     "mechanism": "create_top_topics migration changed to force:true",
+     "trigger": "re-run / table exists",
+     "consequence": "drops and recreates table destroying existing data"
+    },
+    "material_differences": [
+     "A additionally claims unrelated-work/traceability churn as a separate material concern"
+    ],
+    "same": false,
+    "confidence": 0.55,
+    "reason": "B is a pure subset of A's compound claim; A adds the distinct unrelated-migration-churn claim, so strict equivalence fails."
+   },
+   {
+    "pair": 17,
+    "a": {
+     "mechanism": "unrelated already-applied migration modified to add force:true",
+     "trigger": "re-run against DB with existing top_topics data",
+     "consequence": "review churn; table silently dropped, rows lost"
+    },
+    "b": {
+     "mechanism": "already-applied migration edited to add force:true to create_table",
+     "trigger": "migration re-runs",
+     "consequence": "DROP TABLE IF EXISTS silently destroys all top_topics data, no rollback path"
+    },
+    "material_differences": [
+     "A adds the unrelated-churn/traceability claim absent in B"
+    ],
+    "same": false,
+    "confidence": 0.55,
+    "reason": "Core data-loss claim matches, but A's compound report includes the additional unrelated-work churn claim, so under strict equivalence they are not equal."
+   },
+   {
+    "pair": 18,
+    "a": {
+     "mechanism": "unrelated already-applied migration modified to add force:true",
+     "trigger": "re-run against DB with existing data",
+     "consequence": "churn; silent drop/recreate losing rows"
+    },
+    "b": {
+     "mechanism": "force:true drops existing table/data; retroactive edit of released migration has no effect on already-applied DBs",
+     "trigger": "migration executes where table exists; already-applied environments",
+     "consequence": "data destruction on rerun; schema.rb-vs-migrations divergence"
+    },
+    "material_differences": [
+     "B claims the retroactive edit is a no-op on already-applied DBs and causes schema.rb divergence — a distinct claim absent from A",
+     "A adds unrelated-churn claim absent from B"
+    ],
+    "same": false,
+    "confidence": 0.6,
+    "reason": "Beyond the shared drop-on-rerun claim, each report adds different material claims (churn vs schema divergence/no-op effect)."
+   },
+   {
+    "pair": 19,
+    "a": {
+     "mechanism": "unrelated already-applied migration modified to add force:true",
+     "trigger": "re-run against DB with existing top_topics data",
+     "consequence": "churn; silent drop/recreate losing rows"
+    },
+    "b": {
+     "mechanism": "force:true in create_top_topics and create_topic_embeds migrations drops existing tables",
+     "trigger": "environments that rerun the already-shipped create_top_topics migration",
+     "consequence": "destroys top_topics data"
+    },
+    "material_differences": [
+     "B extends the claim to a second migration (create_topic_embeds) not mentioned by A",
+     "A adds unrelated-churn claim absent in B"
+    ],
+    "same": false,
+    "confidence": 0.6,
+    "reason": "B covers an additional migration (create_topic_embeds), a scope difference that is material under strict equivalence."
+   },
+   {
+    "pair": 20,
+    "a": {
+     "mechanism": "unrelated already-applied migration modified to add force:true",
+     "trigger": "re-run against DB with existing top_topics data",
+     "consequence": "churn; silent drop/recreate losing rows"
+    },
+    "b": {
+     "mechanism": "create_top_topics.rb:3 and create_topic_embeds.rb:3 use force:true, silently dropping existing tables and data; editing already-shipped migrations is a red flag",
+     "trigger": "migration runs where tables exist",
+     "consequence": "data destruction; editing shipped migrations is bad practice"
+    },
+    "material_differences": [
+     "B covers a second migration (create_topic_embeds) not in A's claim",
+     "A adds unrelated-churn claim absent in B"
+    ],
+    "same": false,
+    "confidence": 0.6,
+    "reason": "B's claim spans an additional migration file, and A retains the unrelated-churn claim; scopes and claim sets differ materially."
+   }
+  ]
+ },
+ "usage": {
+  "glm-5.3-background": {
+   "input_tokens": 3685,
+   "cache_read_input_tokens": 8192,
+   "cache_creation_input_tokens": 0,
+   "output_tokens": 10351,
+   "reasoning_output_tokens": 4147,
+   "cost_usd": 0.0,
+   "total_tokens": 26375
+  }
+ },
+ "status": "complete",
+ "error_type": null,
+ "elapsed_s": 107.53243398666382
+}

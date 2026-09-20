@@ -1,0 +1,93 @@
+diff --git a/spec/verify/routes_verify.rb b/spec/verify/routes_verify.rb
+new file mode 100644
+--- /dev/null
++++ b/spec/verify/routes_verify.rb
+@@ -0,0 +1,88 @@
++# standalone verification of config/routes.rb embed/best route
++# Run from repo root: ruby -I. spec/verify/routes_verify.rb
++
++module Kernel
++  alias_method :__orig_require, :require unless method_defined?(:__orig_require)
++  def require(name)
++    return false if ["sidekiq/web", "sidetiq/web"].include?(name)
++    __orig_require(name)
++  end
++  def require_dependency(name); end
++end
++
++module Sidekiq; class Web; end; end unless defined?(Sidekiq)
++module Sidetiq; class Web; end; end unless defined?(Sidetiq)
++
++class AdminConstraint;     def initialize(*); end; def matches?(*); true; end; end
++class StaffConstraint;     def initialize(*); end; def matches?(*); true; end; end
++class HomepageConstraint;  def initialize(*); end; def matches?(*); true; end; end
++
++# Minimal routes recorder that captures the get/post/... declarations.
++class Mapper
++  ROUTES = []
++
++  def mount(*args); end
++  def get(*a);    record(:get, a);    end
++  def post(*a);   record(:post, a);   end
++  def put(*a);    record(:put, a);    end
++  def delete(*a); record(:delete, a); end
++  def match(*a);  record(:match, a);  end
++
++  def method_missing(name, *args, &block)
++    Mapper.new.instance_eval(&block) if block
++  end
++
++  def respond_to_missing?(*); true; end
++
++  private
++
++  def record(verb, args)
++    opts = {}
++    opts = args.pop if args.length > 1 && args.last.is_a?(Hash)
++    path = args.shift
++    if path.is_a?(Hash)
++      opts = path.merge(opts)
++      path = opts.keys.first
++    end
++    ROUTES << [verb, path, opts]
++  end
++end
++
++module Discourse
++  def self.filters; []; end
++  def self.anonymous_filters; []; end
++  class Application
++    def self.routes; @routes ||= RouteSet.new; end
++  end
++  class RouteSet
++    def draw(&block); Mapper.new.instance_eval(&block); end
++  end
++end unless defined?(Discourse)
++
++# Load the REAL routes file. Nothing in it is redefined.
++require_relative '../../config/routes'
++
++route = Mapper::ROUTES.find { |verb, path, _| verb == :get && path == "embed/best" }
++
++unless route
++  puts "RESULT: FAIL: embed/best route was not declared in config/routes.rb"
++  exit
++end
++
++opts = route[2]
++
++named = opts.key?(:as)
++format_constrained =
++  opts[:format] == :html ||
++  (opts[:constraints].is_a?(Hash) && opts[:constraints].key?(:format)) ||
++  (opts[:defaults].is_a?(Hash) && opts[:defaults].key?(:format))
++
++if !named && !format_constrained
++  puts "RESULT: FAIL: embed/best route is unnamed (no :as -> no URL helper) and unconstrained (no format constraint -> accepts unintended formats such as .json)"
++elsif !named
++  puts "RESULT: FAIL: embed/best route is unnamed, so no URL helper exists for it"
++elsif !format_constrained
++  puts "RESULT: FAIL: embed/best route has no format constraint, so it accepts unintended formats"
++else
++  puts "RESULT: PASS"
++end

@@ -1,0 +1,57 @@
+import { expect, it, vi } from "vitest";
+
+// Ensure the feature flag is enabled and a known secret is set before the module is imported.
+process.env.CALCOM_APP_CREDENTIAL_SHARING_ENABLED = "true";
+process.env.CALCOM_WEBHOOK_SECRET = "super-secret-value";
+
+vi.mock("@calcom/lib/constants", () => ({
+  APP_CREDENTIAL_SHARING_ENABLED: true,
+}));
+
+vi.mock("@calcom/prisma", () => ({
+  default: {
+    user: { findUnique: vi.fn() },
+    app: { findUnique: vi.fn() },
+    credential: { findFirst: vi.fn(), update: vi.fn(), create: vi.fn() },
+  },
+}));
+
+vi.mock("@calcom/lib/crypto", () => ({
+  symmetricDecrypt: vi.fn(),
+}));
+
+vi.mock("@calcom/app-store/appStoreMetaData", () => ({
+  appStoreMetadata: {},
+}));
+
+it("rate limits repeated requests with an invalid webhook secret", async () => {
+  const { default: handler } = await import("./app-credential");
+
+  let sawRateLimit = false;
+
+  // Send many attempts with a wrong secret. A rate-limited endpoint must
+  // eventually respond with 429 (Too Many Requests).
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const req = {
+      headers: { "calcom-webhook-secret": "wrong-secret" },
+      body: {},
+    } as any;
+
+    const res = {
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn().mockReturnThis(),
+    } as any;
+
+    await handler(req, res);
+
+    if (res.status.mock.calls.some((args: any[]) => args[0] === 429)) {
+      sawRateLimit = true;
+      break;
+    }
+  }
+
+  expect(
+    sawRateLimit,
+    "expected the webhook endpoint to return HTTP 429 after repeated invalid secret attempts, but it never did"
+  ).toBe(true);
+});

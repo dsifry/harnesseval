@@ -1,0 +1,78 @@
+diff --git a/spec/jobs/poll_feed_spec.rb b/spec/jobs/poll_feed_spec.rb
+index e2648338b7..748587fc9b 100644
+--- a/spec/jobs/poll_feed_spec.rb
++++ b/spec/jobs/poll_feed_spec.rb
+@@ -1,40 +1,42 @@
+-require 'spec_helper'
+-require_dependency 'jobs/regular/process_post'
+-
+-describe Jobs::PollFeed do
+-
+-  let(:poller) { Jobs::PollFeed.new }
+-
+-  context "execute" do
+-    let(:url) { "http://eviltrout.com" }
+-    let(:embed_by_username) { "eviltrout" }
+-
+-    it "requires feed_polling_enabled?" do
+-      SiteSetting.stubs(:feed_polling_enabled?).returns(false)
+-      poller.expects(:poll_feed).never
+-      poller.execute({})
++#
++# Creates and Updates Topics based on an RSS or ATOM feed.
++#
++require 'digest/sha1'
++require_dependency 'post_creator'
++require_dependency 'post_revisor'
++require 'open-uri'
++
++module Jobs
++  class PollFeed < Jobs::Scheduled
++    recurrence { hourly }
++    sidekiq_options retry: false
++
++    def execute(args)
++      enabled = SiteSetting.feed_polling_enabled?
++      url = SiteSetting.feed_polling_url
++      username = SiteSetting.embed_by_username
++
++      poll_feed if enabled && url.present? && username.present?
+     end
+ 
+-    it "requires feed_polling_url" do
+-      SiteSetting.stubs(:feed_polling_url).returns(nil)
+-      poller.expects(:poll_feed).never
+-      poller.execute({})
++    def feed_key
++      @feed_key ||= "feed-modified:#{Digest::SHA1.hexdigest(SiteSetting.feed_polling_url)}"
+     end
+ 
+-    it "requires embed_by_username" do
+-      SiteSetting.stubs(:embed_by_username).returns(nil)
+-      poller.expects(:poll_feed).never
+-      poller.execute({})
+-    end
++    def poll_feed
++      user = User.where(username_lower: SiteSetting.embed_by_username.downcase).first
++      return if user.blank?
++
++      require 'simple-rss'
++      rss = SimpleRSS.parse open(SiteSetting.feed_polling_url)
+ 
++      rss.items.each do |i|
++        url = i.link
++        url = i.id if url.blank? || url !~ /^https?\:\/\//
+ 
+-    it "delegates to poll_feed" do
+-      SiteSetting.stubs(:feed_polling_enabled?).returns(true)
+-      SiteSetting.stubs(:feed_polling_url).returns(url)
+-      SiteSetting.stubs(:embed_by_username).returns(embed_by_username)
+-      poller.expects(:poll_feed).once
+-      poller.execute({})
++        content = CGI.unescapeHTML(i.content.scrub)
++        TopicEmbed.import(user, url, i.title, content)
++      end
+     end
+   end
+-
+ end

@@ -1,0 +1,92 @@
+{
+ "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/4",
+ "mrv_adv": 2,
+ "dchars": 29064,
+ "concerns": [
+  {
+   "advisory": "Both new gems are added to `Gemfile`, but only `Gemfile_rails4.lock` is regenerated \u2014 the primary `Gemfile.lock` is untouched, so a deploy using the default lockfile will fail bundler's frozen check or resolve differently.",
+   "kind": "deploy/version-skew risk",
+   "why": "Gemfile adds `ruby-readability` and `simple-rss`; the diff only updates Gemfile_rails4.lock (guess_html_encoding, ruby-readability 0.5.7, simple-rss 1.3.1)."
+  },
+  {
+   "advisory": "New assets `embed.js` and `embed.css.scss` are introduced and referenced by `stylesheet_link_tag 'embed'`, but no asset precompile configuration is added, so in production the embed layout will 404 on its stylesheet unless the precompile list already covers these names.",
+   "kind": "deploy/version-skew risk",
+   "why": "app/assets/javascripts/embed.js and app/assets/stylesheets/embed.css.scss are new top-level assets; app/views/layouts/embed.html.erb calls `stylesheet_link_tag 'embed'`; no config/application.rb precompile change in the diff."
+  },
+  {
+   "advisory": "The already-committed migration `20131223171005_create_top_topics.rb` is edited in place to add `force: true`, which means installs that already ran it are unaffected but any re-run (or a rollback/replay, or a fresh dev DB rebuilt from a schema that has data) will silently DROP and recreate `top_topics`.",
+   "kind": "migration/re-run hazard",
+   "why": "`create_table :top_topics` \u2192 `create_table :top_topics, force: true` in an existing dated migration; the new `create_topic_embeds` migration also uses `force: true`."
+  },
+  {
+   "advisory": "Imported feed/article HTML is stored with `cook_method = :raw_html` and rendered via `raw post.cooked`, bypassing Discourse's sanitizing cook pipeline entirely, so the security posture of embedded topics now depends wholly on ruby-readability's tag/attribute whitelist and the trustworthiness of the polled feed.",
+   "kind": "security-hardening note",
+   "why": "`Post#cook` returns `raw` for `Post.cook_methods[:raw_html]`; `TopicEmbed.import` passes that cook_method; `best.html.erb` emits `<%= raw post.cooked %>`. `import_remote` whitelists tags but `PollFeed` passes feed `content` straight through with no whitelist at all."
+  },
+  {
+   "advisory": "Both remote-fetch paths use Kernel#open (open-uri) on a URL, which fetches arbitrary internal/external hosts from the app server and \u2014 for open-uri \u2014 treats a leading `|` as a shell command; the only guard is an exact `embeddable_host` match in TopicRetriever, which `PollFeed`/`import_remote` do not themselves enforce.",
+   "kind": "security-hardening note",
+   "why": "`SimpleRSS.parse open(SiteSetting.feed_polling_url)` in poll_feed and `Readability::Document.new(open(url).read)` in `TopicEmbed.import_remote`; `import_remote` is also called directly from lib/tasks/disqus.thor with arbitrary thread links."
+  },
+  {
+   "advisory": "Any anonymous visitor hitting `embed/best` with an unknown embed_url enqueues a background job that performs an outbound HTTP fetch; the only rate limiting is a 60-second Redis key per exact URL, so distinct URL variants (query strings, fragments) each get their own fetch slot.",
+   "kind": "security-hardening note",
+   "why": "`Jobs.enqueue(:retrieve_topic, user_id: current_user.try(:id), embed_url: embed_url)` with no auth requirement, and `retrieved_recently?` keys on `\"retrieved:#{@embed_url}\"` for 60s."
+  },
+  {
+   "advisory": "Framing protection is deliberately disabled (`X-Frame-Options: ALLOWALL`) and replaced by a `request.referer` host comparison, which is client-supplied and omitted/spoofable, so the embed endpoint's access control is only as strong as the Referer header.",
+   "kind": "security-hardening note",
+   "why": "`ensure_embeddable` compares `URI(request.referer || '').host` to `SiteSetting.embeddable_host` and then sets `response.headers['X-Frame-Options'] = \"ALLOWALL\"`."
+  },
+  {
+   "advisory": "The postMessage handshake validates loosely on both ends: the child posts to `'<%= request.referer %>'` (a full URL, not an origin) and the parent accepts any message whose origin appears as a substring of `discourseUrl`, so origin checking is weaker than an equality comparison.",
+   "kind": "security-hardening note",
+   "why": "`parent.postMessage({...}, '<%= request.referer %>')` in layouts/embed.html.erb and `if (discourseUrl.indexOf(e.origin) === -1) { return; }` in embed.js."
+  },
+  {
+   "advisory": "`PostRevisor#update_post` now honors a new `skip_validations` option that changes `@post.save` to `save(validate: false)` for every caller, widening a model-level invariant escape hatch beyond the embed import path that motivated it.",
+   "kind": "API-contract or backward-compatibility note",
+   "why": "lib/post_revisor.rb: `@post.save` \u2192 `@post.save(validate: !@opts[:skip_validations])`; only TopicEmbed.import passes the flag today."
+  },
+  {
+   "advisory": "`TopicRetriever#perform_retrieve` runs `Jobs::PollFeed.new.execute({})` inline, so a single embed miss synchronously downloads and imports the entire configured feed (creating/revising many topics) inside one Sidekiq job before falling back to the single-URL fetch.",
+   "kind": "performance consideration",
+   "why": "`if SiteSetting.feed_polling_enabled?; Jobs::PollFeed.new.execute({}); ...` inside perform_retrieve, invoked from Jobs::RetrieveTopic."
+  },
+  {
+   "advisory": "The feed poller has no error handling and `retry: false`, so a single malformed feed, network timeout, or nil `i.content` silently loses that hourly run with nothing logged beyond the Sidekiq failure.",
+   "kind": "observability gap",
+   "why": "`sidekiq_options retry: false` plus unguarded `open(...)`, `SimpleRSS.parse`, and `i.content.scrub` in Jobs::PollFeed#poll_feed."
+  },
+  {
+   "advisory": "`PollFeed#feed_key` computes a `feed-modified:` cache key that is never read or written anywhere, so the conditional-GET/change-detection it implies does not exist and every hourly poll refetches and re-hashes the whole feed.",
+   "kind": "other",
+   "why": "`def feed_key; @feed_key ||= \"feed-modified:#{Digest::SHA1.hexdigest(...)}\"; end` in app/jobs/scheduled/poll_feed.rb, with no call sites in the diff."
+  },
+  {
+   "advisory": "`embed_url` is a plain `t.string` (255 chars on most adapters) carrying a unique index, so long article/feed URLs can be truncated or rejected and two long URLs sharing a prefix could collide on the unique index.",
+   "kind": "other",
+   "why": "db/migrate/20131217174004_create_topic_embeds.rb: `t.string :embed_url, null: false` plus `add_index :topic_embeds, :embed_url, unique: true`."
+  },
+  {
+   "advisory": "The loading page self-reloads every 30 seconds while the retrieval throttle is 60 seconds, so a visitor whose fetch is slow will reload into a throttled no-op at least once, and there is no give-up condition \u2014 the page reloads forever if retrieval never succeeds.",
+   "kind": "documentation/UX inconsistency",
+   "why": "`setTimeout(function() { document.location.reload(); }, 30000)` in embed/loading.html.erb versus `$redis.expire(retrieved_key, 60)` in TopicRetriever."
+  },
+  {
+   "advisory": "The disqus thor task drops its `--category` option and switches topic creation to `TopicEmbed.import_remote`, silently changing the importer's behavior (no category placement, one live HTTP fetch per thread, content now scraped from the link instead of a permalink stub) for anyone relying on the old flow.",
+   "kind": "API-contract or backward-compatibility note",
+   "why": "lib/tasks/disqus.thor removes `method_option :category` and the `category_id` lookup, replacing `PostCreator.new(...)` with `TopicEmbed.import_remote(user, t[:link], title: t[:title])`."
+  },
+  {
+   "advisory": "Test coverage stops at the seams: `PollFeed#poll_feed`, `TopicEmbed.import_remote`, and `absolutize_urls` edge cases (non-default ports, protocol-relative `//host/x`, relative paths without a leading slash) are never exercised, and the EmbedController specs stub out TopicView/TopicRetriever so the new views and layout are never rendered.",
+   "kind": "test-coverage gap",
+   "why": "spec/jobs/poll_feed_spec.rb only asserts the `execute` guard delegation; spec/models/topic_embed_spec.rb covers only `.import` with one root-relative URL; spec/controllers/embed_controller_spec.rb mocks `TopicView.new` and the retriever."
+  },
+  {
+   "advisory": "The four new site settings are added with no type/format validation or client exposure, so `embeddable_host` accepts any string (scheme, port, or path included) even though it is compared against `URI(...).host`, and only a single embedding host is supportable.",
+   "kind": "documentation/UX inconsistency",
+   "why": "config/site_settings.yml adds bare-string `embeddable_host`/`feed_polling_url`/`embed_by_username` defaults, while both `EmbedController#ensure_embeddable` and `TopicRetriever#invalid_host?` compare it to a parsed `.host`."
+  }
+ ]
+}

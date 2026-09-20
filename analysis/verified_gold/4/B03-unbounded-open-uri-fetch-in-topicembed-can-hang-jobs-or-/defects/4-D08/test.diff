@@ -1,0 +1,92 @@
+require 'stringio'
+require 'tmpdir'
+
+# ---------------------------------------------------------------------------
+# Minimal stubs so app/models/topic_embed.rb can load without Rails/DB.
+# ---------------------------------------------------------------------------
+module Kernel
+  def require_dependency(name); end
+end
+
+module ActiveRecord
+  class Relation
+    def first
+      r = Object.new
+      def r.content_sha1; "same"; end
+      def r.post; :stub_post; end
+      r
+    end
+    def pluck(*); []; end
+    def update_column(*); true; end
+  end
+
+  class Base
+    def self.belongs_to(*); end
+    def self.validates_presence_of(*); end
+    def self.where(*); Relation.new; end
+  end
+end
+
+module Digest
+  class SHA1
+    def self.hexdigest(_s); "same"; end
+  end
+end
+
+module I18n
+  def self.t(*); "imported from source"; end
+end
+
+# Fake ruby-readability so `require 'ruby-readability'` inside import_remote works.
+libdir = Dir.mktmpdir
+File.write(File.join(libdir, 'ruby-readability.rb'), <<~RB)
+  module Readability
+    class Document
+      def initialize(html, opts = {}); @html = html; end
+      def title; 'Stub Title'; end
+      def content; '<p>Stub Content</p>'; end
+    end
+  end
+RB
+$LOAD_PATH.unshift(libdir)
+
+# ---------------------------------------------------------------------------
+# Load the REAL file under test (no redefinition of the class).
+# ---------------------------------------------------------------------------
+require_relative '../../app/models/topic_embed.rb'
+
+# ---------------------------------------------------------------------------
+# Capture how the code under test invokes `open`.
+# ---------------------------------------------------------------------------
+$open_calls = []
+module Kernel
+  def open(*args, **kwargs, &blk)
+    $open_calls << [args, kwargs]
+    StringIO.new("<html><body>stub</body></html>")
+  end
+end
+
+begin
+  TopicEmbed.import_remote('tester', 'https://example.com/feed.xml')
+rescue => e
+  # Downstream failure is irrelevant; we only care about the open() call shape.
+end
+
+if $open_calls.empty?
+  puts "RESULT: FAIL: import_remote never invoked open/URI.open"
+  exit
+end
+
+args, kwargs = $open_calls.first
+merged = {}
+args.each { |a| merged.merge!(a) if a.is_a?(Hash) }
+merged.merge!(kwargs)
+
+has_timeout = merged.keys.map(&:to_s).any? { |k| k =~ /(read|open)_timeout/ }
+
+if has_timeout
+  puts "RESULT: PASS"
+else
+  puts "RESULT: FAIL: open(#{args.inspect}) passed no :read_timeout/:open_timeout; " \
+       "a hung upstream blocks the polling worker indefinitely"
+end

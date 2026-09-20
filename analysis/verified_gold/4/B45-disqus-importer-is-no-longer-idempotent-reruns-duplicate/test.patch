@@ -1,0 +1,144 @@
+require 'date'
+require 'stringio'
+
+module Kernel
+  alias_method :__real_require__, :require
+  def require(path)
+    return true if path == './config/environment'
+    return true if path == 'nokogiri'
+    __real_require__(path)
+  end
+end
+
+class Thor
+  def self.desc(*); end
+  def self.method_option(*); end
+  attr_reader :options
+  def initialize(args = [], options = {}, config = {})
+    @options = options
+  end
+end
+
+module Nokogiri
+  module XML
+    module SAX
+      class Document; end
+      class Parser
+        def initialize(doc); @doc = doc; end
+        def parse_file(_f)
+          @doc.threads = {
+            't1' => { id: 't1', title: 'Hello', link: 'http://example.com/hello',
+                      posts: [{ id: 'p1', cooked: 'hello', created_at: '2015-01-01' },
+                              { id: 'p2', cooked: 'world', created_at: '2015-01-02' }] }
+          }
+        end
+      end
+    end
+  end
+end
+
+class Object
+  def blank?; false; end
+  def present?; true; end
+end
+class NilClass
+  def blank?; true; end
+  def present?; false; end
+end
+
+class FakeTopic; end
+class FakePost
+  attr_reader :topic, :topic_id, :post_number
+  def initialize(topic_id, post_number, topic)
+    @topic_id = topic_id; @post_number = post_number; @topic = topic
+  end
+end
+
+$creator_calls = 0
+
+module TopicEmbed
+  # Post-PR contract: the embed row already exists, so the pre-existing post is returned.
+  def self.import_remote(_user, _link, _opts)
+    FakePost.new(42, 1, FakeTopic.new)
+  end
+end
+
+class PostCreator
+  def initialize(_user, _attrs); end
+  def create
+    $creator_calls += 1
+    FakePost.new(42, $creator_calls, FakeTopic.new)
+  end
+end
+
+class TopicFeaturedUsers
+  def initialize(_topic); end
+  def choose; end
+end
+
+module RateLimiter
+  def self.disable; end
+  def self.enable; end
+end
+
+module SiteSetting
+  def self.email_domains_blacklist; ''; end
+  def self.email_domains_blacklist=(_v); end
+end
+
+class User
+  def self.where(_h); FlatUserQuery.new; end
+  class FlatUserQuery
+    def first; User.allocate; end
+  end
+end
+
+module Email
+  def self.downcase(s); s.downcase; end
+end
+
+module UserNameSuggester
+  def self.suggest(_e); 'user'; end
+end
+
+FAKE_FILE = 'disqus_verify_fake.xml'
+class << File
+  alias_method :__orig_exist__, :exist__ # placeholder, fixed below
+end
+
+class << File
+  alias_method :__orig_exist__, :exist?
+  def exist?(p)
+    return true if p == 'disqus_verify_fake.xml'
+    __orig_exist__(p)
+  end
+end
+
+require './lib/tasks/disqus.thor'
+
+def run_import
+  old = $stdout
+  $stdout = StringIO.new
+  begin
+    Disqus.new([], { file: FAKE_FILE, post_as: 'admin' }, {}).import
+  ensure
+    $stdout = old
+  end
+end
+
+begin
+  run_import
+  first = $creator_calls
+  run_import
+  total = $creator_calls
+
+  if first != 2
+    puts "RESULT: FAIL: unexpected first-run creator calls (#{first})"
+  elsif total > 2
+    puts "RESULT: FAIL: rerun duplicated replies (#{total} PostCreator#create calls across two imports; expected 2)"
+  else
+    puts 'RESULT: PASS'
+  end
+rescue => e
+  puts "RESULT: FAIL: #{e.class}: #{e.message}"
+end

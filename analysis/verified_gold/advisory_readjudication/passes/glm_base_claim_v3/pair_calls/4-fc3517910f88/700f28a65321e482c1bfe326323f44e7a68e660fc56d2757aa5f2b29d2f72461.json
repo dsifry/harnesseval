@@ -1,0 +1,488 @@
+{
+ "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/4",
+ "pass_digest": "9c5f733ce7a3f996c90c67f262cc4a77e2b234bc415c197afa7c73477ad320be",
+ "request_sha256": "700f28a65321e482c1bfe326323f44e7a68e660fc56d2757aa5f2b29d2f72461",
+ "request": {
+  "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/4",
+  "model": "glm-5.3-background",
+  "system": "You are clustering code review findings from one PR. Always respond with valid JSON.",
+  "prompt": "You are clustering code review findings from the same PR. For each PAIR below, decide whether the two findings describe the SAME underlying issue — same root cause in the same code location. Different wording is fine. A finding about a DIFFERENT defect in the same file or function is NOT the same issue. Severity or aspect differences of the same root cause ARE the same issue.\n\n\nFor THIS scoring pass, duplicate equivalence is stricter than sharing a root cause.\nYou must compare the COMPLETE MATERIAL CLAIMS, including mechanism, triggering\nconditions, execution path, and consequence. The same line or broad concern does\nnot establish equivalence. A report of wrong-category selection, a case/rename\nmismatch, a crash, and a silent fallback are different claims even at one lookup.\nAn inactive/unbound API concern and an alleged active user-facing failure differ.\nA compound report with an additional material claim does NOT equal its subset.\nDifferences only in wording, severity, or hedging do not create separate claims.\nIf the claimed mechanisms, triggers or consequences conflict, or one report adds\nan unsupported/different material factual claim, return same=false. You are NOT\nverifying which claim is true; do not repair or reinterpret either report to make\nthem match. If unsure whether their full claims are equivalent, return false.\n\nFor every numbered pair, extract what A and B actually CLAIM into mechanism,\ntrigger and consequence. Then list material_differences and give your equivalence\nverdict, confidence and reason. same=true requires no material differences.\nReturn ONLY this JSON object, with EVERY pair index exactly once:\n{\"pairs\":[{\"pair\":1,\"a\":{\"mechanism\":\"...\",\"trigger\":\"...\",\"consequence\":\"...\"},\"b\":{\"mechanism\":\"...\",\"trigger\":\"...\",\"consequence\":\"...\"},\"material_differences\":[],\"same\":true,\"confidence\":0.9,\"reason\":\"...\"}]}\n\nPAIRS:\nPAIR 1:\nA: perform_retrieve synchronously runs the entire feed poll (`Jobs::PollFeed.new.execute({})`) inside the per-URL RetrieveTopic job, duplicating the scheduler's responsibility on a user-triggered path. Every embed of a not-yet-imported article re-fetches and re-imports the whole feed inline (open + parse + one topic per item), so the requesting user's article appears only after the full poll finishes, and N users embedding different articles concurrently run N overlapping full polls that race on the same feed items.\nB: P2: TopicRetriever#perform_retrieve calls Jobs::PollFeed.new.execute({}) directly, bypassing the job queue and coupling retriever to feed poller internals, side-stepping retry/queueing semantics\n\nPAIR 2:\nA: P2: TopicEmbed.import re-import with unchanged content (content_sha1 no-op branch) is untested, and the update test doesn't assert content_sha1 persistence or that no duplicate TopicEmbed/topic is created (unique index on embed_url makes a duplicate-creation regression a hard 500)\nB: The TopicEmbed update test cannot detect if revision loses raw_html cooking: post.cooked =~ /new contents/ would also pass if PostRevisor cooked the new raw through the regular markdown pipeline (the phrase survives markdown), so nothing verifies cook_method is preserved across revision. Also untested: importing identical content triggers no revision (the content_sha1 guard and embed.update_column(:content_sha1, ...)), and that update doesn't create a duplicate topic/embed (TopicEmbed.count == 1 never asserted).\n\nPAIR 3:\nA: P2: TopicEmbed.import re-import with unchanged content (content_sha1 no-op branch) is untested, and the update test doesn't assert content_sha1 persistence or that no duplicate TopicEmbed/topic is created (unique index on embed_url makes a duplicate-creation regression a hard 500)\nB: TopicEmbed sha1 change-detection untested in the 'unchanged' direction — no test verifies that re-importing identical content does not create a revision, and the update test never asserts embed.content_sha1 was refreshed via update_column or checks revision count, so a regression re-revising on every hourly poll would pass the suite\n\nPAIR 4:\nA: The Disqus importer silently loses its --category option and its permalink-post behavior, switching creation to TopicEmbed.import_remote with no migration note for existing callers. Existing automation invoking `thor disqus:import -c \"Some Category\"` now fails with an unknown-option error, and previously imported Disqus threads (which got a Permalink link post) would now create raw-HTML embed topics instead — a behavioral change to a public CLI surface with no counterpart or deprecation path in this diff.\nB: The import loop's behavior was silently rewritten from creating a lightweight permalink post (`PostCreator.new(user, title:..., raw: \"\\[[Permalink](#{t[:link]})\\]\")`) to calling `TopicEmbed.import_remote`, which performs a blocking HTTP fetch per thread and imports full article HTML. Operators who re-run a previously working Disqus import get a different artifact than before: network-dependent imports (can hang/fail per URL), raw-HTML posts bypassing the cooking pipeline, and topics created via the embed path — a changed output contract never surfaced as a decision point.\n\nPAIR 5:\nA: force: true in create_table migrations silently drops an existing table and its data if the migration executes where the table already exists, and retroactively editing the already-released create_top_topics migration has no effect on databases that already applied it, diverging schema.rb-vs-migrations environments\nB: force: true in create_top_topics and create_topic_embeds migrations drops existing tables; adding it to the already-shipped create_top_topics migration destroys top_topics data on environments that rerun it\n\nPAIR 6:\nA: force: true in create_table migrations silently drops an existing table and its data if the migration executes where the table already exists, and retroactively editing the already-released create_top_topics migration has no effect on databases that already applied it, diverging schema.rb-vs-migrations environments\nB: Migrations create_top_topics.rb:3 and create_topic_embeds.rb:3 use `force: true`, silently dropping existing tables and data; editing already-shipped migrations is a red flag\n\nPAIR 7:\nA: force: true in create_table migrations silently drops an existing table and its data if the migration executes where the table already exists, and retroactively editing the already-released create_top_topics migration has no effect on databases that already applied it, diverging schema.rb-vs-migrations environments\nB: Unrelated force: true added to previously shipped create_top_topics migration is a latent data-drop hazard on partially-migrated DBs and obscures PR intent (along with whitespace-only migrate_word_counts.rb edit)\n\nPAIR 8:\nA: force: true in create_table migrations silently drops an existing table and its data if the migration executes where the table already exists, and retroactively editing the already-released create_top_topics migration has no effect on databases that already applied it, diverging schema.rb-vs-migrations environments\nB: Unrelated `force: true` added to the already-applied 20131223171005_create_top_topics migration (and the new create_topic_embeds) with no explanation — if the migration re-runs it silently drops the table, and the churn pollutes history for rollback auditing\n\nPAIR 9:\nA: P2: Embed \"loading\" page has no terminal state — if the topic is never created (fetch failure, non-HTML page, or the referer-host vs embed_url-host validation mismatch between the controller and TopicRetriever, e.g. `www.example.com` vs `example.com` misconfiguration), every viewer reloads every 30 seconds forever and each reload enqueues another job that can never succeed, causing unbounded client polling and job spam on a public endpoint with no error surfaced to the integrator\nB: retrieve_topic job has no error handling around retrieval — raised errors (HTTP, parse, URI errors) fail the job invisibly and the visitor's embed shows loading forever with no feedback\n\nPAIR 10:\nA: create_table :topic_embeds, force: true on a table with null: false topic_id/post_id columns drops any pre-existing topic_embeds table on re-run. If this migration is ever re-run (db:migrate:redo, or a partially-migrated environment where the table already exists with imported topic/post associations), all topic_embed rows are silently dropped, orphaning every imported topic from its source URL so feed polling re-imports duplicates and embed lookups 404.\nB: create_table :topic_embeds uses force: true, which drops an existing topic_embeds table and its data if present, and inside change is recorded as a reversible create whose rollback would permanently drop the table — should be a plain create_table\n\nPAIR 11:\nA: EmbedController's TopicView.new raises NotFound/InvalidAccess if the topic was deleted or restricted, but TopicEmbed rows are never cleaned up on topic deletion (no dependent or FK), so the embed errors permanently\nB: Topic deletion doesn't clean up `topic_embeds` rows (no dependent destroy/hook), so stale embeds accumulate\n\nPAIR 12:\nA: EmbedController's TopicView.new raises NotFound/InvalidAccess if the topic was deleted or restricted, but TopicEmbed rows are never cleaned up on topic deletion (no dependent or FK), so the embed errors permanently\nB: topic_embeds.topic_id and post_id are null: false but lack foreign-key constraints, so deleting a topic or post leaves orphaned embed records that cause EmbedController#best to raise a 500\n\nPAIR 13:\nA: poll_feed calls `i.content.scrub`, but String#scrub exists only in Ruby 2.1.0+ (released 2013-12-25, after this branch) while this Discouse-era runtime is Ruby 2.0.0, and i.content is nil for feed items without a content element. On the deployed Ruby the very first feed item raises NoMethodError and the hourly job dies with retry: false before importing anything, so the RSS import feature ships non-functional; no test in the diff executes poll_feed's body (the specs stub it out), so the crash is invisible to CI.\nB: String#scrub availability on the deployment Ruby (2.1+) should be spot-checked.\n\nPAIR 14:\nA: poll_feed has no error handling around the parse or per-item import loop and the job is declared sidekiq_options retry: false, so any single malformed item (nil content -> NoMethodError on i.content.scrub, or a non-HTTP i.id GUID like 'tag:...') aborts the remaining items with no retry and no user-visible error One bad feed entry silently drops the rest of that poll cycle every hour; items after the failing one are never imported and nothing surfaces the failure to the operator\nB: poll_feed iterates rss.items with no per-item error isolation while `sidekiq_options retry: false` disables redelivery: an item lacking a content element (plain RSS 2.0 feeds use <description>, not <content:encoded>, leaving i.content nil so `nil.scrub` raises NoMethodError), an item with a nil title (PostCreator inserts NULL against topics.title NOT NULL), or a previously-imported item whose post was deleted (PostRevisor.new(nil)) all raise inside the loop and abort the entire run. The first failing feed item kills every hourly poll at the same position each run (feeds are newest-first), so all articles below it are never imported — feed ingestion silently halts site-wide until the offending item rotates out of the feed, and with retry: false nothing ever reports or retries the loss.\n\nPAIR 15:\nA: poll_feed has no error handling around the parse or per-item import loop and the job is declared sidekiq_options retry: false, so any single malformed item (nil content -> NoMethodError on i.content.scrub, or a non-HTTP i.id GUID like 'tag:...') aborts the remaining items with no retry and no user-visible error One bad feed entry silently drops the rest of that poll cycle every hour; items after the failing one are never imported and nothing surfaces the failure to the operator\nB: poll_feed iterates rss.items with no per-item error isolation while the job runs with sidekiq_options retry: false (line 13), so the first item lacking a content element — SimpleRSS returns nil for missing tags — raises NoMethodError on nil.scrub at line 36 and kills the run mid-loop, deterministically, on every hourly execution. Every item after the first content-less entry (common in RSS 2.0 feeds without content:encoded) is dropped forever — the importer stalls at the same item on every run with no retry, topics simply stop appearing, and the only evidence is a sidekiq failure entry; the same mechanism means any single bad item (nil title, PostCreator failure) permanently blocks all later feed items.\n\nPAIR 16:\nA: poll_feed has no error handling around the parse or per-item import loop and the job is declared sidekiq_options retry: false, so any single malformed item (nil content -> NoMethodError on i.content.scrub, or a non-HTTP i.id GUID like 'tag:...') aborts the remaining items with no retry and no user-visible error One bad feed entry silently drops the rest of that poll cycle every hour; items after the failing one are never imported and nothing surfaces the failure to the operator\nB: The rss.items loop has no per-item error handling, and two crash triggers pass the existing guards: an item without content (`nil.scrub` raises NoMethodError) and a link that satisfies import's `^https?\\://` regex but fails URI parsing inside absolutize_urls (URI::InvalidURIError, e.g. a space in the path). One malformed feed item aborts the entire import at that point, and because items are processed in order with retry disabled, every feed item after it is never imported on any future hourly run — feed polling is permanently stuck.\n\nPAIR 17:\nA: poll_feed has no error handling around the parse or per-item import loop and the job is declared sidekiq_options retry: false, so any single malformed item (nil content -> NoMethodError on i.content.scrub, or a non-HTTP i.id GUID like 'tag:...') aborts the remaining items with no retry and no user-visible error One bad feed entry silently drops the rest of that poll cycle every hour; items after the failing one are never imported and nothing surfaces the failure to the operator\nB: The rss.items loop has no per-item error handling, so the first item that raises aborts the entire feed import — most concretely, i.content is nil for feed items with no content element (plain RSS 2.0 feeds that use <description> only), and nil.scrub raises NoMethodError at line 35. One malformed or content-less item permanently halts processing of every item after it; with sidekiq_options retry: false (line 12) the hourly job never retries, so the enabled feed importer imports only a prefix (or nothing, on description-only feeds) each hour with no per-item record of what was dropped — and via TopicRetriever's inline call the same crash also fails every interactive embed retrieval.\n\nPAIR 18:\nA: poll_feed has no error handling around the parse or per-item import loop and the job is declared sidekiq_options retry: false, so any single malformed item (nil content -> NoMethodError on i.content.scrub, or a non-HTTP i.id GUID like 'tag:...') aborts the remaining items with no retry and no user-visible error One bad feed entry silently drops the rest of that poll cycle every hour; items after the failing one are never imported and nothing surfaces the failure to the operator\nB: The rss.items loop has no per-item error isolation, so the first item that raises — a missing title making PostCreator/TopicEmbed.create! fail on a NOT NULL column, a nil link, or ActiveRecord::RecordNotUnique from the check-then-insert in TopicEmbed.import when the scheduled poll and a retriever-triggered poll run concurrently — aborts the entire loop. One malformed feed entry stops import of every remaining feed item until it ages out of the feed, and because TopicRetriever invokes this poll synchronously the same exception also kills retrieval for every embed URL, leaving those pages reloading the loading view forever.\n\nPAIR 19:\nA: poll_feed has no error handling around the parse or per-item import loop and the job is declared sidekiq_options retry: false, so any single malformed item (nil content -> NoMethodError on i.content.scrub, or a non-HTTP i.id GUID like 'tag:...') aborts the remaining items with no retry and no user-visible error One bad feed entry silently drops the rest of that poll cycle every hour; items after the failing one are never imported and nothing surfaces the failure to the operator\nB: The rss.items.each loop has no per-item error isolation: an item lacking a `content` tag (e.g. RSS feeds with only <description>), lacking `id` when `link` is unusable, or whose link passes the /^https?\\:\\/\\// regex but fails URI parsing in absolutize_urls raises and aborts the whole loop. One malformed feed item permanently halts import of every item after it: items before the failure are imported, the rest are silently skipped, and with retry: false nothing re-attempts until the next hourly run — the feed silently stops importing new posts while the job still 'ran'.\n\nPAIR 20:\nA: poll_feed has no error handling around the parse or per-item import loop and the job is declared sidekiq_options retry: false, so any single malformed item (nil content -> NoMethodError on i.content.scrub, or a non-HTTP i.id GUID like 'tag:...') aborts the remaining items with no retry and no user-visible error One bad feed entry silently drops the rest of that poll cycle every hour; items after the failing one are never imported and nothing surfaces the failure to the operator\nB: Feed item parsing assumes `i.content` exists, but simple-rss exposes namespaced `content:encoded` as `content_encoded`, so RSS 2.0 description-only feeds raise `NoMethodError` on `i.content.scrub`, and combined with the missing error isolation one such item kills the entire poll.\n",
+  "effort": "low",
+  "pairs": [
+   [
+    86,
+    1386
+   ],
+   [
+    1383,
+    1698
+   ],
+   [
+    1383,
+    1704
+   ],
+   [
+    126,
+    138
+   ],
+   [
+    1101,
+    1102
+   ],
+   [
+    1101,
+    1326
+   ],
+   [
+    1101,
+    1745
+   ],
+   [
+    1101,
+    1746
+   ],
+   [
+    1369,
+    1464
+   ],
+   [
+    220,
+    941
+   ],
+   [
+    1080,
+    1703
+   ],
+   [
+    1080,
+    1720
+   ],
+   [
+    249,
+    1677
+   ],
+   [
+    251,
+    254
+   ],
+   [
+    251,
+    255
+   ],
+   [
+    251,
+    329
+   ],
+   [
+    251,
+    330
+   ],
+   [
+    251,
+    331
+   ],
+   [
+    251,
+    332
+   ],
+   [
+    251,
+    1093
+   ]
+  ]
+ },
+ "parsed_response": {
+  "pairs": [
+   {
+    "pair": 1,
+    "a": {
+     "mechanism": "perform_retrieve synchronously runs full feed poll inline",
+     "trigger": "user embeds a not-yet-imported article",
+     "consequence": "article appears only after full poll; N concurrent users run N overlapping full polls racing on feed items"
+    },
+    "b": {
+     "mechanism": "perform_retrieve calls Jobs::PollFeed.execute directly, bypassing queue",
+     "trigger": "any retrieval",
+     "consequence": "couples retriever to poller internals, side-steps retry/queueing"
+    },
+    "material_differences": [
+     "A claims user-facing latency and concurrent-poll races; B claims queue/retry semantics bypass — different consequences of the same call, A adds racing/latency claims absent from B"
+    ],
+    "same": false,
+    "confidence": 0.55,
+    "reason": "Same root call but A makes additional material claims (inline user latency, N overlapping polls racing) not in B, and consequences differ."
+   },
+   {
+    "pair": 2,
+    "a": {
+     "mechanism": "content_sha1 no-op re-import branch untested; update test lacks content_sha1 and duplicate assertions",
+     "trigger": "test suite run",
+     "consequence": "duplicate-creation regression would hard-500 on unique index, undetected"
+    },
+    "b": {
+     "mechanism": "test cannot detect cook_method loss; sha1 no-op and duplicate-creation untested",
+     "trigger": "test suite run",
+     "consequence": "cook_method preservation and no-op/duplicate behavior unverified"
+    },
+    "material_differences": [
+     "B adds a distinct material claim about cook_method/raw_html cooking preservation, a different untested defect not in A"
+    ],
+    "same": false,
+    "confidence": 0.75,
+    "reason": "B is a compound report adding a different untested defect (cook_method preservation) beyond A's claims."
+   },
+   {
+    "pair": 3,
+    "a": {
+     "mechanism": "content_sha1 no-op re-import untested; no content_sha1 or duplicate assertions",
+     "trigger": "test suite run",
+     "consequence": "duplicate-creation regression would hard-500 via unique index"
+    },
+    "b": {
+     "mechanism": "sha1 unchanged-direction untested; no revision-count or content_sha1 refresh assertion",
+     "trigger": "test suite run",
+     "consequence": "re-revising on every hourly poll would pass the suite"
+    },
+    "material_differences": [
+     "A adds duplicate-topic/embed assertion gap with 500 consequence; B adds revision-count assertion gap — each has a material claim absent from the other"
+    ],
+    "same": false,
+    "confidence": 0.55,
+    "reason": "Both center on the untested sha1 no-op, but A's duplicate/500 claim and B's revision-count claim are additional material claims on either side."
+   },
+   {
+    "pair": 4,
+    "a": {
+     "mechanism": "Disqus importer switched to TopicEmbed.import_remote, dropping --category and permalink-post behavior",
+     "trigger": "existing automation runs thor disqus:import -c; re-import of old threads",
+     "consequence": "unknown-option CLI error; permalink threads become raw-HTML embed topics; blocking per-URL fetches, network-dependent imports"
+    },
+    "b": {
+     "mechanism": "import loop rewritten from PostCreator permalink to TopicEmbed.import_remote",
+     "trigger": "operator re-runs Disqus import",
+     "consequence": "blocking HTTP fetch per thread, raw-HTML posts bypass cooking, different output contract"
+    },
+    "material_differences": [
+     "A claims a hard CLI failure (unknown-option error) from losing --category, absent from B; B emphasizes network hang/cooking bypass"
+    ],
+    "same": false,
+    "confidence": 0.6,
+    "reason": "Both note the permalink→import_remote rewrite, but A adds a distinct material claim of CLI option breakage causing errors."
+   },
+   {
+    "pair": 5,
+    "a": {
+     "mechanism": "force:true drops existing tables; retroactive edit to shipped migration",
+     "trigger": "migration re-runs where table exists; already-applied DBs",
+     "consequence": "silent data drop; schema.rb-vs-migrations divergence on already-applied DBs"
+    },
+    "b": {
+     "mechanism": "force:true in create_top_topics/create_topic_embeds drops existing tables; editing shipped migration",
+     "trigger": "environments that rerun the migration",
+     "consequence": "destroys top_topics data"
+    },
+    "material_differences": [
+     "A adds schema.rb-vs-migrations divergence claim on already-applied DBs; B does not"
+    ],
+    "same": true,
+    "confidence": 0.6,
+    "reason": "Both make the same core claims (force:true data drop on rerun, retroactive edit to shipped migration); A's divergence note is an additional consequence aspect of the same root cause."
+   },
+   {
+    "pair": 6,
+    "a": {
+     "mechanism": "force:true drops existing tables; retroactive edit of released migration",
+     "trigger": "migration runs where table exists; already-applied DBs",
+     "consequence": "silent data drop; schema divergence"
+    },
+    "b": {
+     "mechanism": "force:true in the two create_table migrations silently drops tables/data",
+     "trigger": "migration runs where table exists",
+     "consequence": "data loss; editing shipped migrations is a red flag"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.7,
+    "reason": "B is a direct restatement of A's core claims about force:true data drop and editing shipped migrations."
+   },
+   {
+    "pair": 7,
+    "a": {
+     "mechanism": "force:true drops existing tables; retroactive edit no effect on applied DBs",
+     "trigger": "migration rerun / already-applied environments",
+     "consequence": "silent data drop; schema.rb-vs-migrations divergence"
+    },
+    "b": {
+     "mechanism": "force:true added to shipped create_top_topics migration",
+     "trigger": "partially-migrated DBs rerun it",
+     "consequence": "latent data-drop hazard; obscures PR intent (whitespace churn)"
+    },
+    "material_differences": [
+     "B adds PR-intent/whitespace-churn observations absent from A"
+    ],
+    "same": true,
+    "confidence": 0.6,
+    "reason": "Same root cause and data-drop claim; B's intent/churn notes are meta-commentary, not a different defect."
+   },
+   {
+    "pair": 8,
+    "a": {
+     "mechanism": "force:true drops existing tables; retroactive edit of released migration",
+     "trigger": "migration runs where table exists; already-applied DBs",
+     "consequence": "silent data drop; schema divergence"
+    },
+    "b": {
+     "mechanism": "force:true added to already-applied create_top_topics and new create_topic_embeds",
+     "trigger": "migration re-runs",
+     "consequence": "silently drops table; churn pollutes history for rollback auditing"
+    },
+    "material_differences": [
+     "B adds rollback-auditing/history-pollution claim absent from A"
+    ],
+    "same": true,
+    "confidence": 0.6,
+    "reason": "Same root cause and drop-on-rerun claim; B's history-pollution note is an additional aspect, not a different defect."
+   },
+   {
+    "pair": 9,
+    "a": {
+     "mechanism": "loading page has no terminal state; controller/retriever host validation mismatch; each reload enqueues another job",
+     "trigger": "topic never created (fetch failure, non-HTML, host mismatch)",
+     "consequence": "unbounded 30s client polling and job spam on public endpoint, no error surfaced"
+    },
+    "b": {
+     "mechanism": "retrieve_topic job has no error handling",
+     "trigger": "raised HTTP/parse/URI errors",
+     "consequence": "job fails invisibly; embed shows loading forever, no feedback"
+    },
+    "material_differences": [
+     "A adds the controller-vs-retriever host validation mismatch trigger and the job-spam/unbounded-polling consequence, absent from B"
+    ],
+    "same": false,
+    "confidence": 0.6,
+    "reason": "Overlapping (loading forever) but A makes additional material claims (validation mismatch trigger, per-reload job enqueue spam) not in B."
+   },
+   {
+    "pair": 10,
+    "a": {
+     "mechanism": "force:true drops pre-existing topic_embeds on rerun",
+     "trigger": "db:migrate:redo or partially-migrated environment",
+     "consequence": "rows dropped, orphaning imported topics → re-imported duplicates and 404 embed lookups"
+    },
+    "b": {
+     "mechanism": "force:true drops existing table; create_table inside change records reversible create",
+     "trigger": "migration rerun or rollback",
+     "consequence": "data drop on rerun; rollback permanently drops table; should be plain create_table"
+    },
+    "material_differences": [
+     "B adds an irreversibility/rollback claim (a different defect aspect) absent from A; A adds orphan/duplicate/404 consequences absent from B"
+    ],
+    "same": false,
+    "confidence": 0.55,
+    "reason": "Same drop-on-rerun core, but B asserts a distinct material claim about rollback irreversibility and A asserts orphan/duplicate/404 consequences."
+   },
+   {
+    "pair": 11,
+    "a": {
+     "mechanism": "TopicEmbed rows not cleaned up on topic deletion; EmbedController TopicView raises NotFound/InvalidAccess",
+     "trigger": "topic deleted or restricted",
+     "consequence": "embed errors permanently"
+    },
+    "b": {
+     "mechanism": "topic deletion doesn't clean up topic_embeds rows",
+     "trigger": "topic deletion",
+     "consequence": "stale embeds accumulate"
+    },
+    "material_differences": [
+     "Consequence framed differently: A claims broken embed display via controller raise; B claims accumulation of stale rows"
+    ],
+    "same": true,
+    "confidence": 0.55,
+    "reason": "Same root cause (no cleanup on topic deletion); consequence framings are aspects of the same defect."
+   },
+   {
+    "pair": 12,
+    "a": {
+     "mechanism": "no dependent/FK cleanup of TopicEmbed on topic deletion; TopicView raises NotFound/InvalidAccess",
+     "trigger": "topic deleted or restricted",
+     "consequence": "embed errors permanently"
+    },
+    "b": {
+     "mechanism": "topic_id/post_id lack FK constraints; deletion leaves orphaned embeds",
+     "trigger": "topic or post deleted",
+     "consequence": "EmbedController#best raises 500"
+    },
+    "material_differences": [
+     "A also covers restricted topics (InvalidAccess) and says dependent or FK; B specifically claims 500 in EmbedController#best"
+    ],
+    "same": true,
+    "confidence": 0.7,
+    "reason": "Same root cause (no FK/dependent cleanup → orphaned embeds break EmbedController); trigger/consequence align."
+   },
+   {
+    "pair": 13,
+    "a": {
+     "mechanism": "String#scrub unavailable on Ruby 2.0.0; i.content nil for items without content",
+     "trigger": "first feed item on deployed Ruby",
+     "consequence": "NoMethodError kills hourly job before importing anything; feature non-functional; invisible to stubbed specs"
+    },
+    "b": {
+     "mechanism": "String#scrub availability on deployment Ruby (2.1+) uncertain",
+     "trigger": "spot-check request",
+     "consequence": "possible unavailability"
+    },
+    "material_differences": [
+     "A asserts a definite crash and nil-content trigger; B is a hedged flag of the same availability concern"
+    ],
+    "same": true,
+    "confidence": 0.55,
+    "reason": "Same root concern (scrub availability on the runtime Ruby); B is a hedged subset, and hedging differences do not create separate claims."
+   },
+   {
+    "pair": 14,
+    "a": {
+     "mechanism": "no error handling in parse/item loop; retry:false",
+     "trigger": "any malformed item (nil content scrub, non-HTTP GUID)",
+     "consequence": "aborts remaining items, silent hourly loss"
+    },
+    "b": {
+     "mechanism": "no per-item isolation; retry:false",
+     "trigger": "nil content, nil title, deleted post PostRevisor(nil)",
+     "consequence": "first failing item aborts entire run; later items never imported; silent halt"
+    },
+    "material_differences": [
+     "Trigger examples differ (B adds nil title/deleted post), but both claim 'any raise in loop aborts run'"
+    ],
+    "same": true,
+    "confidence": 0.6,
+    "reason": "Same mechanism (no isolation + retry:false → first failure aborts rest, silent); trigger examples are instances of the same general claim."
+   },
+   {
+    "pair": 15,
+    "a": {
+     "mechanism": "no error handling in loop; retry:false",
+     "trigger": "malformed item (nil content, bad GUID)",
+     "consequence": "aborts remaining items silently each hour"
+    },
+    "b": {
+     "mechanism": "no per-item isolation; retry:false",
+     "trigger": "item lacking content (nil.scrub NoMethodError)",
+     "consequence": "deterministic mid-loop kill each hourly run; later items dropped forever, only sidekiq failure entry"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.7,
+    "reason": "Same mechanism, shared nil-content trigger, same consequence of permanently dropped later items with no retry."
+   },
+   {
+    "pair": 16,
+    "a": {
+     "mechanism": "no error handling in loop; retry:false",
+     "trigger": "malformed item (nil content, non-HTTP GUID)",
+     "consequence": "aborts remaining items silently"
+    },
+    "b": {
+     "mechanism": "no per-item isolation; two crash triggers: nil content and URI::InvalidURIError in absolutize_urls",
+     "trigger": "item without content or bad URI",
+     "consequence": "one malformed item aborts entire import; later items never imported, polling permanently stuck"
+    },
+    "material_differences": [
+     "B adds URI-parse trigger absent from A's examples"
+    ],
+    "same": true,
+    "confidence": 0.6,
+    "reason": "Same general claim that any single raising item aborts the loop with no retry; URI trigger is an instance of the same general defect."
+   },
+   {
+    "pair": 17,
+    "a": {
+     "mechanism": "no error handling in loop; retry:false",
+     "trigger": "malformed item",
+     "consequence": "aborts remaining items silently each hour"
+    },
+    "b": {
+     "mechanism": "no per-item isolation; retry:false; nil content NoMethodError",
+     "trigger": "content-less item",
+     "consequence": "prefix-only import; also via TopicRetriever inline call the same crash fails every interactive embed retrieval"
+    },
+    "material_differences": [
+     "B adds a material claim that the crash propagates to interactive embed retrieval, an active user-facing failure absent from A"
+    ],
+    "same": false,
+    "confidence": 0.6,
+    "reason": "B is a compound report adding the interactive-retrieval failure path claim not present in A."
+   },
+   {
+    "pair": 18,
+    "a": {
+     "mechanism": "no error handling in loop; retry:false",
+     "trigger": "malformed item",
+     "consequence": "aborts remaining items silently"
+    },
+    "b": {
+     "mechanism": "no per-item isolation; triggers include RecordNotUnique race between scheduled and retriever-triggered polls",
+     "trigger": "missing title, nil link, concurrent poll race",
+     "consequence": "aborts loop; also kills retrieval for every embed URL, loading view forever"
+    },
+    "material_differences": [
+     "B adds concurrency race trigger and the claim that retrieval for every embed URL is killed (user-facing failure)"
+    ],
+    "same": false,
+    "confidence": 0.6,
+    "reason": "B adds materially different claims: a concurrency/RecordNotUnique trigger and active embed-retrieval failure absent from A."
+   },
+   {
+    "pair": 19,
+    "a": {
+     "mechanism": "no error handling in loop; retry:false",
+     "trigger": "malformed item (nil content, bad GUID)",
+     "consequence": "aborts remaining items silently each hour"
+    },
+    "b": {
+     "mechanism": "no per-item isolation; triggers: missing content/id, URI parse failure in absolutize_urls",
+     "trigger": "malformed feed item",
+     "consequence": "one item halts import of all after it; silent skip until next run; feed silently stops importing"
+    },
+    "material_differences": [
+     "Trigger examples differ (URI/id vs GUID), both under 'any malformed item'"
+    ],
+    "same": true,
+    "confidence": 0.6,
+    "reason": "Same general mechanism and consequence (silent halt of remaining items, no retry); differing trigger examples are instances of the same claim."
+   },
+   {
+    "pair": 20,
+    "a": {
+     "mechanism": "no error handling in loop; retry:false; i.content nil raises on scrub",
+     "trigger": "malformed/content-less item",
+     "consequence": "aborts remaining items silently each hour"
+    },
+    "b": {
+     "mechanism": "simple-rss exposes content:encoded as content_encoded so i.content is nil → NoMethodError; no isolation kills entire poll",
+     "trigger": "RSS 2.0 description-only feeds",
+     "consequence": "one such item kills the entire poll"
+    },
+    "material_differences": [
+     "B adds a specific factual mechanism (simple-rss naming of content_encoded) explaining the nil, absent from A"
+    ],
+    "same": true,
+    "confidence": 0.55,
+    "reason": "Same defect (nil i.content → NoMethodError, no isolation kills poll); B's naming detail is an explanatory mechanism for A's own nil-content trigger, not a different defect."
+   }
+  ]
+ },
+ "usage": {
+  "glm-5.3-background": {
+   "input_tokens": 3487,
+   "cache_read_input_tokens": 384,
+   "cache_creation_input_tokens": 0,
+   "output_tokens": 3229,
+   "reasoning_output_tokens": 3756,
+   "cost_usd": 0.0,
+   "total_tokens": 10856
+  }
+ },
+ "status": "complete",
+ "error_type": null,
+ "elapsed_s": 47.98368310928345
+}

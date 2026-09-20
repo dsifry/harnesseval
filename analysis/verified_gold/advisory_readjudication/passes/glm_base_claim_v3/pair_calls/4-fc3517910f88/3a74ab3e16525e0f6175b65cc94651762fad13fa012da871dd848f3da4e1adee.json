@@ -1,0 +1,484 @@
+{
+ "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/4",
+ "pass_digest": "9c5f733ce7a3f996c90c67f262cc4a77e2b234bc415c197afa7c73477ad320be",
+ "request_sha256": "3a74ab3e16525e0f6175b65cc94651762fad13fa012da871dd848f3da4e1adee",
+ "request": {
+  "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/4",
+  "model": "glm-5.3-background",
+  "system": "You are clustering code review findings from one PR. Always respond with valid JSON.",
+  "prompt": "You are clustering code review findings from the same PR. For each PAIR below, decide whether the two findings describe the SAME underlying issue — same root cause in the same code location. Different wording is fine. A finding about a DIFFERENT defect in the same file or function is NOT the same issue. Severity or aspect differences of the same root cause ARE the same issue.\n\n\nFor THIS scoring pass, duplicate equivalence is stricter than sharing a root cause.\nYou must compare the COMPLETE MATERIAL CLAIMS, including mechanism, triggering\nconditions, execution path, and consequence. The same line or broad concern does\nnot establish equivalence. A report of wrong-category selection, a case/rename\nmismatch, a crash, and a silent fallback are different claims even at one lookup.\nAn inactive/unbound API concern and an alleged active user-facing failure differ.\nA compound report with an additional material claim does NOT equal its subset.\nDifferences only in wording, severity, or hedging do not create separate claims.\nIf the claimed mechanisms, triggers or consequences conflict, or one report adds\nan unsupported/different material factual claim, return same=false. You are NOT\nverifying which claim is true; do not repair or reinterpret either report to make\nthem match. If unsure whether their full claims are equivalent, return false.\n\nFor every numbered pair, extract what A and B actually CLAIM into mechanism,\ntrigger and consequence. Then list material_differences and give your equivalence\nverdict, confidence and reason. same=true requires no material differences.\nReturn ONLY this JSON object, with EVERY pair index exactly once:\n{\"pairs\":[{\"pair\":1,\"a\":{\"mechanism\":\"...\",\"trigger\":\"...\",\"consequence\":\"...\"},\"b\":{\"mechanism\":\"...\",\"trigger\":\"...\",\"consequence\":\"...\"},\"material_differences\":[],\"same\":true,\"confidence\":0.9,\"reason\":\"...\"}]}\n\nPAIRS:\nPAIR 1:\nA: app/models/post.rb:133 — [P2, conf 75] the raw_html bypass is keyed on a persisted column that PostRevisor never resets, so any later human edit of an imported post through the normal composer is stored and shown as uncooked raw text (markdown not rendered, onebox/mention/link extraction skipped), and there is no spec or guard covering non-import revisions of raw_html posts.\nB: post.rb:133 lets any user who can edit a `raw_html` post submit arbitrary unsanitized HTML via the normal edit UI since `PostRevisor` preserves `cook_method`\n\nPAIR 2:\nA: The 'Supports updating the post' test asserts only post.cooked =~ /new contents/ and never verifies the content_sha1 bookkeeping (embed.update_column(:content_sha1, ...)) or that a re-import with unchanged contents skips the revision, which is the core idempotency contract of TopicEmbed.import's update branch (app/models/topic_embed.rb lines 30-35). If the content_sha1 comparison were broken (e.g. always unequal, causing PostRevisor to fire and re-notify watchers on every hourly poll), this test still passes because it only covers the changed-content path; a feed polled hourly would silently revise every topic every hour and no spec would fail.\nB: The update test asserts the revised content but never asserts that content_sha1 was persisted or that importing identical content skips the revision, leaving the new sha1-comparison branch half-verified. A regression in the content_sha1 update (topic_embed.rb:44 embed.update_column) or in the unchanged-content short-circuit (content_sha1 != embed.content_sha1) would pass this suite — e.g. if update_column were removed, every poll would silently rewrite the post and the tests would still be green; the 'import is idempotent' property the sha1 exists to provide is never asserted.\n\nPAIR 3:\nA: app/models/topic_embed.rb:47-52 whitelists `href` with no scheme check, so `javascript:` URLs survive absolutize_urls (lines 60-66 only rewrite leading-/ paths)\nB: app/models/topic_embed.rb:64 — absolutize_urls` only rewrites `href`/`src` values that `start_with?('/')`; protocol-relative (`//evil.com/...`), `data:`, and other absolute-but-not-leading-slash URIs pass through completely untouched into a real forum post rendered unsanitized\n\nPAIR 4:\nA: app/models/topic_embed.rb:29 — `TopicEmbed.import` validates the URL only with `url =~ /^https?\\:\\/\\//`, which accepts any http/https host including internal/link-local/loopback addresses (no private-IP or hostname allowlist/denylist), so the guard is not an effective SSRF mitigation for callers that pass user- or feed-supplied URLs .\nB: app/models/topic_embed.rb:5 — the only embed_url validation in the import path is a regex scheme check (`url =~ /^https?\\:\\/\\//`) with a silent `return` on failure and no error surfaced to the caller (job/controller), reinforcing that \"validation\" is minimal rather than the robust system implied by the task title\n\nPAIR 5:\nA: app/models/topic_embed.rb:56-76 — absolutize_urls has no tests for https URLs, non-default ports, or URLs without a host; spec/models/topic_embed_spec.rb only covers the default-port http case\nB: app/models/topic_embed.rb:56-77 — absolutize_urls edge cases are untested: non-standard ports and the 'already-absolute URLs stay untouched' invariant are unpinned.\n\nPAIR 6:\nA: [Medium/security] app/models/topic_embed.rb:13 — `url` is interpolated unescaped into the `embed.imported_from` anchor (`<a href='#{url}'>#{url}</a>`); the only gate is the `^https?\\://` regex and in the poll_feed path (`i.link`) the value is never URI-parsed, so a link like `http://x/'><script>…` yields stored HTML/script injection (Nokogiri's fragment parse preserves the resulting script element through `absolutize_urls`). Escape the URL (`ERB::Util.h`/`h`) or URI-parse it.\nB: app/models/topic_embed.rb:13 — `\"<a href='#{url}'>#{url}</a>\"` interpolates the attacker-chosen embed_url unescaped into a raw_html post (cooked == raw, rendered via `raw post.cooked`), so an unauthenticated request for `embed_url=http://<embeddable_host>/?x='onmouseover='alert(document.cookie)` (URI() accepts `'`, `=`, `(`, `)` in the query, and the host returns 200 for any query) stores XSS on the Discourse origin .\n\nPAIR 7:\nA: [Medium/security] app/models/topic_embed.rb:13 — `url` is interpolated unescaped into the `embed.imported_from` anchor (`<a href='#{url}'>#{url}</a>`); the only gate is the `^https?\\://` regex and in the poll_feed path (`i.link`) the value is never URI-parsed, so a link like `http://x/'><script>…` yields stored HTML/script injection (Nokogiri's fragment parse preserves the resulting script element through `absolutize_urls`). Escape the URL (`ERB::Util.h`/`h`) or URI-parse it.\nB: app/models/topic_embed.rb:13 — `\"<a href='#{url}'>#{url}</a>\"` interpolates the attacker-supplied embed_url unescaped into a raw_html post, and a URL like `http://<embeddable_host>/?'onmouseover='alert(1)'` passes both `URI(@embed_url).host` (verified on Ruby 2.6) and `/^https?\\:\\/\\//`, so an anonymous curl request to /embed/best with a forged Referer header creates stored XSS that runs on the forum origin (P1, conf 75)\n\nPAIR 8:\nA: [Medium/security] app/models/topic_embed.rb:13 — `url` is interpolated unescaped into the `embed.imported_from` anchor (`<a href='#{url}'>#{url}</a>`); the only gate is the `^https?\\://` regex and in the poll_feed path (`i.link`) the value is never URI-parsed, so a link like `http://x/'><script>…` yields stored HTML/script injection (Nokogiri's fragment parse preserves the resulting script element through `absolutize_urls`). Escape the URL (`ERB::Util.h`/`h`) or URI-parse it.\nB: app/models/topic_embed.rb:13 — the embed URL is interpolated unescaped into the 'imported from' footer <a href='#{url}'>#{url}</a>; quotes are legal URI characters, so an embed_url like http://host/x'onclick='…' passes URI parsing and the host check, injects attributes, survives absolutize_urls' Nokogiri round-trip, and is stored and rendered raw\n\nPAIR 9:\nA: [Medium/security] app/models/topic_embed.rb:13 — `url` is interpolated unescaped into the `embed.imported_from` anchor (`<a href='#{url}'>#{url}</a>`); the only gate is the `^https?\\://` regex and in the poll_feed path (`i.link`) the value is never URI-parsed, so a link like `http://x/'><script>…` yields stored HTML/script injection (Nokogiri's fragment parse preserves the resulting script element through `absolutize_urls`). Escape the URL (`ERB::Util.h`/`h`) or URI-parse it.\nB: app/models/topic_embed.rb:13 — Unescaped `url` is interpolated into `<a href='#{url}'>#{url}</a>` inside a raw_html post; an attacker-chosen embed_url like `http://<embeddable_host>/?x'onmouseover='alert(1)` parses fine with URI (single quote is unreserved), the host check passes, the page fetch returns 200, and the payload becomes stored XSS in both the iframe and the main forum topic.\n\nPAIR 10:\nA: [Medium/security] app/models/topic_embed.rb:13 — `url` is interpolated unescaped into the `embed.imported_from` anchor (`<a href='#{url}'>#{url}</a>`); the only gate is the `^https?\\://` regex and in the poll_feed path (`i.link`) the value is never URI-parsed, so a link like `http://x/'><script>…` yields stored HTML/script injection (Nokogiri's fragment parse preserves the resulting script element through `absolutize_urls`). Escape the URL (`ERB::Util.h`/`h`) or URI-parse it.\nB: app/models/topic_embed.rb:13 — `url` is interpolated unescaped into an `<a href>` tag and stored with `cook_method: raw_html`, bypassing the sanitizer; a single-quote in the embed_url (e.g. `http://host/x'onmouseover='alert(1)`) yields stored XSS. Needs `ERB::Util.html_escape` on both occurrences.\n\nPAIR 11:\nA: app/models/topic_embed.rb:13 — `contents << ...` changes the caller's string in place, and a frozen or already-appended string raises or shifts the SHA1, so identical content keeps being revised. (P3, conf 50)\nB: app/models/topic_embed.rb:13 — contents <<` mutates the caller-supplied string and builds an HTML attribution snippet by interpolation inside a model.\n\nPAIR 12:\nA: app/models/topic_embed.rb:13 — `contents << ...` changes the caller's string in place, and a frozen or already-appended string raises or shifts the SHA1, so identical content keeps being revised. (P3, conf 50)\nB: app/models/topic_embed.rb:13 — TopicEmbed.import` mutates the caller's `contents` string in place via `<<`, a hidden side effect on a public class method argument (and the appended footer feeds into `content_sha1`).\n\nPAIR 13:\nA: app/models/topic_embed.rb:13 — `contents << ...` changes the caller's string in place, and a frozen or already-appended string raises or shifts the SHA1, so identical content keeps being revised. (P3, conf 50)\nB: app/models/topic_embed.rb:13 — TopicEmbed.import` mutates the caller's `contents` string in place with `<<` and mixes I18n/HTML presentation into the model.\n\nPAIR 14:\nA: app/models/topic_embed.rb:22 — when `creator.create` returns a post with errors or nil, the transaction commits with no TopicEmbed and `import` returns quietly, so the embed shows \"Loading\" forever and each new retrieval creates a duplicate topic. (P1, conf 75)\nB: app/models/topic_embed.rb:23 — If creator.create returns nil the TopicEmbed row is silently not created and no error is raised, so the url is retrieved again on every request.\n\nPAIR 15:\nA: app/models/topic_embed.rb:22 — when `creator.create` returns a post with errors or nil, the transaction commits with no TopicEmbed and `import` returns quietly, so the embed shows \"Loading\" forever and each new retrieval creates a duplicate topic. (P1, conf 75)\nB: app/models/topic_embed.rb:23 — When `PostCreator#create` fails (e.g. TopicCreator error) `import` silently returns nil with no logging; combined with the loading page reloading every 30s and enqueuing a job per request, this becomes an unbounded, invisible retry loop with no failure state.\n\nPAIR 16:\nA: app/models/topic_embed.rb:22 — when `creator.create` returns a post with errors or nil, the transaction commits with no TopicEmbed and `import` returns quietly, so the embed shows \"Loading\" forever and each new retrieval creates a duplicate topic. (P1, conf 75)\nB: app/models/topic_embed.rb:23 — when PostCreator#create returns nil (topic creation rolled back), `import` returns nil and logs nothing, so RetrieveTopic finishes \"successfully\" and the embed iframe shows the loading page forever while re-enqueueing a doomed retrieval every 30s.\n\nPAIR 17:\nA: app/models/topic_embed.rb:22 — when `creator.create` returns a post with errors or nil, the transaction commits with no TopicEmbed and `import` returns quietly, so the embed shows \"Loading\" forever and each new retrieval creates a duplicate topic. (P1, conf 75)\nB: P3: app/models/topic_embed.rb:20-24 — TopicEmbed.import silently swallows post-creation failure: if PostCreator fails, post is nil, no TopicEmbed row is created, and the method returns nil with no logging or error raised, so on the RetrieveTopic/import_remote path the failure is silent and never retried (user sees 'Loading...' forever)\n\nPAIR 18:\nA: app/views/embed/best.html.erb:16 — post.user.small_avatar_url` / `post.user.username` per post relies on TopicView preloading users; without an explicit `includes(:user)` this is an N+1 per rendered post.\nB: Potential N+1 in embed view: embed/best.html.erb:14-16 accesses post.user per post (up to 5), possibly triggering per-post user loads if TopicView doesn't eager-load authors\n\nPAIR 19:\nA: When no topic exists, the controller enqueues RetrieveTopic and renders 'loading', but the job's retrieve path silently no-ops on every failure (throttled within 60s, embed_url host mismatch, embed_by_username user missing, fetch error), and loading.html.erb blindly reloads every 30s. A user embedding a URL whose retrieval fails gets an iframe stuck in 'Loading Discussion...' forever — the failure of a user-facing operation is completely invisible, with no error state ever rendered.\nB: [Low/bug] app/views/embed/loading.html.erb:7 — page reloads every 30 seconds forever with no error state when retrieval fails (network error, invalid feed, user not configured)\n\nPAIR 20:\nA: When no topic exists, the controller enqueues RetrieveTopic and renders 'loading', but the job's retrieve path silently no-ops on every failure (throttled within 60s, embed_url host mismatch, embed_by_username user missing, fetch error), and loading.html.erb blindly reloads every 30s. A user embedding a URL whose retrieval fails gets an iframe stuck in 'Loading Discussion...' forever — the failure of a user-facing operation is completely invisible, with no error state ever rendered.\nB: [Low/bug] app/views/embed/loading.html.erb:7-10 — the page reloads every 30 seconds forever with no terminal error state; when retrieval can never succeed (e.g., `embed_by_username` unset, host mismatch, feed disabled) clients poll indefinitely and keep re-enqueuing retrieve jobs\n",
+  "effort": "low",
+  "pairs": [
+   [
+    682,
+    1435
+   ],
+   [
+    106,
+    200
+   ],
+   [
+    825,
+    852
+   ],
+   [
+    797,
+    837
+   ],
+   [
+    841,
+    842
+   ],
+   [
+    400,
+    735
+   ],
+   [
+    400,
+    736
+   ],
+   [
+    400,
+    749
+   ],
+   [
+    400,
+    754
+   ],
+   [
+    400,
+    756
+   ],
+   [
+    739,
+    743
+   ],
+   [
+    739,
+    751
+   ],
+   [
+    739,
+    752
+   ],
+   [
+    785,
+    786
+   ],
+   [
+    785,
+    788
+   ],
+   [
+    785,
+    789
+   ],
+   [
+    785,
+    1390
+   ],
+   [
+    866,
+    1445
+   ],
+   [
+    355,
+    373
+   ],
+   [
+    355,
+    374
+   ]
+  ]
+ },
+ "parsed_response": {
+  "pairs": [
+   {
+    "pair": 1,
+    "a": {
+     "mechanism": "raw_html cook_method column is never reset by PostRevisor, so subsequent normal edits of an imported post stay in raw_html mode",
+     "trigger": "a human edits an imported post via the normal composer",
+     "consequence": "edited content stored and shown uncooked — markdown not rendered, onebox/mention/link extraction skipped"
+    },
+    "b": {
+     "mechanism": "PostRevisor preserves cook_method=raw_html, so edits bypass cooking/sanitization",
+     "trigger": "any user with edit permission edits a raw_html post through normal edit UI",
+     "consequence": "arbitrary unsanitized HTML can be submitted and stored/rendered (security)"
+    },
+    "material_differences": [
+     "A frames consequence as a rendering bug (raw text shown, no markdown/onebox); B frames it as a sanitization-bypass/XSS security issue — different claimed defects of the same persistence behavior"
+    ],
+    "same": false,
+    "confidence": 0.75,
+    "reason": "Same underlying persistence behavior but the claimed consequences (unrendered text vs unsanitized HTML injection) are materially different claims."
+   },
+   {
+    "pair": 2,
+    "a": {
+     "mechanism": "test only asserts cooked content, never verifies content_sha1 persistence or unchanged-content skip of revision",
+     "trigger": "a regression in content_sha1 comparison/update logic",
+     "consequence": "every hourly poll would silently revise topics and re-notify watchers with all tests passing"
+    },
+    "b": {
+     "mechanism": "test never asserts content_sha1 persisted nor that identical content skips revision",
+     "trigger": "regression in embed.update_column or the unchanged-content short-circuit",
+     "consequence": "every poll silently rewrites the post while the suite stays green; idempotency property unasserted"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Identical claim: the update test fails to verify the sha1-based idempotency contract, so silent re-revision regressions pass."
+   },
+   {
+    "pair": 3,
+    "a": {
+     "mechanism": "href whitelisted with no scheme check; absolutize_urls only rewrites leading-/ paths",
+     "trigger": "javascript: URL in embedded content",
+     "consequence": "dangerous scheme URLs survive into the rendered forum post"
+    },
+    "b": {
+     "mechanism": "absolutize_urls only rewrites values start_with?('/')",
+     "trigger": "protocol-relative, data:, and other non-leading-slash absolute URIs",
+     "consequence": "such URIs pass untouched into a real forum post rendered unsanitized"
+    },
+    "material_differences": [
+     "A emphasizes javascript: schemes specifically; B emphasizes protocol-relative/data: URIs"
+    ],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "Same mechanism (only leading-slash hrefs rewritten, no scheme/URI filtering) at the same lines with the same consequence (dangerous URLs reach the rendered post); differing example payloads are not material."
+   },
+   {
+    "pair": 4,
+    "a": {
+     "mechanism": "URL validation regex accepts any http/https host including internal/loopback addresses, no private-IP denylist",
+     "trigger": "user- or feed-supplied URLs passed to import",
+     "consequence": "guard is not an effective SSRF mitigation; server may fetch internal resources"
+    },
+    "b": {
+     "mechanism": "only validation is a regex scheme check with a silent return on failure",
+     "trigger": "non-http(s) URL passed to import",
+     "consequence": "no error surfaced to caller; validation is minimal"
+    },
+    "material_differences": [
+     "A claims SSRF (internal host fetch) due to lack of host allowlisting; B claims silent-return/error-handling weakness — different mechanisms and consequences at the same line"
+    ],
+    "same": false,
+    "confidence": 0.8,
+    "reason": "A is an SSRF claim about host filtering; B is an error-surfacing/silent-return claim. Different material defects."
+   },
+   {
+    "pair": 5,
+    "a": {
+     "mechanism": "absolutize_urls tested only for default-port http",
+     "trigger": "https URLs, non-default ports, URLs without host",
+     "consequence": "behavior for these cases unpinned by specs"
+    },
+    "b": {
+     "mechanism": "absolutize_urls edge cases untested",
+     "trigger": "non-standard ports and already-absolute URLs",
+     "consequence": "already-absolute-URLs-untouched invariant not pinned"
+    },
+    "material_differences": [
+     "A adds untested https and no-host cases; B adds the already-absolute invariant as an untested case not in A"
+    ],
+    "same": true,
+    "confidence": 0.6,
+    "reason": "Both claim the same root gap — absolutize_urls is only covered by the single default-port http test — differing only in which untested edge cases they enumerate."
+   },
+   {
+    "pair": 6,
+    "a": {
+     "mechanism": "url interpolated unescaped into imported_from anchor; only gate is https? regex; feed link never URI-parsed",
+     "trigger": "feed link like http://x/'><script>…",
+     "consequence": "stored script injection preserved through Nokogiri into the post"
+    },
+    "b": {
+     "mechanism": "attacker-chosen embed_url interpolated unescaped into raw_html post",
+     "trigger": "unauthenticated embed request with quote-laden query URL on the embeddable host",
+     "consequence": "stored XSS on the Discourse origin"
+    },
+    "material_differences": [
+     "A cites the poll_feed path with a <script> tag payload; B cites direct embed request with onmouseover attribute payload"
+    ],
+    "same": true,
+    "confidence": 0.7,
+    "reason": "Same defect: unescaped URL interpolation at line 13 produces stored XSS; entry path and payload flavor differ but mechanism, location, and consequence are the same."
+   },
+   {
+    "pair": 7,
+    "a": {
+     "mechanism": "unescaped url in imported_from anchor; feed path never URI-parsed",
+     "trigger": "feed link with quote/script payload",
+     "consequence": "stored HTML/script injection survives Nokogiri"
+    },
+    "b": {
+     "mechanism": "unescaped embed_url interpolated into raw_html post",
+     "trigger": "anonymous request to /embed/best with forged Referer and quote payload passing URI host check",
+     "consequence": "stored XSS on forum origin (P1)"
+    },
+    "material_differences": [
+     "Entry path (feed vs /embed/best with forged Referer) and severity differ; core injection identical"
+    ],
+    "same": true,
+    "confidence": 0.7,
+    "reason": "Same root cause and consequence (stored XSS via unescaped URL at line 13); trigger-path variation is not a materially different claim."
+   },
+   {
+    "pair": 8,
+    "a": {
+     "mechanism": "unescaped url in anchor; feed path not URI-parsed",
+     "trigger": "feed link with quote/script payload",
+     "consequence": "stored script injection through Nokogiri round-trip"
+    },
+    "b": {
+     "mechanism": "unescaped URL interpolated; quotes are legal URI characters",
+     "trigger": "embed_url like http://host/x'onclick='…' passing URI parsing and host check",
+     "consequence": "attribute injection stored and rendered raw"
+    },
+    "material_differences": [
+     "Payload (script tag vs onclick attribute) and entry path differ; both claim stored injection"
+    ],
+    "same": true,
+    "confidence": 0.72,
+    "reason": "Same defect and consequence — unescaped URL interpolation at line 13 enabling stored markup/attribute injection rendered raw."
+   },
+   {
+    "pair": 9,
+    "a": {
+     "mechanism": "unescaped url in anchor; feed link never URI-parsed",
+     "trigger": "feed link with quote/script payload",
+     "consequence": "stored HTML/script injection preserved by Nokogiri"
+    },
+    "b": {
+     "mechanism": "unescaped embed_url interpolated into raw_html post",
+     "trigger": "embed_url with onmouseover quote payload passing URI/host/200 checks",
+     "consequence": "stored XSS in iframe and main forum topic"
+    },
+    "material_differences": [
+     "Entry path and payload details differ; both stored XSS"
+    ],
+    "same": true,
+    "confidence": 0.72,
+    "reason": "Same root cause and consequence; only the illustrated trigger differs."
+   },
+   {
+    "pair": 10,
+    "a": {
+     "mechanism": "unescaped url in anchor; feed path never URI-parsed",
+     "trigger": "feed link with quote/script payload",
+     "consequence": "stored HTML/script injection through Nokogiri"
+    },
+    "b": {
+     "mechanism": "unescaped url interpolated into <a href> stored with cook_method raw_html, bypassing sanitizer",
+     "trigger": "single-quote embed_url like http://host/x'onmouseover='alert(1)",
+     "consequence": "stored XSS; needs ERB::Util.html_escape on both occurrences"
+    },
+    "material_differences": [
+     "Entry path differs; fix recommendation consistent"
+    ],
+    "same": true,
+    "confidence": 0.75,
+    "reason": "Same defect and same fix (escape both occurrences); only the trigger illustration differs."
+   },
+   {
+    "pair": 11,
+    "a": {
+     "mechanism": "contents << mutates caller's string in place; frozen string raises or prior append shifts SHA1",
+     "trigger": "frozen string or repeated import of same content",
+     "consequence": "identical content keeps being revised (idempotency broken) or raises"
+    },
+    "b": {
+     "mechanism": "contents << mutates caller-supplied string; builds HTML attribution snippet by interpolation in the model",
+     "trigger": "any call to import",
+     "consequence": "hidden side effect on argument; presentation logic in model"
+    },
+    "material_differences": [
+     "B adds an unrelated layering/design claim (HTML built in model) and omits the SHA1/repeated-revision consequence"
+    ],
+    "same": false,
+    "confidence": 0.6,
+    "reason": "B's material claims (in-place mutation as side effect plus HTML-in-model layering) differ from A's core claim (mutation breaking SHA1 idempotency/revisions)."
+   },
+   {
+    "pair": 12,
+    "a": {
+     "mechanism": "contents << mutates caller's string in place; frozen string raises or prior append shifts SHA1",
+     "trigger": "frozen string or repeated import of identical content",
+     "consequence": "raises or identical content keeps being revised"
+    },
+    "b": {
+     "mechanism": "import mutates caller's contents string via <<, hidden side effect on public class method argument; appended footer feeds into content_sha1",
+     "trigger": "any call to import",
+     "consequence": "unexpected caller-visible mutation affecting content_sha1"
+    },
+    "material_differences": [
+     "A's consequence emphasizes frozen-string raise and repeated revisions; B frames it as argument side effect with the sha1 dependency noted"
+    ],
+    "same": true,
+    "confidence": 0.65,
+    "reason": "Both identify the same root cause — in-place mutation of the caller's string feeding content_sha1 — with the same location; consequence framing differs only in emphasis."
+   },
+   {
+    "pair": 13,
+    "a": {
+     "mechanism": "contents << mutates caller's string in place; frozen string raises or prior append shifts SHA1",
+     "trigger": "frozen string or repeated import of identical content",
+     "consequence": "raises or identical content keeps being revised"
+    },
+    "b": {
+     "mechanism": "import mutates caller's contents string with << and mixes I18n/HTML presentation into the model",
+     "trigger": "any call to import",
+     "consequence": "hidden argument mutation and layering violation"
+    },
+    "material_differences": [
+     "B adds a distinct I18n/presentation-in-model claim not present in A and omits the SHA1/repeated-revision consequence"
+    ],
+    "same": false,
+    "confidence": 0.65,
+    "reason": "B is a compound report adding a materially different design/layering claim; not equivalent to A's mutation-idempotency claim."
+   },
+   {
+    "pair": 14,
+    "a": {
+     "mechanism": "creator.create returning nil/errored post leaves transaction committed with no TopicEmbed and quiet return",
+     "trigger": "post creation fails",
+     "consequence": "embed shows Loading forever and each new retrieval creates a duplicate topic"
+    },
+    "b": {
+     "mechanism": "creator.create returns nil so TopicEmbed row silently not created, no error raised",
+     "trigger": "post creation fails",
+     "consequence": "url retrieved again on every request"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.8,
+    "reason": "Same root cause (silent nil from PostCreator leaves no TopicEmbed) with equivalent consequence (perpetual retrieval/loading); A's duplicate-topic wording matches B's retrieved-again-on-every-request."
+   },
+   {
+    "pair": 15,
+    "a": {
+     "mechanism": "failed create leaves no TopicEmbed, import returns quietly",
+     "trigger": "post creation fails",
+     "consequence": "Loading forever; each retrieval creates duplicate topic"
+    },
+    "b": {
+     "mechanism": "failed create makes import silently return nil with no logging",
+     "trigger": "post creation fails; loading page reloads every 30s enqueuing a job per request",
+     "consequence": "unbounded invisible retry loop with no failure state"
+    },
+    "material_differences": [
+     "A claims duplicate topics are created on each retrieval; B claims only an endless retry loop, not duplicate topics"
+    ],
+    "same": true,
+    "confidence": 0.6,
+    "reason": "Same root cause and stuck-loading consequence; the repeated-retrieval claim is common, and the duplicate-topic vs retry-loop wording is an aspect difference of the same failure path."
+   },
+   {
+    "pair": 16,
+    "a": {
+     "mechanism": "failed create leaves no TopicEmbed, quiet return",
+     "trigger": "post creation fails",
+     "consequence": "Loading forever; duplicate topic per retrieval"
+    },
+    "b": {
+     "mechanism": "PostCreator returns nil, import returns nil, logs nothing, RetrieveTopic finishes successfully",
+     "trigger": "post creation fails",
+     "consequence": "loading page forever, re-enqueuing doomed retrieval every 30s"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.75,
+    "reason": "Same root cause, same silent-failure mechanism, same perpetual loading/retrieval consequence."
+   },
+   {
+    "pair": 17,
+    "a": {
+     "mechanism": "failed create leaves no TopicEmbed, quiet return, transaction commits",
+     "trigger": "post creation fails",
+     "consequence": "Loading forever; each new retrieval creates a duplicate topic"
+    },
+    "b": {
+     "mechanism": "PostCreator fails, post nil, no TopicEmbed row, returns nil with no logging/error",
+     "trigger": "post creation fails on RetrieveTopic/import_remote path",
+     "consequence": "failure is silent and never retried; user sees Loading forever"
+    },
+    "material_differences": [
+     "A claims each new retrieval creates a duplicate topic; B explicitly claims the failure is never retried — conflicting consequence claims"
+    ],
+    "same": false,
+    "confidence": 0.55,
+    "reason": "The core silent-failure is shared, but the claimed downstream consequences conflict (repeated retrieval creating duplicates vs never retried), a material difference under strict comparison."
+   },
+   {
+    "pair": 18,
+    "a": {
+     "mechanism": "embed/best view accesses post.user.small_avatar_url/username per post without explicit includes(:user)",
+     "trigger": "rendering the best-embed list",
+     "consequence": "N+1 query per rendered post if users not preloaded"
+    },
+    "b": {
+     "mechanism": "view accesses post.user per post (up to 5)",
+     "trigger": "rendering embed list",
+     "consequence": "possible per-post user loads if TopicView doesn't eager-load"
+    },
+    "material_differences": [
+     "B hedges on whether TopicView preloads; A asserts the gap — hedging only"
+    ],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "Same N+1 concern, same view lines, same mechanism; B's hedging does not create a separate claim."
+   },
+   {
+    "pair": 19,
+    "a": {
+     "mechanism": "controller enqueues RetrieveTopic and renders loading; retrieve path silently no-ops on every failure mode (throttle, host mismatch, missing user, fetch error)",
+     "trigger": "any retrieval failure",
+     "consequence": "iframe stuck in Loading forever, no error state ever rendered; failure invisible"
+    },
+    "b": {
+     "mechanism": "loading.html.erb reloads every 30 seconds forever with no error state",
+     "trigger": "retrieval fails (network error, invalid feed, user not configured)",
+     "consequence": "infinite reload with no terminal state"
+    },
+    "material_differences": [
+     "A is a compound report covering the job's silent no-op across enumerated failure modes and job enqueue behavior; B reports only the view-level infinite reload"
+    ],
+    "same": false,
+    "confidence": 0.6,
+    "reason": "B is a strict subset of A's compound claim; under stricter equivalence, A's additional material claims (job no-op across multiple failure modes) prevent equivalence."
+   },
+   {
+    "pair": 20,
+    "a": {
+     "mechanism": "controller enqueues job; retrieve path silently no-ops on throttle, host mismatch, missing user, fetch error; loading page blindly reloads every 30s",
+     "trigger": "retrieval can never succeed",
+     "consequence": "iframe stuck Loading forever, failure invisible, no error state, repeated re-enqueues"
+    },
+    "b": {
+     "mechanism": "loading page reloads every 30s forever, no terminal error state; failures include embed_by_username unset, host mismatch, feed disabled",
+     "trigger": "retrieval can never succeed",
+     "consequence": "clients poll indefinitely and keep re-enqueuing retrieve jobs"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "Both describe the same end-to-end failure: silent job no-op across matching failure causes plus indefinite 30s reload/re-enqueue with no error state."
+   }
+  ]
+ },
+ "usage": {
+  "glm-5.3-background": {
+   "input_tokens": 20,
+   "cache_read_input_tokens": 3584,
+   "cache_creation_input_tokens": 0,
+   "output_tokens": 3361,
+   "reasoning_output_tokens": 2102,
+   "cost_usd": 0.0,
+   "total_tokens": 9067
+  }
+ },
+ "status": "complete",
+ "error_type": null,
+ "elapsed_s": 30.740570068359375
+}

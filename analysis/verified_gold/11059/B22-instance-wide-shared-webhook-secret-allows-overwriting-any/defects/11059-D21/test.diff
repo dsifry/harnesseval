@@ -1,0 +1,94 @@
+import type { NextApiRequest, NextApiResponse } from "next";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const state = vi.hoisted(() => ({
+  updateCalls: [] as Array<{ key: unknown }>,
+  createCalls: [] as Array<{ key: unknown }>,
+  existingCredentialId: null as number | null,
+}));
+
+vi.mock("@calcom/lib/constants", () => ({ APP_CREDENTIAL_SHARING_ENABLED: true }));
+
+vi.mock("@calcom/lib/crypto", () => ({
+  // Decode the "ciphertext" into a deterministic key object so we can tell
+  // which webhook delivery produced the stored credential.
+  symmetricDecrypt: (cipher: string) => JSON.stringify({ token: cipher }),
+}));
+
+vi.mock("@calcom/app-store/appStoreMetaData", () => ({
+  appStoreMetadata: { "test-app": { slug: "test-app", type: "test_app" } },
+}));
+
+vi.mock("@calcom/prisma", () => ({
+  default: {
+    user: { findUnique: vi.fn(async () => ({ id: 1 })) },
+    app: { findUnique: vi.fn(async () => ({ slug: "test-app" })) },
+    credential: {
+      findFirst: vi.fn(async () =>
+        state.existingCredentialId !== null ? { id: state.existingCredentialId } : null
+      ),
+      update: vi.fn(async ({ data }: { data: { key: unknown } }) => {
+        state.updateCalls.push(data);
+        return {};
+      }),
+      create: vi.fn(async ({ data }: { data: { key: unknown } }) => {
+        state.createCalls.push(data);
+        return {};
+      }),
+    },
+  },
+}));
+
+function makeReq(body: unknown): NextApiRequest {
+  return {
+    headers: { "calcom-webhook-secret": "secret" },
+    body,
+  } as unknown as NextApiRequest;
+}
+
+function makeRes(): NextApiResponse & { statusCode?: number; payload?: unknown } {
+  const res: any = {
+    statusCode: undefined,
+    payload: undefined,
+    status(code: number) {
+      res.statusCode = code;
+      return res;
+    },
+    json(payload: unknown) {
+      res.payload = payload;
+      return res;
+    },
+  };
+  return res;
+}
+
+describe("app-credential webhook replay/version guard", () => {
+  beforeEach(() => {
+    process.env.CALCOM_WEBHOOK_SECRET = "secret";
+    delete process.env.CALCOM_WEBHOOK_HEADER_NAME;
+    state.updateCalls.length = 0;
+    state.createCalls.length = 0;
+    state.existingCredentialId = 1;
+    vi.resetModules();
+  });
+
+  it("does not let a replayed/stale webhook overwrite a newer rotated credential", async () => {
+    const handler = (await import("./app-credential")).default;
+
+    // A newer, freshly rotated token set is delivered first.
+    const newerRes = makeRes();
+    await handler(makeReq({ userId: 1, appSlug: "test-app", keys: "new-token" }), newerRes);
+    expect(newerRes.statusCode).toBe(200);
+
+    // An older delivery (delayed retry or captured/replayed request) arrives later.
+    const replayRes = makeRes();
+    await handler(makeReq({ userId: 1, appSlug: "test-app", keys: "old-token" }), replayRes);
+
+    // A replay/event-identity/version guard would refuse the stale write
+    // (e.g. 409 Conflict) and leave the newer credential in place.
+    expect(replayRes.statusCode).not.toBe(200);
+
+    const lastWrite = state.updateCalls[state.updateCalls.length - 1];
+    expect(lastWrite?.key).toEqual({ token: "new-token" });
+  });
+});

@@ -1,0 +1,304 @@
+{
+ "model": "claude-sonnet-5",
+ "eff": "high",
+ "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/4",
+ "pair_id": 19,
+ "ce_bugs": [
+  {
+   "id": "C0",
+   "text": "- `app/models/post.rb:130-137` \u2014 when `cook_method == raw_html`, `Post#cook` returns `raw` verbatim, completely bypassing the normal cooking/sanitization pipeline (`post_analyzer.cook`).",
+   "persona": "compound-realistic",
+   "conf": 0.86
+  },
+  {
+   "id": "C1",
+   "text": "- `app/views/embed/best.html.erb:16` \u2014 `<%= raw post.cooked %>` renders that unsanitized content directly, without escaping, to any anonymous visitor of `/embed/best`.",
+   "persona": "compound-realistic",
+   "conf": 0.9
+  },
+  {
+   "id": "C2",
+   "text": "- `app/jobs/scheduled/poll_feed.rb:36-39` \u2014 RSS feed item content (`i.content`) is unescaped via `CGI.unescapeHTML` and handed straight to `TopicEmbed.import` with **no tag/attribute allowlist at all** (unlike `import_remote`, which at least constrains Readability's output to a tag/attribute list). Any `<script>` in a polled feed item becomes a stored, rendered payload.",
+   "persona": "compound-realistic",
+   "conf": 0.93
+  },
+  {
+   "id": "C3",
+   "text": "- `app/models/topic_embed.rb:13` \u2014 `contents << \"\\n<hr>\\n<small>#{I18n.t('embed.imported_from', link: \"<a href='#{url}'>#{url}</a>\")}</small>\\n\"` interpolates `url` into an HTML attribute/text **without escaping**. `url` is attacker-influenced: `EmbedController#best` accepts `embed_url` from a public request param, and `TopicRetriever#invalid_host?` only validates the *host* component (`URI(@embed_url).host == SiteSetting.embeddable_host`) \u2014 the path/query string is fully attacker-controlled. An unauthenticated request such as `GET /embed/best?embed_url=http://<embeddable_host>/x?y='><script>alert(document.cookie)</script>` will pass host validation, get queued via `Jobs::RetrieveTopic` \u2192 `TopicRetriever#fetch_http` \u2192 `TopicEmbed.import_remote`, and the raw `embed_url` string is spliced unescaped into the post body that is then persisted and rendered `raw` to every visitor of that embed.",
+   "persona": "compound-realistic",
+   "conf": 0.86
+  },
+  {
+   "id": "C4",
+   "text": "- `app/models/topic_embed.rb:29` (`open(url).read`) \u2014 the host must match `embeddable_host`, but path/query is attacker-controlled, and `open-uri` follows redirects by default; a malicious or compromised target page could redirect the server to internal/other resources (SSRF surface). Given this era's `open-uri`, this is worth hardening rather than assuming it's safe.",
+   "persona": "compound-realistic",
+   "conf": 0.86
+  }
+ ],
+ "mrv_findings": [
+  {
+   "id": "M0",
+   "text": "app/jobs/scheduled/poll_feed.rb:35 \u2014 `i.content.scrub` uses `String#scrub`, introduced in Ruby 2.1 (Dec 2013), which may postdate the Ruby version this 2013-era app actually targets, risking NoMethodError on every feed poll (confidence=55, severity=P1)",
+   "lens": "metareview-lens/feasibility",
+   "verdict": "unresolved"
+  },
+  {
+   "id": "M1",
+   "text": "app/jobs/regular/retrieve_topic.rb:1 \u2014 `require_dependency 'email/sender'` is unused in the file and looks like a copy-paste leftover; if unresolvable it raises LoadError every time the job class loads, breaking the whole embed-retrieval path (confidence=50, severity=P1)",
+   "lens": "metareview-lens/feasibility",
+   "verdict": "unresolved"
+  },
+  {
+   "id": "M2",
+   "text": "app/models/topic_embed.rb:48 \u2014 `import_remote` fetches via plain `open(url).read` with no timeout, redirect limit, or size cap, so a slow/huge/hanging remote host stalls a sidekiq worker or exhausts memory (confidence=85, severity=P1)",
+   "lens": "metareview-lens/completeness",
+   "verdict": "bug"
+  },
+  {
+   "id": "M3",
+   "text": "app/jobs/scheduled/poll_feed.rb:29 \u2014 feed fetch via `open(...)`+`SimpleRSS.parse` has no timeout/size limit and no rescue, so a slow/huge/malformed feed hangs or OOMs the hourly job (confidence=75, severity=P1)",
+   "lens": "metareview-lens/completeness",
+   "verdict": "bug"
+  },
+  {
+   "id": "M4",
+   "text": "app/jobs/scheduled/poll_feed.rb:35 \u2014 `CGI.unescapeHTML(i.content.scrub)` assumes every RSS item has `content`; a nil raises NoMethodError and aborts the whole loop, silently dropping remaining items (retry: false) (confidence=70, severity=P1)",
+   "lens": "metareview-lens/completeness",
+   "verdict": "matched"
+  },
+  {
+   "id": "M5",
+   "text": "app/models/topic_embed.rb:15-29 \u2014 existence check then `create!` is not transactional/locked; concurrent imports of the same URL can raise unrescued RecordNotUnique (confidence=55, severity=P2)",
+   "lens": "metareview-lens/completeness",
+   "verdict": "bug"
+  },
+  {
+   "id": "M6",
+   "text": "lib/topic_retriever.rb:52 / app/jobs/regular/retrieve_topic.rb:16 \u2014 no rescue around `TopicEmbed.import_remote`; network errors, HTTP errors, and Readability parse failures are unhandled and untested (confidence=80, severity=P1)",
+   "lens": "metareview-lens/completeness",
+   "verdict": "important_non_bug"
+  },
+  {
+   "id": "M7",
+   "text": "app/models/post.rb:130-133 \u2014 raw_html posts skip the entire cook/sanitize pipeline with no test asserting script/style/on* attributes are stripped from imported content (confidence=60, severity=P1)",
+   "lens": "metareview-lens/completeness",
+   "verdict": "bug"
+  },
+  {
+   "id": "M8",
+   "text": "config/site_settings.yml:354 / lib/topic_retriever.rb:15 / app/controllers/embed_controller.rb:26 \u2014 `embeddable_host` is free text with no format validation/normalization; scheme, port, or case mismatches silently break embedding (confidence=55, severity=P2)",
+   "lens": "metareview-lens/completeness",
+   "verdict": "bug"
+  },
+  {
+   "id": "M9",
+   "text": "lib/tasks/disqus.thor:114-143 \u2014 `--category` option and all category-assignment logic deleted with no replacement or warning; existing invocations silently lose that data (confidence=65, severity=P2)",
+   "lens": "metareview-lens/completeness",
+   "verdict": "bug"
+  },
+  {
+   "id": "M10",
+   "text": "app/controllers/embed_controller.rb:14-19 \u2014 no per-client rate limiting on `best`; only a 60s-per-URL redis throttle inside the job, so distinct URLs are unthrottled (confidence=55, severity=P2)",
+   "lens": "metareview-lens/completeness",
+   "verdict": "important_non_bug"
+  },
+  {
+   "id": "M11",
+   "text": "lib/tasks/disqus.thor:117 \u2014 `method_option :category`/`-c` deleted without replacement, a functional regression not called for by an \"embed URL handling and validation\" task (confidence=85, severity=P1)",
+   "lens": "metareview-lens/scope",
+   "verdict": "bug"
+  },
+  {
+   "id": "M12",
+   "text": "lib/tasks/disqus.thor:148 \u2014 disqus.thor's post-creation path rewired from `PostCreator.new(...).create` to `TopicEmbed.import_remote`, an unrelated importer rewrite bundled into this task (confidence=75, severity=P2)",
+   "lens": "metareview-lens/scope",
+   "verdict": "important_non_bug"
+  },
+  {
+   "id": "M13",
+   "text": "app/jobs/scheduled/poll_feed.rb:1 \u2014 an entirely new hourly RSS/Atom feed-polling job (new site settings + new gem) is content-ingestion scope, not \"embed URL handling and validation\" (confidence=80, severity=P2)",
+   "lens": "metareview-lens/scope",
+   "verdict": "important_non_bug"
+  },
+  {
+   "id": "M14",
+   "text": "app/models/post.rb:63 \u2014 new `cook_methods` enum + `cook` bypass is content-pipeline/rendering scope, not URL handling or validation (confidence=65, severity=P2)",
+   "lens": "metareview-lens/scope",
+   "verdict": "hallucination"
+  },
+  {
+   "id": "M15",
+   "text": "lib/post_revisor.rb:85 \u2014 `@post.save` changed to `@post.save(validate: !@opts[:skip_validations])`, altering shared save behavior for all callers to support embed-import, broader than stated scope (confidence=55, severity=P2)",
+   "lens": "metareview-lens/scope",
+   "verdict": "important_non_bug"
+  },
+  {
+   "id": "M16",
+   "text": "db/migrate/20131223171005_create_top_topics.rb:3 \u2014 `force: true` added to a pre-existing, already-shipped, unrelated migration with no traceability to the embed task (confidence=65, severity=P2)",
+   "lens": "metareview-lens/scope",
+   "verdict": "important_non_bug"
+  },
+  {
+   "id": "M17",
+   "text": "db/migrate/20131210181901_migrate_word_counts.rb:3 \u2014 whitespace-only drive-by edit to an unrelated existing migration (confidence=70, severity=P3)",
+   "lens": "metareview-lens/scope",
+   "verdict": "hallucination"
+  },
+  {
+   "id": "M18",
+   "text": "app/models/topic_embed.rb:48 \u2014 `Readability::Document.new(open(url).read, ...)` fetches/buffers arbitrary remote content with no timeout/redirect limit/size cap, reachable by any anonymous visitor via `/embed/best` (confidence=80, severity=P1)",
+   "lens": "metareview-lens/architecture",
+   "verdict": "bug"
+  },
+  {
+   "id": "M19",
+   "text": "app/jobs/scheduled/poll_feed.rb:29 \u2014 `SimpleRSS.parse open(...)` has no timeout/size bound and runs hourly via cron with no guard (confidence=70, severity=P2)",
+   "lens": "metareview-lens/architecture",
+   "verdict": "bug"
+  },
+  {
+   "id": "M20",
+   "text": "app/models/topic_embed.rb:15-29 \u2014 check-then-act against the `embed_url` unique index with no `rescue RecordNotUnique/RecordInvalid`; two concurrent importers of the same URL raise an unhandled DB exception (confidence=75, severity=P1)",
+   "lens": "metareview-lens/architecture",
+   "verdict": "bug"
+  },
+  {
+   "id": "M21",
+   "text": "lib/topic_retriever.rb:21-33 vs app/jobs/scheduled/poll_feed.rb:24-38 \u2014 redis throttle only guards TopicRetriever's entry point; PollFeed calls TopicEmbed.import directly, bypassing it entirely (confidence=65, severity=P2)",
+   "lens": "metareview-lens/architecture",
+   "verdict": "important_non_bug"
+  },
+  {
+   "id": "M22",
+   "text": "db/migrate/20131217174004_create_topic_embeds.rb:4-5 \u2014 `topic_id`/`post_id` have no FK constraint or index; a destroyed topic/post later causes `embed.post` to be nil and crash on revise (confidence=55, severity=P2)",
+   "lens": "metareview-lens/architecture",
+   "verdict": "important_non_bug"
+  },
+  {
+   "id": "M23",
+   "text": "app/models/post.rb:130-137 \u2014 bare integer `cook_method` enum forks the canonical content pipeline into two tiers, silently skipping `Plugin::Filter.apply(:after_post_cook, ...)` for raw_html posts (confidence=70, severity=P1)",
+   "lens": "metareview-lens/architecture",
+   "verdict": "important_non_bug"
+  },
+  {
+   "id": "M24",
+   "text": "app/views/embed/loading.html.erb:6-11 + lib/topic_retriever.rb:35-46 \u2014 no persisted failure state/circuit breaker; a permanently failing URL is retried indefinitely via 30s auto-reload with no error UI (confidence=65, severity=P1)",
+   "lens": "metareview-lens/architecture",
+   "verdict": "bug"
+  },
+  {
+   "id": "M25",
+   "text": "spec/components/topic_retriever_spec.rb + spec/jobs/poll_feed_spec.rb \u2014 specs stub out the risky boundary itself (perform_retrieve/poll_feed), so the real fetch/parse path has zero real coverage (confidence=70, severity=P2)",
+   "lens": "metareview-lens/architecture",
+   "verdict": "important_non_bug"
+  },
+  {
+   "id": "M26",
+   "text": "docs/tasks/task-001.md:1 \u2014 task file committed >16h after the full implementation already existed, so requirement text was authored to describe already-delivered code rather than guiding it (confidence=85, severity=P1)",
+   "lens": "metareview-lens/intent",
+   "verdict": "hallucination"
+  },
+  {
+   "id": "M27",
+   "text": "app/models/topic_embed.rb:1 \u2014 task title claims to \"enhance\" an existing system, but base commit only had empty stub files; this diff builds the entire feature from scratch (confidence=70, severity=P2)",
+   "lens": "metareview-lens/intent",
+   "verdict": "hallucination"
+  },
+  {
+   "id": "M28",
+   "text": "app/controllers/embed_controller.rb:1 \u2014 task description gives no concrete acceptance criteria (\"Review the change\"), so validation logic can't be checked against any pre-existing spec (confidence=55, severity=P2)",
+   "lens": "metareview-lens/intent",
+   "verdict": "hallucination"
+  },
+  {
+   "id": "M29",
+   "text": "app/jobs/scheduled/poll_feed.rb:35-36 + app/models/post.rb:130-137 + app/views/embed/best.html.erb:19 \u2014 RSS content stored as raw_html with zero sanitization and rendered via `raw post.cooked`; a malicious/compromised feed publisher achieves stored, forum-wide XSS (confidence=75, severity=P0)",
+   "lens": "metareview-lens/security",
+   "verdict": "bug"
+  },
+  {
+   "id": "M30",
+   "text": "app/models/topic_embed.rb:44-53 \u2014 Readability extraction whitelists href/src but doesn't filter `javascript:` URL scheme, enabling click-triggered stored XSS via crafted links (confidence=55, severity=P2)",
+   "lens": "metareview-lens/security",
+   "verdict": "unresolved"
+  },
+  {
+   "id": "M31",
+   "text": "lib/topic_retriever.rb:14-19 \u2014 host is validated once on the initial embed_url; open-uri follows redirects without re-checking destination, enabling SSRF via a redirect on the allowed host (confidence=55, severity=P1)",
+   "lens": "metareview-lens/security",
+   "verdict": "bug"
+  },
+  {
+   "id": "M32",
+   "text": "app/controllers/embed_controller.rb:26 \u2014 `ensure_embeddable` gates access solely on the client-spoofable `Referer` header, providing no real access control over triggering fetch/import of attacker-chosen URLs (confidence=70, severity=P2)",
+   "lens": "metareview-lens/security",
+   "verdict": "bug"
+  },
+  {
+   "id": "M33",
+   "text": "spec/controllers/embed_controller_spec.rb:40-46 \u2014 mocks `TopicRetriever.new`, which the controller never calls directly (it calls `Jobs.enqueue(:retrieve_topic, ...)`); the actual job name/args are never asserted (confidence=75, severity=P1)",
+   "lens": "metareview-lens/testing",
+   "verdict": "bug"
+  },
+  {
+   "id": "M34",
+   "text": "spec/components/topic_retriever_spec.rb:9-46 \u2014 every example mocks away `perform_retrieve`; the real HTTP-fetch/import integration path has zero test coverage (confidence=85, severity=P1)",
+   "lens": "metareview-lens/testing",
+   "verdict": "important_non_bug"
+  },
+  {
+   "id": "M35",
+   "text": "spec/jobs/poll_feed_spec.rb:31-37 \u2014 only mocks `poll_feed` itself; the real RSS-parsing body (SimpleRSS, content fallback, unescape, TopicEmbed.import) is untested (confidence=85, severity=P1)",
+   "lens": "metareview-lens/testing",
+   "verdict": "important_non_bug"
+  },
+  {
+   "id": "M36",
+   "text": "spec/jobs/poll_feed_spec.rb:2 \u2014 `require_dependency 'jobs/regular/process_post'` references a file that doesn't exist in the repo; dead copy-paste code (confidence=70, severity=P3)",
+   "lens": "metareview-lens/testing",
+   "verdict": "unresolved"
+  },
+  {
+   "id": "M37",
+   "text": "lib/post_revisor.rb:85 \u2014 new `save(validate: !@opts[:skip_validations])` behavior has no dedicated spec; the only indirect exerciser uses always-valid content (confidence=70, severity=P1)",
+   "lens": "metareview-lens/testing",
+   "verdict": "important_non_bug"
+  },
+  {
+   "id": "M38",
+   "text": "app/models/topic_embed.rb:16-29 \u2014 TOCTOU race against the unique index is untested for concurrent/duplicate imports (confidence=60, severity=P2)",
+   "lens": "metareview-lens/testing",
+   "verdict": "important_non_bug"
+  },
+  {
+   "id": "M39",
+   "text": "spec/controllers/embed_controller_spec.rb:8-11,13-17,24-27 \u2014 bare `response.should_not be_success` never checks status/exception type, so an unrelated 500 would pass just as well (confidence=65, severity=P2)",
+   "lens": "metareview-lens/testing",
+   "verdict": "important_non_bug"
+  },
+  {
+   "id": "M40",
+   "text": "spec/models/topic_embed_spec.rb:26-37 \u2014 never asserts on `content_sha1`/`post_id` of the created row, only presence (confidence=55, severity=P3)",
+   "lens": "metareview-lens/testing",
+   "verdict": "important_non_bug"
+  },
+  {
+   "id": "M41",
+   "text": "db/migrate/20131223171005_create_top_topics.rb:3 \u2014 `force: true` added in-place to an already-shipped migration; a re-run (redo/partial-deploy replay) now silently DROPs the populated table instead of failing loudly (confidence=75, severity=P2)",
+   "lens": "metareview-lens/migration",
+   "verdict": "important_non_bug"
+  },
+  {
+   "id": "M42",
+   "text": "db/migrate/20131217174004_create_topic_embeds.rb:3 \u2014 `force: true` on the new table means any re-run unconditionally drops and loses already-inserted embed rows instead of failing loudly (confidence=55, severity=P3)",
+   "lens": "metareview-lens/migration",
+   "verdict": "important_non_bug"
+  },
+  {
+   "id": "M43",
+   "text": "db/migrate/20131219203905_add_cook_method_to_posts.rb:3 \u2014 `add_column :posts, :cook_method, :integer, default: 1, null: false` with no `disable_ddl_transaction!`/batching performs a full-table rewrite under an exclusive lock on pre-PG11-era Postgres, blocking reads/writes on `posts` (confidence=55, severity=P2)",
+   "lens": "metareview-lens/migration",
+   "verdict": "important_non_bug"
+  }
+ ]
+}

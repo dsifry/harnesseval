@@ -1,0 +1,462 @@
+{
+ "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/10",
+ "pass_digest": "9c5f733ce7a3f996c90c67f262cc4a77e2b234bc415c197afa7c73477ad320be",
+ "request_sha256": "295300132cbd5877cbed39e8bac5a880e3b624cc244d99ba85068be738dd98db",
+ "request": {
+  "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/10",
+  "model": "glm-5.3-background",
+  "system": "You are clustering code review findings from one PR. Always respond with valid JSON.",
+  "prompt": "You are clustering code review findings from the same PR. For each PAIR below, decide whether the two findings describe the SAME underlying issue — same root cause in the same code location. Different wording is fine. A finding about a DIFFERENT defect in the same file or function is NOT the same issue. Severity or aspect differences of the same root cause ARE the same issue.\n\n\nFor THIS scoring pass, duplicate equivalence is stricter than sharing a root cause.\nYou must compare the COMPLETE MATERIAL CLAIMS, including mechanism, triggering\nconditions, execution path, and consequence. The same line or broad concern does\nnot establish equivalence. A report of wrong-category selection, a case/rename\nmismatch, a crash, and a silent fallback are different claims even at one lookup.\nAn inactive/unbound API concern and an alleged active user-facing failure differ.\nA compound report with an additional material claim does NOT equal its subset.\nDifferences only in wording, severity, or hedging do not create separate claims.\nIf the claimed mechanisms, triggers or consequences conflict, or one report adds\nan unsupported/different material factual claim, return same=false. You are NOT\nverifying which claim is true; do not repair or reinterpret either report to make\nthem match. If unsure whether their full claims are equivalent, return false.\n\nFor every numbered pair, extract what A and B actually CLAIM into mechanism,\ntrigger and consequence. Then list material_differences and give your equivalence\nverdict, confidence and reason. same=true requires no material differences.\nReturn ONLY this JSON object, with EVERY pair index exactly once:\n{\"pairs\":[{\"pair\":1,\"a\":{\"mechanism\":\"...\",\"trigger\":\"...\",\"consequence\":\"...\"},\"b\":{\"mechanism\":\"...\",\"trigger\":\"...\",\"consequence\":\"...\"},\"material_differences\":[],\"same\":true,\"confidence\":0.9,\"reason\":\"...\"}]}\n\nPAIRS:\nPAIR 1:\nA: EmbeddableHost.host_allowed? runs an unindexed lower(host) SQL query on every embed/comments request, replacing the previous in-memory SiteSetting read on this public per-page-view path. Every blog page carrying the embed iframe now costs a sequential-scan query on the public comments endpoint; a high-traffic embedded site adds measurable DB load where the old path was served from the process-local settings cache.\nB: `ensure_embeddable` now issues a `lower(host)` table lookup on every embed request where the old path read the in-memory cached site setting, and no index on `host` backs the non-sargable predicate. Every embedded-page view (comments/count endpoints) pays a DB round-trip plus a sequential scan that was previously a memory read; on a high-traffic forum with many embedded iframes this is a per-request query added to a hot path for a lookup that changes only when an admin edits hosts.\n\nPAIR 2:\nA: EmbeddableHost.host_allowed? runs an unindexed lower(host) SQL query on every embed/comments request, replacing the previous in-memory SiteSetting read on this public per-page-view path. Every blog page carrying the embed iframe now costs a sequential-scan query on the public comments endpoint; a high-traffic embedded site adds measurable DB load where the old path was served from the process-local settings cache.\nB: ensure_embeddable now runs an uncached SQL query on every request (`EmbeddableHost.host_allowed?` → `where(\"lower(host) = ?\").first`, unindexed on `lower(host)`), replacing a check that previously read an in-memory site setting. Every /embed/comments and /embed/count request — one per article page-view iframe for forums using embedding — now pays a per-request query plus ActiveRecord instantiation (`record_for_host` returns `.first` where `exists?` would suffice) on one of the highest-traffic endpoints, with no caching layer in the diff.\n\nPAIR 3:\nA: EmbeddableHost.host_allowed? runs an unindexed lower(host) SQL query on every embed/comments request, replacing the previous in-memory SiteSetting read on this public per-page-view path. Every blog page carrying the embed iframe now costs a sequential-scan query on the public comments endpoint; a high-traffic embedded site adds measurable DB load where the old path was served from the process-local settings cache.\nB: ensure_embeddable now runs EmbeddableHost.host_allowed? — an uncached SQL query with no index on embeddable_hosts.host (the migration creates none, and the lower() wrapping defeats a plain btree) — on every /embed/comments request, and TopicRetriever#invalid_host? issues the same query per retrieval. Forums with many embedded pages pay a new DB roundtrip on every comment-widget view and every feed poll, with nothing to serve the lookup efficiently; DB slowdowns now degrade the hot public embed path where the previous check was a site-settings lookup, so operators of embed-heavy forums inherit fresh per-request DB load.\n\nPAIR 4:\nA: EmbeddableHost.host_allowed? runs an unindexed lower(host) SQL query on every embed/comments request, replacing the previous in-memory SiteSetting read on this public per-page-view path. Every blog page carrying the embed iframe now costs a sequential-scan query on the public comments endpoint; a high-traffic embedded site adds measurable DB load where the old path was served from the process-local settings cache.\nB: record_for_host issues WHERE lower(host) = ? on every embed request (embed_controller#ensure_embeddable and TopicRetriever#invalid_host? both call it per request), replacing the previous in-memory SiteSetting check, and the migration creates no index on host — which the lower() comparison would bypass anyway. Every embedded-comments pageview on a host site now costs an unindexed DB roundtrip that the old code served from the cached settings store; high-traffic embeds multiply database load on a hot path the diff previously served from cache.\n\nPAIR 5:\nA: EmbeddableHost.host_allowed? runs an unindexed lower(host) SQL query on every embed/comments request, replacing the previous in-memory SiteSetting read on this public per-page-view path. Every blog page carrying the embed iframe now costs a sequential-scan query on the public comments endpoint; a high-traffic embedded site adds measurable DB load where the old path was served from the process-local settings cache.\nB: record_for_host runs where(\"lower(host) = ?\") on every embed request, replacing the previous in-memory-cached SiteSetting comparison, and the migration creates no index on the host column. Every reader of every page embedding Discourse comments now costs an extra DB roundtrip (plus an unindexed scan) on the hottest anonymous path, so high-traffic embedding sites take a per-request DB load increase at deploy time.\n\nPAIR 6:\nA: EmbeddableHost.host_allowed? runs an unindexed lower(host) SQL query on every embed/comments request, replacing the previous in-memory SiteSetting read on this public per-page-view path. Every blog page carrying the embed iframe now costs a sequential-scan query on the public comments endpoint; a high-traffic embedded site adds measurable DB load where the old path was served from the process-local settings cache.\nB: The per-request embed allow-list check changed from the in-memory cached SiteSetting.allows_embeddable_host? to EmbeddableHost.host_allowed?, which runs an uncached `WHERE lower(host) = ?` query on every embed request, and the migration creates no index on host. Every embedded page's /embed/comments hit now costs a DB round trip (a scan, since a plain index would not serve lower()) — high-embed-traffic sites lose the previous zero-DB allow-list path and gain load proportional to embed views.\n\nPAIR 7:\nA: EmbeddableHost.host_allowed? runs an unindexed lower(host) SQL query on every embed/comments request, replacing the previous in-memory SiteSetting read on this public per-page-view path. Every blog page carrying the embed iframe now costs a sequential-scan query on the public comments endpoint; a high-traffic embedded site adds measurable DB load where the old path was served from the process-local settings cache.\nB: The referer check on the embed/comments hot path changed from a cached in-process SiteSetting read to an unconditional per-request SQL query — EmbeddableHost.host_allowed? runs `where(\"lower(host) = ?\")` against a column with no index. Every render of an embedded comments iframe now adds a database roundtrip (a non-sargable full scan) where the previous check cost zero DB reads, adding load that scales with embed traffic on popular sites.\n\nPAIR 8:\nA: EmbeddableHost.host_allowed? runs an unindexed lower(host) SQL query on every embed/comments request, replacing the previous in-memory SiteSetting read on this public per-page-view path. Every blog page carrying the embed iframe now costs a sequential-scan query on the public comments endpoint; a high-traffic embedded site adds measurable DB load where the old path was served from the process-local settings cache.\nB: Embed hot path performance regression: `ensure_embeddable` now calls `EmbeddableHost.host_allowed?(request.referer)`, issuing a DB query (`WHERE lower(host) = ?`) on every `/embed/comments` request, replacing the process-cached `SiteSetting.allows_embeddable_host?` which required zero DB traffic; the host list should be cached (process/Redis, invalidated on host CRUD) instead of queried per request\n\nPAIR 9:\nA: EmbeddableHost.host_allowed? runs an unindexed lower(host) SQL query on every embed/comments request, replacing the previous in-memory SiteSetting read on this public per-page-view path. Every blog page carrying the embed iframe now costs a sequential-scan query on the public comments endpoint; a high-traffic embedded site adds measurable DB load where the old path was served from the process-local settings cache.\nB: Hot-path host check regressed from in-memory lookup to a per-request DB query: EmbeddableHost.host_allowed? (record_for_host) issues a Postgres query on every call instead of the previous in-memory SiteSetting.allows_embeddable_host? check, adding DB load and latency to every /embed/comments and /embed/count request and each imported post, with no memoization or cache invalidated on host create/update/destroy\n\nPAIR 10:\nA: No migration spec exists anywhere in the diff (the test-shaped files are limited to spec/controllers, spec/fabricators, spec/models and test/javascripts) for a migration that rewrites site configuration and deletes the source setting rows. A regression in the setting-parsing or category-mapping SQL corrupts or drops hosts at upgrade time with no safety net — the exact class of failure this migration already exhibits.\nB: The migration's non-trivial data-transfer logic (category lookup by name join, uncategorized fallback, host-row seeding) has no test anywhere in this diff. A regression in the settings-to-table backfill would corrupt or drop every existing site's embedding configuration with nothing failing in CI; this is the highest-blast-risk code in the PR and the least covered.\n\nPAIR 11:\nA: No migration spec exists anywhere in the diff (the test-shaped files are limited to spec/controllers, spec/fabricators, spec/models and test/javascripts) for a migration that rewrites site configuration and deletes the source setting rows. A regression in the setting-parsing or category-mapping SQL corrupts or drops hosts at upgrade time with no safety net — the exact class of failure this migration already exhibits.\nB: Data migration moving site settings to table rows has zero test coverage\n\nPAIR 12:\nA: No migration spec exists anywhere in the diff (the test-shaped files are limited to spec/controllers, spec/fabricators, spec/models and test/javascripts) for a migration that rewrites site configuration and deletes the source setting rows. A regression in the setting-parsing or category-mapping SQL corrupts or drops hosts at upgrade time with no safety net — the exact class of failure this migration already exhibits.\nB: No test verifies that legacy embeddable_hosts/embed_category values are carried over and that the old settings rows are deleted (line 31)\n\nPAIR 13:\nA: The embeddable_hosts table has no UNIQUE constraint or index on host, so duplicate hosts are representable and the hot-path lookup `where(\"lower(host) = ?\", host)` runs unindexed and non-sargable (function-wrapped column). Admins can save the same host twice and get two rows with different category_ids where `record_for_host(...).first` silently picks one by unspecified order; the per-request embed/comments lookup does a sequential scan of a function-wrapped column.\nB: Lookup query is non-sargable and the embeddable_hosts table has no index: where(\"lower(host) = ?\", host) cannot use a plain btree index and the migration creates no index on host, forcing a sequential scan on every lookup; normalizing hosts to lowercase in before_validation with where(host: host) or adding an expression index on lower(host) would fix it\n\nPAIR 14:\nA: The only spec added for Admin::EmbeddableHostsController asserts class inheritance (verified: this file's single it-block checks Admin::EmbeddableHostsController < Admin::AdminController and no other spec in the diff references this controller), leaving the controller's entire behavior surface unverified — the blank-category_id-to-uncategorized defaulting, the render_json_error path for invalid hosts, and create/update/destroy request handling have zero assertions. A regression in the uncategorized fallback (e.g. dropping host.category_id = SiteSetting.uncategorized_category_id if blank?) breaks every host saved without a category and every embed-import's category assignment, and the build stays green because no test exercises the controller's actual behavior.\nB: The only spec covering Admin::EmbeddableHostsController asserts class inheritance and never exercises create, update, destroy, or save_host. The guard is a pure proxy that stays green no matter what the actions do — any regression in the new CRUD surface (the uncategorized defaulting, the error rendering, a mistyped params key) passes CI and ships to the first staff user in production.\n\nPAIR 15:\nA: The only spec added for Admin::EmbeddableHostsController asserts class inheritance (verified: this file's single it-block checks Admin::EmbeddableHostsController < Admin::AdminController and no other spec in the diff references this controller), leaving the controller's entire behavior surface unverified — the blank-category_id-to-uncategorized defaulting, the render_json_error path for invalid hosts, and create/update/destroy request handling have zero assertions. A regression in the uncategorized fallback (e.g. dropping host.category_id = SiteSetting.uncategorized_category_id if blank?) breaks every host saved without a category and every embed-import's category assignment, and the build stays green because no test exercises the controller's actual behavior.\nB: The only spec for Admin::EmbeddableHostsController asserts class inheritance; create, update and destroy — including save_host's blank-category → uncategorized_category_id fallback — have no behavioral assertions anywhere in the diff. The endpoints' contract (param shape, serialization, the uncategorized fallback, the 500s on missing ids) ships unverified, so regressions in the headline 'edit category/host relationships' flow land silently.\n\nPAIR 16:\nA: The only spec added for Admin::EmbeddableHostsController asserts class inheritance (verified: this file's single it-block checks Admin::EmbeddableHostsController < Admin::AdminController and no other spec in the diff references this controller), leaving the controller's entire behavior surface unverified — the blank-category_id-to-uncategorized defaulting, the render_json_error path for invalid hosts, and create/update/destroy request handling have zero assertions. A regression in the uncategorized fallback (e.g. dropping host.category_id = SiteSetting.uncategorized_category_id if blank?) breaks every host saved without a category and every embed-import's category assignment, and the build stays green because no test exercises the controller's actual behavior.\nB: The only spec for Admin::EmbeddableHostsController asserts subclass ancestry, leaving the new `save_host` logic — the blank-category fallback to uncategorized_category_id, validation-error rendering, and the before_validation host normalization — with no test coverage. A regression in the uncategorized fallback or the error path ships with no failing spec, and embedded topics start posting to the wrong category or the controller returns unrendered 500s on invalid input.\n\nPAIR 17:\nA: The only spec added for Admin::EmbeddableHostsController asserts class inheritance (verified: this file's single it-block checks Admin::EmbeddableHostsController < Admin::AdminController and no other spec in the diff references this controller), leaving the controller's entire behavior surface unverified — the blank-category_id-to-uncategorized defaulting, the render_json_error path for invalid hosts, and create/update/destroy request handling have zero assertions. A regression in the uncategorized fallback (e.g. dropping host.category_id = SiteSetting.uncategorized_category_id if blank?) breaks every host saved without a category and every embed-import's category assignment, and the build stays green because no test exercises the controller's actual behavior.\nB: The only spec for the new Admin::EmbeddableHostsController asserts ancestry, so create/update/destroy behavior — param handling, the blank-category-to-uncategorized fallback in save_host, and error rendering — is exercised by no test in the diff. A regression in save_host (e.g., the nil-record 500 or a broken uncategorized fallback) breaks the new admin embedding UI while the suite stays green.\n\nPAIR 18:\nA: The only spec added for Admin::EmbeddableHostsController asserts class inheritance (verified: this file's single it-block checks Admin::EmbeddableHostsController < Admin::AdminController and no other spec in the diff references this controller), leaving the controller's entire behavior surface unverified — the blank-category_id-to-uncategorized defaulting, the render_json_error path for invalid hosts, and create/update/destroy request handling have zero assertions. A regression in the uncategorized fallback (e.g. dropping host.category_id = SiteSetting.uncategorized_category_id if blank?) breaks every host saved without a category and every embed-import's category assignment, and the build stays green because no test exercises the controller's actual behavior.\nB: The only spec for the new Admin::EmbeddableHostsController asserts ancestry; none of the diff's new behavior — save_host's create/update, the blank-category_id default to uncategorized, render_json_error, or not-found handling — is exercised by any test in the diff. The nil-on-missing-id 500s and any payload/param-name mismatch between the frontend save props and `params[:embeddable_host]` ship undetected and surface only as a broken embedding admin page in production.\n\nPAIR 19:\nA: The only spec added for Admin::EmbeddableHostsController asserts class inheritance (verified: this file's single it-block checks Admin::EmbeddableHostsController < Admin::AdminController and no other spec in the diff references this controller), leaving the controller's entire behavior surface unverified — the blank-category_id-to-uncategorized defaulting, the render_json_error path for invalid hosts, and create/update/destroy request handling have zero assertions. A regression in the uncategorized fallback (e.g. dropping host.category_id = SiteSetting.uncategorized_category_id if blank?) breaks every host saved without a category and every embed-import's category assignment, and the build stays green because no test exercises the controller's actual behavior.\nB: The only spec for the new EmbeddableHostsController asserts class inheritance and exercises none of the controller's new behavior — save_host's parameter handling, the blank→uncategorized_category_id fallback, render_json_error, or destroy — so the entire new logic ships as a stand-in guard. CI stays green through any regression in save_host (a dropped blank? fallback, a renamed params key, a broken error path), so the next refactor silently ships 500s or wrongly-categorized hosts to production admins with a green build.\n\nPAIR 20:\nA: The only spec added for Admin::EmbeddableHostsController asserts class inheritance (verified: this file's single it-block checks Admin::EmbeddableHostsController < Admin::AdminController and no other spec in the diff references this controller), leaving the controller's entire behavior surface unverified — the blank-category_id-to-uncategorized defaulting, the render_json_error path for invalid hosts, and create/update/destroy request handling have zero assertions. A regression in the uncategorized fallback (e.g. dropping host.category_id = SiteSetting.uncategorized_category_id if blank?) breaks every host saved without a category and every embed-import's category assignment, and the build stays green because no test exercises the controller's actual behavior.\nB: The only test for the new Admin::EmbeddableHostsController asserts class ancestry and verifies none of the controller's behavior (create/update/destroy, category_id blank fallback to uncategorized, render_json_error on validation failure). A regression in save_host (e.g., the blank-category fallback or error rendering) ships green because the spec passes even if every action body is deleted; admins get 500s or silently-wrong host records with no failing test.\n",
+  "effort": "low",
+  "pairs": [
+   [
+    24,
+    34
+   ],
+   [
+    24,
+    35
+   ],
+   [
+    24,
+    36
+   ],
+   [
+    24,
+    54
+   ],
+   [
+    24,
+    55
+   ],
+   [
+    24,
+    128
+   ],
+   [
+    24,
+    134
+   ],
+   [
+    24,
+    1238
+   ],
+   [
+    24,
+    1303
+   ],
+   [
+    51,
+    104
+   ],
+   [
+    51,
+    962
+   ],
+   [
+    51,
+    1405
+   ],
+   [
+    83,
+    1313
+   ],
+   [
+    110,
+    112
+   ],
+   [
+    110,
+    113
+   ],
+   [
+    110,
+    114
+   ],
+   [
+    110,
+    117
+   ],
+   [
+    110,
+    118
+   ],
+   [
+    110,
+    123
+   ],
+   [
+    110,
+    127
+   ]
+  ]
+ },
+ "parsed_response": {
+  "pairs": [
+   {
+    "pair": 1,
+    "a": {
+     "mechanism": "host_allowed? runs unindexed lower(host) SQL per request, replacing in-memory SiteSetting read",
+     "trigger": "every embed/comments request (per-page-view iframe)",
+     "consequence": "sequential scan + DB load on hot public path for high-traffic embeds"
+    },
+    "b": {
+     "mechanism": "ensure_embeddable issues lower(host) lookup per request with no index, replacing cached site setting",
+     "trigger": "every embedded-page view (comments/count endpoints)",
+     "consequence": "per-request DB round-trip + seq scan added to hot path"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Identical mechanism, trigger, and consequence; wording only differs."
+   },
+   {
+    "pair": 2,
+    "a": {
+     "mechanism": "unindexed lower(host) SQL per request replacing in-memory SiteSetting read",
+     "trigger": "every embed/comments request",
+     "consequence": "sequential scan, added DB load on hot public path"
+    },
+    "b": {
+     "mechanism": "uncached unindexed lower(host) query per request, AND record_for_host returns .first (AR instantiation) where exists? would suffice",
+     "trigger": "every /embed/comments and /embed/count request",
+     "consequence": "per-request query plus ActiveRecord instantiation overhead"
+    },
+    "material_differences": [
+     "B adds a distinct material claim: ActiveRecord record instantiation overhead from .first vs exists?, beyond the query/scan claim in A"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "B is a compound report adding a material overhead claim (AR instantiation) not present in A."
+   },
+   {
+    "pair": 3,
+    "a": {
+     "mechanism": "unindexed lower(host) SQL per request replacing in-memory SiteSetting read",
+     "trigger": "every embed/comments request",
+     "consequence": "sequential scan, added DB load on public comments path"
+    },
+    "b": {
+     "mechanism": "uncached unindexed host_allowed? query per request",
+     "trigger": "every /embed/comments request AND every TopicRetriever retrieval (feed poll) via invalid_host?",
+     "consequence": "per-request DB roundtrip on comment-widget views and feed polls; DB slowdowns degrade hot path"
+    },
+    "material_differences": [
+     "B adds a second execution path (TopicRetriever#invalid_host? per retrieval/feed poll) not claimed by A"
+    ],
+    "same": false,
+    "confidence": 0.75,
+    "reason": "B adds a distinct trigger path (TopicRetriever/feed polling) beyond A's embed/comments claim."
+   },
+   {
+    "pair": 4,
+    "a": {
+     "mechanism": "unindexed lower(host) SQL per request replacing in-memory SiteSetting read",
+     "trigger": "every embed/comments request",
+     "consequence": "sequential scan, added DB load on hot path"
+    },
+    "b": {
+     "mechanism": "record_for_host WHERE lower(host) unindexed, no migration index",
+     "trigger": "every embed request via both ensure_embeddable AND TopicRetriever#invalid_host?",
+     "consequence": "per-request unindexed DB roundtrip replacing cached settings read"
+    },
+    "material_differences": [
+     "B claims an additional call path (TopicRetriever#invalid_host?) and frames trigger as every embed request, not just embed/comments"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "B adds a second execution path not present in A's claim."
+   },
+   {
+    "pair": 5,
+    "a": {
+     "mechanism": "unindexed lower(host) SQL per request replacing in-memory SiteSetting read",
+     "trigger": "every embed/comments request",
+     "consequence": "sequential scan, added DB load for high-traffic embeds"
+    },
+    "b": {
+     "mechanism": "record_for_host runs where(lower(host)=?) per embed request, no index created, replacing in-memory-cached SiteSetting comparison",
+     "trigger": "every embed request / embedded-comments pageview",
+     "consequence": "extra DB roundtrip + unindexed scan on hottest anonymous path, per-request load increase"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "Same mechanism (unindexed per-request lookup replacing cached setting), same trigger and consequence; 'every embed request' vs 'embed/comments' is a scope wording difference within the same check."
+   },
+   {
+    "pair": 6,
+    "a": {
+     "mechanism": "unindexed lower(host) SQL per request replacing in-memory SiteSetting read",
+     "trigger": "every embed/comments request",
+     "consequence": "sequential scan, added DB load"
+    },
+    "b": {
+     "mechanism": "allow-list check moved from cached SiteSetting.allows_embeddable_host? to uncached WHERE lower(host)=? with no index",
+     "trigger": "every embedded page's /embed/comments hit",
+     "consequence": "DB round trip scan per request, load proportional to embed views"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Same mechanism, trigger, and consequence."
+   },
+   {
+    "pair": 7,
+    "a": {
+     "mechanism": "unindexed lower(host) SQL per request replacing in-memory SiteSetting read",
+     "trigger": "every embed/comments request",
+     "consequence": "sequential scan, added DB load scaling with embed traffic"
+    },
+    "b": {
+     "mechanism": "referer check changed from cached SiteSetting to unconditional per-request lower(host) query on unindexed column",
+     "trigger": "every render of an embedded comments iframe",
+     "consequence": "DB roundtrip (non-sargable full scan) where prior check cost zero DB reads"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Same mechanism, trigger, and consequence."
+   },
+   {
+    "pair": 8,
+    "a": {
+     "mechanism": "unindexed lower(host) SQL per request replacing in-memory SiteSetting read",
+     "trigger": "every embed/comments request",
+     "consequence": "sequential scan, added DB load on hot path"
+    },
+    "b": {
+     "mechanism": "host_allowed? issues DB query per request replacing process-cached setting",
+     "trigger": "every /embed/comments request",
+     "consequence": "per-request DB traffic replacing zero-DB path; host list should be cached"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Same mechanism, trigger, consequence; B's caching suggestion is a remedy, not a different claim."
+   },
+   {
+    "pair": 9,
+    "a": {
+     "mechanism": "unindexed lower(host) SQL per request replacing in-memory SiteSetting read",
+     "trigger": "every embed/comments request",
+     "consequence": "sequential scan, added DB load"
+    },
+    "b": {
+     "mechanism": "host_allowed?/record_for_host issues per-call DB query replacing in-memory check, no memoization/cache",
+     "trigger": "/embed/comments, /embed/count requests AND each imported post",
+     "consequence": "added DB load and latency on those paths"
+    },
+    "material_differences": [
+     "B adds an additional trigger path (each imported post via TopicRetriever) beyond A's embed/comments claim"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "B claims extra execution paths (imported posts, /embed/count) not in A."
+   },
+   {
+    "pair": 10,
+    "a": {
+     "mechanism": "migration rewrites site configuration and deletes source rows with no migration spec in diff",
+     "trigger": "regression in setting-parsing or category-mapping SQL",
+     "consequence": "hosts corrupted or dropped at upgrade with no safety net"
+    },
+    "b": {
+     "mechanism": "migration's data-transfer logic (category join, uncategorized fallback, host seeding) untested",
+     "trigger": "regression in settings-to-table backfill",
+     "consequence": "corrupts/drops embedding configuration with CI staying green"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Same root cause: untested data migration that can corrupt embedding configuration."
+   },
+   {
+    "pair": 11,
+    "a": {
+     "mechanism": "migration rewrites config and deletes source rows, no migration spec in diff",
+     "trigger": "regression in migration SQL",
+     "consequence": "hosts corrupted/dropped at upgrade, no safety net"
+    },
+    "b": {
+     "mechanism": "data migration moving site settings to table rows has zero test coverage",
+     "trigger": "any migration defect",
+     "consequence": "untested migration"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "B is a terse restatement of the same untested-migration issue."
+   },
+   {
+    "pair": 12,
+    "a": {
+     "mechanism": "no migration spec for migration that rewrites config and deletes source setting rows",
+     "trigger": "regression in parsing/mapping SQL",
+     "consequence": "hosts corrupted/dropped at upgrade, no safety net"
+    },
+    "b": {
+     "mechanism": "no test verifies legacy embeddable_hosts/embed_category carryover and old settings deletion",
+     "trigger": "migration defect in carryover/deletion",
+     "consequence": "unverified data carryover and cleanup"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "Same issue: the migration's data carryover and setting-row deletion is untested."
+   },
+   {
+    "pair": 13,
+    "a": {
+     "mechanism": "no UNIQUE constraint/index on host: duplicates representable, record_for_host(...).first silently picks arbitrary row; lower(host) lookup unindexed/non-sargable",
+     "trigger": "admin saves same host twice; per-request lookup",
+     "consequence": "duplicate rows with different category_ids, nondeterministic pick, plus seq scan"
+    },
+    "b": {
+     "mechanism": "lookup non-sargable (lower() defeats btree), migration creates no host index",
+     "trigger": "every lookup",
+     "consequence": "sequential scan; fix via normalization or expression index"
+    },
+    "material_differences": [
+     "A adds a distinct material claim: missing UNIQUE constraint allows duplicate host rows with nondeterministic record selection, absent from B"
+    ],
+    "same": false,
+    "confidence": 0.75,
+    "reason": "A is compound: duplicates/nondeterministic pick claim plus index issue; B covers only the index/sargability issue."
+   },
+   {
+    "pair": 14,
+    "a": {
+     "mechanism": "only spec asserts controller inheritance; all controller behavior unverified (uncategorized defaulting, error rendering, CRUD)",
+     "trigger": "any regression in controller actions",
+     "consequence": "regression ships with green build"
+    },
+    "b": {
+     "mechanism": "only spec asserts inheritance, never exercises create/update/destroy/save_host",
+     "trigger": "any regression in new CRUD surface",
+     "consequence": "passes CI and ships to production staff users"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Same root cause: controller behavior untested behind an inheritance-only spec."
+   },
+   {
+    "pair": 15,
+    "a": {
+     "mechanism": "only inheritance spec; blank-category defaulting, error path, CRUD untested",
+     "trigger": "regression in uncategorized fallback or error path",
+     "consequence": "broken hosts/imports with green build"
+    },
+    "b": {
+     "mechanism": "only inheritance spec; create/update/destroy incl. save_host fallback untested; endpoints' contract ships unverified",
+     "trigger": "regression in the CRUD flow",
+     "consequence": "silently-landed regressions"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Same root cause and consequence; B's contract details are elaborations of the same untested surface."
+   },
+   {
+    "pair": 16,
+    "a": {
+     "mechanism": "only inheritance spec; uncategorized defaulting, render_json_error, CRUD untested",
+     "trigger": "regression in fallback or error path",
+     "consequence": "green build while behavior broken"
+    },
+    "b": {
+     "mechanism": "only ancestry spec; save_host fallback, error rendering, host normalization untested",
+     "trigger": "regression in fallback/error path",
+     "consequence": "wrong-category posts or 500s with no failing spec"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "Same issue; B adds host normalization to the untested list, an elaboration of the same untested-controller root cause."
+   },
+   {
+    "pair": 17,
+    "a": {
+     "mechanism": "only inheritance spec; controller behavior surface untested",
+     "trigger": "regression in save_host/fallback/error path",
+     "consequence": "green build, broken behavior"
+    },
+    "b": {
+     "mechanism": "only ancestry spec; create/update/destroy, fallback, error rendering untested",
+     "trigger": "regression in save_host (nil-record 500, broken fallback)",
+     "consequence": "admin UI broken while suite green"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Same root cause and consequence."
+   },
+   {
+    "pair": 18,
+    "a": {
+     "mechanism": "only inheritance spec; defaulting, error rendering, CRUD untested",
+     "trigger": "regression in fallback/error path",
+     "consequence": "green build, broken hosts/imports"
+    },
+    "b": {
+     "mechanism": "only ancestry spec; save_host, fallback, render_json_error, not-found handling untested",
+     "trigger": "nil-on-missing-id 500s, payload/param-name mismatch",
+     "consequence": "broken embedding admin page in production, undetected"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "Same untested-controller root cause; B's param-mismatch is a concrete regression example, same as A's examples."
+   },
+   {
+    "pair": 19,
+    "a": {
+     "mechanism": "only inheritance spec; defaulting, error rendering, CRUD untested",
+     "trigger": "regression in fallback/params/error path",
+     "consequence": "green build, broken behavior for admins"
+    },
+    "b": {
+     "mechanism": "only inheritance spec; save_host param handling, fallback, render_json_error, destroy untested",
+     "trigger": "regression in save_host",
+     "consequence": "green build ships 500s or wrongly-categorized hosts"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Same root cause, trigger, and consequence."
+   },
+   {
+    "pair": 20,
+    "a": {
+     "mechanism": "only inheritance spec; defaulting, error rendering, CRUD untested",
+     "trigger": "regression in fallback or error rendering",
+     "consequence": "green build, broken host records"
+    },
+    "b": {
+     "mechanism": "only ancestry spec; create/update/destroy, fallback, render_json_error unverified",
+     "trigger": "regression in save_host (fallback or error rendering)",
+     "consequence": "spec passes even if actions deleted; admins get 500s or wrong records"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Same root cause, trigger, and consequence."
+   }
+  ]
+ },
+ "usage": {
+  "glm-5.3-background": {
+   "input_tokens": 4058,
+   "cache_read_input_tokens": 384,
+   "cache_creation_input_tokens": 0,
+   "output_tokens": 2818,
+   "reasoning_output_tokens": 1308,
+   "cost_usd": 0.0,
+   "total_tokens": 8568
+  }
+ },
+ "status": "complete",
+ "error_type": null,
+ "elapsed_s": 22.910629987716675
+}

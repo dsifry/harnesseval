@@ -1,0 +1,1119 @@
+{
+  "tp": 1,
+  "fp": 34,
+  "fn": 1,
+  "precision": 0.02857142857142857,
+  "recall": 0.5,
+  "n_findings": 37,
+  "n_golden": 2,
+  "tokens_in": 453436,
+  "tokens_out": 7925,
+  "wall_ms": 1777462.4049663544,
+  "per_model_usage": {
+    "glm-5.3-vision-background": {
+      "input_tokens": 3708,
+      "cache_read_input_tokens": 25280,
+      "cache_creation_input_tokens": 0,
+      "output_tokens": 7925,
+      "reasoning_output_tokens": 424448,
+      "cost_usd": 0.0,
+      "total_tokens": 461361
+    }
+  },
+  "total_cost_usd": 0.0,
+  "resolved_model": "glm-5.3-vision-background",
+  "adjudicated_precision": 0.5,
+  "incremental_recall": 0.9166666666666666,
+  "n_bug_ungold": 10,
+  "n_important_non_bug": 21,
+  "n_true_hallucination": 1,
+  "n_unresolved": 2,
+  "n_real_ungold": 10,
+  "n_hallucination": 1,
+  "decomposition": {
+    "deterministic_tp": 0,
+    "llm_lens_tp": 1,
+    "deterministic_gate_recall": 0.0,
+    "llm_lens_recall": 0.5
+  },
+  "findings": [
+    {
+      "issue_text": "[ADVISORY] Including I18n::Backend::Fallbacks into the backend for every environment (line 9) makes every backend-mediated translation (interpolated/pluralized lookups and miss walks) compute its chain through FallbackLocaleList#[], which dereferences SiteSetting.default_locale at line 17, so I18n now performs a database-backed settings read inside the translation path of every process type, not just web requests. Operators running Rails code against a database without the site_settings table (fresh-install bootstrap while db:migrate is still mid-run, rails runner or a recovery console on an empty DB) get ActiveRecord::StatementInvalid / PG::UndefinedTable raised out of an I18n lookup instead of the missing-translation marker; before this PR dev/test/rake had no fallbacks at all and production's config.i18n.fallbacks used I18n::Locale::Fallbacks, neither of which queried SiteSetting.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] [locale, SiteSetting.default_locale.to_sym, :en].uniq fails to deduplicate the current locale against its Symbol twin because I18n.locale is a String on the common request path (set_locale assigns the raw SiteSetting.default_locale / user-locale strings, as shown in the adjacent app/controllers/application_controller.rb hunk), so a request whose locale equals the site default produces ['en', :en, :en].uniq => ['en', :en] instead of a two-element chain. Every web process runs I18n.ensure_loaded! twice for the primary locale (once as String, once as Symbol) and hands I18n::Backend::Fallbacks a chain containing the same locale twice, doubling preload work and adding a dead hop to every fallback miss walk; the extra locale dicts and lookups scale with worker count and go unnoticed because translation results still resolve correctly.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The diff introduces three pieces of behavior-bearing logic \u2014 the FallbackLocaleList fallback-chain computation and its ensure_loaded! (lines 12-23), the TranslateAccelerator#ensure_loaded! preload patch in lib/freedom_patches/translate_accelerator.rb, and the ApplicationController#set_locale hook \u2014 with no test anywhere in the diff covering any of them. A regression in chain ordering (user locale -> site default -> en), dedup, or locale type handling ships silently because nothing in CI asserts the fallback list or that a key missing in locale A returns the site-default/English translation; sites would just see translation_missing markers again with no red build, and the String/Symbol duplication at line 17 is exactly the class of defect a one-line spec on FallbackLocaleList#[] would have caught before merge.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] ensure_loaded! calls I18n.ensure_loaded!, a method defined neither in this diff nor by the i18n gem \u2014 the only ensure_loaded! this diff adds lives on TranslateAccelerator (lib/freedom_patches/translate_accelerator.rb:62-65) and the I18n module has no delegation to its backend, so the bridge from I18n.ensure_loaded! to the backend method is missing from the diff. ApplicationController#set_locale (app/controllers/application_controller.rb:160) runs I18n.fallbacks.ensure_loaded! on every request; with no definition of I18n.ensure_loaded! anywhere in the diff, this raises NoMethodError and turns every page and API call into a 500 \u2014 a full-site outage gated entirely on unstated out-of-diff wiring.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p0",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] The diff ships a new global fallback architecture (FallbackLocaleList, backend module inclusion, per-request preload hook, removal of fallback config from three production environment files) with zero test files \u2014 a scan of the diff finds no spec/**, test/**, or *.spec.* additions covering any of it. The uncovered behaviors are exactly the load-bearing ones: chain ordering (user locale -> SiteSetting.default_locale -> :en), that I18n::Backend::Fallbacks#translate is actually reached (TranslateAccelerator defines its own translate(key, *args) which shadows the included Fallbacks#translate(locale, key, options) unless its internal super passes the backend signature \u2014 nothing in the diff verifies the wiring), that ensure_loaded! preloads work, and that pluralization survived the consolidation of the deleted config/initializers/pluralization.rb into this initializer; a regression in any of these silently mis-renders every server-side string for non-English users.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] I18n.fallbacks.ensure_loaded! is wired only into the HTTP filter set_locale; no background path (Sidekiq mail jobs, rake tasks, console) ever preloads the fallback locales, and TranslateAccelerator#translate lazy-loads only config.locale, never the fallback locales. Discourse generates all email in Sidekiq jobs; a fresh worker whose first job is a notification for a 'de' user on a site with default_locale 'fr' has neither :fr nor :en translations loaded (I18n::Backend::Fallbacks#translate never loads, it only rescues MissingTranslationData down the chain), so the site-default and English fallback hops render 'translation missing: ...' strings in production emails \u2014 the PR's headline fallback silently fails for the entire background/mail server surface.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] Moving fallback enablement out of the production-only environment files into an initializer turns fallbacks on in development and test, where config.i18n.fallbacks was never set before this diff. Developers lose their missing-translation signal: a key absent from a non-English locale's server.yml that previously rendered as a loud 'translation missing:' marker in dev/test now silently renders English, so the test suite can no longer catch untranslated or typo'd keys \u2014 the exact gap this feature papers over at runtime now also hides it at verification time, and translation regressions reach users of minority locales undetected.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] FallbackLocaleList#[] rebuilds the chain on every invocation \u2014 fresh 3-element array plus uniq, compact, to_sym, and a SiteSetting.default_locale read \u2014 and I18n::Backend::Fallbacks#translate evaluates I18n.fallbacks[locale] on every lookup instead of the plain Hash lookup the old config.i18n.fallbacks = true provided. Every interpolated I18n.t call (the args.length > 0 no-cache path in TranslateAccelerator#translate) now pays array allocation and re-derivation per translated string on translation-heavy pages with hundreds of lookups per request; a per-locale memoized chain eliminates it, and the omission is a hot-path cost on every request of every high-traffic site.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The chain symbolizes SiteSetting.default_locale but not the incoming locale, so when I18n.locale is a String \u2014 which it is on the set_locale else-branch that assigns SiteSetting.default_locale, a String \u2014 a site whose default matches the user's locale yields a chain like [\"de\", :de, :en]. I18n.fallbacks.ensure_loaded! iterates both \"de\" and :de, and TranslateAccelerator#ensure_loaded!'s @loaded_locales.include? guard treats them as distinct, so load_locale parses the same server.de.yml twice and stores it under two type-identities, doubling per-locale parse cost and memory while one of the two chain entries is a dead lookup hop on every miss \u2014 the next change to locale handling has to reason about which of the two types actually resolves.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] The only call site that preloads the fallback-chain locales is ApplicationController#set_locale, so every server-side translation running outside an HTTP request \u2014 the Sidekiq jobs that render Discourse's emails, digests, and system messages \u2014 executes the new fallback chain against fallback locales that were never loaded. A mailer job rendering an email in the user's locale hits a key missing from that locale; the Fallbacks backend then tries SiteSetting.default_locale and :en, but neither was load_locale'd in the Sidekiq process (TranslateAccelerator#translate at lib/freedom_patches/translate_accelerator.rb:68 only lazy-loads config.locale), so the user is emailed raw 'translation missing: en.mailer_subject' text instead of the site-default/English fallback the feature exists to provide \u2014 the feature silently exists only for web-page rendering.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] The fallback chain makes translation results depend on the live per-site value of SiteSetting.default_locale (line 17), but the diff adds no cache keying or invalidation for the process-wide translation cache that TranslateAccelerator#translate front-runs on its no-args path (lib/freedom_patches/translate_accelerator.rb:69), so fallback-resolved strings are stored under a cache key that cannot distinguish sites or setting changes. In a multisite deployment, two sites with different default locales share the per-process (locale, key) cache, so a user on site B whose locale is missing a key is served site A's fallback-language text; likewise, after an admin changes default_locale, previously cached fallback-baked strings keep rendering in the old language until process restart.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] The new ensure_loaded! centralizes the guard-then-load pattern, but the adjacent translate keeps its own inline copy (line 68, `load_locale(config.locale) unless @loaded_locales.include?(config.locale)`) instead of delegating, and the two copies already disagree \u2014 ensure_loaded! defensively initializes @loaded_locales while translate dereferences it unguarded. The next change to the loading policy \u2014 a mutex for the multithreaded first-load race, or logging on first load \u2014 must be replicated in two places and one will be missed; replacing translate's guard with ensure_loaded!(config.locale) deletes the duplicated branch outright.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] Two adjacent backend-module includes attach by incompatible strategies \u2014 Pluralization is pinned to the I18n::Backend::Simple constant (line 5) while Fallbacks is bound to whatever class I18n.backend happens to be at initializer time (line 9) \u2014 so the two behaviors detach under different conditions. A plugin or test harness that reassigns I18n.backend (a chain wrapper, a stub) silently runs with pluralization but without fallbacks, or vice versa, depending on whether the assignment happens before or after this initializer; because neither detachment raises, the next contributor spends hours tracing why fallbacks work in one boot path and not another.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The new non-trivial fallback semantics \u2014 the user-locale \u2192 site-default \u2192 English ordering and uniq/compact dedup (lines 13-18), FallbackLocaleList's Hash#[] contract with i18n's Fallbacks backend, and the ensure_loaded! preloading handshake with TranslateAccelerator \u2014 ship with no test anywhere in the diff. A future edit that reorders the chain, drops the :en last resort, or breaks the ensure_loaded! protocol changes the rendered language of server-side strings for entire locale groups and merges undetected, because nothing in the suite pins the contract this initializer creates.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] Fallback-chain locale preloading is owned exclusively by the HTTP request lifecycle \u2014 `I18n.fallbacks.ensure_loaded!` runs only in set_locale, while the lazy accelerator in translate_accelerator.rb loads only the current locale (`translate` -> `load_locale(config.locale)`), so every non-request process executes `I18n::Backend::Fallbacks#translate` over backend locales that were never loaded. All Discourse mail is rendered in Sidekiq processes that never run set_locale: on a site whose default_locale is not English, a user-locale email missing a key falls through the unloaded site-default leg and delivers English text (or a raw 'translation missing' marker in a fresh process that never loaded :en) instead of the site-default language, and whether the fallback works flips depending on which locales happened to load earlier in that process's lifetime.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] Removing `config.i18n.fallbacks = true` silently drops the standard I18n::Locale::Fallbacks parent-language chain (pt-BR->pt, zh-TW->zh) from production; the replacement chain `[locale, SiteSetting.default_locale, :en]` in config/initializers/i18n.rb has no parent-language leg at all. Regional-locale users lose existing production behavior: a pt_BR user on an English-default site currently gets Portuguese via the pt leg for keys missing in pt_BR; after this change they get English \u2014 a user-visible regression for every Discourse regional locale, shipped with no data-driven place to re-add the parent leg (the TODO only mentions cross-variant fallbacks).",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] `FallbackLocaleList#[]` calls `SiteSetting.default_locale` on every fallback computation, putting a DB-backed settings read on the translation-miss path of every process, including contexts where the site_settings table or connection does not exist (first `db:migrate`/`db:bootstrap` boot, `rails runner` against an unbuilt database). A missing translation key during a DB-less boot context that previously returned a 'translation missing' marker now raises `ActiveRecord::StatementInvalid` (relation \"site_settings\" does not exist) out of `I18n.fallbacks[locale]`, aborting the boot or rake task instead of degrading to the marker.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] The fallback chain bakes the per-site value `SiteSetting.default_locale` into results memoized in the process-global translation cache (translate_accelerator.rb's `translate` caches per (locale, key) on the shared I18n module), so identical cache keys hold site-specific fallback text on multisite installs. On a multisite install where site A defaults to :fr and site B to :es, a German user's lookup of a key missing in :de caches French text under (de, key) while serving site A; site B's German users then hit that cache entry and receive site A's French text instead of site B's Spanish \u2014 wrong-language content crossing tenant boundaries with no translation-override involvement.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] FallbackLocaleList subclasses Hash but overrides `[]` to ignore the underlying store, so the inherited write API that i18n documents for custom fallbacks (`I18n.fallbacks[:zh_TW] = [:zh_TW, :zh_CN]`, `merge!`) accepts writes that no read path ever consults. A plugin or operator configuring per-language fallbacks \u2014 the exact zh_TW/zh_CN enhancement this file's own TODO anticipates \u2014 gets a silent no-op: the assignment succeeds, the lookup path never sees it, translations keep resolving without the custom leg, and no error surfaces the loss.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The cached no-args `translate` path stores fallback-resolved text under the requesting locale's cache entry, while Discourse's translation-override invalidation is keyed by the overridden locale's (locale, key) pair, so an override saved for the fallback locale never evicts entries that were populated from that fallback. When an admin edits English copy on a multilingual site, users browsing in other locales keep seeing the pre-edit English text \u2014 served from (their_locale, key) cache entries written via fallback \u2014 until the process restarts, so the override appears applied for English users but not for everyone else.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] `ensure_loaded!` is defined only on the concrete FallbackLocaleList class and invoked unguarded from ApplicationController#set_locale, hard-coupling every request to this initializer's exact class being installed as `I18n.fallbacks`. Any plugin or operator installing a fallbacks object through i18n's documented customization points (`config.i18n.fallbacks = {...}`, or `I18n::Locale::Fallbacks.new`) \u2014 which need not respond to `ensure_loaded!` \u2014 makes set_locale raise NoMethodError in a before_action on every request, bricking the site instead of degrading to untranslated keys.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The chain literal normalizes its second element (`SiteSetting.default_locale.to_sym`) but leaves the first element raw, so when the backend passes the request locale as the String Discourse negotiates ('en'), `[locale, ...].uniq` keeps both 'en' and :en \u2014 String and Symbol are not uniq-equal. On sites where the request locale equals the default locale, every missing-key lookup executes a redundant duplicate backend miss lookup on the uncached args path (`I18n.t(key, count: n)`), and the developer who implements the per-language TODO must handle two encodings of every locale or the custom leg silently never matches.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] FallbackLocaleList#[] builds the chain from the raw request locale plus the Symbolized site default ([locale, SiteSetting.default_locale.to_sym, :en].uniq), so uniq fails to collapse the pair whenever the request locale is the String form that set_locale assigns in its default branch (I18n.locale = ... SiteSetting.default_locale), leaving the site's primary locale twice in the chain (e.g. [\"en\", :en]). ensure_loaded! (line 21) then calls the accelerator's load_locale twice \u2014 once for the String and once for the Symbol \u2014 and the @loaded_locales include? guard in translate_accelerator.rb treats the two forms as distinct, so every process parses and caches the site's hottest translation tree twice and holds a duplicate copy in per-process memory; each missing-key lookup additionally walks a redundant duplicate hop.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] FallbackLocaleList#[] recomputes the chain on every backend translate \u2014 a SiteSetting.default_locale read, a to_sym, and a three-element Array plus uniq/compact allocations \u2014 with no memoization into the Hash storage it subclasses, while I18n::Backend::Fallbacks computes I18n.fallbacks[locale] up front for every lookup because the list must contain the original locale. Every interpolated I18n.t in production (the args-present path that always reaches the backend) now pays a SiteSetting read plus fresh allocations where the deleted config.i18n.fallbacks = true wiring served the same list from I18n::Locale::Fallbacks' memoized per-locale map; high-traffic sites absorb extra CPU and GC pressure on every request's translation calls.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] Centralizing fallback configuration in an environment-agnostic initializer while deleting only the production-scoped config.i18n.fallbacks = true lines (config/environments/production.rb, profile.rb, cloud66) silently extends fallback behavior to development and test, which previously surfaced missing keys as 'translation missing' markers. Developers and plugin/theme translators lose the only environment that loudly reported absent keys: a partially translated locale now silently renders English/default text during development and in the test suite, so translation gaps \u2014 including ones introduced by newly added keys \u2014 ship to production undetected.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The declared load-order dependency ('order: after 02-freedom_patches.rb') is enforced only by a comment plus the accident that '02-...' sorts lexicographically before 'i18n.rb', with no mechanical guard in the file. A routine rename of either initializer (e.g. renumbering '10-i18n.rb' or renaming the freedom_patches initializer) silently reverses the backend-patch order the author explicitly depends on; the resulting translation/fallback misbehavior produces no boot error, so production sites serve subtly wrong strings until someone re-reads this comment.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] Replacing the standard I18n::Locale::Fallbacks object with a Hash subclass whose [] ignores stored values silently degrades the documented i18n fallbacks configuration surface: I18n.fallbacks.map(:ca => :es) becomes Hash#map over an always-empty store (a silent no-op) and fallback registrations via []= are never read back. Plugin/gem authors and future core changes that register per-locale fallbacks through the standard API \u2014 exactly the per-language fallback refinement this file's own TODO contemplates (zh_TW to zh_CN) \u2014 get silent no-ops instead of configuration taking effect, with no error pointing at this class.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The diff introduces behavior-bearing logic \u2014 FallbackLocaleList#[] chain construction, FallbackLocaleList#ensure_loaded!, the accelerator's ensure_loaded!, and the per-request warm call added to ApplicationController#set_locale \u2014 and no test anywhere in the diff exercises any of it. A regression in the chain construction (the String/Symbol uniq gap shipped in this very diff is precisely the class of bug a chain spec would catch) silently changes string rendering for every non-English site, and because fallbacks exist to hide missing-key markers, users see wrong-language text with neither a test nor a boot-time signal.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] Installing FallbackLocaleList as the process-global I18n.fallbacks makes every backend translation resolve its chain through SiteSetting.default_locale \u2014 a DB-backed site setting \u2014 so I18n.t now raises in any context without an established site connection where it previously resolved fallbacks via the pure-Ruby I18n::Locale::Fallbacks with no database dependency. On multisite installs, rake tasks, `rails runner` scripts, and any code that translates before a site connection is established crash with a no-connection error instead of returning a translated string (I18n::Backend::Fallbacks, now included into the backend at line 9, calls I18n.fallbacks[locale] before every lookup, so the SiteSetting read at line 17 is unavoidable for all I18n.t calls); before this diff, production's `config.i18n.fallbacks = true` produced a locale-subtag-only chain that worked without a DB.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] FallbackLocaleList subclasses Hash but its overridden [] never reads stored entries, so the standard write-then-read contract of the public I18n.fallbacks surface (I18n.fallbacks[locale] = [...], honored by the stock I18n::Locale::Fallbacks this replaces in production) silently accepts and then ignores the stored value. Any plugin author or operator who configures per-locale fallback chains via the documented I18n.fallbacks[locale] = [...] API gets a silent no-op \u2014 no error and no effect \u2014 while the hardcoded [user_locale, SiteSetting.default_locale, :en] chain applies instead; the TODO on lines 15-16 invites exactly this extension, so the next developer implementing it will write a mapping that does nothing.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] The new fallback-preloading hook `I18n.fallbacks.ensure_loaded!` is wired into exactly one call site \u2014 the web-request path in `set_locale` \u2014 while the fallback machinery the diff enables globally (`I18n.backend.class.send(:include, I18n::Backend::Fallbacks)` plus `FallbackLocaleList`) is process-global, so server-side translations executed outside controller dispatch run with fallback locales that are never loaded. The accelerator's `translate` only loads `config.locale` (translate_accelerator.rb:69 `load_locale(config.locale) unless @loaded_locales.include?(config.locale)`); in a Sidekiq worker rendering a localized email, a key missing in the user's locale falls through `I18n::Backend::Fallbacks` to the site-default and `:en` locales, which were never `load_locale`d in that process, so the chain exhausts and the user-facing email ships with literal `translation missing: \u2026` fragments instead of the translated text \u2014 the feature this PR exists to provide silently fails in every non-request context (fresh job processes never run set_locale).",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] Installing `I18n.fallbacks = FallbackLocaleList.new` unconditionally in the initializer turns fallbacks on in development and test, where `config.i18n.fallbacks` was previously unset and Rails deliberately enables fallbacks only in production (the diff removes `config.i18n.fallbacks = true` from production.rb/profile.rb/cloud66 but adds global behavior everywhere). Developers and translation contributors reviewing untranslated or partially translated locales in development now see silently-resolved English text instead of the `translation missing: \u2026` markers that previously surfaced, so missing keys are first discovered by end users in production rather than during development; any test asserting on missing-translation behavior also changes meaning.",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] `[locale, SiteSetting.default_locale.to_sym, :en].uniq.compact` mixes the String `I18n.locale` (assigned directly from the String `SiteSetting.default_locale` / `user.locale` in `set_locale`, visible in the diff context) with Symbol entries, and `uniq` uses equality, so the chain for an English site is `[\"en\", :en]` rather than a single entry. `I18n.ensure_loaded!` loads English twice per process under distinct locale keys \u2014 the accelerator's `@loaded_locales` and per-locale translation stores hold both `\"en\"` and `:en` \u2014 doubling the memory of the largest translation tree in every web and background process and duplicating fallback iteration for each missing key; the same String/Symbol split applies to any site-default locale pair.",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] The only code path that preloads the fallback-chain locales is ApplicationController#set_locale's `I18n.fallbacks.ensure_loaded!`, so in any process that renders localized text without passing through a web controller (sidekiq email/notification/digest jobs using I18n.with_locale, rake, console) the fallback lookups hit locales that were never loaded in that process. I18n::Backend::Fallbacks#translate performs each fallback attempt via `super(fallback, key, options)`, which goes straight into Simple#translate and bypasses TranslateAccelerator's `load_locale(config.locale)` guard (that guard only ever loads the primary locale). In a sidekiq process, which never runs set_locale, the newly-added middle chain entry SiteSetting.default_locale is never loaded for non-English-default sites: a background email for a user with locale ru on a site whose default is de renders English (or a 'translation missing' string on a fresh process where :en is also not yet loaded) instead of the configured German fallback \u2014 silently, with no error logged, because a fallback miss is indistinguishable from a genuinely absent key. Pre-PR production fallback chains were [locale, I18n.default_locale] and worked in jobs because :en loads on the first ordinary translate; this diff adds the site-default entry that is structurally dead in all background rendering.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] FallbackLocaleList subclasses Hash but overrides `[]` to always recompute `[locale, SiteSetting.default_locale.to_sym, :en].uniq.compact`, so the documented i18n customization API `I18n.fallbacks[locale] = [...]` becomes a silent no-op: Hash#[]= is not overridden, the write succeeds, and the stored value is never read back. Any Discourse plugin or vendored gem that follows the standard per-locale fallback-customization idiom gets zero effect with no error and no warning, shipping the wrong fallback order to end users; a maintainer debugging the chain will read the initializer, see a Hash, and reasonably assume stored fallbacks apply. The strongest rebuttal \u2014 'core never writes to I18n.fallbacks' \u2014 describes today's core only; the initializer deliberately swapped out the public fallbacks object for a look-alike, and out-of-tree callers are the ones this family exists to protect.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] `I18n.fallbacks = FallbackLocaleList.new` enables the fallback chain unconditionally in every environment, whereas previously only production/profile/cloud66 enabled fallbacks (the config was removed from production.rb, profile.rb and the cloud66 file), so dev and test environments switch from surfacing missing translations to silently swallowing them. Before this diff, a missing key in a non-English locale raised/returned a visible 'translation missing' marker in dev and test \u2014 the primary detection surface for incomplete plugin/theme locale files, which core's yml-parity specs do not cover. After it, the same lookup returns English text and reports success, so developers and CI specs no longer notice incomplete locale coverage and the gaps ship to production. The rebuttal 'dev now shows what production shows' inverts the canary role dev/test played pre-PR and leaves no environment that surfaces the failure.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The new `ensure_loaded!` hand-rolls the same `unless @loaded_locales.include?(locale)` guard that `translate` (line 67) already implements inline, so the loaded-locales idempotence invariant is now enforced at two parallel call sites in the same class instead of being centralized inside load_locale (or by having translate call the new ensure_loaded!). The next change to locale bookkeeping \u2014 normalizing keys to symbols, adding synchronization, or rolling back @loaded_locales on a failed load \u2014 must be replicated at every guard site; missing one makes a guard permanently false (locale files re-parsed on every request: latency/CPU burn) or permanently true (locales never load: missing-translation output of exactly the kind the sibling finding describes). The author's counter \u2014 'the guards are cheap and correct today' \u2014 concedes the point: the finding is about change-safety of a freshly duplicated invariant, and translate's guard line is directly replaceable by `ensure_loaded!(config.locale)`, a one-place consolidation this diff was ideally positioned to make.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    }
+  ],
+  "goldens": [
+    {
+      "comment": "The @loaded_locales instance variable in translate_accelerator.rb is lazily initialized and accessed by multiple concurrent threads without synchronization.",
+      "severity": "Low",
+      "category": "concurrency"
+    },
+    {
+      "comment": "Consider normalizing the input locale (e.g., to a symbol) when checking/loading here to avoid double-loading if the same locale is passed as a String vs Symbol (also applies to other locations in the PR).",
+      "severity": "Low",
+      "category": "perf"
+    }
+  ],
+  "per_golden_matches": [
+    {
+      "golden_comment": "Consider normalizing the input locale (e.g., to a symbol) when checking/loading here to avoid double-loading if the same locale is passed as a String vs Symbol (also applies to other locations in the PR).",
+      "severity": "Low",
+      "category": "perf",
+      "matched_candidate": "[BUG] FallbackLocaleList#[] builds the chain from the raw request locale plus the Symbolized site default ([locale, SiteSetting.default_locale.to_sym, :en].uniq), so uniq fails to collapse the pair whenever the request locale is the String form that set_locale assigns in its default branch (I18n.locale = ... SiteSetting.default_locale), leaving the site's primary locale twice in the chain (e.g. [\"en\", :en]). ensure_loaded! (line 21) then calls the accelerator's load_locale twice \u2014 once for the String and once for the Symbol \u2014 and the @loaded_locales include? guard in translate_accelerator.rb treats the two forms as distinct, so every process parses and caches the site's hottest translation tree twice and holds a duplicate copy in per-process memory; each missing-key lookup additionally walks a redundant duplicate hop.",
+      "confidence": 0.97,
+      "reasoning": "Yes. The candidate issue explicitly describes the String vs Symbol locale mismatch causing duplicates in the locale chain and double-loading/caching (e.g., [\"en\", :en]), which is exactly what the golden comment warns about and suggests fixing by normalizing the locale (e.g., to a Symbol)."
+    },
+    {
+      "golden_comment": "The @loaded_locales instance variable in translate_accelerator.rb is lazily initialized and accessed by multiple concurrent threads without synchronization.",
+      "severity": "Low",
+      "category": "concurrency"
+    }
+  ],
+  "adjudication_records": [
+    {
+      "issue_text": "[ADVISORY] Including I18n::Backend::Fallbacks into the backend for every environment (line 9) makes every backend-mediated translation (interpolated/pluralized lookups and miss walks) compute its chain through FallbackLocaleList#[], which dereferences SiteSetting.default_locale at line 17, so I18n now performs a database-backed settings read inside the translation path of every process type, not just web requests. Operators running Rails code against a database without the site_settings table (fresh-install bootstrap while db:migrate is still mid-run, rails runner or a recovery console on an empty DB) get ActiveRecord::StatementInvalid / PG::UndefinedTable raised out of an I18n lookup instead of the missing-translation marker; before this PR dev/test/rake had no fallbacks at all and production's config.i18n.fallbacks used I18n::Locale::Fallbacks, neither of which queried SiteSetting.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.6,
+        "rationale": "The diff does make I18n fallbacks global via `config/initializers/i18n.rb` by including `I18n::Backend::Fallbacks` and setting `I18n.fallbacks = FallbackLocaleList.new`. `FallbackLocaleList#[]` explicitly references `SiteSetting.default_locale.to_sym`, so any fallback-chain computation will depend on `SiteSetting` at runtime, and `ApplicationController#set_locale` now calls `I18n.fallbacks.ensure_loaded!`, which also invokes `self[I18n.locale]` (thus hitting `SiteSetting.default_locale`) on every web request. However, the finding\u2019s claim that this definitively causes database/`site_settings` table errors in non-web contexts is not strictly provable from the diff alone because `SiteSetting.default_locale`\u2019s implementation (DB-backed or not) isn\u2019t shown.",
+        "diff_context_hash": "4bcd6ba39c1fb40585a74526dd58e9877d8d82e3"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] [locale, SiteSetting.default_locale.to_sym, :en].uniq fails to deduplicate the current locale against its Symbol twin because I18n.locale is a String on the common request path (set_locale assigns the raw SiteSetting.default_locale / user-locale strings, as shown in the adjacent app/controllers/application_controller.rb hunk), so a request whose locale equals the site default produces ['en', :en, :en].uniq => ['en', :en] instead of a two-element chain. Every web process runs I18n.ensure_loaded! twice for the primary locale (once as String, once as Symbol) and hands I18n::Backend::Fallbacks a chain containing the same locale twice, doubling preload work and adding a dead hop to every fallback miss walk; the extra locale dicts and lookups scale with worker count and go unnoticed because translation results still resolve correctly.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "unjudged",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "unjudged",
+        "adjudicating_judge": null,
+        "confidence": null,
+        "rationale": null,
+        "diff_context_hash": "4bcd6ba39c1fb40585a74526dd58e9877d8d82e3"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The diff introduces three pieces of behavior-bearing logic \u2014 the FallbackLocaleList fallback-chain computation and its ensure_loaded! (lines 12-23), the TranslateAccelerator#ensure_loaded! preload patch in lib/freedom_patches/translate_accelerator.rb, and the ApplicationController#set_locale hook \u2014 with no test anywhere in the diff covering any of them. A regression in chain ordering (user locale -> site default -> en), dedup, or locale type handling ships silently because nothing in CI asserts the fallback list or that a key missing in locale A returns the site-default/English translation; sites would just see translation_missing markers again with no red build, and the String/Symbol duplication at line 17 is exactly the class of defect a one-line spec on FallbackLocaleList#[] would have caught before merge.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.84,
+        "rationale": "The diff adds new behavior-bearing logic without any accompanying tests in the shown changes: a new `FallbackLocaleList` with custom `[]` fallback-chain computation and `ensure_loaded!` in `config/initializers/i18n.rb`, a new `TranslateAccelerator#ensure_loaded!` method in `lib/freedom_patches/translate_accelerator.rb`, and a new call site `I18n.fallbacks.ensure_loaded!` in `ApplicationController#set_locale`. No spec/test files are added or modified in the diff to assert fallback ordering/deduplication or that missing keys fall back correctly, so regressions would not be caught by CI based on this diff alone. (The note about possible String/Symbol non-dedup in `[locale, SiteSetting.default_locale.to_sym, :en].uniq` is also a concrete, diff-grounded edge case that tests could cover.)",
+        "diff_context_hash": "4bcd6ba39c1fb40585a74526dd58e9877d8d82e3"
+      }
+    },
+    {
+      "issue_text": "[BUG] ensure_loaded! calls I18n.ensure_loaded!, a method defined neither in this diff nor by the i18n gem \u2014 the only ensure_loaded! this diff adds lives on TranslateAccelerator (lib/freedom_patches/translate_accelerator.rb:62-65) and the I18n module has no delegation to its backend, so the bridge from I18n.ensure_loaded! to the backend method is missing from the diff. ApplicationController#set_locale (app/controllers/application_controller.rb:160) runs I18n.fallbacks.ensure_loaded! on every request; with no definition of I18n.ensure_loaded! anywhere in the diff, this raises NoMethodError and turns every page and API call into a 500 \u2014 a full-site outage gated entirely on unstated out-of-diff wiring.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p0",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "unresolved",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "unresolved",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.45,
+        "rationale": "The diff introduces a new call path `ApplicationController#set_locale -> I18n.fallbacks.ensure_loaded!` where `FallbackLocaleList#ensure_loaded!` calls `I18n.ensure_loaded! l` (config/initializers/i18n.rb). In this diff, the only `ensure_loaded!` method added is `TranslateAccelerator#ensure_loaded!(locale)` (lib/freedom_patches/translate_accelerator.rb), and there is no definition shown for `I18n.ensure_loaded!` or any delegation from `I18n` to its backend. If no pre-existing `I18n.ensure_loaded!` exists elsewhere, this new per-request call would raise `NoMethodError` at runtime.",
+        "diff_context_hash": "4bcd6ba39c1fb40585a74526dd58e9877d8d82e3"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The diff ships a new global fallback architecture (FallbackLocaleList, backend module inclusion, per-request preload hook, removal of fallback config from three production environment files) with zero test files \u2014 a scan of the diff finds no spec/**, test/**, or *.spec.* additions covering any of it. The uncovered behaviors are exactly the load-bearing ones: chain ordering (user locale -> SiteSetting.default_locale -> :en), that I18n::Backend::Fallbacks#translate is actually reached (TranslateAccelerator defines its own translate(key, *args) which shadows the included Fallbacks#translate(locale, key, options) unless its internal super passes the backend signature \u2014 nothing in the diff verifies the wiring), that ensure_loaded! preloads work, and that pluralization survived the consolidation of the deleted config/initializers/pluralization.rb into this initializer; a regression in any of these silently mis-renders every server-side string for non-English users.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.87,
+        "rationale": "The diff introduces substantial new I18n behavior (new config/initializers/i18n.rb with a custom FallbackLocaleList, inclusion of I18n::Backend::Fallbacks, new ensure_loaded! call path from ApplicationController#set_locale, and new TranslateAccelerator#ensure_loaded!) while removing config.i18n.fallbacks = true from multiple environment files, yet the diff contains no additions under spec/**, test/**, or similar. The finding\u2019s specific concern that this load-bearing fallback ordering and wiring (custom fallback chain, preload behavior, and pluralization consolidation after deleting config/initializers/pluralization.rb) is untested is directly supported by the absence of any test changes in the provided diff; it\u2019s a real review gap but not a verifiable functional defect from the diff alone.",
+        "diff_context_hash": "4bcd6ba39c1fb40585a74526dd58e9877d8d82e3"
+      }
+    },
+    {
+      "issue_text": "[BUG] I18n.fallbacks.ensure_loaded! is wired only into the HTTP filter set_locale; no background path (Sidekiq mail jobs, rake tasks, console) ever preloads the fallback locales, and TranslateAccelerator#translate lazy-loads only config.locale, never the fallback locales. Discourse generates all email in Sidekiq jobs; a fresh worker whose first job is a notification for a 'de' user on a site with default_locale 'fr' has neither :fr nor :en translations loaded (I18n::Backend::Fallbacks#translate never loads, it only rescues MissingTranslationData down the chain), so the site-default and English fallback hops render 'translation missing: ...' strings in production emails \u2014 the PR's headline fallback silently fails for the entire background/mail server surface.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.56,
+        "rationale": "The diff shows fallback locale preloading is explicitly triggered only in the HTTP path via `ApplicationController#set_locale` calling `I18n.fallbacks.ensure_loaded!`. The new `FallbackLocaleList#ensure_loaded!` depends on that being invoked to call `I18n.ensure_loaded!` for `[current_locale, SiteSetting.default_locale, :en]`. No other call sites are added in the diff for background execution contexts (jobs/rake/console), so it is a concrete, diff-grounded coverage gap concern. However, the finding\u2019s stronger claim that production emails will definitely render `translation missing` cannot be fully verified from this diff alone, because we can\u2019t conclusively determine from the shown code whether fallbacks would still cause the relevant locales to be loaded implicitly elsewhere.",
+        "diff_context_hash": "4bcd6ba39c1fb40585a74526dd58e9877d8d82e3"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] Moving fallback enablement out of the production-only environment files into an initializer turns fallbacks on in development and test, where config.i18n.fallbacks was never set before this diff. Developers lose their missing-translation signal: a key absent from a non-English locale's server.yml that previously rendered as a loud 'translation missing:' marker in dev/test now silently renders English, so the test suite can no longer catch untranslated or typo'd keys \u2014 the exact gap this feature papers over at runtime now also hides it at verification time, and translation regressions reach users of minority locales undetected.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.74,
+        "rationale": "The diff removes `config.i18n.fallbacks = true` from production/profile environment files and adds `config/initializers/i18n.rb` that unconditionally mixes in `I18n::Backend::Fallbacks` and sets `I18n.fallbacks = FallbackLocaleList.new`, which will run in all environments. That makes it plausible that development/test now use fallbacks too, potentially masking missing-translation indicators by falling back to `SiteSetting.default_locale`/`:en` per `FallbackLocaleList#[]`. This is a real, diff-grounded scope/verification concern rather than a clearly incorrect runtime defect.",
+        "diff_context_hash": "4bcd6ba39c1fb40585a74526dd58e9877d8d82e3"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] FallbackLocaleList#[] rebuilds the chain on every invocation \u2014 fresh 3-element array plus uniq, compact, to_sym, and a SiteSetting.default_locale read \u2014 and I18n::Backend::Fallbacks#translate evaluates I18n.fallbacks[locale] on every lookup instead of the plain Hash lookup the old config.i18n.fallbacks = true provided. Every interpolated I18n.t call (the args.length > 0 no-cache path in TranslateAccelerator#translate) now pays array allocation and re-derivation per translated string on translation-heavy pages with hundreds of lookups per request; a per-locale memoized chain eliminates it, and the omission is a hot-path cost on every request of every high-traffic site.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.5,
+        "rationale": "The diff introduces a custom `FallbackLocaleList < Hash` where `#[]` always constructs a new array (`[locale, SiteSetting.default_locale.to_sym, :en].uniq.compact`) instead of memoizing per-locale. That is a real, diff-grounded potential hot-path/performance concern if `I18n.fallbacks[locale]` is consulted frequently by the fallbacks backend. However, the finding\u2019s stronger claims about how often `I18n::Backend::Fallbacks#translate` evaluates fallbacks (e.g., \u201con every lookup\u201d and tied to the interpolated/no-cache path) are not directly verifiable from this diff alone and depend on I18n internals.",
+        "diff_context_hash": "4bcd6ba39c1fb40585a74526dd58e9877d8d82e3"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The chain symbolizes SiteSetting.default_locale but not the incoming locale, so when I18n.locale is a String \u2014 which it is on the set_locale else-branch that assigns SiteSetting.default_locale, a String \u2014 a site whose default matches the user's locale yields a chain like [\"de\", :de, :en]. I18n.fallbacks.ensure_loaded! iterates both \"de\" and :de, and TranslateAccelerator#ensure_loaded!'s @loaded_locales.include? guard treats them as distinct, so load_locale parses the same server.de.yml twice and stores it under two type-identities, doubling per-locale parse cost and memory while one of the two chain entries is a dead lookup hop on every miss \u2014 the next change to locale handling has to reason about which of the two types actually resolves.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "unjudged",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "unjudged",
+        "adjudicating_judge": null,
+        "confidence": null,
+        "rationale": null,
+        "diff_context_hash": "4bcd6ba39c1fb40585a74526dd58e9877d8d82e3"
+      }
+    },
+    {
+      "issue_text": "[BUG] The only call site that preloads the fallback-chain locales is ApplicationController#set_locale, so every server-side translation running outside an HTTP request \u2014 the Sidekiq jobs that render Discourse's emails, digests, and system messages \u2014 executes the new fallback chain against fallback locales that were never loaded. A mailer job rendering an email in the user's locale hits a key missing from that locale; the Fallbacks backend then tries SiteSetting.default_locale and :en, but neither was load_locale'd in the Sidekiq process (TranslateAccelerator#translate at lib/freedom_patches/translate_accelerator.rb:68 only lazy-loads config.locale), so the user is emailed raw 'translation missing: en.mailer_subject' text instead of the site-default/English fallback the feature exists to provide \u2014 the feature silently exists only for web-page rendering.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.62,
+        "rationale": "The diff shows the new fallback-chain preloading hook (`I18n.fallbacks.ensure_loaded!`) is only added in `ApplicationController#set_locale`, and the custom `FallbackLocaleList#ensure_loaded!` requires an explicit call to load the chain locales via `I18n.ensure_loaded!`. No other call site for `I18n.fallbacks.ensure_loaded!` is present in the diff, so background/non-controller code paths (e.g. jobs/mailers) will not proactively preload the fallback locales. Whether that actually results in \u201ctranslation missing\u201d instead of fallbacks depends on how `I18n::Backend::Fallbacks` interacts with the `TranslateAccelerator` backend (not fully shown in the diff), but the review concern about coupling fallback preloading to HTTP requests is real and diff-grounded.",
+        "diff_context_hash": "4bcd6ba39c1fb40585a74526dd58e9877d8d82e3"
+      }
+    },
+    {
+      "issue_text": "[BUG] The fallback chain makes translation results depend on the live per-site value of SiteSetting.default_locale (line 17), but the diff adds no cache keying or invalidation for the process-wide translation cache that TranslateAccelerator#translate front-runs on its no-args path (lib/freedom_patches/translate_accelerator.rb:69), so fallback-resolved strings are stored under a cache key that cannot distinguish sites or setting changes. In a multisite deployment, two sites with different default locales share the per-process (locale, key) cache, so a user on site B whose locale is missing a key is served site A's fallback-language text; likewise, after an admin changes default_locale, previously cached fallback-baked strings keep rendering in the old language until process restart.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.65,
+        "rationale": "The diff makes I18n fallbacks depend on `SiteSetting.default_locale` at lookup time (`FallbackLocaleList#[]` in `config/initializers/i18n.rb`), while `TranslateAccelerator#translate` clearly has a cached fast-path when called with no args (it only bypasses cache when `args.length > 0`). The diff adds no indication that this cache is keyed by anything beyond locale/key, nor any invalidation when `SiteSetting.default_locale` changes. That means a translation missing in a user locale can be cached as the fallback string under the user locale, even though the fallback language is site-dependent and can change, creating cross-site bleed/stale fallback text until restart.",
+        "diff_context_hash": "4bcd6ba39c1fb40585a74526dd58e9877d8d82e3"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The new ensure_loaded! centralizes the guard-then-load pattern, but the adjacent translate keeps its own inline copy (line 68, `load_locale(config.locale) unless @loaded_locales.include?(config.locale)`) instead of delegating, and the two copies already disagree \u2014 ensure_loaded! defensively initializes @loaded_locales while translate dereferences it unguarded. The next change to the loading policy \u2014 a mutex for the multithreaded first-load race, or logging on first load \u2014 must be replicated in two places and one will be missed; replacing translate's guard with ensure_loaded!(config.locale) deletes the duplicated branch outright.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.8,
+        "rationale": "In lib/freedom_patches/translate_accelerator.rb the diff adds ensure_loaded!(locale), which encapsulates the guard-then-load pattern and defensively initializes @loaded_locales with ||= []. However, translate still contains its own inline guard `load_locale(config.locale) unless @loaded_locales.include?(config.locale)` and does not call ensure_loaded!, so the loading policy is duplicated. The two implementations also differ in defensiveness (ensure_loaded! initializes @loaded_locales; translate assumes it\u2019s already set), creating a maintainability/consistency concern grounded in the shown code.",
+        "diff_context_hash": "4bcd6ba39c1fb40585a74526dd58e9877d8d82e3"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] Two adjacent backend-module includes attach by incompatible strategies \u2014 Pluralization is pinned to the I18n::Backend::Simple constant (line 5) while Fallbacks is bound to whatever class I18n.backend happens to be at initializer time (line 9) \u2014 so the two behaviors detach under different conditions. A plugin or test harness that reassigns I18n.backend (a chain wrapper, a stub) silently runs with pluralization but without fallbacks, or vice versa, depending on whether the assignment happens before or after this initializer; because neither detachment raises, the next contributor spends hours tracing why fallbacks work in one boot path and not another.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.66,
+        "rationale": "In `config/initializers/i18n.rb`, pluralization is mixed into the constant `I18n::Backend::Simple` (`I18n::Backend::Simple.send(:include, ...)`), while fallbacks are mixed into whatever the current backend instance\u2019s class is at initializer time (`I18n.backend.class.send(:include, ...)`). This asymmetry is real in the diff and makes behavior dependent on when/if `I18n.backend` is reassigned later (e.g., a different backend class may not get fallbacks, and a non-Simple backend may not get pluralization). The diff alone doesn\u2019t prove such reassignment happens in this app, so it\u2019s a concrete robustness/architecture concern rather than a verified runtime defect.",
+        "diff_context_hash": "4bcd6ba39c1fb40585a74526dd58e9877d8d82e3"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The new non-trivial fallback semantics \u2014 the user-locale \u2192 site-default \u2192 English ordering and uniq/compact dedup (lines 13-18), FallbackLocaleList's Hash#[] contract with i18n's Fallbacks backend, and the ensure_loaded! preloading handshake with TranslateAccelerator \u2014 ship with no test anywhere in the diff. A future edit that reorders the chain, drops the :en last resort, or breaks the ensure_loaded! protocol changes the rendered language of server-side strings for entire locale groups and merges undetected, because nothing in the suite pins the contract this initializer creates.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.87,
+        "rationale": "The diff introduces new non-trivial I18n behavior in `config/initializers/i18n.rb`: a custom `FallbackLocaleList#[]` returning `[locale, SiteSetting.default_locale.to_sym, :en].uniq.compact` plus a new `ensure_loaded!` method, and wires it into runtime via `I18n.fallbacks = FallbackLocaleList.new` and `ApplicationController#set_locale` calling `I18n.fallbacks.ensure_loaded!`. It also adds `TranslateAccelerator#ensure_loaded!(locale)` to support that preload protocol. No test files or assertions are added in the diff to pin the fallback ordering/`:en` last resort or the preload handshake, so a future change could silently alter server-side translation behavior without detection.",
+        "diff_context_hash": "4bcd6ba39c1fb40585a74526dd58e9877d8d82e3"
+      }
+    },
+    {
+      "issue_text": "[BUG] Fallback-chain locale preloading is owned exclusively by the HTTP request lifecycle \u2014 `I18n.fallbacks.ensure_loaded!` runs only in set_locale, while the lazy accelerator in translate_accelerator.rb loads only the current locale (`translate` -> `load_locale(config.locale)`), so every non-request process executes `I18n::Backend::Fallbacks#translate` over backend locales that were never loaded. All Discourse mail is rendered in Sidekiq processes that never run set_locale: on a site whose default_locale is not English, a user-locale email missing a key falls through the unloaded site-default leg and delivers English text (or a raw 'translation missing' marker in a fresh process that never loaded :en) instead of the site-default language, and whether the fallback works flips depending on which locales happened to load earlier in that process's lifetime.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.6,
+        "rationale": "The diff makes fallback-locale preloading an explicit step via `I18n.fallbacks.ensure_loaded!`, and the only added call site shown is `ApplicationController#set_locale` (HTTP request path). At the same time, the lazy loader in `lib/freedom_patches/translate_accelerator.rb` still loads just one locale on demand (`translate` -> `load_locale(config.locale)`), and nothing in that file ensures the other locales in the fallback chain are loaded before `I18n::Backend::Fallbacks` tries them. With the new custom `FallbackLocaleList` ([locale, SiteSetting.default_locale, :en]) this means non-controller codepaths may execute fallbacks over locales that were never `ensure_loaded!`\u2019d, producing missing/incorrect fallback results depending on process history.",
+        "diff_context_hash": "4bcd6ba39c1fb40585a74526dd58e9877d8d82e3"
+      }
+    },
+    {
+      "issue_text": "[BUG] Removing `config.i18n.fallbacks = true` silently drops the standard I18n::Locale::Fallbacks parent-language chain (pt-BR->pt, zh-TW->zh) from production; the replacement chain `[locale, SiteSetting.default_locale, :en]` in config/initializers/i18n.rb has no parent-language leg at all. Regional-locale users lose existing production behavior: a pt_BR user on an English-default site currently gets Portuguese via the pt leg for keys missing in pt_BR; after this change they get English \u2014 a user-visible regression for every Discourse regional locale, shipped with no data-driven place to re-add the parent leg (the TODO only mentions cross-variant fallbacks).",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.78,
+        "rationale": "The diff removes `config.i18n.fallbacks = true` from production/profile configs and replaces it by explicitly setting `I18n.fallbacks = FallbackLocaleList.new` in `config/initializers/i18n.rb`. That custom `FallbackLocaleList#[]` returns only `[locale, SiteSetting.default_locale.to_sym, :en]`, which contains no parent-language fallback (e.g. `:'pt-BR' -> :pt`, `:'zh-TW' -> :zh`). So for regional locales, missing keys will no longer fall back to the base language before falling back to the site default / English, which is a behavior change/regression introduced by this diff.",
+        "diff_context_hash": "4bcd6ba39c1fb40585a74526dd58e9877d8d82e3"
+      }
+    },
+    {
+      "issue_text": "[BUG] `FallbackLocaleList#[]` calls `SiteSetting.default_locale` on every fallback computation, putting a DB-backed settings read on the translation-miss path of every process, including contexts where the site_settings table or connection does not exist (first `db:migrate`/`db:bootstrap` boot, `rails runner` against an unbuilt database). A missing translation key during a DB-less boot context that previously returned a 'translation missing' marker now raises `ActiveRecord::StatementInvalid` (relation \"site_settings\" does not exist) out of `I18n.fallbacks[locale]`, aborting the boot or rake task instead of degrading to the marker.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.72,
+        "rationale": "The new initializer defines `FallbackLocaleList#[]` to build the fallback chain as `[locale, SiteSetting.default_locale.to_sym, :en]`, which performs a `SiteSetting.default_locale` lookup every time fallbacks are computed. Since `I18n.backend` is explicitly extended with `I18n::Backend::Fallbacks` and `I18n.fallbacks = FallbackLocaleList.new`, any fallback resolution will invoke this code path. If `SiteSetting` relies on the DB (likely, given the name), this introduces a failure mode during DB-less/partially-migrated boots where fallback computation can raise instead of gracefully returning a missing translation marker. This risk did not exist with the removed `config.i18n.fallbacks = true` approach, which would fall back to `I18n.default_locale` without consulting `SiteSetting`.",
+        "diff_context_hash": "4bcd6ba39c1fb40585a74526dd58e9877d8d82e3"
+      }
+    },
+    {
+      "issue_text": "[BUG] The fallback chain bakes the per-site value `SiteSetting.default_locale` into results memoized in the process-global translation cache (translate_accelerator.rb's `translate` caches per (locale, key) on the shared I18n module), so identical cache keys hold site-specific fallback text on multisite installs. On a multisite install where site A defaults to :fr and site B to :es, a German user's lookup of a key missing in :de caches French text under (de, key) while serving site A; site B's German users then hit that cache entry and receive site A's French text instead of site B's Spanish \u2014 wrong-language content crossing tenant boundaries with no translation-override involvement.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.6,
+        "rationale": "The diff introduces a per-request/per-site fallback order via `FallbackLocaleList#[]` returning `[locale, SiteSetting.default_locale.to_sym, :en]` (config/initializers/i18n.rb). That means a translation miss in `:de` can resolve to different strings depending on the current site\u2019s `SiteSetting.default_locale`. Since the translation layer is process-global and the existing `translate_accelerator` is explicitly a shared accelerator/cache (and this diff does not add any tenant/site dimension to its caching), caching a resolved value under just `(locale, key)` would let one site\u2019s fallback result be reused on another site, causing cross-tenant wrong-language strings as described.",
+        "diff_context_hash": "4bcd6ba39c1fb40585a74526dd58e9877d8d82e3"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] FallbackLocaleList subclasses Hash but overrides `[]` to ignore the underlying store, so the inherited write API that i18n documents for custom fallbacks (`I18n.fallbacks[:zh_TW] = [:zh_TW, :zh_CN]`, `merge!`) accepts writes that no read path ever consults. A plugin or operator configuring per-language fallbacks \u2014 the exact zh_TW/zh_CN enhancement this file's own TODO anticipates \u2014 gets a silent no-op: the assignment succeeds, the lookup path never sees it, translations keep resolving without the custom leg, and no error surfaces the loss.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.78,
+        "rationale": "In config/initializers/i18n.rb, FallbackLocaleList subclasses Hash but overrides `[]` to always return a computed array `[locale, SiteSetting.default_locale.to_sym, :en].uniq.compact`, never consulting stored hash entries. Since it inherits `[]=`/`merge!` from Hash, writes like `I18n.fallbacks[:zh_TW] = [...]` will succeed but can never affect reads via `[]`, making such configuration a silent no-op. Given `I18n.fallbacks = FallbackLocaleList.new`, this breaks the expected writable fallback mapping behavior for callers/plugins.",
+        "diff_context_hash": "4bcd6ba39c1fb40585a74526dd58e9877d8d82e3"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The cached no-args `translate` path stores fallback-resolved text under the requesting locale's cache entry, while Discourse's translation-override invalidation is keyed by the overridden locale's (locale, key) pair, so an override saved for the fallback locale never evicts entries that were populated from that fallback. When an admin edits English copy on a multilingual site, users browsing in other locales keep seeing the pre-edit English text \u2014 served from (their_locale, key) cache entries written via fallback \u2014 until the process restarts, so the override appears applied for English users but not for everyone else.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "hallucination",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "hallucination",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.35,
+        "rationale": "The diff adds a custom I18n fallbacks implementation (config/initializers/i18n.rb) and calls `I18n.fallbacks.ensure_loaded!` in `set_locale`, plus adds `ensure_loaded!` to `TranslateAccelerator`. However, the finding hinges on specifics of the translate cache keying and the translation-override invalidation mechanism (e.g., caching fallback-resolved text under `(requesting_locale, key)` and invalidation keyed by `(fallback_locale, key)`), none of which are shown or modified in this diff. From the provided changes alone, we cannot verify that such caching/invalidation mismatch exists or that edits to English overrides would fail to evict other-locale cache entries.",
+        "diff_context_hash": "4bcd6ba39c1fb40585a74526dd58e9877d8d82e3"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] `ensure_loaded!` is defined only on the concrete FallbackLocaleList class and invoked unguarded from ApplicationController#set_locale, hard-coupling every request to this initializer's exact class being installed as `I18n.fallbacks`. Any plugin or operator installing a fallbacks object through i18n's documented customization points (`config.i18n.fallbacks = {...}`, or `I18n::Locale::Fallbacks.new`) \u2014 which need not respond to `ensure_loaded!` \u2014 makes set_locale raise NoMethodError in a before_action on every request, bricking the site instead of degrading to untranslated keys.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.78,
+        "rationale": "The diff adds an unguarded call `I18n.fallbacks.ensure_loaded!` in `ApplicationController#set_locale`. In the new initializer, `I18n.fallbacks` is set to `FallbackLocaleList.new`, which defines `ensure_loaded!`, so the app\u2019s default configuration will work. However, `ensure_loaded!` is not part of the standard I18n fallbacks interface, so if some other code (e.g., a plugin or deployment config) replaces `I18n.fallbacks` with a different fallbacks object (like `I18n::Locale::Fallbacks`) that doesn\u2019t implement `ensure_loaded!`, this would raise `NoMethodError` in a request before_action. That\u2019s a real coupling/robustness concern grounded in the diff, but not a guaranteed defect under the shown setup.",
+        "diff_context_hash": "4bcd6ba39c1fb40585a74526dd58e9877d8d82e3"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The chain literal normalizes its second element (`SiteSetting.default_locale.to_sym`) but leaves the first element raw, so when the backend passes the request locale as the String Discourse negotiates ('en'), `[locale, ...].uniq` keeps both 'en' and :en \u2014 String and Symbol are not uniq-equal. On sites where the request locale equals the default locale, every missing-key lookup executes a redundant duplicate backend miss lookup on the uncached args path (`I18n.t(key, count: n)`), and the developer who implements the per-language TODO must handle two encodings of every locale or the custom leg silently never matches.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.62,
+        "rationale": "In `config/initializers/i18n.rb`, `FallbackLocaleList#[]` returns `[locale, SiteSetting.default_locale.to_sym, :en].uniq.compact`, which normalizes only the default locale to a Symbol but leaves the incoming `locale` as-is. If callers ever pass a String locale (e.g. \"en\") while defaults are Symbols (e.g. `:en`), `uniq` will keep both, and `ensure_loaded!` will iterate both forms. Given `lib/freedom_patches/translate_accelerator.rb` tracks `@loaded_locales` via `include?` on the raw `locale`, this can lead to redundant loads/misses and makes future per-language fallback matching harder. The diff doesn\u2019t prove that locales are Strings at runtime, so the impact is conditional, but the normalization inconsistency is real and diff-grounded.",
+        "diff_context_hash": "4bcd6ba39c1fb40585a74526dd58e9877d8d82e3"
+      }
+    },
+    {
+      "issue_text": "[BUG] FallbackLocaleList#[] builds the chain from the raw request locale plus the Symbolized site default ([locale, SiteSetting.default_locale.to_sym, :en].uniq), so uniq fails to collapse the pair whenever the request locale is the String form that set_locale assigns in its default branch (I18n.locale = ... SiteSetting.default_locale), leaving the site's primary locale twice in the chain (e.g. [\"en\", :en]). ensure_loaded! (line 21) then calls the accelerator's load_locale twice \u2014 once for the String and once for the Symbol \u2014 and the @loaded_locales include? guard in translate_accelerator.rb treats the two forms as distinct, so every process parses and caches the site's hottest translation tree twice and holds a duplicate copy in per-process memory; each missing-key lookup additionally walks a redundant duplicate hop.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "bug",
+      "matched_golden_ids": [
+        "Consider normalizing the input locale (e.g., to a symbol) when checking/loading here to avoid double-loading if the same locale is passed as a String vs Symbol (also applies to other locations in the PR)."
+      ],
+      "primary_judge_verdict": "matched",
+      "primary_judge": "gpt-5.2",
+      "primary_judge_confidence": 0.97,
+      "primary_judge_reasoning": "Yes. The candidate issue explicitly describes the String vs Symbol locale mismatch causing duplicates in the locale chain and double-loading/caching (e.g., [\"en\", :en]), which is exactly what the golden comment warns about and suggests fixing by normalizing the locale (e.g., to a Symbol).",
+      "adjudication": {
+        "verdict": "matched",
+        "adjudicating_judge": null,
+        "confidence": null,
+        "rationale": null,
+        "diff_context_hash": "4bcd6ba39c1fb40585a74526dd58e9877d8d82e3"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] FallbackLocaleList#[] recomputes the chain on every backend translate \u2014 a SiteSetting.default_locale read, a to_sym, and a three-element Array plus uniq/compact allocations \u2014 with no memoization into the Hash storage it subclasses, while I18n::Backend::Fallbacks computes I18n.fallbacks[locale] up front for every lookup because the list must contain the original locale. Every interpolated I18n.t in production (the args-present path that always reaches the backend) now pays a SiteSetting read plus fresh allocations where the deleted config.i18n.fallbacks = true wiring served the same list from I18n::Locale::Fallbacks' memoized per-locale map; high-traffic sites absorb extra CPU and GC pressure on every request's translation calls.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.78,
+        "rationale": "The diff adds `FallbackLocaleList < Hash` overriding `#[]` to always build a new array `[locale, SiteSetting.default_locale.to_sym, :en].uniq.compact` without storing/memoizing it in the Hash, so repeated `I18n.fallbacks[locale]` calls will redo the `SiteSetting.default_locale` read and allocate fresh Arrays. The diff also wires fallbacks via `I18n::Backend::Fallbacks` and changes runtime behavior away from `config.i18n.fallbacks = true`, so the reviewer\u2019s concern about added per-lookup overhead is grounded, but it\u2019s a performance/GC consideration rather than a correctness bug.",
+        "diff_context_hash": "4bcd6ba39c1fb40585a74526dd58e9877d8d82e3"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] Centralizing fallback configuration in an environment-agnostic initializer while deleting only the production-scoped config.i18n.fallbacks = true lines (config/environments/production.rb, profile.rb, cloud66) silently extends fallback behavior to development and test, which previously surfaced missing keys as 'translation missing' markers. Developers and plugin/theme translators lose the only environment that loudly reported absent keys: a partially translated locale now silently renders English/default text during development and in the test suite, so translation gaps \u2014 including ones introduced by newly added keys \u2014 ship to production undetected.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.67,
+        "rationale": "The diff moves fallback setup into a new global initializer (`config/initializers/i18n.rb`) by including `I18n::Backend::Fallbacks` and setting `I18n.fallbacks = FallbackLocaleList.new`, while removing `config.i18n.fallbacks = true` from production/profile/cloud66 environment configs. Initializers run in all Rails environments, so this change plausibly enables fallback behavior beyond just those previously-configured environments, which can indeed reduce visibility of missing translation keys (fallback text instead of \"translation missing\") during development/test. This is a diff-grounded scope/testing concern, though it may be intentional rather than a definite defect.",
+        "diff_context_hash": "4bcd6ba39c1fb40585a74526dd58e9877d8d82e3"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The declared load-order dependency ('order: after 02-freedom_patches.rb') is enforced only by a comment plus the accident that '02-...' sorts lexicographically before 'i18n.rb', with no mechanical guard in the file. A routine rename of either initializer (e.g. renumbering '10-i18n.rb' or renaming the freedom_patches initializer) silently reverses the backend-patch order the author explicitly depends on; the resulting translation/fallback misbehavior produces no boot error, so production sites serve subtly wrong strings until someone re-reads this comment.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.76,
+        "rationale": "The new initializer `config/initializers/i18n.rb` explicitly declares a load-order dependency via comment (`# order: after 02-freedom_patches.rb`) but contains no code-level guard/enforcement. Rails initializer order is filename-based, so it currently relies on lexicographic sorting (e.g., `02-...` before `i18n.rb`). If either file is renamed/renumbered, the include/patch order (e.g., `I18n.backend.class.send(:include, I18n::Backend::Fallbacks)` and `I18n.fallbacks = ...`) could change without any boot-time failure. This is a concrete maintainability/robustness risk grounded in the diff, even if it\u2019s not a currently-triggered defect.",
+        "diff_context_hash": "4bcd6ba39c1fb40585a74526dd58e9877d8d82e3"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] Replacing the standard I18n::Locale::Fallbacks object with a Hash subclass whose [] ignores stored values silently degrades the documented i18n fallbacks configuration surface: I18n.fallbacks.map(:ca => :es) becomes Hash#map over an always-empty store (a silent no-op) and fallback registrations via []= are never read back. Plugin/gem authors and future core changes that register per-locale fallbacks through the standard API \u2014 exactly the per-language fallback refinement this file's own TODO contemplates (zh_TW to zh_CN) \u2014 get silent no-ops instead of configuration taking effect, with no error pointing at this class.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.72,
+        "rationale": "The diff replaces the standard `I18n.fallbacks` object with `FallbackLocaleList < Hash` whose `[]` always returns a computed array and never consults stored mappings. This means any per-locale fallback registrations written into the hash (e.g., via `[]=` or the standard `I18n::Locale::Fallbacks#map` configuration API) will not be read back by `[]`, so such configuration becomes a silent no-op. This is a behavior/compatibility break introduced by `config/initializers/i18n.rb` (`I18n.fallbacks = FallbackLocaleList.new` and custom `def []`).",
+        "diff_context_hash": "4bcd6ba39c1fb40585a74526dd58e9877d8d82e3"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The diff introduces behavior-bearing logic \u2014 FallbackLocaleList#[] chain construction, FallbackLocaleList#ensure_loaded!, the accelerator's ensure_loaded!, and the per-request warm call added to ApplicationController#set_locale \u2014 and no test anywhere in the diff exercises any of it. A regression in the chain construction (the String/Symbol uniq gap shipped in this very diff is precisely the class of bug a chain spec would catch) silently changes string rendering for every non-English site, and because fallbacks exist to hide missing-key markers, users see wrong-language text with neither a test nor a boot-time signal.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.86,
+        "rationale": "The diff adds multiple pieces of new, behavior-bearing i18n logic (new `config/initializers/i18n.rb` with `FallbackLocaleList#[]` and `#ensure_loaded!`, a new `ensure_loaded!` method in `lib/freedom_patches/translate_accelerator.rb`, and a new per-request call `I18n.fallbacks.ensure_loaded!` in `ApplicationController#set_locale`). The diff itself contains no test additions exercising fallback chain construction or the new warm-loading behavior, so regressions in these new code paths would not be caught by changes in this PR. The finding\u2019s specific \u201cno test in the diff for this new logic\u201d claim is directly supported by the shown changes.",
+        "diff_context_hash": "4bcd6ba39c1fb40585a74526dd58e9877d8d82e3"
+      }
+    },
+    {
+      "issue_text": "[BUG] Installing FallbackLocaleList as the process-global I18n.fallbacks makes every backend translation resolve its chain through SiteSetting.default_locale \u2014 a DB-backed site setting \u2014 so I18n.t now raises in any context without an established site connection where it previously resolved fallbacks via the pure-Ruby I18n::Locale::Fallbacks with no database dependency. On multisite installs, rake tasks, `rails runner` scripts, and any code that translates before a site connection is established crash with a no-connection error instead of returning a translated string (I18n::Backend::Fallbacks, now included into the backend at line 9, calls I18n.fallbacks[locale] before every lookup, so the SiteSetting read at line 17 is unavoidable for all I18n.t calls); before this diff, production's `config.i18n.fallbacks = true` produced a locale-subtag-only chain that worked without a DB.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.62,
+        "rationale": "The diff replaces Rails\u2019 environment-level `config.i18n.fallbacks = true` with a process-global `I18n.fallbacks = FallbackLocaleList.new` (config/initializers/i18n.rb) whose `[]` method unconditionally reads `SiteSetting.default_locale`. Because the initializer also includes `I18n::Backend::Fallbacks` into the backend, fallback resolution will consult `I18n.fallbacks[locale]`, making the `SiteSetting` access part of the fallback chain computation. This introduces a new hard dependency on `SiteSetting` for fallback computation that did not exist when using the built-in fallbacks enabled via `config.i18n.fallbacks = true`, and can break translation calls in contexts where `SiteSetting` is not available/initialized (e.g., before site selection/connection).",
+        "diff_context_hash": "4bcd6ba39c1fb40585a74526dd58e9877d8d82e3"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] FallbackLocaleList subclasses Hash but its overridden [] never reads stored entries, so the standard write-then-read contract of the public I18n.fallbacks surface (I18n.fallbacks[locale] = [...], honored by the stock I18n::Locale::Fallbacks this replaces in production) silently accepts and then ignores the stored value. Any plugin author or operator who configures per-locale fallback chains via the documented I18n.fallbacks[locale] = [...] API gets a silent no-op \u2014 no error and no effect \u2014 while the hardcoded [user_locale, SiteSetting.default_locale, :en] chain applies instead; the TODO on lines 15-16 invites exactly this extension, so the next developer implementing it will write a mapping that does nothing.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.65,
+        "rationale": "In config/initializers/i18n.rb, FallbackLocaleList subclasses Hash but overrides `[](locale)` to always return `[locale, SiteSetting.default_locale.to_sym, :en].uniq.compact` and never consults any stored hash entries. Since `[]=` is still inherited from Hash, callers could write `I18n.fallbacks[locale] = ...` and it would be silently ignored on reads. The diff doesn\u2019t show any in-repo code relying on `[]=` (so a concrete breakage can\u2019t be proven here), but it is a real API/extension trap created by this change.",
+        "diff_context_hash": "4bcd6ba39c1fb40585a74526dd58e9877d8d82e3"
+      }
+    },
+    {
+      "issue_text": "[BUG] The new fallback-preloading hook `I18n.fallbacks.ensure_loaded!` is wired into exactly one call site \u2014 the web-request path in `set_locale` \u2014 while the fallback machinery the diff enables globally (`I18n.backend.class.send(:include, I18n::Backend::Fallbacks)` plus `FallbackLocaleList`) is process-global, so server-side translations executed outside controller dispatch run with fallback locales that are never loaded. The accelerator's `translate` only loads `config.locale` (translate_accelerator.rb:69 `load_locale(config.locale) unless @loaded_locales.include?(config.locale)`); in a Sidekiq worker rendering a localized email, a key missing in the user's locale falls through `I18n::Backend::Fallbacks` to the site-default and `:en` locales, which were never `load_locale`d in that process, so the chain exhausts and the user-facing email ships with literal `translation missing: \u2026` fragments instead of the translated text \u2014 the feature this PR exists to provide silently fails in every non-request context (fresh job processes never run set_locale).",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.58,
+        "rationale": "The diff wires `I18n.fallbacks.ensure_loaded!` only into `ApplicationController#set_locale` (new call added there). The new fallback setup is global (`I18n::Backend::Fallbacks` included and `I18n.fallbacks = FallbackLocaleList.new` in `config/initializers/i18n.rb`), so any translations executed in non-controller contexts (e.g., background jobs, rake tasks) will not run this preload hook unless they call it elsewhere (no other call sites shown). However, the finding\u2019s claimed concrete failure mode (\u201cfallback chain exhausts and emails ship with `translation missing`\u201d) can\u2019t be conclusively verified from the diff alone because it depends on how `TranslateAccelerator#translate` interacts with the I18n fallback backend and whether fallback lookups already trigger locale loading implicitly.",
+        "diff_context_hash": "4bcd6ba39c1fb40585a74526dd58e9877d8d82e3"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] Installing `I18n.fallbacks = FallbackLocaleList.new` unconditionally in the initializer turns fallbacks on in development and test, where `config.i18n.fallbacks` was previously unset and Rails deliberately enables fallbacks only in production (the diff removes `config.i18n.fallbacks = true` from production.rb/profile.rb/cloud66 but adds global behavior everywhere). Developers and translation contributors reviewing untranslated or partially translated locales in development now see silently-resolved English text instead of the `translation missing: \u2026` markers that previously surfaced, so missing keys are first discovered by end users in production rather than during development; any test asserting on missing-translation behavior also changes meaning.",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.66,
+        "rationale": "The new initializer `config/initializers/i18n.rb` unconditionally includes `I18n::Backend::Fallbacks` and sets `I18n.fallbacks = FallbackLocaleList.new`, which applies in all environments. The diff also removes `config.i18n.fallbacks = true` from production/profile/cloud66, shifting fallback behavior from being explicitly enabled only in those env files to being globally installed. This can change how missing translations surface (e.g., falling back to `SiteSetting.default_locale`/`:en` instead of showing missing-translation markers) in development/test compared to prior behavior, even if the intent is to standardize fallbacks.",
+        "diff_context_hash": "4bcd6ba39c1fb40585a74526dd58e9877d8d82e3"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] `[locale, SiteSetting.default_locale.to_sym, :en].uniq.compact` mixes the String `I18n.locale` (assigned directly from the String `SiteSetting.default_locale` / `user.locale` in `set_locale`, visible in the diff context) with Symbol entries, and `uniq` uses equality, so the chain for an English site is `[\"en\", :en]` rather than a single entry. `I18n.ensure_loaded!` loads English twice per process under distinct locale keys \u2014 the accelerator's `@loaded_locales` and per-locale translation stores hold both `\"en\"` and `:en` \u2014 doubling the memory of the largest translation tree in every web and background process and duplicating fallback iteration for each missing key; the same String/Symbol split applies to any site-default locale pair.",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "unresolved",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "unresolved",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.0,
+        "rationale": "",
+        "diff_context_hash": "4bcd6ba39c1fb40585a74526dd58e9877d8d82e3"
+      }
+    },
+    {
+      "issue_text": "[BUG] The only code path that preloads the fallback-chain locales is ApplicationController#set_locale's `I18n.fallbacks.ensure_loaded!`, so in any process that renders localized text without passing through a web controller (sidekiq email/notification/digest jobs using I18n.with_locale, rake, console) the fallback lookups hit locales that were never loaded in that process. I18n::Backend::Fallbacks#translate performs each fallback attempt via `super(fallback, key, options)`, which goes straight into Simple#translate and bypasses TranslateAccelerator's `load_locale(config.locale)` guard (that guard only ever loads the primary locale). In a sidekiq process, which never runs set_locale, the newly-added middle chain entry SiteSetting.default_locale is never loaded for non-English-default sites: a background email for a user with locale ru on a site whose default is de renders English (or a 'translation missing' string on a fresh process where :en is also not yet loaded) instead of the configured German fallback \u2014 silently, with no error logged, because a fallback miss is indistinguishable from a genuinely absent key. Pre-PR production fallback chains were [locale, I18n.default_locale] and worked in jobs because :en loads on the first ordinary translate; this diff adds the site-default entry that is structurally dead in all background rendering.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.62,
+        "rationale": "The diff introduces a custom fallback chain `[locale, SiteSetting.default_locale.to_sym, :en]` in `config/initializers/i18n.rb`, but the only added call that proactively loads that chain is in `ApplicationController#set_locale` via `I18n.fallbacks.ensure_loaded!`. Nothing in the diff shows analogous loading for non-controller code paths (jobs/rake/console), and `translate_accelerator.rb` still only auto-loads `config.locale` in `translate`, not the fallback locales. Given the new `FallbackLocaleList#ensure_loaded!` implementation relies on being invoked, background processes can plausibly miss loading `SiteSetting.default_locale`/`:en` and therefore have incorrect/missing fallback behavior.",
+        "diff_context_hash": "4bcd6ba39c1fb40585a74526dd58e9877d8d82e3"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] FallbackLocaleList subclasses Hash but overrides `[]` to always recompute `[locale, SiteSetting.default_locale.to_sym, :en].uniq.compact`, so the documented i18n customization API `I18n.fallbacks[locale] = [...]` becomes a silent no-op: Hash#[]= is not overridden, the write succeeds, and the stored value is never read back. Any Discourse plugin or vendored gem that follows the standard per-locale fallback-customization idiom gets zero effect with no error and no warning, shipping the wrong fallback order to end users; a maintainer debugging the chain will read the initializer, see a Hash, and reasonably assume stored fallbacks apply. The strongest rebuttal \u2014 'core never writes to I18n.fallbacks' \u2014 describes today's core only; the initializer deliberately swapped out the public fallbacks object for a look-alike, and out-of-tree callers are the ones this family exists to protect.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.82,
+        "rationale": "In `config/initializers/i18n.rb`, `FallbackLocaleList < Hash` overrides `def [](locale)` to always return a freshly computed `[locale, SiteSetting.default_locale.to_sym, :en].uniq.compact` and never consults the underlying Hash storage. Since `Hash#[]=` is not overridden, any caller doing the standard `I18n.fallbacks[locale] = [...]` will successfully write but the value will never be read back (silent no-op). The diff also assigns `I18n.fallbacks = FallbackLocaleList.new`, so this behavior applies globally and can break expected i18n fallback customization semantics for out-of-tree code.",
+        "diff_context_hash": "4bcd6ba39c1fb40585a74526dd58e9877d8d82e3"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] `I18n.fallbacks = FallbackLocaleList.new` enables the fallback chain unconditionally in every environment, whereas previously only production/profile/cloud66 enabled fallbacks (the config was removed from production.rb, profile.rb and the cloud66 file), so dev and test environments switch from surfacing missing translations to silently swallowing them. Before this diff, a missing key in a non-English locale raised/returned a visible 'translation missing' marker in dev and test \u2014 the primary detection surface for incomplete plugin/theme locale files, which core's yml-parity specs do not cover. After it, the same lookup returns English text and reports success, so developers and CI specs no longer notice incomplete locale coverage and the gaps ship to production. The rebuttal 'dev now shows what production shows' inverts the canary role dev/test played pre-PR and leaves no environment that surfaces the failure.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.78,
+        "rationale": "The diff adds `config/initializers/i18n.rb` which unconditionally mixes `I18n::Backend::Fallbacks` into the backend and sets `I18n.fallbacks = FallbackLocaleList.new`, and `FallbackLocaleList#[]` returns a chain including `:en`. Since initializers run in all environments, this makes fallbacks active globally, whereas the explicit `config.i18n.fallbacks = true` lines were only present (and are now removed) in `production.rb`, `profile.rb`, and the cloud66 production config. The concern that this can mask missing non-English translations by falling back to English is directly supported by the new fallback chain, though the exact prior behavior in dev/test isn\u2019t fully shown in the diff.",
+        "diff_context_hash": "4bcd6ba39c1fb40585a74526dd58e9877d8d82e3"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The new `ensure_loaded!` hand-rolls the same `unless @loaded_locales.include?(locale)` guard that `translate` (line 67) already implements inline, so the loaded-locales idempotence invariant is now enforced at two parallel call sites in the same class instead of being centralized inside load_locale (or by having translate call the new ensure_loaded!). The next change to locale bookkeeping \u2014 normalizing keys to symbols, adding synchronization, or rolling back @loaded_locales on a failed load \u2014 must be replicated at every guard site; missing one makes a guard permanently false (locale files re-parsed on every request: latency/CPU burn) or permanently true (locales never load: missing-translation output of exactly the kind the sibling finding describes). The author's counter \u2014 'the guards are cheap and correct today' \u2014 concedes the point: the finding is about change-safety of a freshly duplicated invariant, and translate's guard line is directly replaceable by `ensure_loaded!(config.locale)`, a one-place consolidation this diff was ideally positioned to make.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.86,
+        "rationale": "In lib/freedom_patches/translate_accelerator.rb the diff adds ensure_loaded!(locale) which implements the same guard pattern as translate already has inline: `load_locale locale unless @loaded_locales.include?(locale)` (new method) vs `load_locale(config.locale) unless @loaded_locales.include?(config.locale)` (existing translate). The new helper is not used to replace the existing guard, so the locale-loaded idempotence logic is now duplicated across two call sites, increasing maintenance/change-safety risk if @loaded_locales semantics or locale normalization changes later. This is a concrete, diff-grounded design concern rather than an immediately verifiable runtime bug.",
+        "diff_context_hash": "4bcd6ba39c1fb40585a74526dd58e9877d8d82e3"
+      }
+    }
+  ],
+  "diff_context_hash": "4bcd6ba39c1fb40585a74526dd58e9877d8d82e3",
+  "primary_judge": "gpt-5.2",
+  "adjudicating_judge": "gpt-5.2",
+  "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/9",
+  "framework": "metareview-realistic",
+  "model": "glm-5.3-vision-background",
+  "effort": "medium",
+  "judge": "gpt-5.2",
+  "wall_s": 1828.580496788025,
+  "execution_mode": "api",
+  "run_batch": "20260910-mrv0120-manifold"
+}

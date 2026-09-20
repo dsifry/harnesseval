@@ -94,6 +94,37 @@ def openai_client():
     return OpenAI(api_key=load_keys()["HARNESS_OPENAI_API_KEY"], timeout=REQUEST_TIMEOUT_S)
 
 
+def lunaroute_clients() -> list:
+    """All Lunaroute clients: the primary HARNESS_KEYS_FILE plus any extra key files named in
+    HARNESS_LUNAROUTE_KEY_FILES (colon/comma-separated). Each key carries its own concurrency
+    budget (12 calls/key on the flat-fee plan), so the pool doubles effective capacity.
+
+    The API key multiplexer in model_router picks least-in-flight and fails over on
+    429/5xx/timeout — a blind alternation would route calls into a cold/queued key.
+    """
+    from openai import OpenAI
+    files: list[Path] = [KEYS_FILE]
+    extra = os.environ.get("HARNESS_LUNAROUTE_KEY_FILES", "")
+    for p in [x.strip() for x in extra.replace(",", ":").split(":") if x.strip()]:
+        pth = Path(p).expanduser()
+        if pth not in files:
+            files.append(pth)
+    out = []
+    for pth in files:
+        k = load_keys(pth)
+        if k.get("HARNESS_LUNAROUTE_API_KEY"):
+            # max_retries=0 (2026-09-14 root cause): the openai SDK defaults to max_retries=2,
+            # which SILENTLY retries a timed-out request twice -> an effective timeout of
+            # 3x the configured value (blackhole-probe: timeout=15s raised APITimeoutError at
+            # 46.9s). With timeout=900 that made every dead/queued gateway connection block for
+            # 2,700s (45 min) with NO ledger trace (SDK retries are invisible), which is exactly
+            # the all-day "wedge" on GLM lens calls. Our own ladders already retry (and log)
+            # timeout/connection/503/empty-content classes - the SDK must not double up.
+            out.append(OpenAI(api_key=k["HARNESS_LUNAROUTE_API_KEY"], base_url=k["LUNAROUTE_BASE_URL"],
+                              timeout=LUNAROUTE_TIMEOUT_S, max_retries=0))
+    return out
+
+
 def lunaroute_client():
     """Construct an OpenAI-compatible client pointed at the Lunaroute gateway (GLM/Kimi).
 
@@ -103,7 +134,7 @@ def lunaroute_client():
     from openai import OpenAI
     k = load_keys()
     return OpenAI(api_key=k["HARNESS_LUNAROUTE_API_KEY"], base_url=k["LUNAROUTE_BASE_URL"],
-                  timeout=LUNAROUTE_TIMEOUT_S)
+                  timeout=LUNAROUTE_TIMEOUT_S, max_retries=0)  # see multi-client note: SDK 3x
 
 
 def martian_client():

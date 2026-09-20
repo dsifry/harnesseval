@@ -1,0 +1,87 @@
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("@calcom/lib/constants", () => ({
+  APP_NAME: "Cal",
+  EMAIL_FROM: "noreply@cal.com",
+  WEBAPP_URL: "http://localhost:3000",
+}));
+
+vi.mock("../", () => ({
+  renderEmail: vi.fn().mockResolvedValue("<html></html>"),
+}));
+
+vi.mock("../lib/generateIcsString", () => ({
+  default: vi.fn().mockReturnValue("BEGIN:VCALENDAR\nEND:VCALENDAR"),
+}));
+
+// Mock the parent to avoid pulling the whole prisma/emails dependency graph
+// during module resolution; the behavior under test lives in the subclass.
+vi.mock("./organizer-scheduled-email", () => ({
+  default: class OrganizerScheduledEmail {
+    calEvent: unknown;
+    teamMember: unknown;
+    constructor(calEvent: unknown, teamMember?: unknown) {
+      this.calEvent = calEvent;
+      this.teamMember = teamMember;
+    }
+    t(key: string) {
+      return key;
+    }
+    getFormattedDate() {
+      return "1 Jan 2024";
+    }
+    getTextBody() {
+      return "text body";
+    }
+    getMailerOptions() {
+      return { from: "noreply@cal.com" };
+    }
+  },
+}));
+
+import OrganizerAddGuestsEmail from "./organizer-add-guests-email";
+
+type Attendee = { email: string; name: string };
+
+function buildEvent(attendees: Attendee[]) {
+  return {
+    type: "30min",
+    title: "Test event",
+    startTime: "2024-01-01T10:00:00.000Z",
+    endTime: "2024-01-01T10:30:00.000Z",
+    organizer: {
+      email: "organizer@cal.com",
+      name: "Organizer",
+      language: { locale: "en" },
+      timeZone: "UTC",
+    },
+    attendees,
+    iCalUID: "uid-1",
+    uid: "uid-1",
+  };
+}
+
+async function invokeGetNodeMailerPayload(email: OrganizerAddGuestsEmail) {
+  const fn = (
+    email as unknown as {
+      getNodeMailerPayload: () => Promise<Record<string, unknown>>;
+    }
+  ).getNodeMailerPayload;
+  return fn.call(email);
+}
+
+describe("OrganizerAddGuestsEmail.getNodeMailerPayload subject", () => {
+  it("does not reject when the attendees array is empty (guarded attendees[0].name)", async () => {
+    const email = new OrganizerAddGuestsEmail(buildEvent([]) as never, undefined as never);
+
+    // On the buggy code, `this.calEvent.attendees[0].name` throws a TypeError
+    // for an empty attendee list, so building the mailer payload rejects.
+    await expect(invokeGetNodeMailerPayload(email)).resolves.toBeDefined();
+  });
+
+  it("produces a subject string even when no guests are present", async () => {
+    const email = new OrganizerAddGuestsEmail(buildEvent([]) as never, undefined as never);
+    const payload = await invokeGetNodeMailerPayload(email);
+    expect(typeof payload.subject).toBe("string");
+  });
+});

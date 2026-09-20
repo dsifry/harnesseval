@@ -1,0 +1,974 @@
+{
+  "tp": 2,
+  "fp": 29,
+  "fn": 0,
+  "precision": 0.06451612903225806,
+  "recall": 1.0,
+  "n_findings": 32,
+  "n_golden": 2,
+  "tokens_in": 49733,
+  "tokens_out": 5566,
+  "wall_ms": 147697.10898399353,
+  "per_model_usage": {},
+  "total_cost_usd": 0.0,
+  "resolved_model": "glm-5.3-vision-background",
+  "adjudicated_precision": 0.4,
+  "incremental_recall": 1.0,
+  "n_bug_ungold": 6,
+  "n_important_non_bug": 19,
+  "n_true_hallucination": 3,
+  "n_unresolved": 1,
+  "n_real_ungold": 6,
+  "n_hallucination": 3,
+  "decomposition": {
+    "deterministic_tp": 0,
+    "llm_lens_tp": 2,
+    "deterministic_gate_recall": 0.0,
+    "llm_lens_recall": 1.0
+  },
+  "findings": [
+    {
+      "issue_text": "[BUG] Removing the cacheMu lock from the head of BuildIndex leaves the pre-existing cache lookup path (the read of b.cache[key] before building) executing without any lock, while the lock is now only held for the final write at line 137. Two concurrent BuildIndex calls for the same key (e.g., from getOrCreateIndex racing on event bursts) both miss the cache, both build a full bleve index, and the unlocked map read concurrent with the locked write is a Go data race that crashes with fatal error: concurrent map read and map write under -race builds and corrupts the cache in production.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] Init (including the full search index build, which can take seconds-to-minutes and touches the DB) is moved from lazy per-request initialization into NewResourceServer construction. Operators of Grafana singlebinaries: any transient DB error or slow index build at startup now hard-fails or blocks process start, where the previous design deferred init errors to request time and let the server come up; the diff's own test skip in pkg/server/module_server_test.go ('test not working with postgres in Drone') is direct evidence this construction-time init is already breaking the server bring-up path in CI.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] s.search.TotalDocs() is called on the search backend at init completion time, summing documents across all tenant indexes. This is only valid because init just finished; but if init() ever returns early with initErr on a partial build the log line reports a misleading count and TotalDocs iterates the index map that is concurrently written by handleEvent from the watcher started afterwards, so the next refactor moving this line into an event handler hits an unsynchronized read.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The postgres integration test is skipped with a TODO rather than fixed, meaning the new startup-time Init path in NewResourceServer has no CI coverage on postgres at all. Future contributors get no signal when the construction-time init (which this same PR introduced, per the 'not working with postgres in Drone' note) breaks postgres deployments; the regression the TODO describes is exactly the code path this PR makes mandatory.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] Moving the cacheMu lock from the start of BuildIndex to only the final cache write allows concurrent BuildIndex calls for the same NamespacedResource key to run bleve.New/bleve.NewMemOnly and builder() simultaneously, with no single-flight guard and no double-check of b.cache before building. Two concurrent first-access requests (e.g. two tenants hitting the same dashboard search key after startup) each build a full in-memory/file bleve index; the loser's index is silently discarded and leaked (never closed), doubling memory and index-build CPU, and for file-backed indexes two concurrent bleve.New calls on the same dir can corrupt or fail on Windows file locks. Previously the whole function was serialized by cacheMu, so this race is introduced by this diff and no test covers concurrent BuildIndex.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] The PR disables the only integration test covering the storage server end-to-end on postgres with a TODO skip ('test not working with postgres in Drone. Works locally.') instead of fixing it. This PR's central behavioral change \u2014 Init moved from per-request lazy calls into NewResourceServer, changing startup semantics and removing the per-request init-error return on Create/Update/Delete/Read/List/Watch/Search/History/Origin/IsHealthy/PutBlob/GetBlob \u2014 is exactly what this integration test would verify, and it is now skipped on one of the two production-relevant databases, so a regression in eager initialization on postgres ships undetected. 'Works locally' with no diagnosis means the CI failure mode is unhandled, not fixed.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] The diff converts lazy per-request initialization into a hard startup-time failure by calling s.Init(ctx) inside NewResourceServer and returning nil,err on failure, while deleting every per-request Init guard (Create, Update, Delete, Read, List, Watch, Search, History, Origin, IsHealthy, PutBlob, GetBlob), but no test in the diff covers the NewResourceServer failure path. Operators of single-binary Grafana get a process that previously served reads and returned errors only per-request (letting other subsystems start) now refusing to construct the resource server when index init or watcher init fails \u2014 a search/index startup error becomes a hard boot failure \u2014 and there is no verification anywhere in the diff that (a) callers of NewResourceServer propagate this new error correctly, or (b) the previously-tested 'Init error returned from first request' behavior has an equivalent guarantee. A regression here breaks startup, not just one endpoint.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] Reordering Init to run search-index initialization before initWatcher means events emitted by the watcher now start flowing to handleEvent before/while the search index has finished building, and no test in the diff covers the event- versus index-build ordering this reorder creates. A dashboard created between watcher start and index-ready previously raced differently; with the new order, handleEvent can enqueue writes into an index that build() is concurrently rebuilding for the same key, and the getOrCreateIndex/build path has no coverage (no test file in the diff touches resource/search.go or the init ordering) \u2014 a regression here silently drops or double-applies watch events during startup, which is invisible until users report missing search results.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The new s.log.Info(\"search index initialized\", ..., \"total_docs\", s.search.TotalDocs()) logging call adds an unconditional Info log at startup with no log-level gating or test, and total_docs is read after the builder goroutines complete but the value is never asserted anywhere in the diff. Every Grafana single-binary startup now emits an Info-level line per index regardless of configured log level verbosity conventions, and if TotalDocs() is meaningful only post-build there is no verification that the logged count is not zero due to the earlier removed serialization \u2014 operators using this log to diagnose the 'Drone postgres' failure will be reading an unverified number.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] Removing the cacheMu lock from around the whole BuildIndex body creates a concurrent-build race for the same NamespacedResource key. Two concurrent callers building the index for the same key both run the full builder; for keys above FileThreshold both call bleve.New on the same filesystem directory simultaneously, producing file-lock errors or a corrupted/partially-written index, and the second b.cache[key] = idx silently replaces the first, leaking the duplicate in-memory index. The previous code serialized this via cacheMu.Lock(); defer Unlock() across the whole function.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] Init is now invoked eagerly inside NewResourceServer using whatever context the constructor receives, and any failure aborts construction. Whoever constructs the server with a short-lived or request-scoped context ties the entire index build, watcher startup, and all child spans/cancellation to that context \u2014 if the constructing request's ctx is cancelled after NewResourceServer returns, the freshly started watcher and search background work inherit a cancelled context and die. Additionally, a transient index-build failure that previously surfaced per-request (and could succeed on retry via the once-guarded Init) now permanently prevents the server from being constructed at all.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] The postgres integration test is skipped with a TODO and no linked issue, unrelated to the stated performance intent. The unified-storage server's integration coverage on postgres is silently dropped; whoever later changes the resource server has no CI signal on the primary production database, and the 'works locally' skip is untraceable to any requirement in this PR.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] History and Origin no longer run Init but dereference s.search unconditionally, while Search (three lines above) still nil-guards s.search. When the server is constructed without a search backend configured (searchSupport == nil), any History or Origin call panics with a nil-pointer dereference returning a 500/crash, whereas the sibling Search method correctly returns the 'search index not configured' error \u2014 the diff widens an existing asymmetry instead of keeping the guard surface consistent while removing Init.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] Removing the cacheMu lock from the entire BuildIndex body allows concurrent index builds for the same key, including two concurrent bleve.New calls writing the same file-backed directory. Previously the mutex serialized all builds; now nothing in this diff guarantees mutual exclusion. Two concurrent BuildIndex calls for the same NamespacedResource both run the full builder and race to write b.cache[key], and for size > FileThreshold both call bleve.New on the identical filepath.Join(Root, Namespace, ...) directory \u2014 concurrent Bleve file-store creation on the same path can corrupt or fail the index, and the losing build's documents are silently discarded while an expensive duplicate build burns CPU.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] Init is moved from lazy per-request invocation to the constructor, turning any initialization failure into a hard construction/startup failure. Previously a failed search-index build degraded individual requests (each method returned the Init error); now NewResourceServer returns nil and the whole Grafana startup (or any test/embedder constructing a ResourceServer) fails hard. Operators get a crash-looping process on a transient DB hiccup during init instead of a server that serves reads while search is down. Any code path that constructs the server struct without going through NewResourceServer (tests, alternate constructors, re-Init after error) also silently loses the init guarantee the per-request calls provided.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The reordering that runs search.init before initWatcher means writes that occur during the (potentially minutes-long) index build are invisible to the server until the watcher starts. If initWatcher is the event stream that feeds handleEvent into the search index, documents created between the index-build snapshot and watcher start are in the DB but not in the search index, so Search returns stale/missing results for those resources with no rebuild trigger. The old order (watcher first) at least captured those events even if RV ordering handled the rest; the new order widens the gap unless the builder snapshots at an RV the watcher catches up from.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The postgres integration test is skipped with a TODO, so CI stays green while the postgres code path is known-broken. This is a stand-in guard that can go green while prod is red: the comment admits the test 'not working with postgres in Drone', meaning the unified-storage server path is failing on a supported production database and nothing in the pipeline will catch regressions there. Whoever relies on Drone's green build gets no signal for postgres.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] Moving the cacheMu acquisition to after the index build in BuildIndex removes serialization of concurrent builds for the same NamespacedResource key, so two goroutines calling getOrCreateIndex/build simultaneously both perform a full index build and the last b.cache[key] = idx write wins. The loser's index \u2014 which may have been built at a newer resource version \u2014 is silently discarded; until the next WrittenEvent arrives, Search serves results from a stale index, and duplicate full tenant index builds cause a transient memory/CPU spike proportional to tenant size. The prior code blocked the second caller on cacheMu and let it reuse the freshly built index.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] This diff silently converts resource-server initialization from lazy per-request Init (previously each RPC handler called s.Init) to hard-fail-at-construction, changing the server's failure semantics without any accompanying caller or acceptance note. A tenant with a slow or temporarily unavailable search-index dependency (e.g. remote storage hiccup during startup) previously failed individual requests while the process stayed up and later requests could succeed; now NewResourceServer returns an error and the entire storage server refuses to start, turning a per-request failure into a hard startup failure for all Grafana deployments using unified storage.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The diff reorders Init so the search index is fully built before initWatcher starts, inverting the previous watcher-first order, with no stated rationale. Index build time is now serial with watcher startup in the constructor path: a tenant with a large existing dataset delays the watcher (and, because Init is now called from NewResourceServer, delays the whole server coming up) by the full build duration; events written between construction and watcher start are invisible to the index until the next write for that resource. If the reorder was meant to fix an event-race, the acceptance criteria for that change are not recorded anywhere in the diff.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The diff disables the only integration test covering the storage server target on postgres ('TODO - fix this test for postgres... Works locally'), permanently removing postgres coverage from CI with a comment standing in for a tracked issue. Future regressions in the unified-storage postgres path ship green because CI now skips it; 'works locally' indicates a real environment-dependent defect that is being hidden rather than fixed, and there is no issue reference ensuring anyone ever revisits it.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] Moving Init(ctx) from per-request lazy calls into NewResourceServer converts every per-request initialization failure into a hard constructor failure that blocks server startup entirely. An operator whose search-index build or watcher setup transiently fails (e.g., index directory locked, DB briefly unavailable during rolling restart) now gets a server that will not boot at all, instead of requests failing individually while the rest of Grafana serves traffic; previously a failed init was retried per request and degraded only unified-storage endpoints.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] All per-request Init(ctx) guards were deleted from Read, List, Watch, Search, History, Origin, IsHealthy, PutBlob, and GetBlob, leaving those handlers with no defense if the server instance was constructed through any path other than NewResourceServer or if the once-guarded init silently failed. Any caller (tests, alternate constructors, or a future refactor) that obtains a *server without going through NewResourceServer now serves Read/List/Watch against a nil or unprimed store and search backend, where previously it returned an explicit init error; a nil s.search dereference in Search/History/Origin would panic rather than return an error.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] Narrowing the cacheMu critical section in BuildIndex from the whole build to just the map write lets two concurrent BuildIndex calls for the same NamespacedResource key each run a full bleve index build and blindly overwrite each other in b.cache. Concurrent builders (e.g., two watch events racing, or init plus a request-driven build) do duplicate work up to the FileThreshold disk path \u2014 two bleve.New(dir, mapper) calls opening the same on-disk index directory concurrently can hit lock contention or corrupt/duplicate the file-backed index, and the loser's in-flight documents reference an index that was replaced in the cache.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] The diff's only test change disables the postgres integration test ('test not working with postgres in Drone. Works locally.') instead of diagnosing it, removing the sole coverage for the very behavior this diff changes on the postgres path. NewResourceServer now eagerly calls s.Init at construction (server.go:258) and reorders initWatcher after search init (server.go:303-308); a broken postgres path would surface exactly as 'test not working in Drone', so the skip buries a probable real regression introduced by this diff behind a TODO, and CI stays green on postgres while the local/CI divergence persists.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] The init-order change (search.init now runs before initWatcher) and the eager Init in NewResourceServer are lifecycle behavior changes with no assertion anywhere in the diff that events observed during index build are handled correctly. If watcher events arriving before/after search init are now processed against a partially built index (or dropped), the ordering bug ships unnoticed; operators on Grafana deployments with large search indexes get stale or missing search results at startup. Checked: the only test-shaped change in the diff is pkg/server/module_server_test.go, which adds a skip and asserts nothing about init order.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] Moving initWatcher() to run after search.init() creates a window where writes committed during index construction are never indexed. The search index is built from a SQL snapshot at build time; the watcher previously started first so any write during the (potentially minutes-long) index build arrived as a WrittenEvent and re-indexed that document. With the watcher now started only after search.init returns, any Create/Update/Delete committed between the index snapshot and watcher startup is absent from the index and from watch streams until that same resource is written again \u2014 dashboards created during a Grafana restart/deploy-window are invisible to search and watch consumers with no reconciliation pass to repair them.",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] Moving Init from a lazy per-request call into NewResourceServer turns a previously per-request, recoverable init failure into a hard constructor failure. Before this diff, a transient init failure (e.g. the search index build hitting a DB hiccup) failed individual requests while the process stayed up and Init retried on the next request via the initErr-clearing path; now NewResourceServer returns an error and the whole Grafana server fails to start, so an operator who could previously ride out a slow/failing index build now has a crash-looping deployment with no way to bypass it short of a code/config change.",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] Removing the cacheMu lock from the whole BuildIndex body while keeping it only around the final cache write opens the concurrent-build race the lock was preventing: two goroutines for the same key can each run builder and both write b.cache[key], leaking one fully-built index and doubling index-build DB read load. GetOrCreateIndex call sites that previously serialized on cacheMu now proceed in parallel; under a burst of requests for a not-yet-built namespace/resource (e.g. right at startup when Init was moved to construction), the same heavy index is built twice, doubling memory and scan cost, and the loser index plus its on-disk bleve directory under opts.Root are orphaned \u2014 the disk-backed path can also race two bleve.New calls on the same directory, which errors or corrupts the bleve files.",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] Removing the cacheMu lock from the body of BuildIndex means two concurrent calls for the same NamespacedResource key both execute the full build path, and both call bleve.New(dir, mapper) on the same filesystem directory (filepath.Join(b.opts.Root, key.Namespace, fmt.Sprintf(\"%s.%s\", key.Resource, key.Group))) before either publishes to the cache. When two requests (e.g., two Search calls cold-starting the same dashboard index, which previously serialized on the lock) race, the second bleve.New on the same non-empty directory fails ('init: cannot create index... path already exists'), so that caller's build errors out; even in the memory-only case the work and DB reads are duplicated and one of the two built indexes is silently discarded when the later cache write overwrites the earlier one.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] Init is now invoked once inside NewResourceServer and all per-request Init calls were removed, converting every previously lazy, retryable initialization (index build, watcher setup) into a hard startup failure and removing the per-request retry that existed when initErr was transient. A transient database hiccup during startup now prevents Grafana from starting at all (return nil, err from the constructor), whereas before this diff a failed init on request 1 was retried on request 2; additionally, any code that constructs/embeds a server value without going through NewResourceServer (test doubles, alternative constructors added later) silently hits uninitialized search/watcher state with no guard left in Create/Read/List/Search/Watch.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The new log line s.log.Info(\"search index initialized\", ..., \"total_docs\", s.search.TotalDocs()) executes immediately after launching the async indexing goroutine (`}()`) without waiting for it to finish, so total_docs is read before the bulk of documents are indexed. Operators reading the startup log see total_docs of 0 or a tiny partial count and conclude the index is empty or the initial sync failed, sending debugging down the wrong path; the IndexCreationTime metric has the same stale-value exposure.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    }
+  ],
+  "goldens": [
+    {
+      "comment": "A race condition in BuildIndex allows multiple goroutines to concurrently build the same expensive index for the same key. This is caused by moving the b.cacheMu lock from protecting the entire function to only protecting the final cache assignment. ",
+      "severity": "High",
+      "category": "concurrency"
+    },
+    {
+      "comment": "Calling s.search.TotalDocs() here may race with concurrent index creation: TotalDocs iterates b.cache without synchronization, and the event watcher goroutine started just above could trigger BuildIndex writes concurrently, potentially causing a concurrent map read/write panic.",
+      "severity": "High",
+      "category": "concurrency"
+    }
+  ],
+  "per_golden_matches": [
+    {
+      "golden_comment": "A race condition in BuildIndex allows multiple goroutines to concurrently build the same expensive index for the same key. This is caused by moving the b.cacheMu lock from protecting the entire function to only protecting the final cache assignment. ",
+      "severity": "High",
+      "category": "concurrency",
+      "matched_candidate": "[BUG] Moving the cacheMu lock from the start of BuildIndex to only the final cache write allows concurrent BuildIndex calls for the same NamespacedResource key to run bleve.New/bleve.NewMemOnly and builder() simultaneously, with no single-flight guard and no double-check of b.cache before building. Two concurrent first-access requests (e.g. two tenants hitting the same dashboard search key after startup) each build a full in-memory/file bleve index; the loser's index is silently discarded and leaked (never closed), doubling memory and index-build CPU, and for file-backed indexes two concurrent bleve.New calls on the same dir can corrupt or fail on Windows file locks. Previously the whole function was serialized by cacheMu, so this race is introduced by this diff and no test covers concurrent BuildIndex.",
+      "confidence": 0.98,
+      "reasoning": "The candidate describes the same race introduced by narrowing cacheMu\u2019s scope in BuildIndex: concurrent goroutines can miss the cache and simultaneously build the same index for the same key, since the lock no longer serializes the whole function. This matches the golden issue (duplicate expensive builds due to lock move)."
+    },
+    {
+      "golden_comment": "Calling s.search.TotalDocs() here may race with concurrent index creation: TotalDocs iterates b.cache without synchronization, and the event watcher goroutine started just above could trigger BuildIndex writes concurrently, potentially causing a concurrent map read/write panic.",
+      "severity": "High",
+      "category": "concurrency",
+      "matched_candidate": "[ADVISORY] s.search.TotalDocs() is called on the search backend at init completion time, summing documents across all tenant indexes. This is only valid because init just finished; but if init() ever returns early with initErr on a partial build the log line reports a misleading count and TotalDocs iterates the index map that is concurrently written by handleEvent from the watcher started afterwards, so the next refactor moving this line into an event handler hits an unsynchronized read.",
+      "confidence": 0.92,
+      "reasoning": "The candidate flags that s.search.TotalDocs() iterates an index/cache map without synchronization while a watcher goroutine (handleEvent/BuildIndex) may concurrently write to that map, risking a concurrent map read/write panic. This is the same race condition described in the golden comment (extra notes about misleading count/refactor are ancillary)."
+    }
+  ],
+  "adjudication_records": [
+    {
+      "issue_text": "[BUG] Removing the cacheMu lock from the head of BuildIndex leaves the pre-existing cache lookup path (the read of b.cache[key] before building) executing without any lock, while the lock is now only held for the final write at line 137. Two concurrent BuildIndex calls for the same key (e.g., from getOrCreateIndex racing on event bursts) both miss the cache, both build a full bleve index, and the unlocked map read concurrent with the locked write is a Go data race that crashes with fatal error: concurrent map read and map write under -race builds and corrupts the cache in production.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "unjudged",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "unjudged",
+        "adjudicating_judge": null,
+        "confidence": null,
+        "rationale": null,
+        "diff_context_hash": "2691f948f4856c0cbbf460a6b7e17b6953fe78e7"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] Init (including the full search index build, which can take seconds-to-minutes and touches the DB) is moved from lazy per-request initialization into NewResourceServer construction. Operators of Grafana singlebinaries: any transient DB error or slow index build at startup now hard-fails or blocks process start, where the previous design deferred init errors to request time and let the server come up; the diff's own test skip in pkg/server/module_server_test.go ('test not working with postgres in Drone') is direct evidence this construction-time init is already breaking the server bring-up path in CI.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.78,
+        "rationale": "The diff clearly moves initialization to construction time: `NewResourceServer` now calls `err := s.Init(ctx)` and returns `nil, err` on failure, while many RPC handlers (Create/Update/Delete/Read/List/Watch/Search/etc.) removed their `s.Init(ctx)` lazy-init calls. This change means any init failure (including search index init and watcher setup) will prevent server construction and thus startup, rather than deferring failure to request time. The added postgres skip in `pkg/server/module_server_test.go` indicates CI instability but does not directly prove this init move is the cause; still, the operational/startup-blocking concern is diff-grounded.",
+        "diff_context_hash": "2691f948f4856c0cbbf460a6b7e17b6953fe78e7"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] s.search.TotalDocs() is called on the search backend at init completion time, summing documents across all tenant indexes. This is only valid because init just finished; but if init() ever returns early with initErr on a partial build the log line reports a misleading count and TotalDocs iterates the index map that is concurrently written by handleEvent from the watcher started afterwards, so the next refactor moving this line into an event handler hits an unsynchronized read.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": [
+        "Calling s.search.TotalDocs() here may race with concurrent index creation: TotalDocs iterates b.cache without synchronization, and the event watcher goroutine started just above could trigger BuildIndex writes concurrently, potentially causing a concurrent map read/write panic."
+      ],
+      "primary_judge_verdict": "matched",
+      "primary_judge": "gpt-5.2",
+      "primary_judge_confidence": 0.92,
+      "primary_judge_reasoning": "The candidate flags that s.search.TotalDocs() iterates an index/cache map without synchronization while a watcher goroutine (handleEvent/BuildIndex) may concurrently write to that map, risking a concurrent map read/write panic. This is the same race condition described in the golden comment (extra notes about misleading count/refactor are ancillary).",
+      "adjudication": {
+        "verdict": "matched",
+        "adjudicating_judge": null,
+        "confidence": null,
+        "rationale": null,
+        "diff_context_hash": "2691f948f4856c0cbbf460a6b7e17b6953fe78e7"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The postgres integration test is skipped with a TODO rather than fixed, meaning the new startup-time Init path in NewResourceServer has no CI coverage on postgres at all. Future contributors get no signal when the construction-time init (which this same PR introduced, per the 'not working with postgres in Drone' note) breaks postgres deployments; the regression the TODO describes is exactly the code path this PR makes mandatory.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.88,
+        "rationale": "The diff explicitly adds a postgres-specific skip in `TestIntegrationWillRunInstrumentationServerWhenTargetHasNoHttpServer` (`if dbType == \"postgres\" { t.Skip(\"...not working with postgres in Drone\") }`), which reduces CI coverage for postgres. In the same PR, `NewResourceServer` now calls `s.Init(ctx)` during construction (and removes per-RPC `Init` calls), making initialization a mandatory startup-time path. Skipping the postgres integration test means this new construction-time init path won\u2019t be exercised in CI for postgres, matching the finding\u2019s concern about lack of signal for regressions.",
+        "diff_context_hash": "2691f948f4856c0cbbf460a6b7e17b6953fe78e7"
+      }
+    },
+    {
+      "issue_text": "[BUG] Moving the cacheMu lock from the start of BuildIndex to only the final cache write allows concurrent BuildIndex calls for the same NamespacedResource key to run bleve.New/bleve.NewMemOnly and builder() simultaneously, with no single-flight guard and no double-check of b.cache before building. Two concurrent first-access requests (e.g. two tenants hitting the same dashboard search key after startup) each build a full in-memory/file bleve index; the loser's index is silently discarded and leaked (never closed), doubling memory and index-build CPU, and for file-backed indexes two concurrent bleve.New calls on the same dir can corrupt or fail on Windows file locks. Previously the whole function was serialized by cacheMu, so this race is introduced by this diff and no test covers concurrent BuildIndex.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": [
+        "A race condition in BuildIndex allows multiple goroutines to concurrently build the same expensive index for the same key. This is caused by moving the b.cacheMu lock from protecting the entire function to only protecting the final cache assignment. "
+      ],
+      "primary_judge_verdict": "matched",
+      "primary_judge": "gpt-5.2",
+      "primary_judge_confidence": 0.98,
+      "primary_judge_reasoning": "The candidate describes the same race introduced by narrowing cacheMu\u2019s scope in BuildIndex: concurrent goroutines can miss the cache and simultaneously build the same index for the same key, since the lock no longer serializes the whole function. This matches the golden issue (duplicate expensive builds due to lock move).",
+      "adjudication": {
+        "verdict": "matched",
+        "adjudicating_judge": null,
+        "confidence": null,
+        "rationale": null,
+        "diff_context_hash": "2691f948f4856c0cbbf460a6b7e17b6953fe78e7"
+      }
+    },
+    {
+      "issue_text": "[BUG] The PR disables the only integration test covering the storage server end-to-end on postgres with a TODO skip ('test not working with postgres in Drone. Works locally.') instead of fixing it. This PR's central behavioral change \u2014 Init moved from per-request lazy calls into NewResourceServer, changing startup semantics and removing the per-request init-error return on Create/Update/Delete/Read/List/Watch/Search/History/Origin/IsHealthy/PutBlob/GetBlob \u2014 is exactly what this integration test would verify, and it is now skipped on one of the two production-relevant databases, so a regression in eager initialization on postgres ships undetected. 'Works locally' with no diagnosis means the CI failure mode is unhandled, not fixed.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.72,
+        "rationale": "The diff explicitly adds a TODO skip for `dbType == \"postgres\"` in `TestIntegrationWillRunInstrumentationServerWhenTargetHasNoHttpServer`, disabling that integration test on Postgres in CI (\u201cWorks locally.\u201d). That is a real, diff-grounded concern because this PR also changes initialization semantics (calling `s.Init(ctx)` in `NewResourceServer` and removing per-request `Init` calls in many RPC handlers), and skipping Postgres reduces coverage for a production-relevant backend. However, the finding overstates what the diff proves: it\u2019s not verifiable from this diff that this is the *only* end-to-end storage-server test for Postgres or that this particular test directly verifies the `Init`-semantics change.",
+        "diff_context_hash": "2691f948f4856c0cbbf460a6b7e17b6953fe78e7"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The diff converts lazy per-request initialization into a hard startup-time failure by calling s.Init(ctx) inside NewResourceServer and returning nil,err on failure, while deleting every per-request Init guard (Create, Update, Delete, Read, List, Watch, Search, History, Origin, IsHealthy, PutBlob, GetBlob), but no test in the diff covers the NewResourceServer failure path. Operators of single-binary Grafana get a process that previously served reads and returned errors only per-request (letting other subsystems start) now refusing to construct the resource server when index init or watcher init fails \u2014 a search/index startup error becomes a hard boot failure \u2014 and there is no verification anywhere in the diff that (a) callers of NewResourceServer propagate this new error correctly, or (b) the previously-tested 'Init error returned from first request' behavior has an equivalent guarantee. A regression here breaks startup, not just one endpoint.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.74,
+        "rationale": "The diff clearly changes initialization semantics: `NewResourceServer` now calls `s.Init(ctx)` and returns `nil, err` on failure (pkg/storage/unified/resource/server.go), while all per-request `if err := s.Init(ctx); err != nil { ... }` guards were removed from `Create/Update/Delete/Read/List/Watch/Search/History/Origin/IsHealthy/PutBlob/GetBlob`. This makes init failures surface at construction time rather than on first request. The finding\u2019s core concern\u2014there is no new/updated test in the diff that exercises `NewResourceServer`\u2019s failure path or verifies callers handle the new error\u2014is diff-grounded and actionable, but it\u2019s not a verifiable defect by itself (it may be an intended behavior change).",
+        "diff_context_hash": "2691f948f4856c0cbbf460a6b7e17b6953fe78e7"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] Reordering Init to run search-index initialization before initWatcher means events emitted by the watcher now start flowing to handleEvent before/while the search index has finished building, and no test in the diff covers the event- versus index-build ordering this reorder creates. A dashboard created between watcher start and index-ready previously raced differently; with the new order, handleEvent can enqueue writes into an index that build() is concurrently rebuilding for the same key, and the getOrCreateIndex/build path has no coverage (no test file in the diff touches resource/search.go or the init ordering) \u2014 a regression here silently drops or double-applies watch events during startup, which is invisible until users report missing search results.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "hallucination",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "hallucination",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.82,
+        "rationale": "The diff changes `server.Init` to initialize the search index *before* starting the watcher (`s.search.init(ctx)` now runs before `s.initWatcher()`), which means watcher events cannot flow to `handleEvent` until after `search.init` returns. That contradicts the finding\u2019s core claim that watcher events now arrive before/while the index is still building. Also, `NewResourceServer` now calls `s.Init(ctx)` once during construction and the per-RPC `Init` calls were removed, further reducing the chance that watcher/event processing overlaps with index initialization at request time. The alleged regression about concurrent build vs watcher during startup is not supported by what\u2019s shown in the diff.",
+        "diff_context_hash": "2691f948f4856c0cbbf460a6b7e17b6953fe78e7"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The new s.log.Info(\"search index initialized\", ..., \"total_docs\", s.search.TotalDocs()) logging call adds an unconditional Info log at startup with no log-level gating or test, and total_docs is read after the builder goroutines complete but the value is never asserted anywhere in the diff. Every Grafana single-binary startup now emits an Info-level line per index regardless of configured log level verbosity conventions, and if TotalDocs() is meaningful only post-build there is no verification that the logged count is not zero due to the earlier removed serialization \u2014 operators using this log to diagnose the 'Drone postgres' failure will be reading an unverified number.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "hallucination",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "hallucination",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.6,
+        "rationale": "The diff does add an unconditional `s.log.Info(\"search index initialized\", ..., \"total_docs\", s.search.TotalDocs())` in `searchSupport.init`, but the finding overstates/assumes behavior not shown: it claims startup will emit the line \u201cregardless of configured log level\u201d and \u201cper index\u201d, neither of which can be verified from the diff (Info logs are typically filtered by configured level, and the call appears once per `init` invocation, not per index). It also speculates that `TotalDocs()` is \u201cunverified\u201d/zero \u201cdue to earlier removed serialization\u201d; the only serialization change shown is a removed mutex around `bleveBackend.BuildIndex`, and there\u2019s no diff evidence connecting that to `TotalDocs()` correctness or to the logged value being misleading.",
+        "diff_context_hash": "2691f948f4856c0cbbf460a6b7e17b6953fe78e7"
+      }
+    },
+    {
+      "issue_text": "[BUG] Removing the cacheMu lock from around the whole BuildIndex body creates a concurrent-build race for the same NamespacedResource key. Two concurrent callers building the index for the same key both run the full builder; for keys above FileThreshold both call bleve.New on the same filesystem directory simultaneously, producing file-lock errors or a corrupted/partially-written index, and the second b.cache[key] = idx silently replaces the first, leaking the duplicate in-memory index. The previous code serialized this via cacheMu.Lock(); defer Unlock() across the whole function.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.78,
+        "rationale": "In pkg/storage/unified/search/bleve.go, BuildIndex previously held b.cacheMu for the entire function (lock+defer unlock removed at lines ~85). The new code only locks around `b.cache[key] = idx` at the end. If BuildIndex is invoked concurrently for the same `resource.NamespacedResource` key, both callers can now execute the expensive/side-effectful build path concurrently, including `bleve.New(dir, mapper)` for the same filesystem directory when `size > b.opts.FileThreshold` (dir is deterministically derived from the key). That can lead to simultaneous creation/writes of the same on-disk index and then a last-writer-wins cache update, potentially leaking the other built index and/or causing file-lock/corruption issues. The diff clearly reduces mutual exclusion from whole-build to cache-write only, so the race described is a real risk introduced by this change.",
+        "diff_context_hash": "2691f948f4856c0cbbf460a6b7e17b6953fe78e7"
+      }
+    },
+    {
+      "issue_text": "[BUG] Init is now invoked eagerly inside NewResourceServer using whatever context the constructor receives, and any failure aborts construction. Whoever constructs the server with a short-lived or request-scoped context ties the entire index build, watcher startup, and all child spans/cancellation to that context \u2014 if the constructing request's ctx is cancelled after NewResourceServer returns, the freshly started watcher and search background work inherit a cancelled context and die. Additionally, a transient index-build failure that previously surfaced per-request (and could succeed on retry via the once-guarded Init) now permanently prevents the server from being constructed at all.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "hallucination",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "hallucination",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.7,
+        "rationale": "The diff does show NewResourceServer now calls s.Init(ctx) and returns an error if it fails, but the finding\u2019s core claim that the constructor \u201creceives\u201d an arbitrary/request-scoped context is not verifiable from the diff: NewResourceServer\u2019s signature is `NewResourceServer(opts ResourceServerOptions)` (no context parameter), and the source of `ctx` inside the constructor isn\u2019t shown here. Also, the claim that failures previously \u201csurfaced per-request and could succeed on retry\u201d is contradicted by the existing `sync.Once`-guarded Init pattern (`s.initOnce.Do(...)` storing `s.initErr`): once Init fails, subsequent calls won\u2019t retry anyway, so moving Init earlier does not change retryability in the way described.",
+        "diff_context_hash": "2691f948f4856c0cbbf460a6b7e17b6953fe78e7"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The postgres integration test is skipped with a TODO and no linked issue, unrelated to the stated performance intent. The unified-storage server's integration coverage on postgres is silently dropped; whoever later changes the resource server has no CI signal on the primary production database, and the 'works locally' skip is untraceable to any requirement in this PR.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.9,
+        "rationale": "The diff explicitly adds a new unconditional skip for postgres in `TestIntegrationWillRunInstrumentationServerWhenTargetHasNoHttpServer` with a TODO and rationale \"test not working with postgres in Drone. Works locally.\" and no issue reference. This does drop CI coverage for postgres for that integration test and is unrelated to the other functional changes in the PR (resource server init/search/indexing changes), making it a concrete, diff-grounded test/maintainability concern rather than a runtime defect.",
+        "diff_context_hash": "2691f948f4856c0cbbf460a6b7e17b6953fe78e7"
+      }
+    },
+    {
+      "issue_text": "[BUG] History and Origin no longer run Init but dereference s.search unconditionally, while Search (three lines above) still nil-guards s.search. When the server is constructed without a search backend configured (searchSupport == nil), any History or Origin call panics with a nil-pointer dereference returning a 500/crash, whereas the sibling Search method correctly returns the 'search index not configured' error \u2014 the diff widens an existing asymmetry instead of keeping the guard surface consistent while removing Init.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.9,
+        "rationale": "In pkg/storage/unified/resource/server.go, Search now nil-guards `s.search` and returns `\"search index not configured\"` when it is nil, but History and Origin were changed to directly `return s.search.History(ctx, req)` / `return s.search.Origin(ctx, req)` without any `s.search == nil` guard. The same diff shows `Init` only initializes the search index when `s.search != nil` (`if s.initErr == nil && s.search != nil { ... }`), so `s.search` can legitimately be nil. With the removal of per-RPC `Init` calls, History/Origin can now nil-deref and panic when search is not configured.",
+        "diff_context_hash": "2691f948f4856c0cbbf460a6b7e17b6953fe78e7"
+      }
+    },
+    {
+      "issue_text": "[BUG] Removing the cacheMu lock from the entire BuildIndex body allows concurrent index builds for the same key, including two concurrent bleve.New calls writing the same file-backed directory. Previously the mutex serialized all builds; now nothing in this diff guarantees mutual exclusion. Two concurrent BuildIndex calls for the same NamespacedResource both run the full builder and race to write b.cache[key], and for size > FileThreshold both call bleve.New on the identical filepath.Join(Root, Namespace, ...) directory \u2014 concurrent Bleve file-store creation on the same path can corrupt or fail the index, and the losing build's documents are silently discarded while an expensive duplicate build burns CPU.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.62,
+        "rationale": "In `pkg/storage/unified/search/bleve.go`, `BuildIndex` previously held `b.cacheMu` for the entire function body, but the diff removes that and now only locks around `b.cache[key] = idx`. This change does indeed permit multiple concurrent `BuildIndex` executions (including for the same `key`) to proceed through `bleve.New(dir, ...)`/`bleve.NewMemOnly(...)` and the full `builder(...)` work in parallel, with only the final cache assignment serialized. However, the diff alone does not show whether `BuildIndex` can be invoked concurrently for the same key (there may be higher-level serialization in callers not shown), so the claimed file-backed index corruption/failure is a plausible risk but not strictly verifiable from this diff alone.",
+        "diff_context_hash": "2691f948f4856c0cbbf460a6b7e17b6953fe78e7"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] Init is moved from lazy per-request invocation to the constructor, turning any initialization failure into a hard construction/startup failure. Previously a failed search-index build degraded individual requests (each method returned the Init error); now NewResourceServer returns nil and the whole Grafana startup (or any test/embedder constructing a ResourceServer) fails hard. Operators get a crash-looping process on a transient DB hiccup during init instead of a server that serves reads while search is down. Any code path that constructs the server struct without going through NewResourceServer (tests, alternate constructors, re-Init after error) also silently loses the init guarantee the per-request calls provided.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.72,
+        "rationale": "The diff explicitly moves initialization to construction: `NewResourceServer` now calls `s.Init(ctx)` and returns `nil, err` on failure, while many RPC methods (Create/Update/Delete/Read/List/Watch/Search/History/Origin/IsHealthy/PutBlob/GetBlob) had their `s.Init(ctx)` calls removed. This verifiably changes failure/availability semantics from per-request lazy init (where requests would fail with the init error) to a hard construction/startup failure if init (including `s.search.init(ctx)` in `Init`) errors. The claim about other code paths constructing `server` without `NewResourceServer` is plausible but not verifiable from this diff alone.",
+        "diff_context_hash": "2691f948f4856c0cbbf460a6b7e17b6953fe78e7"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The reordering that runs search.init before initWatcher means writes that occur during the (potentially minutes-long) index build are invisible to the server until the watcher starts. If initWatcher is the event stream that feeds handleEvent into the search index, documents created between the index-build snapshot and watcher start are in the DB but not in the search index, so Search returns stale/missing results for those resources with no rebuild trigger. The old order (watcher first) at least captured those events even if RV ordering handled the rest; the new order widens the gap unless the builder snapshots at an RV the watcher catches up from.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.55,
+        "rationale": "The diff clearly reorders initialization in `(*server).Init`: it now calls `s.search.init(ctx)` before `s.initWatcher()` (see `pkg/storage/unified/resource/server.go`), whereas previously the watcher started first. If `initWatcher` is the mechanism that streams `WrittenEvent`s into `searchSupport.handleEvent`, then any external writes occurring while `search.init` is building the index would not be observed until the watcher starts. However, the diff does not show whether `search.init` snapshots at a specific RV, whether the watcher can resume from that RV, or whether any writes can occur concurrently (notably `NewResourceServer` now calls `s.Init(ctx)` before returning, so this gap may not affect requests handled by this server instance). So the concern is concrete and diff-grounded, but not provably a defect from the diff alone.",
+        "diff_context_hash": "2691f948f4856c0cbbf460a6b7e17b6953fe78e7"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The postgres integration test is skipped with a TODO, so CI stays green while the postgres code path is known-broken. This is a stand-in guard that can go green while prod is red: the comment admits the test 'not working with postgres in Drone', meaning the unified-storage server path is failing on a supported production database and nothing in the pipeline will catch regressions there. Whoever relies on Drone's green build gets no signal for postgres.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.87,
+        "rationale": "The diff explicitly adds a postgres-only skip to an integration test: in `TestIntegrationWillRunInstrumentationServerWhenTargetHasNoHttpServerWhenTargetHasNoHttpServer` it now does `if dbType == \"postgres\" { t.Skip(\"skipping - test not working with postgres in Drone. Works locally.\") }` with a TODO comment. This is a concrete CI/coverage gap introduced by the change: postgres runs will no longer exercise this integration path in CI, so regressions on postgres won\u2019t be caught by this test.",
+        "diff_context_hash": "2691f948f4856c0cbbf460a6b7e17b6953fe78e7"
+      }
+    },
+    {
+      "issue_text": "[BUG] Moving the cacheMu acquisition to after the index build in BuildIndex removes serialization of concurrent builds for the same NamespacedResource key, so two goroutines calling getOrCreateIndex/build simultaneously both perform a full index build and the last b.cache[key] = idx write wins. The loser's index \u2014 which may have been built at a newer resource version \u2014 is silently discarded; until the next WrittenEvent arrives, Search serves results from a stale index, and duplicate full tenant index builds cause a transient memory/CPU spike proportional to tenant size. The prior code blocked the second caller on cacheMu and let it reuse the freshly built index.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.58,
+        "rationale": "In pkg/storage/unified/search/bleve.go, BuildIndex previously held cacheMu for the entire index build, but the diff removes that and now only locks around `b.cache[key] = idx`. From the diff alone, it\u2019s clear concurrent callers can now both proceed to build an index for the same `key` and whichever finishes last will overwrite the cached entry (the earlier-built idx is discarded). That is a real, diff-grounded concurrency/efficiency concern introduced by this change, but the claim about serving a stale index \u201cuntil the next WrittenEvent\u201d and the newer resource-version being silently lost cannot be verified from this diff because the call patterns (whether concurrent BuildIndex for the same key occurs) and resource-version semantics are not shown here.",
+        "diff_context_hash": "2691f948f4856c0cbbf460a6b7e17b6953fe78e7"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] This diff silently converts resource-server initialization from lazy per-request Init (previously each RPC handler called s.Init) to hard-fail-at-construction, changing the server's failure semantics without any accompanying caller or acceptance note. A tenant with a slow or temporarily unavailable search-index dependency (e.g. remote storage hiccup during startup) previously failed individual requests while the process stayed up and later requests could succeed; now NewResourceServer returns an error and the entire storage server refuses to start, turning a per-request failure into a hard startup failure for all Grafana deployments using unified storage.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.86,
+        "rationale": "The diff clearly changes initialization semantics: `NewResourceServer` now calls `s.Init(ctx)` and returns an error on failure (`pkg/storage/unified/resource/server.go`), while most RPC handlers (Create/Update/Delete/Read/List/Watch/Search/History/Origin/IsHealthy/PutBlob/GetBlob) removed their per-call `s.Init(ctx)` checks. This is a behavior/architecture change (fail-at-construction vs lazy/per-request init) that can affect startup vs request-time failure modes, but the diff alone doesn\u2019t prove it is incorrect\u2014only that it\u2019s a potentially breaking semantic change that should be called out/justified.",
+        "diff_context_hash": "2691f948f4856c0cbbf460a6b7e17b6953fe78e7"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The diff reorders Init so the search index is fully built before initWatcher starts, inverting the previous watcher-first order, with no stated rationale. Index build time is now serial with watcher startup in the constructor path: a tenant with a large existing dataset delays the watcher (and, because Init is now called from NewResourceServer, delays the whole server coming up) by the full build duration; events written between construction and watcher start are invisible to the index until the next write for that resource. If the reorder was meant to fix an event-race, the acceptance criteria for that change are not recorded anywhere in the diff.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.66,
+        "rationale": "The diff clearly changes init sequencing: in server.Init, search.init(ctx) now runs before initWatcher() (the watcher-start block was moved below the search initialization). It also changes when Init runs: NewResourceServer now calls s.Init(ctx) and returns an error on failure, while per-RPC Init calls were removed from methods like Create/Update/Delete/Watch/Search/etc. These changes can plausibly serialize server startup behind potentially long search index initialization and delay watcher startup, but the stronger claims about missed/invisible events during the gap cannot be verified from the diff alone (index build/watcher semantics aren\u2019t shown). The review concern about the behavioral tradeoff and lack of documented rationale is grounded in the diff and actionable, but not a proven defect by itself.",
+        "diff_context_hash": "2691f948f4856c0cbbf460a6b7e17b6953fe78e7"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The diff disables the only integration test covering the storage server target on postgres ('TODO - fix this test for postgres... Works locally'), permanently removing postgres coverage from CI with a comment standing in for a tracked issue. Future regressions in the unified-storage postgres path ship green because CI now skips it; 'works locally' indicates a real environment-dependent defect that is being hidden rather than fixed, and there is no issue reference ensuring anyone ever revisits it.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.74,
+        "rationale": "The diff explicitly adds a postgres skip to an integration test (`TestIntegrationWillRunInstrumentationServerWhenTargetHasNoHttpServer`) with a TODO comment and no issue reference:\n```go\n// TODO - fix this test for postgres\nif dbType == \"postgres\" {\n  t.Skip(\"skipping - test not working with postgres in Drone. Works locally.\")\n}\n```\nThis is a concrete CI-coverage regression for postgres in this test path (it will no longer run under postgres in CI), and the comment/\"works locally\" note indicates an unresolved environment-dependent problem being bypassed rather than tracked/fixed. However, the claim that this is the *only* integration test covering the storage server target on postgres cannot be verified from the diff alone.",
+        "diff_context_hash": "2691f948f4856c0cbbf460a6b7e17b6953fe78e7"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] Moving Init(ctx) from per-request lazy calls into NewResourceServer converts every per-request initialization failure into a hard constructor failure that blocks server startup entirely. An operator whose search-index build or watcher setup transiently fails (e.g., index directory locked, DB briefly unavailable during rolling restart) now gets a server that will not boot at all, instead of requests failing individually while the rest of Grafana serves traffic; previously a failed init was retried per request and degraded only unified-storage endpoints.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.66,
+        "rationale": "The diff clearly moves initialization from lazy, per-RPC calls (removed from Create/Update/Delete/Read/List/Watch/Search/etc.) into the constructor: `NewResourceServer` now calls `s.Init(ctx)` and returns an error if it fails. This means any init failure (e.g., search index init `s.search.init(ctx)` or watcher `s.initWatcher()`) will now prevent `NewResourceServer` from returning a server at all, i.e., blocks startup of this component, whereas previously the server could be constructed and only unified-storage endpoints would fail when `Init` was invoked. The finding\u2019s claim about \u201cretried per request\u201d isn\u2019t verifiable from the diff (Init likely uses one-time init), but the startup-vs-runtime failure mode change is real and review-relevant.",
+        "diff_context_hash": "2691f948f4856c0cbbf460a6b7e17b6953fe78e7"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] All per-request Init(ctx) guards were deleted from Read, List, Watch, Search, History, Origin, IsHealthy, PutBlob, and GetBlob, leaving those handlers with no defense if the server instance was constructed through any path other than NewResourceServer or if the once-guarded init silently failed. Any caller (tests, alternate constructors, or a future refactor) that obtains a *server without going through NewResourceServer now serves Read/List/Watch against a nil or unprimed store and search backend, where previously it returned an explicit init error; a nil s.search dereference in Search/History/Origin would panic rather than return an error.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.55,
+        "rationale": "The diff does remove per-request `s.Init(ctx)` calls from `Read`, `List`, `Watch`, `Search`, `History`, `Origin`, `IsHealthy`, `PutBlob`, and `GetBlob`, and instead calls `s.Init(ctx)` once in `NewResourceServer` (and returns an error if init fails). That architectural shift means correctness now relies on all code paths constructing the server via `NewResourceServer` (or otherwise calling `Init`), which is a real review concern but not a verifiable defect from this diff alone. Also, the finding\u2019s claim that `Search` would panic on nil `s.search` is contradicted by the diff: `Search` now explicitly checks `if s.search == nil { return nil, fmt.Errorf(...) }`.",
+        "diff_context_hash": "2691f948f4856c0cbbf460a6b7e17b6953fe78e7"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] Narrowing the cacheMu critical section in BuildIndex from the whole build to just the map write lets two concurrent BuildIndex calls for the same NamespacedResource key each run a full bleve index build and blindly overwrite each other in b.cache. Concurrent builders (e.g., two watch events racing, or init plus a request-driven build) do duplicate work up to the FileThreshold disk path \u2014 two bleve.New(dir, mapper) calls opening the same on-disk index directory concurrently can hit lock contention or corrupt/duplicate the file-backed index, and the loser's in-flight documents reference an index that was replaced in the cache.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.62,
+        "rationale": "In pkg/storage/unified/search/bleve.go, BuildIndex previously held cacheMu for the entire build, but the diff removes that and now only locks around `b.cache[key] = idx`. With this change, two concurrent BuildIndex calls for the same `key` can both proceed to create and populate separate bleve indexes (including potentially both calling `bleve.New(dir, mapper)` for the same on-disk directory) and then race to overwrite `b.cache[key]`. The duplicate builds and last-writer-wins cache overwrite are directly implied by the new code; the prior coarse lock prevented this interleaving.",
+        "diff_context_hash": "2691f948f4856c0cbbf460a6b7e17b6953fe78e7"
+      }
+    },
+    {
+      "issue_text": "[BUG] The diff's only test change disables the postgres integration test ('test not working with postgres in Drone. Works locally.') instead of diagnosing it, removing the sole coverage for the very behavior this diff changes on the postgres path. NewResourceServer now eagerly calls s.Init at construction (server.go:258) and reorders initWatcher after search init (server.go:303-308); a broken postgres path would surface exactly as 'test not working in Drone', so the skip buries a probable real regression introduced by this diff behind a TODO, and CI stays green on postgres while the local/CI divergence persists.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.76,
+        "rationale": "The diff explicitly adds a postgres-specific `t.Skip` in `TestIntegrationWillRunInstrumentationServerWhenTargetHasNoHttpServer` with a TODO noting it fails in Drone, which reduces CI coverage for postgres on the exact PR that changes initialization behavior (eager `s.Init(ctx)` in `NewResourceServer` and reordering watcher init after search init in `Init`). While the finding\u2019s regression claim on postgres can\u2019t be proven from the diff alone, the test skip is a concrete, diff-grounded review concern because it masks failures on the postgres path instead of addressing them.",
+        "diff_context_hash": "2691f948f4856c0cbbf460a6b7e17b6953fe78e7"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The init-order change (search.init now runs before initWatcher) and the eager Init in NewResourceServer are lifecycle behavior changes with no assertion anywhere in the diff that events observed during index build are handled correctly. If watcher events arriving before/after search init are now processed against a partially built index (or dropped), the ordering bug ships unnoticed; operators on Grafana deployments with large search indexes get stale or missing search results at startup. Checked: the only test-shaped change in the diff is pkg/server/module_server_test.go, which adds a skip and asserts nothing about init order.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.62,
+        "rationale": "The diff makes two concrete lifecycle changes: (1) NewResourceServer now eagerly calls s.Init(ctx) and returns an error if init fails (pkg/storage/unified/resource/server.go), and (2) Init() now runs s.search.init(ctx) before starting the watcher (initWatcher moved below search.init). Separately, all RPC methods (Create/Update/Delete/Read/List/Watch/Search/etc.) no longer call s.Init(ctx) per-request. This alters startup sequencing and when watch events begin flowing relative to index construction, but the diff adds no tests or assertions validating correctness of event handling across this new ordering (the only test change is adding a postgres skip). Whether events can be missed/delayed depends on unseen watcher/search semantics, so it\u2019s not a verifiable defect from the diff alone, but it is a specific, nontrivial behavioral change that merits coverage/justification.",
+        "diff_context_hash": "2691f948f4856c0cbbf460a6b7e17b6953fe78e7"
+      }
+    },
+    {
+      "issue_text": "[BUG] Moving initWatcher() to run after search.init() creates a window where writes committed during index construction are never indexed. The search index is built from a SQL snapshot at build time; the watcher previously started first so any write during the (potentially minutes-long) index build arrived as a WrittenEvent and re-indexed that document. With the watcher now started only after search.init returns, any Create/Update/Delete committed between the index snapshot and watcher startup is absent from the index and from watch streams until that same resource is written again \u2014 dashboards created during a Grafana restart/deploy-window are invisible to search and watch consumers with no reconciliation pass to repair them.",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.68,
+        "rationale": "In pkg/storage/unified/resource/server.go, Init() now runs s.search.init(ctx) before starting the change watcher (initWatcher()). Previously the watcher was started first and could observe writes occurring while the (potentially long) search index initialization was running. With the new order, any Create/Update/Delete that commits between whatever snapshot/scan search.init performs and watcher startup has no guarantee of being replayed into the index or delivered to watch consumers, since the watcher only begins after init completes and the diff shows no catch-up/reconciliation step.",
+        "diff_context_hash": "2691f948f4856c0cbbf460a6b7e17b6953fe78e7"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] Moving Init from a lazy per-request call into NewResourceServer turns a previously per-request, recoverable init failure into a hard constructor failure. Before this diff, a transient init failure (e.g. the search index build hitting a DB hiccup) failed individual requests while the process stayed up and Init retried on the next request via the initErr-clearing path; now NewResourceServer returns an error and the whole Grafana server fails to start, so an operator who could previously ride out a slow/failing index build now has a crash-looping deployment with no way to bypass it short of a code/config change.",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.82,
+        "rationale": "The diff clearly moves initialization from per-request to construction: `NewResourceServer` now calls `err := s.Init(ctx)` and returns an error on failure (server.go +255), while the per-RPC `if err := s.Init(ctx); ...` blocks were removed from `Create/Update/Delete/Read/List/Watch/Search/...` (server.go multiple hunks). This is a real behavior/operability change: an init failure that previously would surface as request errors after startup can now fail the constructor and prevent startup entirely. The finding\u2019s additional claim about an \u201cinitErr-clearing path\u201d isn\u2019t verifiable from the shown diff, but the core concern is diff-grounded.",
+        "diff_context_hash": "2691f948f4856c0cbbf460a6b7e17b6953fe78e7"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] Removing the cacheMu lock from the whole BuildIndex body while keeping it only around the final cache write opens the concurrent-build race the lock was preventing: two goroutines for the same key can each run builder and both write b.cache[key], leaking one fully-built index and doubling index-build DB read load. GetOrCreateIndex call sites that previously serialized on cacheMu now proceed in parallel; under a burst of requests for a not-yet-built namespace/resource (e.g. right at startup when Init was moved to construction), the same heavy index is built twice, doubling memory and scan cost, and the loser index plus its on-disk bleve directory under opts.Root are orphaned \u2014 the disk-backed path can also race two bleve.New calls on the same directory, which errors or corrupts the bleve files.",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.67,
+        "rationale": "In pkg/storage/unified/search/bleve.go, BuildIndex previously held b.cacheMu for the entire function body and now only locks around the final `b.cache[key] = idx` write. With the diff alone, BuildIndex no longer prevents two goroutines from concurrently building an index for the same `key` (both can run `bleve.New(dir, ...)` / `bleve.NewMemOnly(...)`, both can execute the `builder`, then last-writer wins in `b.cache`). For the file-backed path (`dir := filepath.Join(b.opts.Root, key.Namespace, ...)`), concurrent `bleve.New(dir, ...)` calls can contend on the same directory, which can fail or leave one built index orphaned; even the mem-only path would duplicate expensive work. The diff does not show any alternative singleflight/deduplication around BuildIndex, so this is a real concurrency/correctness regression risk introduced by the change.",
+        "diff_context_hash": "2691f948f4856c0cbbf460a6b7e17b6953fe78e7"
+      }
+    },
+    {
+      "issue_text": "[BUG] Removing the cacheMu lock from the body of BuildIndex means two concurrent calls for the same NamespacedResource key both execute the full build path, and both call bleve.New(dir, mapper) on the same filesystem directory (filepath.Join(b.opts.Root, key.Namespace, fmt.Sprintf(\"%s.%s\", key.Resource, key.Group))) before either publishes to the cache. When two requests (e.g., two Search calls cold-starting the same dashboard index, which previously serialized on the lock) race, the second bleve.New on the same non-empty directory fails ('init: cannot create index... path already exists'), so that caller's build errors out; even in the memory-only case the work and DB reads are duplicated and one of the two built indexes is silently discarded when the later cache write overwrites the earlier one.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.8,
+        "rationale": "In pkg/storage/unified/search/bleve.go, BuildIndex previously took b.cacheMu.Lock() for the whole function; the diff removes that and now only locks around the final `b.cache[key] = idx` write. This makes it possible for two concurrent BuildIndex calls for the same `NamespacedResource` key to both miss the cache and execute the full build concurrently, including both reaching `bleve.New(dir, mapper)` where `dir` is deterministically `filepath.Join(b.opts.Root, key.Namespace, fmt.Sprintf(\"%s.%s\", key.Resource, key.Group))`. The diff shows no remaining serialization around the index creation path, so a directory-backed index build can race on the same filesystem path before either caches the result, which can cause one call to fail or at least duplicate work; the later cache write can also overwrite the earlier built index.",
+        "diff_context_hash": "2691f948f4856c0cbbf460a6b7e17b6953fe78e7"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] Init is now invoked once inside NewResourceServer and all per-request Init calls were removed, converting every previously lazy, retryable initialization (index build, watcher setup) into a hard startup failure and removing the per-request retry that existed when initErr was transient. A transient database hiccup during startup now prevents Grafana from starting at all (return nil, err from the constructor), whereas before this diff a failed init on request 1 was retried on request 2; additionally, any code that constructs/embeds a server value without going through NewResourceServer (test doubles, alternative constructors added later) silently hits uninitialized search/watcher state with no guard left in Create/Read/List/Search/Watch.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.73,
+        "rationale": "The diff clearly moves initialization to construction (`NewResourceServer` now calls `s.Init(ctx)` and returns `nil, err` on failure) and removes all per-request `s.Init(ctx)` calls from RPC handlers like `Create/Read/List/Watch/Search` etc. This is a real behavioral/architecture change: initialization errors are now surfaced at server creation time (hard startup failure) rather than at first use. However, the finding\u2019s claim about \u201cretry on request 2\u201d is not supported by the diff: `Init` still uses `s.initOnce.Do(...)`, so repeated calls would not re-run init anyway. The concern about bypassing `NewResourceServer` is plausible but not directly evidenced in this diff.",
+        "diff_context_hash": "2691f948f4856c0cbbf460a6b7e17b6953fe78e7"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The new log line s.log.Info(\"search index initialized\", ..., \"total_docs\", s.search.TotalDocs()) executes immediately after launching the async indexing goroutine (`}()`) without waiting for it to finish, so total_docs is read before the bulk of documents are indexed. Operators reading the startup log see total_docs of 0 or a tiny partial count and conclude the index is empty or the initial sync failed, sending debugging down the wrong path; the IndexCreationTime metric has the same stale-value exposure.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "unresolved",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "unresolved",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.45,
+        "rationale": "In `pkg/storage/unified/resource/search.go` `searchSupport.init`, a new log line `s.log.Info(\"search index initialized\", ..., \"total_docs\", s.search.TotalDocs())` was added immediately after a `}()` block that appears to be starting background work (likely a `go func(){...}()` just above the shown context). If that block is asynchronous indexing, then logging `TotalDocs()` and observing `IndexCreationTime` right after scheduling the work can report a partial/zero document count and misleadingly suggest initialization finished. This is an observability/diagnostics issue rather than a functional correctness defect, and the diff alone doesn\u2019t fully prove whether that `}()` is actually launched as a goroutine (the `go` keyword isn\u2019t visible in the shown hunk).",
+        "diff_context_hash": "2691f948f4856c0cbbf460a6b7e17b6953fe78e7"
+      }
+    }
+  ],
+  "diff_context_hash": "2691f948f4856c0cbbf460a6b7e17b6953fe78e7",
+  "primary_judge": "gpt-5.2",
+  "adjudicating_judge": "gpt-5.2",
+  "url": "https://github.com/grafana/grafana/pull/97529",
+  "framework": "metareview-realistic",
+  "model": "glm-5.3-vision-background",
+  "effort": "low",
+  "judge": "gpt-5.2",
+  "wall_s": 216.74089813232422,
+  "execution_mode": "api",
+  "run_batch": "20260910-mrv0120-manifold"
+}

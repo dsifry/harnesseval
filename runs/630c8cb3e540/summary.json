@@ -1,0 +1,1368 @@
+{
+  "tp": 2,
+  "fp": 41,
+  "fn": 2,
+  "precision": 0.046511627906976744,
+  "recall": 0.5,
+  "n_findings": 45,
+  "n_golden": 4,
+  "tokens_in": 108430,
+  "tokens_out": 9224,
+  "wall_ms": 147710.22486686707,
+  "per_model_usage": {
+    "glm-5.3-flash-background": {
+      "input_tokens": 35051,
+      "cache_read_input_tokens": 17472,
+      "cache_creation_input_tokens": 0,
+      "output_tokens": 9224,
+      "reasoning_output_tokens": 55907,
+      "cost_usd": 0.0,
+      "total_tokens": 117654
+    }
+  },
+  "total_cost_usd": 0.0,
+  "resolved_model": "glm-5.3-flash-background",
+  "adjudicated_precision": 0.6666666666666666,
+  "incremental_recall": 0.9166666666666666,
+  "n_bug_ungold": 20,
+  "n_important_non_bug": 19,
+  "n_true_hallucination": 1,
+  "n_unresolved": 1,
+  "n_real_ungold": 20,
+  "n_hallucination": 1,
+  "decomposition": {
+    "deterministic_tp": 0,
+    "llm_lens_tp": 2,
+    "deterministic_gate_recall": 0.0,
+    "llm_lens_recall": 0.5
+  },
+  "findings": [
+    {
+      "issue_text": "[BUG] assignment_source.to_dict() embeds a raw datetime ('queued': timezone.now()) into celery task kwargs passed to sync_assignee_outbound.apply_async, which cannot round-trip through the broker's JSON task serializer. On every inbound-driven assignment (e.g. a Jira webhook calling sync_group_assignee_inbound -> GroupAssignee.objects.assign(assignment_source=...) -> sync_group_assignee_outbound), apply_async raises a kombu EncodeError/TypeError while serializing the datetime in the producer (web/consumer) process, so the outbound assignee sync task is never enqueued and the inbound assignment webhook errors. The new tests pass only because self.tasks() executes the task inline without broker serialization, masking the failure.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] The dataclass default 'queued: datetime = timezone.now()' is evaluated once at module import time, so every AssignmentSource instance created for the life of the process carries the same import-time timestamp. The 'queued' field records when the worker/web process imported the module, not when the assignment was sourced; any consumer relying on it to order or age assignment events gets a stale, meaningless value. test_to_dict only asserts 'queued is not None', so the defect is invisible to the test suite.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] The sync_assignee_outbound celery task gains a new kwarg 'assignment_source_dict', producing a rolling-deploy skew where web nodes on new code enqueue kwargs that workers on old code reject. During a rolling deploy, any worker still running the old task signature (def sync_assignee_outbound(external_issue_id, user_id, assign)) raises TypeError on tasks enqueued with assignment_source_dict, so outbound assignee syncs triggered by inbound webhooks fail (and after retries, are dropped) until all workers are updated.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The 'queued' field is ships-inert: it is populated, serialized into every task kwargs payload, and deserialized by from_dict, but no code in this diff (or any caller of should_sync/sync_assignee_outbound) ever reads it. Every outbound assignment pays the serialization/transport cost of a datetime that nothing consumes, and (per the import-time default defect) the value it carries is wrong anyway; future maintainers may trust it as an ordering signal when it is not one.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] The dataclass default `queued: datetime = timezone.now()` is evaluated exactly once at module import time, so every AssignmentSource constructed without an explicit `queued` (i.e., every one created via `from_integration`, the only constructor used in this diff) carries the same import-time timestamp instead of its actual creation time. The `queued` field \u2014 which exists precisely to timestamp when a sync originated, the primitive needed to bound sync loops \u2014 is meaningless: all sources created in a process share the module-load instant, and the value differs per worker depending on when each process imported the module. Any consumer (including the tests' `queued is not None` assertion, which cannot detect this) reads garbage. This is a mechanical Python dataclass pitfall: defaults are evaluated at class-definition time, not per-instantiation.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] The cycle guard only suppresses the direct source integration, so a two-integration ping-pong (issue linked to both Jira and GitHub with outbound assignee sync enabled on both) loops indefinitely: Jira's inbound assign fans out to GitHub, GitHub's inbound assign fans back to Jira (source integration_id \u2260 Jira's, so should_sync passes), forever. The comment claims 'prevent sync-cycles from occurring' but the implementation only prevents self-echo. Each leg of the A\u2194B loop generates webhooks that re-trigger the other leg with a different source, producing unbounded assign/unassign churn on both external systems. The `queued` timestamp field \u2014 the natural mechanism to bound such multi-hop loops \u2014 is written by this diff but read by nothing, confirming the loop-bound half of the design was never implemented.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] The abstract `sync_status_outbound` signature gains an `assignment_source` parameter, but no caller in this diff ever passes it \u2014 the resolve/unresolve and inbound-status paths still invoke should_sync source-less \u2014 so the cycle prevention this PR claims applies only to assignees, not to status synchronization. Status sync has the identical bounce topology (Jira resolve \u2192 Sentry resolve \u2192 GitHub resolve \u2192 Jira...) and remains unguarded. A future reader wiring status sync will assume the parameter threading exists because the signature advertises it, and the dead parameter rots until someone either wires it or removes it. The PR title 'cross-system issue synchronization' over-delivers relative to what the diff actually protects.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The `apply_async` kwargs dict now always includes the `assignment_source_dict` key (even when the value is None), so every outbound-assignee task enqueued by new code carries a kwarg that the previous task signature `sync_assignee_outbound(external_issue_id, user_id, assign)` does not accept. During a rolling deploy, old workers execute these messages and raise TypeError on the unexpected kwarg, failing the task \u2014 outbound assignee sync silently stops for the whole deploy window, and this applies to all user-driven assignments (the key is sent even when no source exists), not just integration-sourced ones. The new parameter needed a **kwargs-style backward-compatible signature or a deploy-ordering note; neither is present.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] `to_dict()` emits `queued` as a datetime, but the Celery/kombu JSON transport serializes it to an ISO string and `from_dict` (`cls(**input_dict)`) silently accepts the string, so the reconstructed AssignmentSource has `queued` typed as `str`, violating the dataclass declaration. Any consumer that relies on `queued` being a datetime (comparison, arithmetic for staleness) crashes with a TypeError on worker-reconstructed instances while working on producer-side instances \u2014 a producer/consumer asymmetry that no test in the diff exercises because the round-trip through serialization is bypassed by the model tests that mock the integration method and run tasks eagerly.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] `from_dict` returns None on any malformed payload (caught ValueError/TypeError), silently downgrading a corrupted or schema-skewed source to 'no source', which disables the cycle guard for that sync rather than failing it. During version skew or if the producer's dict shape ever changes (e.g., an added required field or renamed key), the worker logs nothing, the guard is bypassed, and the self-echo assignment the feature exists to prevent bounces back to the external system. A malformed cycle-guard credential should be loud, not treated as 'user-initiated'.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The new cycle test covers only the matching-source case (assert_not_called) and the source-less case; the code comment's explicit claim that 'other integrations [should] propagate changes outward' \u2014 a non-matching source still syncing \u2014 has no assertion anywhere in the diff's tests. A regression that inverts the guard (blocking all sourced outbound syncs, or comparing against the wrong id such that foreign sources are also blocked) passes the entire suite, since no test exercises a sourced assignment whose integration_id differs from the target integration. The negative case protecting the feature's core value proposition is the one case left unverified.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] The cycle check in should_sync only suppresses outbound sync when the source integration is the same integration, so the claimed invariant 'prevent sync-cycles from occurring' is not enforced for cycles of length >= 2. A group linked to two integrations that both have assignee inbound+outbound sync enabled ping-pongs forever: assign in integration X -> inbound webhook (source=X) -> outbound to Y allowed (Y != X) -> Y's external system updated -> Y's inbound webhook (source=Y) -> outbound to X allowed (X != Y) -> X updated -> repeat. GroupAssignee.assign re-fires sync_group_assignee_outbound even on re-assignment of the same user (the sync call precedes the `if not created` branch), so every echo is a fresh outbound task. The check at line 387 compares sync_source.integration_id only against self, never against the set of integrations already visited for this assignment, so the stated cycle-prevention guarantee is only a self-echo guard.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] sync_group_assignee_outbound now always includes the assignment_source_dict key in the Celery kwargs (even when its value is None), which breaks old workers during a rolling deploy. Old worker processes still running the previous task signature `sync_assignee_outbound(external_issue_id, user_id, assign)` raise TypeError on the unexpected keyword argument for every assignment task enqueued by a new web node during the deploy window, failing (and retrying/final-failing) all outbound assignee syncs until workers are rolled. Making the key conditional on assignment_source being non-None (or tolerating the kwarg in the old signature) avoids the skew.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] sync_status_outbound gains an assignment_source parameter that no call site in this diff ever passes, while the sibling abstract sync_assignee_outbound \u2014 which the task DOES call with assignment_source \u2014 was not given the parameter in its abstract signature. Untraceable plumbing in both directions: the status parameter is dead code a future reader will assume is wired up, and the assignee abstract interface relies on concrete implementations' **kwargs to accept a kwarg its own contract does not declare \u2014 any integration override that spells out its parameters without **kwargs crashes with TypeError when the outbound task passes assignment_source. The two abstract signatures should be consistent and each parameter should have a real producer or not exist.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The inbound unassign path (deassign with a constructed AssignmentSource) added in this diff has no test coverage in this diff \u2014 the new tests only cover the outbound-task suppression for the assign direction and the assignment_source=None propagation for direct assign/deassign. A regression that drops the assignment_source kwarg from this deassign call (or from GroupAssignee.deassign's propagation) silently disables cycle suppression for every integration-driven unassign, and no test in the diff would catch it \u2014 the failure mode is the exact sync-echo loop this PR exists to prevent, resurfacing only on the unassign path in production.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] sync_group_assignee_outbound serializes a raw datetime into Celery task kwargs: AssignmentSource.to_dict() uses dataclasses.asdict, which emits the `queued` field as a datetime object, and apply_async's JSON serializer cannot encode datetime, so the task publish raises instead of enqueueing. Every inbound-driven outbound sync that carries a source (sync_group_assignee_inbound -> GroupAssignee.objects.assign/deassign(assignment_source=...) -> this apply_async) fails at publish time; the EncodeError propagates synchronously back through deassign/assign into the inbound webhook handler, so external->Sentry assignment sync now crashes the whole inbound sync path instead of propagating the assignment.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] `queued: datetime = timezone.now()` is evaluated once at module import, not per instantiation, so every AssignmentSource created via from_integration carries the process-start timestamp rather than the assignment time. The field's meaning is silently wrong for the entire lifetime of each worker/web process (all sources share one timestamp); any consumer that later trusts `queued` for ordering, dedup, or cycle-window logic gets garbage, and the unit test (assert queued is not None) cannot detect it because the import-time value is non-None. It also guarantees the datetime is present in every to_dict() payload, feeding the serialization failure in sync.py.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] New required kwarg assignment_source_dict is added to the sync_assignee_outbound task signature with no **kwargs fallback, so producers and workers cannot coexist during a rolling deploy. During the deploy window, web nodes running the new code enqueue kwargs that old workers' sync_assignee_outbound(external_issue_id, user_id, assign) rejects with TypeError; outbound assignee sync is dropped for every assignment performed until all workers are updated \u2014 a silent failure window the rollout cannot avoid.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The assignment_source parameter added to the sync_status_outbound abstract method has no producer anywhere in this diff \u2014 no caller (e.g. the sync_status_inbound task) passes it, and should_sync's cycle guard is only reachable for the outbound_assignee attribute. Status-sync cycles (Sentry resolve -> external resolve -> inbound webhook -> Sentry) remain unguarded while assignee cycles are guarded; the dead parameter signals the cycle problem is 'handled' at the interface level, so the next implementer wiring status sync will assume the guard applies when it never fires, and a real A->B->A status loop can still ping-pong indefinitely.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] from_dict collapses 'payload unparseable' and 'no source' into the same None sentinel, and any unknown key in the payload (ValueError/TypeError from cls(**input_dict)) disables the cycle guard for that message. When a future producer adds a field to AssignmentSource (or the payload is corrupted in transport), old consumers' from_dict returns None, should_sync sees no source, and the outbound sync proceeds \u2014 re-enabling the exact sync-cycle this PR exists to prevent, silently and per-message; there is no log or metric distinguishing the two Nones.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The only test that passes a non-None assignment_source exercises the blocked path (assert_not_called); no test enqueues the outbound task with a source present, so the source-bearing happy path is untested and CI stays green while the datetime-kwargs serialization failure fires in production. A regression in the enqueue-with-source path (which is exactly where the datetime bug lives) is invisible to the suite: the matching-source test green-lights the PR while every real inbound assignment with a resolvable user fails at task publish.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] assignment_source.to_dict() embeds the raw `queued: datetime` field into celery task kwargs, and the JSON task transport cannot serialize a datetime, so apply_async raises at publish time. Every inbound-triggered outbound assignee sync (sync_group_assignee_inbound now always constructs a source via from_integration on both the assign and deassign branches) crashes when enqueueing sync_assignee_outbound, so inbound assignment sync from integrations fails entirely; tests pass only because self.tasks() executes inline without broker serialization, hiding the failure. The datetime must be serialized to a string in to_dict (or dropped) before crossing the queue boundary.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] The dataclass field default `queued: datetime = timezone.now()` is evaluated once at module import time, so every AssignmentSource constructed without an explicit queued value carries the server process's startup timestamp, not its actual queue time. The field's purpose (recording when the assignment was queued) is silently wrong for every instance; any future consumer trusting `queued` gets a timestamp that can be days stale. It also feeds the broken datetime payload in sync.py. The default must be a sentinel plus __post_init__/default_factory, or the field dropped \u2014 nothing in this diff reads it anyway.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] The abstract sync_status_outbound signature gained an `assignment_source` parameter that no call site in this diff passes, and no status-sync path (sync_status_inbound, resolve/unresolve) threads a source at all \u2014 the PR's stated goal of preventing sync cycles is implemented only for the assignee path. The objective silently narrowed from 'cross-system issue synchronization' with cycle prevention to assignment-only cycle suppression without a recorded acceptance of that narrowing; status changes still echo between linked systems (the exact loop class the comment at mixins/issues.py:386-388 claims to prevent), and the inert parameter invites out-of-tree implementers to accept a value that nothing sends.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The sync_assignee_outbound task gains a new kwarg (assignment_source_dict) that new producers send immediately, but workers running the pre-deploy task signature raise TypeError on the unrecognized kwarg. During any rolling deploy window, every outbound assignee sync enqueued by new web/task nodes fails on old workers instead of syncing \u2014 the previously-working sync path degrades during rollout, and the failures surface as generic task errors rather than a deploy-skew signal.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] AssignmentSource.from_dict swallows ValueError/TypeError and returns None with no logging, so any payload-shape drift or version skew silently degrades to 'no source' and should_sync proceeds as if cycle suppression never existed. The loop-prevention mechanism fails open and invisibly: the moment the dataclass shape evolves (or a producer/worker skew produces a mismatched dict), sync cycles resume with zero diagnostic signal \u2014 the exact regression this PR exists to prevent returns silently and is indistinguishable from the feature working correctly.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The only new behavioral test exercises the suppression path in-process (assert_not_called); no test covers a source from a different integration surviving the to_dict -> task -> from_dict round trip and correctly allowing the outbound sync, nor a deassign-with-source suppression case. The pass-through path \u2014 the path every non-echo assignment actually takes in production \u2014 is untested, and per the serialization defect it is currently broken; a future regression in the round trip would silently disable or invert cycle suppression with no failing test.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] The dataclass field `queued: datetime = timezone.now()` evaluates `timezone.now()` once at module import, so every AssignmentSource created via `from_integration` carries the process's import-time timestamp instead of the actual assignment time. All AssignmentSource instances in a long-running worker share one stale `queued` value; any consumer ordering or auditing assignments by `queued` gets meaningless data (every assignment appears to have occurred at worker startup), and the timestamp silently drifts as workers restart.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] The `assignment_source.to_dict()` payload includes the `queued` datetime object and is passed directly as Celery task kwargs to `sync_assignee_outbound.apply_async`, which fails JSON serialization and breaks the outbound sync task enqueue. Every assignment that flows through the new source-tracking path (inbound sync -> GroupAssignee.assign -> sync_group_assignee_outbound -> apply_async) raises EncodeError in kombu's JSON serializer at enqueue time, so the outbound assignment task never runs and the sync feature is broken for all sourced assignments, with the exception propagating into the calling inbound-sync task.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] `from_dict` silently returns None for any dict whose shape drifts (renamed/missing/extra field), which degrades the task into the pre-fix behavior where the cycle-suppression check in `should_sync` is skipped entirely. If the serialized AssignmentSource shape ever changes (e.g., a field rename or a serializer that converts `queued` to a string rejected by the constructor), the malformed payload is swallowed without any log line, the sync-cycle guard silently turns off, and operators see re-emergent integration assignment ping-pong with no diagnostic pointing at the deserialization failure.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The cycle-prevention check only suppresses sync when the source integration equals the target integration, so a pair of integrations that mirror each other's assignments (A assigns -> B receives -> B webhook -> A receives -> A webhook -> ...) still loops infinitely despite source tracking now being available to detect it. Customers with two mutually-syncing integrations (e.g., Jira and GitHub both configured for assignee sync on the same issues) get an unbounded assign/unassign ping-pong across both external systems, generating duplicate API calls and webhook storms; the new AssignmentSource data was specifically introduced for cycle detection but is only used for the trivial self-cycle case.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The task signature gains a new `assignment_source_dict` kwarg that pre-deploy worker code does not accept, so during a rolling deploy new producers enqueue tasks old workers cannot execute. During the deploy window, inbound-sourced assignments produce `sync_assignee_outbound` messages containing the new kwarg; old workers raise TypeError when invoking the task with an unexpected keyword argument, dropping outbound assignment syncs for the duration of the rollout instead of degrading gracefully.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The abstract `sync_status_outbound` signature gains an `assignment_source` parameter that no caller in this diff ever supplies, adding dead API surface that every concrete integration subclass must now carry. Implementers of IssueSyncIntegration are forced to accept and thread a parameter that is always None in this change; if status-sync cycle prevention is later needed, each subclass will have independently ignored or half-threaded the parameter, making the eventual fix harder and the current signature misleading about supported behavior.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] The dataclass field default `queued: datetime = timezone.now()` is evaluated once at class-definition (module import) time, so every AssignmentSource instance ever created carries the same deploy/import timestamp instead of the time the assignment was actually queued. All `queued` values recorded via to_dict()/from_dict() round-trips are the worker's import-time timestamp, not the real enqueue time; the field is meaningless as audit metadata. Mechanically verifiable dataclass semantics: class-body defaults execute once.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] test_to_dict asserts only `result.get(\"queued\") is not None` \u2014 an existence check with no value, type, or freshness assertion \u2014 so it passes even though the `queued` default is frozen at module import time (the bug it should have caught). The test suite grants false confidence on the one field whose value is actually wrong; a staff reviewer would assert `queued` is a datetime near `timezone.now()` at construction time, which would fail today and expose the stale-default defect.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] The new code ships `assignment_source.to_dict()` \u2014 which contains a raw `datetime` (`queued`) \u2014 directly into Celery `apply_async` kwargs, and no test in the diff exercises the to_dict \u2192 queue \u2192 from_dict round-trip, so the serialization behavior of the actual transport is completely unverified. If the Celery task serializer cannot encode datetime (kombu's default JSON encoder raises EncodeError), every inbound-webhook-triggered assign/deassign that now passes an assignment_source fails at publish time and the outbound sync silently never happens; if a custom encoder stringifies it, from_dict accepts a string `queued` with no validation. The new tests cannot catch either outcome: test_assignment_source.py only feeds from_dict hand-built dicts (`{\"source_name\": ..., \"integration_id\": ...}`) that omit the `queued` key, and test_groupassignee.py exercises the matching-source path without asserting anything about the kwargs actually published to the queue.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] The new cycle-prevention branch in should_sync is only tested for its blocking case (same-integration source \u2192 not called); no test passes an AssignmentSource from a *different* integration, nor exercises the deassign path with a source, so the 'other integrations propagate changes outward' behavior the code comment promises is unverified. A regression that over-blocks \u2014 e.g. the condition degrading to `if sync_source: return False` \u2014 would suppress all outbound assignee sync whenever any source is present, and the entire test suite would still pass: the existing outbound test passes assignment_source=None, and the new test only checks the same-integration case. Also untested: GroupAssignee.objects.deassign with assignment_source (the path sync_group_assignee_inbound actually takes on webhook-driven unassign).",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] sync_group_assignee_outbound always includes the new `assignment_source_dict` key in the celery task kwargs (even as None), so during a rolling deploy new producers enqueue a kwarg the old workers' `sync_assignee_outbound(external_issue_id, user_id, assign)` signature does not accept. Any inbound assignment/unassignment enqueued by a new web node and executed by an old worker raises TypeError (unexpected keyword argument 'assignment_source_dict'), the task fails without retrying against the new signature, and the outbound assignee sync to the external system is silently lost until the worker fleet is fully rolled \u2014 assignments made during the deploy window never propagate.",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] The dataclass field `queued: datetime = timezone.now()` is evaluated once at module import time, so every AssignmentSource constructed via `from_integration` carries the same timestamp from when the worker/web process was booted, not when the assignment was queued. Any consumer that relies on `queued` to order, deduplicate, or age out assignment-sync events gets a stale process-start timestamp for every event; the field silently records wrong data rather than the actual enqueue time.",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] AssignmentSource round-trips through the celery queue as a JSON dict in which `queued` is serialized to a string, and `from_dict` does no type coercion, so the deserialized instance has `queued` as a str rather than the declared datetime. Once a source crosses the task boundary (the inbound-sync path in sync_group_assignee_inbound always populates it), any code that treats `queued` as a datetime (comparisons, .isoformat(), arithmetic) crashes with AttributeError/TypeError on the str; today nothing reads `queued`, but the first consumer to trust the type annotation hits this.",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] The dataclass default `queued: datetime = timezone.now()` is evaluated exactly once at module import time, so every AssignmentSource constructed via `from_integration` (and every `to_dict()` payload) carries the process-start timestamp rather than the time the assignment was actually queued. Any consumer of `queued` (and any audit/debugging of synced assignments) reads a timestamp that is hours or days stale from worker uptime, with no error surfaced; the field silently misrepresents when the assignment happened. This is verifiable mechanically: dataclass default expressions are evaluated once at class-definition time, not per instantiation.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] `assignment_source.to_dict()` embeds a non-JSON-serializable `datetime` (`queued`) into the Celery `apply_async` kwargs, so with Sentry's JSON task serializer the message publish raises synchronously instead of enqueueing the outbound sync. Every inbound assign/deassign webhook that reaches `sync_group_assignee_inbound` (the only path in this diff that constructs a source) crashes at `apply_async` with an encode error inside `GroupAssignee.objects.assign/deassign`, failing the inbound sync task instead of propagating the assignment; the tests miss this because `self.tasks()` executes tasks eagerly in-process and never exercises broker serialization. Even if the transport were changed to survive the datetime (e.g., stringified), `from_dict`'s `cls(**input_dict)` accepts it only because dataclasses perform no type validation, so the failure mode shifts rather than disappears.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] The task gains a new kwarg `assignment_source_dict` with no producer/worker version tolerance, so during a rolling deploy messages published by new web nodes carry a key the old worker's task signature does not accept. Old workers raise TypeError (unexpected keyword argument) on every outbound assignee sync enqueued by new producers for the duration of the deploy window; each failure consumes a Celery retry and the assignment silently lags behind until workers are updated. A versioned payload (e.g., nested under a single opaque key consumed defensively) or tolerant-kwargs handling would avoid the skew.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] `AssignmentSource.from_dict` returning None on any parse failure converts a corrupt or schema-drifted `assignment_source_dict` into 'no source', silently re-enabling the outbound sync the cycle guard was supposed to suppress. Any producer/consumer schema mismatch (extra field, renamed field, changed shape \u2014 e.g., a rolling deploy where a new field is added to the dict) makes `from_dict` raise TypeError inside the try, return None, and the task proceeds as if no source existed \u2014 the cycle-prevention check in `should_sync` is silently bypassed and ping-pong syncs resume with no log line and no error, while the caller sees a normal-looking successful sync.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The guard only suppresses the loop when the source integration equals the target integration, so two distinct integrations linked to the same group still form a cross-provider sync cycle (Jira inbound \u2192 outbound to GitHub \u2192 GitHub inbound \u2192 outbound to Jira \u2192 ...), despite the comment claiming this 'prevent[s] sync-cycles from occurring'. Organizations with two issue-sync integrations on the same project can enter an assignment ping-pong where each integration's webhook re-triggers the other's outbound task (each hop passes the guard because the source alternates between the two integration IDs), generating repeated outbound API calls and webhook traffic that only terminates if the external systems happen to suppress webhooks for no-op assignment changes; the misleading comment will steer future debuggers away from this exact loop.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    }
+  ],
+  "goldens": [
+    {
+      "comment": "The AssignmentSource dataclass uses queued: datetime = timezone.now() as a default field value, which evaluates timezone.now() once at class definition time and shares that single datetime instance across all objects.",
+      "severity": "Medium",
+      "category": "concurrency"
+    },
+    {
+      "comment": "The method name has a typo: test_from_dict_inalid_data should be test_from_dict_invalid_data.",
+      "severity": "Low",
+      "category": "style"
+    },
+    {
+      "comment": "Method name says 'empty_array' but tests empty dict - consider renaming to 'test_from_dict_empty_dict' for clarity.",
+      "severity": "Low",
+      "category": "style"
+    },
+    {
+      "comment": "to_dict() returns a datetime for queued; if this dict is passed in task kwargs (e.g., via apply_async), JSON serialization may fail depending on the serializer, which can cause enqueue errors.",
+      "severity": "Medium",
+      "category": "bug"
+    }
+  ],
+  "per_golden_matches": [
+    {
+      "golden_comment": "The AssignmentSource dataclass uses queued: datetime = timezone.now() as a default field value, which evaluates timezone.now() once at class definition time and shares that single datetime instance across all objects.",
+      "severity": "Medium",
+      "category": "concurrency",
+      "matched_candidate": "[BUG] The dataclass default `queued: datetime = timezone.now()` is evaluated exactly once at module import time, so every AssignmentSource constructed without an explicit `queued` (i.e., every one created via `from_integration`, the only constructor used in this diff) carries the same import-time timestamp instead of its actual creation time. The `queued` field \u2014 which exists precisely to timestamp when a sync originated, the primitive needed to bound sync loops \u2014 is meaningless: all sources created in a process share the module-load instant, and the value differs per worker depending on when each process imported the module. Any consumer (including the tests' `queued is not None` assertion, which cannot detect this) reads garbage. This is a mechanical Python dataclass pitfall: defaults are evaluated at class-definition time, not per-instantiation.",
+      "confidence": 0.98,
+      "reasoning": "The candidate flags the same dataclass default-evaluation bug: `queued: datetime = timezone.now()` is evaluated once at import/class-definition time and thus shared across instances, resulting in a single stale timestamp for all objects created without an explicit value."
+    },
+    {
+      "golden_comment": "to_dict() returns a datetime for queued; if this dict is passed in task kwargs (e.g., via apply_async), JSON serialization may fail depending on the serializer, which can cause enqueue errors.",
+      "severity": "Medium",
+      "category": "bug",
+      "matched_candidate": "[BUG] The `assignment_source.to_dict()` payload includes the `queued` datetime object and is passed directly as Celery task kwargs to `sync_assignee_outbound.apply_async`, which fails JSON serialization and breaks the outbound sync task enqueue. Every assignment that flows through the new source-tracking path (inbound sync -> GroupAssignee.assign -> sync_group_assignee_outbound -> apply_async) raises EncodeError in kombu's JSON serializer at enqueue time, so the outbound assignment task never runs and the sync feature is broken for all sourced assignments, with the exception propagating into the calling inbound-sync task.",
+      "confidence": 0.98,
+      "reasoning": "The candidate flags that `to_dict()` includes a `queued` datetime object which is passed as Celery task kwargs to `apply_async`, causing JSON serialization (EncodeError) failures at enqueue time. This is the same underlying issue described in the golden comment."
+    },
+    {
+      "golden_comment": "The method name has a typo: test_from_dict_inalid_data should be test_from_dict_invalid_data.",
+      "severity": "Low",
+      "category": "style"
+    },
+    {
+      "golden_comment": "Method name says 'empty_array' but tests empty dict - consider renaming to 'test_from_dict_empty_dict' for clarity.",
+      "severity": "Low",
+      "category": "style"
+    }
+  ],
+  "adjudication_records": [
+    {
+      "issue_text": "[BUG] assignment_source.to_dict() embeds a raw datetime ('queued': timezone.now()) into celery task kwargs passed to sync_assignee_outbound.apply_async, which cannot round-trip through the broker's JSON task serializer. On every inbound-driven assignment (e.g. a Jira webhook calling sync_group_assignee_inbound -> GroupAssignee.objects.assign(assignment_source=...) -> sync_group_assignee_outbound), apply_async raises a kombu EncodeError/TypeError while serializing the datetime in the producer (web/consumer) process, so the outbound assignee sync task is never enqueued and the inbound assignment webhook errors. The new tests pass only because self.tasks() executes the task inline without broker serialization, masking the failure.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "unjudged",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "unjudged",
+        "adjudicating_judge": null,
+        "confidence": null,
+        "rationale": null,
+        "diff_context_hash": "8f90503482efe3f54a36f47e046c6a3c2438c579"
+      }
+    },
+    {
+      "issue_text": "[BUG] The dataclass default 'queued: datetime = timezone.now()' is evaluated once at module import time, so every AssignmentSource instance created for the life of the process carries the same import-time timestamp. The 'queued' field records when the worker/web process imported the module, not when the assignment was sourced; any consumer relying on it to order or age assignment events gets a stale, meaningless value. test_to_dict only asserts 'queued is not None', so the defect is invisible to the test suite.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "unjudged",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "unjudged",
+        "adjudicating_judge": null,
+        "confidence": null,
+        "rationale": null,
+        "diff_context_hash": "8f90503482efe3f54a36f47e046c6a3c2438c579"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The sync_assignee_outbound celery task gains a new kwarg 'assignment_source_dict', producing a rolling-deploy skew where web nodes on new code enqueue kwargs that workers on old code reject. During a rolling deploy, any worker still running the old task signature (def sync_assignee_outbound(external_issue_id, user_id, assign)) raises TypeError on tasks enqueued with assignment_source_dict, so outbound assignee syncs triggered by inbound webhooks fail (and after retries, are dropped) until all workers are updated.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.9,
+        "rationale": "The diff changes the Celery task signature `sync_assignee_outbound` to accept a new kwarg `assignment_source_dict` (with a default), and updates the enqueue site to always include that kwarg in `apply_async` kwargs (even if it is `None`). An old worker running the previous task definition (without this kwarg) would raise `TypeError: got an unexpected keyword argument 'assignment_source_dict'` when executing tasks enqueued by new web code during a rolling deploy. This is a real deploy-skew break introduced by the diff.",
+        "diff_context_hash": "8f90503482efe3f54a36f47e046c6a3c2438c579"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The 'queued' field is ships-inert: it is populated, serialized into every task kwargs payload, and deserialized by from_dict, but no code in this diff (or any caller of should_sync/sync_assignee_outbound) ever reads it. Every outbound assignment pays the serialization/transport cost of a datetime that nothing consumes, and (per the import-time default defect) the value it carries is wrong anyway; future maintainers may trust it as an ordering signal when it is not one.",
+      "source_lens": "metareview-lens/feasibility",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.87,
+        "rationale": "In `AssignmentSource` the field is defined as `queued: datetime = timezone.now()`, which evaluates `timezone.now()` at import time, so all instances created without an explicit `queued` will share the same timestamp. That is a real correctness defect introduced by this diff. The field also appears unused in the shown call chain (`to_dict` -> task kwargs -> `from_dict` -> `should_sync`/`sync_assignee_outbound`), so it is currently inert overhead, but the import-time default issue alone makes this a verifiable bug.",
+        "diff_context_hash": "8f90503482efe3f54a36f47e046c6a3c2438c579"
+      }
+    },
+    {
+      "issue_text": "[BUG] The dataclass default `queued: datetime = timezone.now()` is evaluated exactly once at module import time, so every AssignmentSource constructed without an explicit `queued` (i.e., every one created via `from_integration`, the only constructor used in this diff) carries the same import-time timestamp instead of its actual creation time. The `queued` field \u2014 which exists precisely to timestamp when a sync originated, the primitive needed to bound sync loops \u2014 is meaningless: all sources created in a process share the module-load instant, and the value differs per worker depending on when each process imported the module. Any consumer (including the tests' `queued is not None` assertion, which cannot detect this) reads garbage. This is a mechanical Python dataclass pitfall: defaults are evaluated at class-definition time, not per-instantiation.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": [
+        "The AssignmentSource dataclass uses queued: datetime = timezone.now() as a default field value, which evaluates timezone.now() once at class definition time and shares that single datetime instance across all objects."
+      ],
+      "primary_judge_verdict": "matched",
+      "primary_judge": "gpt-5.2",
+      "primary_judge_confidence": 0.98,
+      "primary_judge_reasoning": "The candidate flags the same dataclass default-evaluation bug: `queued: datetime = timezone.now()` is evaluated once at import/class-definition time and thus shared across instances, resulting in a single stale timestamp for all objects created without an explicit value.",
+      "adjudication": {
+        "verdict": "matched",
+        "adjudicating_judge": null,
+        "confidence": null,
+        "rationale": null,
+        "diff_context_hash": "8f90503482efe3f54a36f47e046c6a3c2438c579"
+      }
+    },
+    {
+      "issue_text": "[BUG] The cycle guard only suppresses the direct source integration, so a two-integration ping-pong (issue linked to both Jira and GitHub with outbound assignee sync enabled on both) loops indefinitely: Jira's inbound assign fans out to GitHub, GitHub's inbound assign fans back to Jira (source integration_id \u2260 Jira's, so should_sync passes), forever. The comment claims 'prevent sync-cycles from occurring' but the implementation only prevents self-echo. Each leg of the A\u2194B loop generates webhooks that re-trigger the other leg with a different source, producing unbounded assign/unassign churn on both external systems. The `queued` timestamp field \u2014 the natural mechanism to bound such multi-hop loops \u2014 is written by this diff but read by nothing, confirming the loop-bound half of the design was never implemented.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.56,
+        "rationale": "The diff\u2019s cycle guard in `IssueSyncIntegration.should_sync` only blocks outbound sync when `sync_source.integration_id == self.org_integration.integration_id`, i.e. it prevents self-echo to the same integration. Nothing in the diff uses `AssignmentSource.queued` or otherwise tracks multi-hop propagation, so the change does not (and by code cannot) prevent cross-integration ping-pong cycles. However, the finding\u2019s claim of an \u201cindefinite\u201d loop is not directly verifiable from this diff alone because it depends on external systems/webhooks and on whether inbound handlers are idempotent (not shown here).",
+        "diff_context_hash": "8f90503482efe3f54a36f47e046c6a3c2438c579"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The abstract `sync_status_outbound` signature gains an `assignment_source` parameter, but no caller in this diff ever passes it \u2014 the resolve/unresolve and inbound-status paths still invoke should_sync source-less \u2014 so the cycle prevention this PR claims applies only to assignees, not to status synchronization. Status sync has the identical bounce topology (Jira resolve \u2192 Sentry resolve \u2192 GitHub resolve \u2192 Jira...) and remains unguarded. A future reader wiring status sync will assume the parameter threading exists because the signature advertises it, and the dead parameter rots until someone either wires it or removes it. The PR title 'cross-system issue synchronization' over-delivers relative to what the diff actually protects.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.72,
+        "rationale": "The diff adds `sync_source: AssignmentSource | None = None` to `IssueBasicIntegration.should_sync`/`IssueSyncIntegration.should_sync` and adds `assignment_source` to the abstract `sync_status_outbound` signature, but the only new threading of an `AssignmentSource` shown is for assignee sync (`GroupAssignee.assign/deassign` -> `sync_group_assignee_outbound` -> task `sync_assignee_outbound` -> `installation.should_sync(..., parsed_assignment_source)` and `installation.sync_assignee_outbound(..., assignment_source=...)`). No status-sync call sites are updated in this diff to pass an `AssignmentSource`, so the new status parameter is currently unused/unguarded here and could mislead future readers about cycle-prevention coverage.",
+        "diff_context_hash": "8f90503482efe3f54a36f47e046c6a3c2438c579"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The `apply_async` kwargs dict now always includes the `assignment_source_dict` key (even when the value is None), so every outbound-assignee task enqueued by new code carries a kwarg that the previous task signature `sync_assignee_outbound(external_issue_id, user_id, assign)` does not accept. During a rolling deploy, old workers execute these messages and raise TypeError on the unexpected kwarg, failing the task \u2014 outbound assignee sync silently stops for the whole deploy window, and this applies to all user-driven assignments (the key is sent even when no source exists), not just integration-sourced ones. The new parameter needed a **kwargs-style backward-compatible signature or a deploy-ordering note; neither is present.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.9,
+        "rationale": "The diff changes the task signature to `sync_assignee_outbound(..., assignment_source_dict: dict[str, Any] | None = None)` and updates `sync_group_assignee_outbound()` to enqueue with `apply_async(kwargs={..., \"assignment_source_dict\": ... if assignment_source else None})`, meaning the kwarg key is always present even when no source exists. If any workers still run the previous version of `sync_assignee_outbound(external_issue_id, user_id, assign)`, they would receive an unexpected kwarg and raise `TypeError`, breaking outbound-assignee sync during a rolling deploy. No **kwargs/backward-compat handling or deploy-ordering note is present in the diff.",
+        "diff_context_hash": "8f90503482efe3f54a36f47e046c6a3c2438c579"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] `to_dict()` emits `queued` as a datetime, but the Celery/kombu JSON transport serializes it to an ISO string and `from_dict` (`cls(**input_dict)`) silently accepts the string, so the reconstructed AssignmentSource has `queued` typed as `str`, violating the dataclass declaration. Any consumer that relies on `queued` being a datetime (comparison, arithmetic for staleness) crashes with a TypeError on worker-reconstructed instances while working on producer-side instances \u2014 a producer/consumer asymmetry that no test in the diff exercises because the round-trip through serialization is bypassed by the model tests that mock the integration method and run tasks eagerly.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.62,
+        "rationale": "In this diff, `AssignmentSource.to_dict()` uses `asdict(self)` and therefore includes `queued` as a `datetime` (see `queued: datetime = timezone.now()` and `to_dict`). That dict is passed into Celery task kwargs (`sync_group_assignee_outbound` -> `sync_assignee_outbound.apply_async(... assignment_source_dict=...)`). On the worker side, `sync_assignee_outbound` reconstructs via `AssignmentSource.from_dict` which does `cls(**input_dict)` without parsing/converting `queued`. Since dataclasses don\u2019t enforce runtime types, if Celery\u2019s JSON serialization turns the datetime into a string, you can end up with `AssignmentSource.queued` being a `str` post-deserialization, creating producer/consumer asymmetry. However, within the shown diff, `queued` is not used anywhere (only `integration_id` is consulted in `should_sync`), so this is a real, diff-grounded robustness/test gap rather than a currently verifiable crash/defect.",
+        "diff_context_hash": "8f90503482efe3f54a36f47e046c6a3c2438c579"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] `from_dict` returns None on any malformed payload (caught ValueError/TypeError), silently downgrading a corrupted or schema-skewed source to 'no source', which disables the cycle guard for that sync rather than failing it. During version skew or if the producer's dict shape ever changes (e.g., an added required field or renamed key), the worker logs nothing, the guard is bypassed, and the self-echo assignment the feature exists to prevent bounces back to the external system. A malformed cycle-guard credential should be loud, not treated as 'user-initiated'.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.72,
+        "rationale": "Diff shows `AssignmentSource.from_dict` intentionally swallows `ValueError`/`TypeError` and returns `None` on malformed payloads (`except (ValueError, TypeError): return None`). In `sync_assignee_outbound`, that `None` is passed to `installation.should_sync(\"outbound_assignee\", parsed_assignment_source)`, and the cycle-prevention check in `IssueSyncIntegration.should_sync` only triggers when `sync_source` is truthy. So a malformed/shape-skewed `assignment_source_dict` would silently bypass the guard and allow outbound sync to proceed. This is a real, diff-grounded robustness concern, but it depends on malformed/skewed task payloads and isn\u2019t demonstrably a current runtime defect from the diff alone.",
+        "diff_context_hash": "8f90503482efe3f54a36f47e046c6a3c2438c579"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The new cycle test covers only the matching-source case (assert_not_called) and the source-less case; the code comment's explicit claim that 'other integrations [should] propagate changes outward' \u2014 a non-matching source still syncing \u2014 has no assertion anywhere in the diff's tests. A regression that inverts the guard (blocking all sourced outbound syncs, or comparing against the wrong id such that foreign sources are also blocked) passes the entire suite, since no test exercises a sourced assignment whose integration_id differs from the target integration. The negative case protecting the feature's core value proposition is the one case left unverified.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.86,
+        "rationale": "The diff adds a new guard in `IssueSyncIntegration.should_sync(..., sync_source)` that blocks outbound sync only when `sync_source.integration_id == self.org_integration.integration_id` (to prevent cycles), while explicitly intending to still allow other integrations to sync. The new/updated tests in `tests/sentry/models/test_groupassignee.py` cover (1) `assignment_source=None` (expects outbound sync called with `assignment_source=None`) and (2) matching-source integration (expects `sync_assignee_outbound` not called). There is no test exercising a non-matching `AssignmentSource` (different integration_id) to assert outbound syncing still occurs, so a regression that incorrectly blocks all non-null sources or compares the wrong id could pass these tests.",
+        "diff_context_hash": "8f90503482efe3f54a36f47e046c6a3c2438c579"
+      }
+    },
+    {
+      "issue_text": "[BUG] The cycle check in should_sync only suppresses outbound sync when the source integration is the same integration, so the claimed invariant 'prevent sync-cycles from occurring' is not enforced for cycles of length >= 2. A group linked to two integrations that both have assignee inbound+outbound sync enabled ping-pongs forever: assign in integration X -> inbound webhook (source=X) -> outbound to Y allowed (Y != X) -> Y's external system updated -> Y's inbound webhook (source=Y) -> outbound to X allowed (X != Y) -> X updated -> repeat. GroupAssignee.assign re-fires sync_group_assignee_outbound even on re-assignment of the same user (the sync call precedes the `if not created` branch), so every echo is a fresh outbound task. The check at line 387 compares sync_source.integration_id only against self, never against the set of integrations already visited for this assignment, so the stated cycle-prevention guarantee is only a self-echo guard.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.62,
+        "rationale": "The diff adds a cycle guard in `IssueSyncIntegration.should_sync` that only blocks outbound sync when `sync_source.integration_id == self.org_integration.integration_id` (i.e., self-echo). That\u2019s verifiably insufficient to prevent multi-integration ping-pong cycles because nothing in the diff tracks/blocks \u201calready visited\u201d integrations for a given assignment across X\u2192Y\u2192X, and outbound tasks pass only a single `AssignmentSource` through `assignment_source_dict`. However, the code comment explicitly scopes the check to \u201cthis same integration,\u201d so it\u2019s not a directly provable defect from the diff\u2014more an architectural/scope gap vs. broader cycle-prevention expectations.",
+        "diff_context_hash": "8f90503482efe3f54a36f47e046c6a3c2438c579"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] sync_group_assignee_outbound now always includes the assignment_source_dict key in the Celery kwargs (even when its value is None), which breaks old workers during a rolling deploy. Old worker processes still running the previous task signature `sync_assignee_outbound(external_issue_id, user_id, assign)` raise TypeError on the unexpected keyword argument for every assignment task enqueued by a new web node during the deploy window, failing (and retrying/final-failing) all outbound assignee syncs until workers are rolled. Making the key conditional on assignment_source being non-None (or tolerating the kwarg in the old signature) avoids the skew.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.78,
+        "rationale": "In `sync_group_assignee_outbound` (src/sentry/integrations/utils/sync.py), `apply_async` always includes the kwarg `assignment_source_dict`, setting it to `None` when no source is provided (`\"assignment_source_dict\": assignment_source.to_dict() if assignment_source else None`). This changes the Celery task invocation shape compared to the previous version (which would not have sent that kwarg at all). While the worker-side task signature in this diff is updated to accept `assignment_source_dict: dict[str, Any] | None = None` (src/sentry/integrations/tasks/sync_assignee_outbound.py), during a rolling deploy any still-old workers running the prior signature would receive an unexpected keyword argument and raise `TypeError`, breaking outbound assignee sync tasks enqueued by updated nodes. Making the kwarg truly conditional (omit the key when None) would avoid this compatibility break.",
+        "diff_context_hash": "8f90503482efe3f54a36f47e046c6a3c2438c579"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] sync_status_outbound gains an assignment_source parameter that no call site in this diff ever passes, while the sibling abstract sync_assignee_outbound \u2014 which the task DOES call with assignment_source \u2014 was not given the parameter in its abstract signature. Untraceable plumbing in both directions: the status parameter is dead code a future reader will assume is wired up, and the assignee abstract interface relies on concrete implementations' **kwargs to accept a kwarg its own contract does not declare \u2014 any integration override that spells out its parameters without **kwargs crashes with TypeError when the outbound task passes assignment_source. The two abstract signatures should be consistent and each parameter should have a real producer or not exist.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.62,
+        "rationale": "In this diff, the outbound task now calls `installation.sync_assignee_outbound(..., assignment_source=parsed_assignment_source)` (src/sentry/integrations/tasks/sync_assignee_outbound.py), but there is no corresponding update shown to the abstract `sync_assignee_outbound` contract in the mixin (only `sync_status_outbound` is updated to accept `assignment_source`). That makes the interface inconsistent and creates a real risk that some concrete integration implementations with a strict signature (no `**kwargs` / no `assignment_source`) could raise `TypeError` at runtime. Also, `sync_status_outbound` gains an `assignment_source` parameter in the abstract signature (src/sentry/integrations/mixins/issues.py) but this diff shows no call sites producing/passing it, so it looks like currently-unwired plumbing (not necessarily a defect by itself, but it is confusing/incomplete as presented).",
+        "diff_context_hash": "8f90503482efe3f54a36f47e046c6a3c2438c579"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The inbound unassign path (deassign with a constructed AssignmentSource) added in this diff has no test coverage in this diff \u2014 the new tests only cover the outbound-task suppression for the assign direction and the assignment_source=None propagation for direct assign/deassign. A regression that drops the assignment_source kwarg from this deassign call (or from GroupAssignee.deassign's propagation) silently disables cycle suppression for every integration-driven unassign, and no test in the diff would catch it \u2014 the failure mode is the exact sync-echo loop this PR exists to prevent, resurfacing only on the unassign path in production.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.86,
+        "rationale": "The diff adds an inbound unassign path that calls `GroupAssignee.objects.deassign(group, assignment_source=AssignmentSource.from_integration(integration))` in `sync_group_assignee_inbound` (src/sentry/integrations/utils/sync.py). The new tests cover (a) outbound suppression for *assign* when `assignment_source.integration_id` matches the target integration, and (b) that direct assign/deassign propagate `assignment_source=None` through to `sync_assignee_outbound`. There is no test that exercises inbound-driven **deassign** with a non-None `AssignmentSource` to ensure the cycle-suppression plumbing remains intact on the unassign path. That\u2019s a specific, diff-grounded missing-test concern, not a current functional defect shown by the diff.",
+        "diff_context_hash": "8f90503482efe3f54a36f47e046c6a3c2438c579"
+      }
+    },
+    {
+      "issue_text": "[BUG] sync_group_assignee_outbound serializes a raw datetime into Celery task kwargs: AssignmentSource.to_dict() uses dataclasses.asdict, which emits the `queued` field as a datetime object, and apply_async's JSON serializer cannot encode datetime, so the task publish raises instead of enqueueing. Every inbound-driven outbound sync that carries a source (sync_group_assignee_inbound -> GroupAssignee.objects.assign/deassign(assignment_source=...) -> this apply_async) fails at publish time; the EncodeError propagates synchronously back through deassign/assign into the inbound webhook handler, so external->Sentry assignment sync now crashes the whole inbound sync path instead of propagating the assignment.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.72,
+        "rationale": "In `sync_group_assignee_outbound` the Celery task is enqueued with `assignment_source_dict=assignment_source.to_dict()` (src/sentry/integrations/utils/sync.py). `AssignmentSource.to_dict()` uses `dataclasses.asdict(self)` (src/sentry/integrations/services/assignment_source.py), which includes the `queued` field as a raw `datetime` (`queued: datetime = timezone.now()`). That dict is then passed directly into `apply_async(kwargs=...)`. If the task transport/serializer is JSON (common/default), a raw `datetime` in kwargs is not JSON-serializable and would raise during publish/enqueue, breaking the inbound->outbound sync path when `assignment_source` is provided (as added in `sync_group_assignee_inbound` and GroupAssignee assign/deassign).",
+        "diff_context_hash": "8f90503482efe3f54a36f47e046c6a3c2438c579"
+      }
+    },
+    {
+      "issue_text": "[BUG] `queued: datetime = timezone.now()` is evaluated once at module import, not per instantiation, so every AssignmentSource created via from_integration carries the process-start timestamp rather than the assignment time. The field's meaning is silently wrong for the entire lifetime of each worker/web process (all sources share one timestamp); any consumer that later trusts `queued` for ordering, dedup, or cycle-window logic gets garbage, and the unit test (assert queued is not None) cannot detect it because the import-time value is non-None. It also guarantees the datetime is present in every to_dict() payload, feeding the serialization failure in sync.py.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.9,
+        "rationale": "In `AssignmentSource` the dataclass field is declared as `queued: datetime = timezone.now()` (new file `src/sentry/integrations/services/assignment_source.py`). In Python dataclasses, that expression is evaluated at class definition/import time, so every `AssignmentSource(...)` created without explicitly passing `queued` (including `from_integration`) will share the same timestamp for the lifetime of the process. This makes the `queued` value incorrect as an instantiation-time marker. (The additional claim about guaranteed serialization failure is not directly verifiable from this diff, but the import-time default timestamp bug is.)",
+        "diff_context_hash": "8f90503482efe3f54a36f47e046c6a3c2438c579"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] New required kwarg assignment_source_dict is added to the sync_assignee_outbound task signature with no **kwargs fallback, so producers and workers cannot coexist during a rolling deploy. During the deploy window, web nodes running the new code enqueue kwargs that old workers' sync_assignee_outbound(external_issue_id, user_id, assign) rejects with TypeError; outbound assignee sync is dropped for every assignment performed until all workers are updated \u2014 a silent failure window the rollout cannot avoid.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.87,
+        "rationale": "The diff changes the Celery task signature from `sync_assignee_outbound(external_issue_id, user_id, assign)` to include a new kwarg `assignment_source_dict` (with a default), and the producer now enqueues this kwarg in `sync_group_assignee_outbound.apply_async(kwargs={..., \"assignment_source_dict\": ...})`. Old workers running the previous signature (no `**kwargs` and no `assignment_source_dict` parameter) would raise `TypeError: got an unexpected keyword argument 'assignment_source_dict'` when consuming tasks queued by new web nodes during a rolling deploy, dropping outbound assignee sync work. The finding is correct about rolling-deploy incompatibility, though the kwarg is optional rather than required.",
+        "diff_context_hash": "8f90503482efe3f54a36f47e046c6a3c2438c579"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The assignment_source parameter added to the sync_status_outbound abstract method has no producer anywhere in this diff \u2014 no caller (e.g. the sync_status_inbound task) passes it, and should_sync's cycle guard is only reachable for the outbound_assignee attribute. Status-sync cycles (Sentry resolve -> external resolve -> inbound webhook -> Sentry) remain unguarded while assignee cycles are guarded; the dead parameter signals the cycle problem is 'handled' at the interface level, so the next implementer wiring status sync will assume the guard applies when it never fires, and a real A->B->A status loop can still ping-pong indefinitely.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.62,
+        "rationale": "The diff adds `assignment_source` to the `sync_status_outbound` abstract method signature (in `IssueSyncIntegration`) but, within this diff, there is no producer/caller shown that passes an `AssignmentSource` through any status-sync path. By contrast, assignee outbound explicitly parses and passes `assignment_source_dict` into `installation.should_sync(\"outbound_assignee\", ...)`, making the new cycle-guard in `should_sync(..., sync_source=...)` reachable only for assignee syncing in this change. The broader claim about status ping-pong loops can\u2019t be fully verified from this diff alone (status tasks/webhooks aren\u2019t shown), but the parameter does appear unused here and the guard is only wired for assignees in the shown changes.",
+        "diff_context_hash": "8f90503482efe3f54a36f47e046c6a3c2438c579"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] from_dict collapses 'payload unparseable' and 'no source' into the same None sentinel, and any unknown key in the payload (ValueError/TypeError from cls(**input_dict)) disables the cycle guard for that message. When a future producer adds a field to AssignmentSource (or the payload is corrupted in transport), old consumers' from_dict returns None, should_sync sees no source, and the outbound sync proceeds \u2014 re-enabling the exact sync-cycle this PR exists to prevent, silently and per-message; there is no log or metric distinguishing the two Nones.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.78,
+        "rationale": "The diff shows `AssignmentSource.from_dict` returns `None` on `TypeError`/`ValueError` (e.g., unexpected/extra keys) with no logging, and `sync_assignee_outbound` then passes that `None` into `installation.should_sync(...)`. In `IssueSyncIntegration.should_sync`, the cycle-prevention guard only runs when `sync_source` is truthy; if parsing fails and returns `None`, the guard is skipped and outbound sync can proceed based solely on config. This forward-compat/corruption case could re-enable cycles silently, but it\u2019s contingent on malformed/extended payloads rather than a guaranteed present-time failure.",
+        "diff_context_hash": "8f90503482efe3f54a36f47e046c6a3c2438c579"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The only test that passes a non-None assignment_source exercises the blocked path (assert_not_called); no test enqueues the outbound task with a source present, so the source-bearing happy path is untested and CI stays green while the datetime-kwargs serialization failure fires in production. A regression in the enqueue-with-source path (which is exactly where the datetime bug lives) is invisible to the suite: the matching-source test green-lights the PR while every real inbound assignment with a resolvable user fails at task publish.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.74,
+        "rationale": "The diff adds a new `assignment_source_dict` task kwarg and passes `assignment_source.to_dict()` from `sync_group_assignee_outbound` (which includes a `queued: datetime` via `asdict`). The tests only cover (a) default `assignment_source=None` outbound sync, and (b) the non-None `assignment_source` case that intentionally blocks outbound sync (`assert_not_called`). There is no test that exercises the enqueue/publish + parse path with a non-None `assignment_source_dict` (`sync_group_assignee_outbound` -> `apply_async` -> `AssignmentSource.from_dict` -> `installation.sync_assignee_outbound(...)`). The claim that this would *definitely* cause a datetime serialization failure cannot be verified from the diff alone (Celery serializer/config not shown), but the missing coverage for the new nontrivial code path is concrete and diff-grounded.",
+        "diff_context_hash": "8f90503482efe3f54a36f47e046c6a3c2438c579"
+      }
+    },
+    {
+      "issue_text": "[BUG] assignment_source.to_dict() embeds the raw `queued: datetime` field into celery task kwargs, and the JSON task transport cannot serialize a datetime, so apply_async raises at publish time. Every inbound-triggered outbound assignee sync (sync_group_assignee_inbound now always constructs a source via from_integration on both the assign and deassign branches) crashes when enqueueing sync_assignee_outbound, so inbound assignment sync from integrations fails entirely; tests pass only because self.tasks() executes inline without broker serialization, hiding the failure. The datetime must be serialized to a string in to_dict (or dropped) before crossing the queue boundary.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.75,
+        "rationale": "In `AssignmentSource.to_dict()`, `asdict(self)` will include the `queued` field as a raw `datetime` (default `timezone.now()` in the dataclass). `sync_group_assignee_outbound()` then passes `assignment_source.to_dict()` directly into Celery `apply_async` kwargs (`assignment_source_dict`). If the task serializer is JSON (common/default), a `datetime` in kwargs is not JSON-serializable and would raise at publish/serialization time. The tests shown use `with self.tasks()` (eager/in-process execution), which would bypass broker serialization and can mask this failure.",
+        "diff_context_hash": "8f90503482efe3f54a36f47e046c6a3c2438c579"
+      }
+    },
+    {
+      "issue_text": "[BUG] The dataclass field default `queued: datetime = timezone.now()` is evaluated once at module import time, so every AssignmentSource constructed without an explicit queued value carries the server process's startup timestamp, not its actual queue time. The field's purpose (recording when the assignment was queued) is silently wrong for every instance; any future consumer trusting `queued` gets a timestamp that can be days stale. It also feeds the broken datetime payload in sync.py. The default must be a sentinel plus __post_init__/default_factory, or the field dropped \u2014 nothing in this diff reads it anyway.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.95,
+        "rationale": "In `AssignmentSource` (new file `src/sentry/integrations/services/assignment_source.py`), the dataclass field is defined as `queued: datetime = timezone.now()`. Because `timezone.now()` is *called* at class definition/import time, every `AssignmentSource` created without an explicit `queued` value (e.g., `from_integration()`, which does not pass `queued`) will share the same timestamp for the lifetime of the process. This is then serialized via `to_dict()` and sent through `sync_group_assignee_outbound`/Celery kwargs, so the queued time is silently incorrect/stale. It should use `field(default_factory=timezone.now)` or similar.",
+        "diff_context_hash": "8f90503482efe3f54a36f47e046c6a3c2438c579"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The abstract sync_status_outbound signature gained an `assignment_source` parameter that no call site in this diff passes, and no status-sync path (sync_status_inbound, resolve/unresolve) threads a source at all \u2014 the PR's stated goal of preventing sync cycles is implemented only for the assignee path. The objective silently narrowed from 'cross-system issue synchronization' with cycle prevention to assignment-only cycle suppression without a recorded acceptance of that narrowing; status changes still echo between linked systems (the exact loop class the comment at mixins/issues.py:386-388 claims to prevent), and the inert parameter invites out-of-tree implementers to accept a value that nothing sends.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.74,
+        "rationale": "The diff clearly threads `AssignmentSource` only through the assignee sync path: `GroupAssignee.assign/deassign(..., assignment_source=...)` -> `sync_group_assignee_outbound(..., assignment_source=...)` -> Celery task `sync_assignee_outbound(..., assignment_source_dict=...)` -> `installation.should_sync(\"outbound_assignee\", parsed_assignment_source)` and then passes `assignment_source` into `sync_assignee_outbound(...)`. By contrast, the abstract `sync_status_outbound(...)` signature is expanded to accept `assignment_source`, but this diff shows no status-sync call sites updated to pass a source (and no inbound status/resolve-unresolve path threading it). The cycle-prevention guard added in `IssueSyncIntegration.should_sync(..., sync_source=...)` therefore won\u2019t apply to status sync unless callers start providing `sync_source`. This is a concrete scope/incompleteness concern grounded in the shown changes, but not a directly verifiable functional defect from the diff alone.",
+        "diff_context_hash": "8f90503482efe3f54a36f47e046c6a3c2438c579"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The sync_assignee_outbound task gains a new kwarg (assignment_source_dict) that new producers send immediately, but workers running the pre-deploy task signature raise TypeError on the unrecognized kwarg. During any rolling deploy window, every outbound assignee sync enqueued by new web/task nodes fails on old workers instead of syncing \u2014 the previously-working sync path degrades during rollout, and the failures surface as generic task errors rather than a deploy-skew signal.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.9,
+        "rationale": "The Celery task `sync_assignee_outbound` changes its signature to accept a new kwarg `assignment_source_dict` (with default `None`). The producer `sync_group_assignee_outbound` now *always* enqueues this kwarg via `apply_async(kwargs={..., \"assignment_source_dict\": ...})` (it is present even when `assignment_source` is `None`). During a rolling deploy, any worker still running the pre-change code (where the task did not accept this kwarg, per the diff showing the signature change) would raise `TypeError` on unexpected keyword arguments, causing outbound assignee sync tasks to fail during deploy skew.",
+        "diff_context_hash": "8f90503482efe3f54a36f47e046c6a3c2438c579"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] AssignmentSource.from_dict swallows ValueError/TypeError and returns None with no logging, so any payload-shape drift or version skew silently degrades to 'no source' and should_sync proceeds as if cycle suppression never existed. The loop-prevention mechanism fails open and invisibly: the moment the dataclass shape evolves (or a producer/worker skew produces a mismatched dict), sync cycles resume with zero diagnostic signal \u2014 the exact regression this PR exists to prevent returns silently and is indistinguishable from the feature working correctly.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.74,
+        "rationale": "The diff shows `AssignmentSource.from_dict` intentionally catches `(ValueError, TypeError)` and returns `None` without any logging (`src/sentry/integrations/services/assignment_source.py`). Callers then pass this parsed value into `installation.should_sync(...)` (`sync_assignee_outbound.py`), and cycle suppression only happens when `sync_source` is non-None and matches `integration_id` (`IssueSyncIntegration.should_sync`). Therefore, any dict-shape mismatch/skew will silently disable the new loop-prevention check (fail-open). This is a real, diff-grounded concern about robustness/diagnostics rather than a directly provable functional defect in the normal path.",
+        "diff_context_hash": "8f90503482efe3f54a36f47e046c6a3c2438c579"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The only new behavioral test exercises the suppression path in-process (assert_not_called); no test covers a source from a different integration surviving the to_dict -> task -> from_dict round trip and correctly allowing the outbound sync, nor a deassign-with-source suppression case. The pass-through path \u2014 the path every non-echo assignment actually takes in production \u2014 is untested, and per the serialization defect it is currently broken; a future regression in the round trip would silently disable or invert cycle suppression with no failing test.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.66,
+        "rationale": "The diff adds new cycle-suppression logic via `should_sync(..., sync_source)` (issues.py) and a new `AssignmentSource` that is serialized into Celery task kwargs (`sync_group_assignee_outbound` passes `assignment_source.to_dict()` into `sync_assignee_outbound.apply_async`). The added behavioral test in `test_groupassignee.py` only asserts the suppression case (matching `integration_id` => `assert_not_called`) and the existing non-suppression test only covers `assignment_source=None`. There is no test that a non-matching `AssignmentSource` survives the `to_dict` -> task kwargs -> `from_dict` parsing and still allows outbound sync, nor a deassign-with-source suppression scenario. This is a concrete, diff-grounded gap in coverage for the newly added nontrivial propagation path and would allow regressions in the round-trip handling/suppression logic to go unnoticed.",
+        "diff_context_hash": "8f90503482efe3f54a36f47e046c6a3c2438c579"
+      }
+    },
+    {
+      "issue_text": "[BUG] The dataclass field `queued: datetime = timezone.now()` evaluates `timezone.now()` once at module import, so every AssignmentSource created via `from_integration` carries the process's import-time timestamp instead of the actual assignment time. All AssignmentSource instances in a long-running worker share one stale `queued` value; any consumer ordering or auditing assignments by `queued` gets meaningless data (every assignment appears to have occurred at worker startup), and the timestamp silently drifts as workers restart.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.95,
+        "rationale": "In `src/sentry/integrations/services/assignment_source.py`, the dataclass defines `queued: datetime = timezone.now()`. This calls `timezone.now()` at import/class-definition time, so all `AssignmentSource` instances that don\u2019t explicitly pass `queued` (e.g., `AssignmentSource.from_integration(...)`) will share the same stale timestamp until the process restarts. Dataclasses should use `field(default_factory=timezone.now)` for per-instance timestamps.",
+        "diff_context_hash": "8f90503482efe3f54a36f47e046c6a3c2438c579"
+      }
+    },
+    {
+      "issue_text": "[BUG] The `assignment_source.to_dict()` payload includes the `queued` datetime object and is passed directly as Celery task kwargs to `sync_assignee_outbound.apply_async`, which fails JSON serialization and breaks the outbound sync task enqueue. Every assignment that flows through the new source-tracking path (inbound sync -> GroupAssignee.assign -> sync_group_assignee_outbound -> apply_async) raises EncodeError in kombu's JSON serializer at enqueue time, so the outbound assignment task never runs and the sync feature is broken for all sourced assignments, with the exception propagating into the calling inbound-sync task.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": [
+        "to_dict() returns a datetime for queued; if this dict is passed in task kwargs (e.g., via apply_async), JSON serialization may fail depending on the serializer, which can cause enqueue errors."
+      ],
+      "primary_judge_verdict": "matched",
+      "primary_judge": "gpt-5.2",
+      "primary_judge_confidence": 0.98,
+      "primary_judge_reasoning": "The candidate flags that `to_dict()` includes a `queued` datetime object which is passed as Celery task kwargs to `apply_async`, causing JSON serialization (EncodeError) failures at enqueue time. This is the same underlying issue described in the golden comment.",
+      "adjudication": {
+        "verdict": "matched",
+        "adjudicating_judge": null,
+        "confidence": null,
+        "rationale": null,
+        "diff_context_hash": "8f90503482efe3f54a36f47e046c6a3c2438c579"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] `from_dict` silently returns None for any dict whose shape drifts (renamed/missing/extra field), which degrades the task into the pre-fix behavior where the cycle-suppression check in `should_sync` is skipped entirely. If the serialized AssignmentSource shape ever changes (e.g., a field rename or a serializer that converts `queued` to a string rejected by the constructor), the malformed payload is swallowed without any log line, the sync-cycle guard silently turns off, and operators see re-emergent integration assignment ping-pong with no diagnostic pointing at the deserialization failure.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.62,
+        "rationale": "The diff shows `AssignmentSource.from_dict` swallowing `ValueError`/`TypeError` and returning `None` without logging (new file `assignment_source.py`). The task (`sync_assignee_outbound`) then passes that parsed value into `installation.should_sync(\"outbound_assignee\", parsed_assignment_source)`, and the new cycle-suppression guard in `IssueSyncIntegration.should_sync` is only applied when a non-`None` `sync_source` is present. So a deserialization failure would indeed silently disable the new guard and revert behavior to the prior always-sync path for that integration, with no diagnostics. However, this is a robustness/operability concern contingent on malformed/changed payloads, not a concrete defect demonstrably triggered by the diff as written.",
+        "diff_context_hash": "8f90503482efe3f54a36f47e046c6a3c2438c579"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The cycle-prevention check only suppresses sync when the source integration equals the target integration, so a pair of integrations that mirror each other's assignments (A assigns -> B receives -> B webhook -> A receives -> A webhook -> ...) still loops infinitely despite source tracking now being available to detect it. Customers with two mutually-syncing integrations (e.g., Jira and GitHub both configured for assignee sync on the same issues) get an unbounded assign/unassign ping-pong across both external systems, generating duplicate API calls and webhook storms; the new AssignmentSource data was specifically introduced for cycle detection but is only used for the trivial self-cycle case.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.66,
+        "rationale": "The diff adds `AssignmentSource` and uses it in `IssueSyncIntegration.should_sync(...)` to suppress outbound sync only when `sync_source.integration_id == self.org_integration.integration_id` (i.e., same integration). This is explicitly reinforced by the comment that it \"should still allow other integrations to propagate changes outward.\" Therefore, the finding\u2019s core point\u2014that the new cycle-prevention logic does not address multi-integration ping-pong loops\u2014is grounded in the diff. However, the claim of an \"infinite\" loop/webhook storm cannot be verified from the diff alone (it depends on external systems\u2019 webhook semantics and other inbound/outbound guards not shown), so it\u2019s better treated as a scope/architecture gap rather than a provable defect introduced here.",
+        "diff_context_hash": "8f90503482efe3f54a36f47e046c6a3c2438c579"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The task signature gains a new `assignment_source_dict` kwarg that pre-deploy worker code does not accept, so during a rolling deploy new producers enqueue tasks old workers cannot execute. During the deploy window, inbound-sourced assignments produce `sync_assignee_outbound` messages containing the new kwarg; old workers raise TypeError when invoking the task with an unexpected keyword argument, dropping outbound assignment syncs for the duration of the rollout instead of degrading gracefully.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.86,
+        "rationale": "The diff changes the Celery task `sync_assignee_outbound` signature to accept a new kwarg `assignment_source_dict` (with a default), and also changes the producer (`sync_group_assignee_outbound` in `src/sentry/integrations/utils/sync.py`) to enqueue the task with `kwargs={..., \"assignment_source_dict\": ...}`. During a rolling deploy, old workers running the pre-change task implementation (without that kwarg) would receive tasks containing an unexpected keyword argument and raise `TypeError`, causing outbound assignee sync tasks to fail/drop during the deploy window. This incompatibility is directly implied by the task signature/producer change in the diff.",
+        "diff_context_hash": "8f90503482efe3f54a36f47e046c6a3c2438c579"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The abstract `sync_status_outbound` signature gains an `assignment_source` parameter that no caller in this diff ever supplies, adding dead API surface that every concrete integration subclass must now carry. Implementers of IssueSyncIntegration are forced to accept and thread a parameter that is always None in this change; if status-sync cycle prevention is later needed, each subclass will have independently ignored or half-threaded the parameter, making the eventual fix harder and the current signature misleading about supported behavior.",
+      "source_lens": "metareview-lens/security",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.72,
+        "rationale": "The diff changes the abstract `IssueSyncIntegration.sync_status_outbound(...)` signature to include `assignment_source: AssignmentSource | None = None` (in `mixins/issues.py`), but within the shown changes only assignee-sync paths parse/thread `AssignmentSource` (e.g., `sync_assignee_outbound` task and `GroupAssignee.assign/deassign`). There is no corresponding new call site in this diff that supplies `assignment_source` to `sync_status_outbound`, so the added abstract parameter is currently unused in the presented changes while still forcing every concrete integration subclass to accept it (or loosen its signature via `**kwargs`). That\u2019s a real, diff-grounded API/architecture concern, but not a demonstrable runtime defect from the diff alone.",
+        "diff_context_hash": "8f90503482efe3f54a36f47e046c6a3c2438c579"
+      }
+    },
+    {
+      "issue_text": "[BUG] The dataclass field default `queued: datetime = timezone.now()` is evaluated once at class-definition (module import) time, so every AssignmentSource instance ever created carries the same deploy/import timestamp instead of the time the assignment was actually queued. All `queued` values recorded via to_dict()/from_dict() round-trips are the worker's import-time timestamp, not the real enqueue time; the field is meaningless as audit metadata. Mechanically verifiable dataclass semantics: class-body defaults execute once.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.95,
+        "rationale": "In `src/sentry/integrations/services/assignment_source.py`, the dataclass defines `queued: datetime = timezone.now()`. That calls `timezone.now()` at import/class-definition time, so every `AssignmentSource(...)` created without an explicit `queued` will share the same timestamp value. This makes the `queued` audit metadata incorrect for later instances and for `to_dict()/from_dict()` usage. Dataclass defaults require `field(default_factory=timezone.now)` to compute per-instance.",
+        "diff_context_hash": "8f90503482efe3f54a36f47e046c6a3c2438c579"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] test_to_dict asserts only `result.get(\"queued\") is not None` \u2014 an existence check with no value, type, or freshness assertion \u2014 so it passes even though the `queued` default is frozen at module import time (the bug it should have caught). The test suite grants false confidence on the one field whose value is actually wrong; a staff reviewer would assert `queued` is a datetime near `timezone.now()` at construction time, which would fail today and expose the stale-default defect.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.9,
+        "rationale": "In `AssignmentSource` the dataclass field is declared as `queued: datetime = timezone.now()`, which evaluates `timezone.now()` once at import/class definition time, freezing the same timestamp for all instances (should be `field(default_factory=timezone.now)`). The new test `test_to_dict` only asserts `queued` is not `None`, so it would not catch this stale-default defect and can give false confidence about a field whose value is actually wrong.",
+        "diff_context_hash": "8f90503482efe3f54a36f47e046c6a3c2438c579"
+      }
+    },
+    {
+      "issue_text": "[BUG] The new code ships `assignment_source.to_dict()` \u2014 which contains a raw `datetime` (`queued`) \u2014 directly into Celery `apply_async` kwargs, and no test in the diff exercises the to_dict \u2192 queue \u2192 from_dict round-trip, so the serialization behavior of the actual transport is completely unverified. If the Celery task serializer cannot encode datetime (kombu's default JSON encoder raises EncodeError), every inbound-webhook-triggered assign/deassign that now passes an assignment_source fails at publish time and the outbound sync silently never happens; if a custom encoder stringifies it, from_dict accepts a string `queued` with no validation. The new tests cannot catch either outcome: test_assignment_source.py only feeds from_dict hand-built dicts (`{\"source_name\": ..., \"integration_id\": ...}`) that omit the `queued` key, and test_groupassignee.py exercises the matching-source path without asserting anything about the kwargs actually published to the queue.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.64,
+        "rationale": "The diff does pass `assignment_source.to_dict()` into Celery `apply_async` kwargs (`sync_group_assignee_outbound`), and `AssignmentSource.to_dict()` returns `asdict(self)` which will include `queued` as a `datetime` object. The tests added/modified don\u2019t exercise a real Celery serialization/deserialization round-trip (they either omit `queued` in `from_dict` inputs or don\u2019t assert the queued kwargs payload), so transport behavior and `queued` type validation are unverified. However, the claim that this will *definitely* fail at publish time depends on Celery/kombu serializer configuration, which is not shown in the diff, so a concrete breakage can\u2019t be verified from the diff alone.",
+        "diff_context_hash": "8f90503482efe3f54a36f47e046c6a3c2438c579"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The new cycle-prevention branch in should_sync is only tested for its blocking case (same-integration source \u2192 not called); no test passes an AssignmentSource from a *different* integration, nor exercises the deassign path with a source, so the 'other integrations propagate changes outward' behavior the code comment promises is unverified. A regression that over-blocks \u2014 e.g. the condition degrading to `if sync_source: return False` \u2014 would suppress all outbound assignee sync whenever any source is present, and the entire test suite would still pass: the existing outbound test passes assignment_source=None, and the new test only checks the same-integration case. Also untested: GroupAssignee.objects.deassign with assignment_source (the path sync_group_assignee_inbound actually takes on webhook-driven unassign).",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.88,
+        "rationale": "The diff adds new nontrivial cycle-prevention logic in `IssueSyncIntegration.should_sync(..., sync_source)` that only blocks when `sync_source.integration_id == self.org_integration.integration_id` (issues.py). The added test `test_assignee_sync_outbound_assign_with_matching_source_integration` covers only that blocking case, while the existing outbound tests call `GroupAssignee.objects.assign/deassign` without `assignment_source` and assert `assignment_source=None` reaches `sync_assignee_outbound`. There is no test that passes an `AssignmentSource` from a *different* integration to verify outbound sync still occurs, and no test that exercises `GroupAssignee.objects.deassign(..., assignment_source=...)` even though inbound unassign now supplies a source (sync.py). This is a concrete missing-coverage risk for regressions that over-block when any source is present.",
+        "diff_context_hash": "8f90503482efe3f54a36f47e046c6a3c2438c579"
+      }
+    },
+    {
+      "issue_text": "[BUG] sync_group_assignee_outbound always includes the new `assignment_source_dict` key in the celery task kwargs (even as None), so during a rolling deploy new producers enqueue a kwarg the old workers' `sync_assignee_outbound(external_issue_id, user_id, assign)` signature does not accept. Any inbound assignment/unassignment enqueued by a new web node and executed by an old worker raises TypeError (unexpected keyword argument 'assignment_source_dict'), the task fails without retrying against the new signature, and the outbound assignee sync to the external system is silently lost until the worker fleet is fully rolled \u2014 assignments made during the deploy window never propagate.",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.74,
+        "rationale": "In `sync_group_assignee_outbound` (sentry/integrations/utils/sync.py), the Celery enqueue always includes the kwarg `assignment_source_dict` in `apply_async(..., kwargs={...})`, even when `assignment_source` is `None` (it sets the key to `None`). This diff also changes the task `sync_assignee_outbound` signature to accept `assignment_source_dict`, implying older workers (pre-diff) would not accept that kwarg and would raise `TypeError: unexpected keyword argument 'assignment_source_dict'` when executing tasks produced by newer code during a rolling deploy. The problem is directly evidenced by the unconditional presence of the new kwarg in the enqueued kwargs dict.",
+        "diff_context_hash": "8f90503482efe3f54a36f47e046c6a3c2438c579"
+      }
+    },
+    {
+      "issue_text": "[BUG] The dataclass field `queued: datetime = timezone.now()` is evaluated once at module import time, so every AssignmentSource constructed via `from_integration` carries the same timestamp from when the worker/web process was booted, not when the assignment was queued. Any consumer that relies on `queued` to order, deduplicate, or age out assignment-sync events gets a stale process-start timestamp for every event; the field silently records wrong data rather than the actual enqueue time.",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.95,
+        "rationale": "In `src/sentry/integrations/services/assignment_source.py`, the dataclass defines `queued: datetime = timezone.now()`. That expression is evaluated once when the class is defined (module import time), so all `AssignmentSource` instances that don\u2019t explicitly pass `queued` (including those created by `from_integration`) will share the same timestamp. This makes `queued` incorrect for representing when an assignment was queued; it should use `field(default_factory=timezone.now)` instead.",
+        "diff_context_hash": "8f90503482efe3f54a36f47e046c6a3c2438c579"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] AssignmentSource round-trips through the celery queue as a JSON dict in which `queued` is serialized to a string, and `from_dict` does no type coercion, so the deserialized instance has `queued` as a str rather than the declared datetime. Once a source crosses the task boundary (the inbound-sync path in sync_group_assignee_inbound always populates it), any code that treats `queued` as a datetime (comparisons, .isoformat(), arithmetic) crashes with AttributeError/TypeError on the str; today nothing reads `queued`, but the first consumer to trust the type annotation hits this.",
+      "source_lens": "metareview-lens/data-migration",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "unresolved",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "unresolved",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.48,
+        "rationale": "The diff does show `AssignmentSource` being passed across a Celery task boundary as a plain dict (`assignment_source.to_dict()` in `sync_group_assignee_outbound` -> `assignment_source_dict` in `sync_assignee_outbound` -> `AssignmentSource.from_dict`). `from_dict` simply does `cls(**input_dict)` with no type coercion/validation beyond constructor errors, so if `queued` arrives as a string (a plausible outcome of JSON/task serialization), the resulting `AssignmentSource.queued` would indeed be a `str` despite being annotated as `datetime`. However, the diff does not confirm how Celery serializes datetimes here (it could also error or preserve via a non-JSON serializer), and no code in the diff reads `queued` yet, so this is a forward-looking robustness issue rather than a proven defect.",
+        "diff_context_hash": "8f90503482efe3f54a36f47e046c6a3c2438c579"
+      }
+    },
+    {
+      "issue_text": "[BUG] The dataclass default `queued: datetime = timezone.now()` is evaluated exactly once at module import time, so every AssignmentSource constructed via `from_integration` (and every `to_dict()` payload) carries the process-start timestamp rather than the time the assignment was actually queued. Any consumer of `queued` (and any audit/debugging of synced assignments) reads a timestamp that is hours or days stale from worker uptime, with no error surfaced; the field silently misrepresents when the assignment happened. This is verifiable mechanically: dataclass default expressions are evaluated once at class-definition time, not per instantiation.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.95,
+        "rationale": "In `src/sentry/integrations/services/assignment_source.py`, the dataclass defines `queued: datetime = timezone.now()`. That expression is evaluated once when the class is defined (module import time), so all `AssignmentSource` instances that don\u2019t explicitly pass `queued` (including those created via `from_integration`) will share the same stale timestamp. This is a correctness bug; it should use a `default_factory` (e.g., `field(default_factory=timezone.now)`) to capture instantiation time.",
+        "diff_context_hash": "8f90503482efe3f54a36f47e046c6a3c2438c579"
+      }
+    },
+    {
+      "issue_text": "[BUG] `assignment_source.to_dict()` embeds a non-JSON-serializable `datetime` (`queued`) into the Celery `apply_async` kwargs, so with Sentry's JSON task serializer the message publish raises synchronously instead of enqueueing the outbound sync. Every inbound assign/deassign webhook that reaches `sync_group_assignee_inbound` (the only path in this diff that constructs a source) crashes at `apply_async` with an encode error inside `GroupAssignee.objects.assign/deassign`, failing the inbound sync task instead of propagating the assignment; the tests miss this because `self.tasks()` executes tasks eagerly in-process and never exercises broker serialization. Even if the transport were changed to survive the datetime (e.g., stringified), `from_dict`'s `cls(**input_dict)` accepts it only because dataclasses perform no type validation, so the failure mode shifts rather than disappears.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p1",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.72,
+        "rationale": "In `AssignmentSource.to_dict()` the `queued` field is included via `asdict(self)` (new file `src/sentry/integrations/services/assignment_source.py`), and `queued` is a `datetime`. That dict is passed directly into Celery `apply_async` kwargs as `assignment_source_dict` in `sync_group_assignee_outbound` (`src/sentry/integrations/utils/sync.py`), so task dispatch now depends on the task serializer handling a raw `datetime` in kwargs. With a JSON serializer this will fail at publish time (before enqueue), and the tests won\u2019t catch it because they run tasks eagerly (`with self.tasks():`). Separately, `queued: datetime = timezone.now()` is also a problematic default (evaluated at import time), reinforcing that `queued` handling is incorrect for serialization/transport.",
+        "diff_context_hash": "8f90503482efe3f54a36f47e046c6a3c2438c579"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The task gains a new kwarg `assignment_source_dict` with no producer/worker version tolerance, so during a rolling deploy messages published by new web nodes carry a key the old worker's task signature does not accept. Old workers raise TypeError (unexpected keyword argument) on every outbound assignee sync enqueued by new producers for the duration of the deploy window; each failure consumes a Celery retry and the assignment silently lags behind until workers are updated. A versioned payload (e.g., nested under a single opaque key consumed defensively) or tolerant-kwargs handling would avoid the skew.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.86,
+        "rationale": "The diff adds a new Celery task kwarg `assignment_source_dict` to `sync_assignee_outbound` (task signature updated to accept it), and producers now always include it in `apply_async` kwargs when provided (`sync_group_assignee_outbound` builds `{\"assignment_source_dict\": ...}`); an older worker running the previous code would still have the old task function signature (no `assignment_source_dict` and no `**kwargs`), so during a rolling deploy it would raise `TypeError: unexpected keyword argument` when consuming messages produced by newer nodes.",
+        "diff_context_hash": "8f90503482efe3f54a36f47e046c6a3c2438c579"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] `AssignmentSource.from_dict` returning None on any parse failure converts a corrupt or schema-drifted `assignment_source_dict` into 'no source', silently re-enabling the outbound sync the cycle guard was supposed to suppress. Any producer/consumer schema mismatch (extra field, renamed field, changed shape \u2014 e.g., a rolling deploy where a new field is added to the dict) makes `from_dict` raise TypeError inside the try, return None, and the task proceeds as if no source existed \u2014 the cycle-prevention check in `should_sync` is silently bypassed and ping-pong syncs resume with no log line and no error, while the caller sees a normal-looking successful sync.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.78,
+        "rationale": "In `sync_assignee_outbound`, `assignment_source_dict` is parsed via `AssignmentSource.from_dict(...)` and then passed into `installation.should_sync(\"outbound_assignee\", parsed_assignment_source)`. The cycle guard in `IssueSyncIntegration.should_sync` only suppresses sync when `sync_source` is non-None and matches `self.org_integration.integration_id`. However, `AssignmentSource.from_dict` returns `None` on any `TypeError`/`ValueError`. Because it calls `cls(**input_dict)`, any extra/unknown key in the dict (e.g., schema drift/rolling deploy adding a field) will raise `TypeError` and be converted to `None`, which makes `should_sync` treat it as \u201cno source\u201d and proceed, silently bypassing the cycle-prevention logic.",
+        "diff_context_hash": "8f90503482efe3f54a36f47e046c6a3c2438c579"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The guard only suppresses the loop when the source integration equals the target integration, so two distinct integrations linked to the same group still form a cross-provider sync cycle (Jira inbound \u2192 outbound to GitHub \u2192 GitHub inbound \u2192 outbound to Jira \u2192 ...), despite the comment claiming this 'prevent[s] sync-cycles from occurring'. Organizations with two issue-sync integrations on the same project can enter an assignment ping-pong where each integration's webhook re-triggers the other's outbound task (each hop passes the guard because the source alternates between the two integration IDs), generating repeated outbound API calls and webhook traffic that only terminates if the external systems happen to suppress webhooks for no-op assignment changes; the misleading comment will steer future debuggers away from this exact loop.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "hallucination",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "hallucination",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.66,
+        "rationale": "The diff adds a guard in `IssueSyncIntegration.should_sync` that only blocks outbound sync when `sync_source.integration_id == self.org_integration.integration_id`. The accompanying comment explicitly clarifies the intended scope: it prevents cycles for the *same* integration and \u201cshould still allow other integrations to propagate changes outward.\u201d The finding\u2019s claim that the comment is misleading / claims to prevent all sync cycles, and the described cross-provider ping-pong loop, are speculative behaviors not demonstrated in this diff (no evidence here of a full inbound\u2192outbound chain across two providers repeatedly firing webhooks).",
+        "diff_context_hash": "8f90503482efe3f54a36f47e046c6a3c2438c579"
+      }
+    }
+  ],
+  "diff_context_hash": "8f90503482efe3f54a36f47e046c6a3c2438c579",
+  "primary_judge": "gpt-5.2",
+  "adjudicating_judge": "gpt-5.2",
+  "url": "https://github.com/getsentry/sentry/pull/77754",
+  "framework": "metareview-realistic",
+  "model": "glm-5.3-flash-background",
+  "effort": "medium",
+  "judge": "gpt-5.2",
+  "wall_s": 299.7063858509064,
+  "execution_mode": "api",
+  "run_batch": "20260910-mrv0120-manifold"
+}

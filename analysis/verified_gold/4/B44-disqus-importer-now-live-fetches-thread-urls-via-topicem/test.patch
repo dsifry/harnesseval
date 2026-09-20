@@ -1,0 +1,138 @@
+require 'date'
+require 'stringio'
+
+# --- Stubs for external dependencies ---
+module Nokogiri
+  module XML
+    module SAX
+      class Document; end
+      class Parser
+        def initialize(p); end
+        def parse_file(f); end
+      end
+    end
+  end
+end
+
+class Thor
+  def self.desc(*); end
+  def self.method_option(*); end
+  def initialize(args=[], options={}, config={}); @options = options; end
+  def options; @options; end
+end
+
+class SiteSetting
+  @email_domains_blacklist = ""
+  class << self; attr_accessor :email_domains_blacklist; end
+end
+
+class User
+  def self.where(*); self; end
+  def self.first; new; end
+  def self.create!(**); new; end
+end
+
+class RateLimiter
+  def self.disable; end
+  def self.enable; end
+end
+
+class TopicEmbed
+  @calls = []
+  class << self; attr_accessor :calls; end
+  def self.import_remote(user, link, opts={})
+    @calls << {user: user, link: link, opts: opts}
+    post = Object.new
+    def post.present?; true; end
+    def post.topic_id; 1; end
+    def post.topic; @topic ||= Object.new; end
+    post
+  end
+end
+
+class TopicFeaturedUsers
+  def initialize(topic); end
+  def choose; end
+end
+
+class PostCreator
+  @calls = []
+  class << self; attr_accessor :calls; end
+  def initialize(user, attrs)
+    @user = user; @attrs = attrs
+    self.class.calls << {user: user, attrs: attrs}
+  end
+  def create
+    post = Object.new
+    def post.post_number; 1; end
+    def post.topic; @topic ||= Object.new; end
+    post
+  end
+end
+
+class Email; def self.downcase(s); s.downcase; end; end
+class UserNameSuggester; def self.suggest(s); "user"; end; end
+
+class Object
+  def blank?; respond_to?(:empty?) ? !!empty? : !self; end
+  def present?; !blank?; end
+end
+
+module Kernel
+  alias_method :orig_require, :require
+  def require(name)
+    return false if name == 'nokogiri' || name == './config/environment'
+    orig_require(name)
+  end
+end
+
+class File
+  class << self
+    alias_method :orig_exist?, :exist?
+    def exist?(path)
+      return true if path == 'fake.xml'
+      orig_exist?(path)
+    end
+  end
+end
+
+# --- Load the real file ---
+path = File.expand_path('../../lib/tasks/disqus.thor', __dir__)
+load path
+
+# --- Provide a fake parser with a thread ---
+class DisqusSAX
+  def self.new(options=nil)
+    parser = Object.new
+    threads = {
+      "1" => {
+        title: "Test Thread",
+        link: "http://example.com/thread",
+        created_at: "2015-01-01T00:00:00Z",
+        posts: [
+          { cooked: "<p>hello</p>", created_at: "2015-01-02T00:00:00Z", author_email: nil }
+        ]
+      }
+    }
+    parser.define_singleton_method(:threads) { threads }
+    parser.define_singleton_method(:normalize) { }
+    parser
+  end
+end
+
+# --- Run import, capture stdout ---
+original_stdout = $stdout
+$stdout = StringIO.new
+begin
+  disqus = Disqus.new([], { file: 'fake.xml', post_as: 'test' })
+  disqus.import
+  $stdout = original_stdout
+  if TopicEmbed.calls.any?
+    puts "RESULT: FAIL: TopicEmbed.import_remote was called (live HTTP fetch, drops created_at/permalink body)"
+  else
+    puts "RESULT: PASS"
+  end
+rescue => e
+  $stdout = original_stdout
+  puts "RESULT: FAIL: #{e.class}: #{e.message}"
+end

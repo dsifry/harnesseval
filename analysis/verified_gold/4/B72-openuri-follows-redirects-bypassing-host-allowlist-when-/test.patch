@@ -1,0 +1,85 @@
+require 'open-uri'
+require 'socket'
+require 'tmpdir'
+
+# Stub ruby-readability so import_remote can require it, capturing the body it sees.
+tmpdir = Dir.mktmpdir
+File.write(File.join(tmpdir, 'ruby-readability.rb'), <<~STUB)
+  module Readability
+    CAPTURED = []
+    class Document
+      def initialize(html, _opts = {})
+        Readability::CAPTURED << html.to_s
+        @title = 't'
+        @content = 'c'
+      end
+      attr_reader :title, :content
+    end
+  end
+STUB
+$LOAD_PATH.unshift(tmpdir)
+
+# Stub Rails-only helpers used by the file at load / minimal runtime.
+def require_dependency(*); end
+
+module I18n
+  def self.t(_k, _o = {}); 'x'; end
+end
+
+module ActiveRecord
+  class Base
+    def self.belongs_to(*); end
+    def self.validates_presence_of(*); end
+    def self.where(*); Relation.new; end
+    def self.pluck(*); []; end
+    def self.create!(*); nil; end
+    def self.transaction; yield; end
+    def self.cook_methods; { raw_html: 0 }; end
+    def update_column(*); end
+    class Relation
+      def first; nil; end
+      def blank?; true; end
+    end
+  end
+end
+
+REPO_ROOT = Dir.pwd
+require File.join(REPO_ROOT, 'app/models/topic_embed.rb')
+
+def serve(&block)
+  srv = TCPServer.new('127.0.0.1', 0)
+  port = srv.addr[1]
+  Thread.new do
+    loop do
+      c = srv.accept
+      while (l = c.gets) && l != "\r\n"; end
+      c.write(block.call)
+      c.close
+    end
+  end
+  [srv, port]
+end
+
+evil_body = '<html><body>EVIL_MARKER_PAYLOAD</body></html>'
+_evil_srv, evil_port = serve {
+  "HTTP/1.0 200 OK\r\nContent-Type: text/html\r\nContent-Length: #{evil_body.bytesize}\r\nConnection: close\r\n\r\n#{evil_body}"
+}
+_redir_srv, redir_port = serve {
+  "HTTP/1.0 302 Found\r\nLocation: http://127.0.0.1:#{evil_port}/evil\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+}
+
+begin
+  TopicEmbed.import_remote(nil, "http://127.0.0.1:#{redir_port}/start")
+rescue StandardError => e
+  # Downstream app deps are stubbed; failure after Document.new is expected.
+end
+
+captured = Readability.const_get(:CAPTURED).join
+
+if captured.include?('EVIL_MARKER_PAYLOAD')
+  puts "Observed body fetched by open(url): #{captured[0, 80].inspect}"
+  puts "RESULT: FAIL: open(url) followed redirect and fetched HTML from a host other than the request URL's host"
+else
+  puts "Observed body fetched by open(url): #{captured[0, 80].inspect}"
+  puts "RESULT: PASS"
+end

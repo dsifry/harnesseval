@@ -1,0 +1,456 @@
+{
+ "url": "https://github.com/calcom/cal.com/pull/11059",
+ "pass_digest": "9c5f733ce7a3f996c90c67f262cc4a77e2b234bc415c197afa7c73477ad320be",
+ "request_sha256": "67ceac3646bf78cc2d8f5c4aad43be1959b341580e6d964503d67ddef85b3ca8",
+ "request": {
+  "url": "https://github.com/calcom/cal.com/pull/11059",
+  "model": "glm-5.3-background",
+  "system": "You are clustering code review findings from one PR. Always respond with valid JSON.",
+  "prompt": "You are clustering code review findings from the same PR. For each PAIR below, decide whether the two findings describe the SAME underlying issue — same root cause in the same code location. Different wording is fine. A finding about a DIFFERENT defect in the same file or function is NOT the same issue. Severity or aspect differences of the same root cause ARE the same issue.\n\n\nFor THIS scoring pass, duplicate equivalence is stricter than sharing a root cause.\nYou must compare the COMPLETE MATERIAL CLAIMS, including mechanism, triggering\nconditions, execution path, and consequence. The same line or broad concern does\nnot establish equivalence. A report of wrong-category selection, a case/rename\nmismatch, a crash, and a silent fallback are different claims even at one lookup.\nAn inactive/unbound API concern and an alleged active user-facing failure differ.\nA compound report with an additional material claim does NOT equal its subset.\nDifferences only in wording, severity, or hedging do not create separate claims.\nIf the claimed mechanisms, triggers or consequences conflict, or one report adds\nan unsupported/different material factual claim, return same=false. You are NOT\nverifying which claim is true; do not repair or reinterpret either report to make\nthem match. If unsure whether their full claims are equivalent, return false.\n\nFor every numbered pair, extract what A and B actually CLAIM into mechanism,\ntrigger and consequence. Then list material_differences and give your equivalence\nverdict, confidence and reason. same=true requires no material differences.\nReturn ONLY this JSON object, with EVERY pair index exactly once:\n{\"pairs\":[{\"pair\":1,\"a\":{\"mechanism\":\"...\",\"trigger\":\"...\",\"consequence\":\"...\"},\"b\":{\"mechanism\":\"...\",\"trigger\":\"...\",\"consequence\":\"...\"},\"material_differences\":[],\"same\":true,\"confidence\":0.9,\"reason\":\"...\"}]}\n\nPAIRS:\nPAIR 1:\nA: packages/app-store/salesforce/lib/CalendarService.ts:75 — Salesforce refresh bypasses refreshOAuthTokens entirely and has no timeout, so it ignores credential sync and can hang\nB: packages/app-store/salesforce/lib/CalendarService.ts:75 — salesforce skips `refreshOAuthTokens`, calling login.salesforce.com directly on every `getClient`, so it ignores credential sync while every other app uses the shared helper, and it does an unconditional refresh plus DB write per instantiation (N calls x M credentials) (P1, conf 75)\n\nPAIR 2:\nA: packages/app-store/salesforce/lib/CalendarService.ts:75 — Salesforce refresh bypasses refreshOAuthTokens entirely and has no timeout, so it ignores credential sync and can hang\nB: packages/app-store/salesforce/lib/CalendarService.ts:75 — the change adds a new refresh on every `getClient` call (`const response = await fetch(\"https://login.salesforce.com/services/oauth2/token\", ...)` plus `prisma.credential.update`) that no requirement asks for, and it skips `refreshOAuthTokens`, so with credential sync on (`CALCOM_CREDENTIAL_SYNC_ENDPOINT` set) Salesforce still refreshes directly with the local refresh_token; sync is not actually wired up for Salesforce, and every constructed CalendarService makes an extra network call and DB write (P1, conf 75)\n\nPAIR 3:\nA: packages/app-store/salesforce/lib/CalendarService.ts:75 — Salesforce refresh bypasses refreshOAuthTokens entirely and has no timeout, so it ignores credential sync and can hang\nB: packages/app-store/salesforce/lib/CalendarService.ts:75 — The new `await fetch(\"https://login.salesforce.com/services/oauth2/token\", ...)` block adds an unconditional refresh-token round trip plus `prisma.credential.update` every time a Salesforce client is constructed, and it never goes through `refreshOAuthTokens`. Every existing Salesforce install, sync on or off, now makes an extra token call per service instantiation (and hits an unimported `prisma`), while sync-enabled deployments still bypass the sync endpoint. (P1, conf 75)\n\nPAIR 4:\nA: packages/app-store/salesforce/lib/CalendarService.ts:75 — Salesforce refresh bypasses refreshOAuthTokens entirely and has no timeout, so it ignores credential sync and can hang\nB: Salesforce implements its own bespoke inline fetch token refresh path in the connection-setup flow instead of using refreshOAuthTokens, so the credential-sync feature silently doesn't apply to salesforce (duplicated, divergent refresh logic); it also performs an eager token refresh on every service instantiation (extra network round-trip per operation, rate-limit exposure) where jsforce already handles refresh\n\nPAIR 5:\nA: A Salesforce token refresh (remote fetch plus a prisma.credential.update) now runs unconditionally inside the service constructor/connection setup path on every instantiation, with no expiry check, caching, or in-flight guard. Every calendar operation that constructs SalesforceCalendarService issues a full token refresh and a DB write, multiplying remote calls per process and per request; concurrent operations race on the same credential row and hammer login.salesforce.com, risking refresh-token rotation invalidating in-flight copies.\nB: SalesforceCalendarService now performs an unconditional Salesforce token refresh plus a prisma.credential.update on every service construction — no expiry/isExpired guard, and no routing through refreshOAuthTokens — creating a parallel refresh path that duplicates jsforce's own OAuth refresh and bypasses the sync abstraction every other app in this PR uses. Every availability check and booking involving a Salesforce-connected user now makes a login.salesforce.com round trip (which counts against the org's Salesforce API/login limits) plus a DB write, even on hosts that never enable credential sharing: hot-path latency and org API-quota exhaustion are added to all Salesforce booking flows, and concurrent constructions race read-modify-write on credential.key.\n\nPAIR 6:\nA: A Salesforce token refresh (remote fetch plus a prisma.credential.update) now runs unconditionally inside the service constructor/connection setup path on every instantiation, with no expiry check, caching, or in-flight guard. Every calendar operation that constructs SalesforceCalendarService issues a full token refresh and a DB write, multiplying remote calls per process and per request; concurrent operations race on the same credential row and hammer login.salesforce.com, risking refresh-token rotation invalidating in-flight copies.\nB: The hand-rolled Salesforce token refresh is not gated on APP_CREDENTIAL_SHARING_ENABLED and bypasses refreshOAuthTokens entirely, unlike every other integration in this diff. With the feature off, every SalesforceCalendarService instantiation now performs an eager token-endpoint round-trip plus a credential-table write on the path jsforce previously refreshed lazily (extra remote call + DB write on every availability/booking operation); with the feature on, Salesforce never consults CALCOM_CREDENTIAL_SYNC_ENDPOINT, so it is the one OAuth app the sync feature silently does not cover.\n\nPAIR 7:\nA: A Salesforce token refresh (remote fetch plus a prisma.credential.update) now runs unconditionally inside the service constructor/connection setup path on every instantiation, with no expiry check, caching, or in-flight guard. Every calendar operation that constructs SalesforceCalendarService issues a full token refresh and a DB write, multiplying remote calls per process and per request; concurrent operations race on the same credential row and hammer login.salesforce.com, risking refresh-token rotation invalidating in-flight copies.\nB: The new Salesforce token refresh plus prisma.credential.update runs unconditionally on every jsforce connection creation — unlike every other refresh path in this diff, it is not gated on APP_CREDENTIAL_SHARING_ENABLED. All existing non-sharing Salesforce users now pay an extra synchronous OAuth round-trip plus DB write per service instantiation, and any Salesforce or network failure during the refresh throws HttpError and aborts calendar operations that previously succeeded using the still-valid stored token.\n\nPAIR 8:\nA: A Salesforce token refresh (remote fetch plus a prisma.credential.update) now runs unconditionally inside the service constructor/connection setup path on every instantiation, with no expiry check, caching, or in-flight guard. Every calendar operation that constructs SalesforceCalendarService issues a full token refresh and a DB write, multiplying remote calls per process and per request; concurrent operations race on the same credential row and hammer login.salesforce.com, risking refresh-token rotation invalidating in-flight copies.\nB: The service now performs an unconditional Salesforce token refresh plus a credential DB write on every SalesforceCalendarService construction — previously the jsforce connection refreshed lazily — and this new flow never routes through refreshOAuthTokens, so it is disconnected from the credential-sync feature the PR claims to implement. Every Salesforce availability check and booking now makes a synchronous login.salesforce.com round-trip and a DB write even when the stored access token is valid, adding latency to the booking hot path and multiplying token-endpoint load; the change is also implementation work not traceable to any stated requirement.\n\nPAIR 9:\nA: A Salesforce token refresh (remote fetch plus a prisma.credential.update) now runs unconditionally inside the service constructor/connection setup path on every instantiation, with no expiry check, caching, or in-flight guard. Every calendar operation that constructs SalesforceCalendarService issues a full token refresh and a DB write, multiplying remote calls per process and per request; concurrent operations race on the same credential row and hammer login.salesforce.com, risking refresh-token rotation invalidating in-flight copies.\nB: Salesforce CalendarService constructor performs unconditional token refresh fetch to login.salesforce.com plus prisma.credential.update on every instantiation, adding serial latency and DB write amplification even when cached token is valid, and bypasses refreshOAuthTokens\n\nPAIR 10:\nA: A Salesforce token refresh (remote fetch plus a prisma.credential.update) now runs unconditionally inside the service constructor/connection setup path on every instantiation, with no expiry check, caching, or in-flight guard. Every calendar operation that constructs SalesforceCalendarService issues a full token refresh and a DB write, multiplying remote calls per process and per request; concurrent operations race on the same credential row and hammer login.salesforce.com, risking refresh-token rotation invalidating in-flight copies.\nB: Salesforce CalendarService now performs a manual token refresh (network call + DB write) unconditionally on every service construction regardless of token validity or APP_CREDENTIAL_SHARING_ENABLED, an unflagged behavior change\n\nPAIR 11:\nA: A Salesforce token refresh (remote fetch plus a prisma.credential.update) now runs unconditionally inside the service constructor/connection setup path on every instantiation, with no expiry check, caching, or in-flight guard. Every calendar operation that constructs SalesforceCalendarService issues a full token refresh and a DB write, multiplying remote calls per process and per request; concurrent operations race on the same credential row and hammer login.salesforce.com, risking refresh-token rotation invalidating in-flight copies.\nB: Salesforce performs an unconditional token refresh and DB write on every service instantiation with no expiry check, adding an extra OAuth round-trip and credential write per booking/operation, duplicating jsforce's own refresh flow (two sources of truth) and bypassing refreshOAuthTokens so credential sharing silently doesn't apply to Salesforce\n\nPAIR 12:\nA: A Salesforce token refresh (remote fetch plus a prisma.credential.update) now runs unconditionally inside the service constructor/connection setup path on every instantiation, with no expiry check, caching, or in-flight guard. Every calendar operation that constructs SalesforceCalendarService issues a full token refresh and a DB write, multiplying remote calls per process and per request; concurrent operations race on the same credential row and hammer login.salesforce.com, risking refresh-token rotation invalidating in-flight copies.\nB: Salesforce token refresh happens eagerly on every service instantiation instead of on 401, adding a network call per operation and turning failed token endpoints into hard failures, while duplicating jsforce's own refresh logic\n\nPAIR 13:\nA: A Salesforce token refresh (remote fetch plus a prisma.credential.update) now runs unconditionally inside the service constructor/connection setup path on every instantiation, with no expiry check, caching, or in-flight guard. Every calendar operation that constructs SalesforceCalendarService issues a full token refresh and a DB write, multiplying remote calls per process and per request; concurrent operations race on the same credential row and hammer login.salesforce.com, risking refresh-token rotation invalidating in-flight copies.\nB: Salesforce token refresh moved into constructor and runs unconditionally regardless of APP_CREDENTIAL_SHARING_ENABLED, adding network round-trips and rotation pressure for self-hosters\n\nPAIR 14:\nA: refreshOAuthTokens fetch to CALCOM_CREDENTIAL_SYNC_ENDPOINT has no timeout or AbortController, allowing a slow or hung user-configured endpoint to block token refresh and booking-flow request paths indefinitely\nB: refreshOAuthTokens makes an un-timed (no AbortSignal/timeout) and uncached fetch to CALCOM_CREDENTIAL_SYNC_ENDPOINT that sits serially on the token-refresh hot path for all synced apps, so a slow or hung sync endpoint inflates booking/availability latency or stalls serverless invocations, with all apps funneling through one endpoint and no backpressure\n\nPAIR 15:\nA: refreshOAuthTokens fetch to CALCOM_CREDENTIAL_SYNC_ENDPOINT has no timeout or AbortController, allowing a slow or hung user-configured endpoint to block token refresh and booking-flow request paths indefinitely\nB: refreshOAuthTokens sync path fetch has no timeout (AbortSignal), no retry, no status handling; a hung/slow sync endpoint blocks booking flows and non-2xx responses are returned as-is to callers\n\nPAIR 16:\nA: refreshOAuthTokens fetch to CALCOM_CREDENTIAL_SYNC_ENDPOINT has no timeout or AbortController, allowing a slow or hung user-configured endpoint to block token refresh and booking-flow request paths indefinitely\nB: refreshOAuthTokens sync path has no timeout/AbortSignal, no retry or circuit-breaker, no response.ok status check, no fallback to the local refreshFunction, and no auth material — a hung or failing parent instance becomes a hard outage or latency amplifier for every synced credential\n\nPAIR 17:\nA: refreshOAuthTokens fetch to CALCOM_CREDENTIAL_SYNC_ENDPOINT has no timeout or AbortController, allowing a slow or hung user-configured endpoint to block token refresh and booking-flow request paths indefinitely\nB: Sync endpoint fetch in refreshOAuthTokens has no AbortController timeout and never checks response.ok, so a hung endpoint stalls the request/booking path indefinitely and a 500/404 body is passed to callers as if it were a valid token response\n\nPAIR 18:\nA: refreshOAuthTokens fetch to CALCOM_CREDENTIAL_SYNC_ENDPOINT has no timeout or AbortController, allowing a slow or hung user-configured endpoint to block token refresh and booking-flow request paths indefinitely\nB: The outbound sync fetch has no timeout, so a hanging CALCOM_CREDENTIAL_SYNC_ENDPOINT stalls booking flows because the call runs inline in calendar/video service construction\n",
+  "effort": "low",
+  "pairs": [
+   [
+    1260,
+    1270
+   ],
+   [
+    1260,
+    1274
+   ],
+   [
+    1260,
+    1275
+   ],
+   [
+    1260,
+    1892
+   ],
+   [
+    211,
+    406
+   ],
+   [
+    211,
+    459
+   ],
+   [
+    211,
+    474
+   ],
+   [
+    211,
+    484
+   ],
+   [
+    211,
+    1865
+   ],
+   [
+    211,
+    1867
+   ],
+   [
+    211,
+    1900
+   ],
+   [
+    211,
+    1914
+   ],
+   [
+    211,
+    1915
+   ],
+   [
+    1832,
+    1834
+   ],
+   [
+    1832,
+    1852
+   ],
+   [
+    1832,
+    1853
+   ],
+   [
+    1832,
+    1934
+   ],
+   [
+    1832,
+    1965
+   ]
+  ]
+ },
+ "parsed_response": {
+  "pairs": [
+   {
+    "pair": 1,
+    "a": {
+     "mechanism": "Salesforce refresh bypasses refreshOAuthTokens and has no timeout",
+     "trigger": "Salesforce credential refresh",
+     "consequence": "Ignores credential sync; can hang"
+    },
+    "b": {
+     "mechanism": "Salesforce skips refreshOAuthTokens, calls login.salesforce.com directly on every getClient, does unconditional refresh + DB write",
+     "trigger": "Every getClient / instantiation",
+     "consequence": "Ignores sync; N calls × M credentials extra refresh/DB writes"
+    },
+    "material_differences": [
+     "A claims no timeout / can hang; B does not",
+     "B adds unconditional refresh + DB write per instantiation claim absent from A"
+    ],
+    "same": false,
+    "confidence": 0.85,
+    "reason": "B adds material claims (unconditional refresh, DB write, N×M multiplication) and omits the hang/timeout claim."
+   },
+   {
+    "pair": 2,
+    "a": {
+     "mechanism": "Bypasses refreshOAuthTokens, no timeout",
+     "trigger": "Salesforce refresh",
+     "consequence": "Ignores sync; can hang"
+    },
+    "b": {
+     "mechanism": "New unconditional refresh fetch + prisma update skips refreshOAuthTokens",
+     "trigger": "Every getClient; when CALCOM_CREDENTIAL_SYNC_ENDPOINT set",
+     "consequence": "Sync not wired for Salesforce; extra network call and DB write; not required by any requirement"
+    },
+    "material_differences": [
+     "A's hang/no-timeout claim absent from B",
+     "B adds no-requirement claim and DB write amplification"
+    ],
+    "same": false,
+    "confidence": 0.85,
+    "reason": "B makes additional material claims and omits A's timeout/hang claim."
+   },
+   {
+    "pair": 3,
+    "a": {
+     "mechanism": "Bypasses refreshOAuthTokens, no timeout",
+     "trigger": "Salesforce refresh",
+     "consequence": "Ignores sync; can hang"
+    },
+    "b": {
+     "mechanism": "Unconditional fetch + prisma.credential.update on every construction, never through refreshOAuthTokens",
+     "trigger": "Every Salesforce client construction, sync on or off",
+     "consequence": "Extra token call per instantiation; hits unimported prisma; sync-enabled deployments bypass sync endpoint"
+    },
+    "material_differences": [
+     "B adds unimported-prisma claim and applies-to-all-installs scope; A's hang claim absent"
+    ],
+    "same": false,
+    "confidence": 0.85,
+    "reason": "B adds different material claims (unimported prisma, every existing install) not in A."
+   },
+   {
+    "pair": 4,
+    "a": {
+     "mechanism": "Bypasses refreshOAuthTokens, no timeout",
+     "trigger": "Salesforce refresh",
+     "consequence": "Ignores sync; can hang"
+    },
+    "b": {
+     "mechanism": "Bespoke inline fetch refresh in connection setup instead of refreshOAuthTokens; duplicates jsforce refresh",
+     "trigger": "Every service instantiation",
+     "consequence": "Sync silently doesn't apply to Salesforce; eager refresh adds round trips and rate-limit exposure"
+    },
+    "material_differences": [
+     "A's no-timeout/hang claim absent from B",
+     "B adds jsforce-duplication and rate-limit claims"
+    ],
+    "same": false,
+    "confidence": 0.85,
+    "reason": "B adds jsforce duplication/rate-limit claims and lacks hang claim."
+   },
+   {
+    "pair": 5,
+    "a": {
+     "mechanism": "Unconditional refresh + DB write on every instantiation; no expiry/caching/in-flight guard; concurrent races",
+     "trigger": "Every SalesforceCalendarService construction",
+     "consequence": "Races on credential row; rotation may invalidate in-flight copies; multiplied remote calls"
+    },
+    "b": {
+     "mechanism": "Unconditional refresh + DB write, no expiry guard, bypasses refreshOAuthTokens, duplicates jsforce refresh",
+     "trigger": "Every availability check and booking",
+     "consequence": "Salesforce API-quota exhaustion, hot-path latency, races on credential.key"
+    },
+    "material_differences": [
+     "B adds jsforce-duplication claim",
+     "B adds org API-quota exhaustion consequence",
+     "A's token-rotation-invalidation claim absent from B"
+    ],
+    "same": false,
+    "confidence": 0.8,
+    "reason": "Each report contains material claims the other lacks."
+   },
+   {
+    "pair": 6,
+    "a": {
+     "mechanism": "Unconditional refresh + DB write; no expiry check; races",
+     "trigger": "Every instantiation",
+     "consequence": "Races risk rotation invalidating in-flight copies; multiplied calls"
+    },
+    "b": {
+     "mechanism": "Not gated on APP_CREDENTIAL_SHARING_ENABLED; bypasses refreshOAuthTokens",
+     "trigger": "Feature on or off",
+     "consequence": "Feature-off users pay extra call+write; feature-on Salesforce bypasses sync endpoint"
+    },
+    "material_differences": [
+     "A claims races/rotation-invalidation risk; B doesn't",
+     "B adds gating-on-flag claim and feature-on sync bypass"
+    ],
+    "same": false,
+    "confidence": 0.85,
+    "reason": "Different trigger conditions (flag gating) and consequences (race/rotation vs gating/sync coverage)."
+   },
+   {
+    "pair": 7,
+    "a": {
+     "mechanism": "Unconditional refresh + DB write; races",
+     "trigger": "Every instantiation",
+     "consequence": "Race-induced rotation invalidation; multiplied calls"
+    },
+    "b": {
+     "mechanism": "Unconditional refresh, not gated on APP_CREDENTIAL_SHARING_ENABLED",
+     "trigger": "Every connection creation; any Salesforce/network failure",
+     "consequence": "Non-sharing users pay extra call+write; failures throw HttpError aborting previously-working operations"
+    },
+    "material_differences": [
+     "B adds hard-failure/HttpError abort claim",
+     "B adds flag-gating claim; A adds race/rotation claims"
+    ],
+    "same": false,
+    "confidence": 0.85,
+    "reason": "B asserts a different consequence (hard failure aborting operations) not in A."
+   },
+   {
+    "pair": 8,
+    "a": {
+     "mechanism": "Unconditional refresh + DB write; races",
+     "trigger": "Every instantiation",
+     "consequence": "Race-induced rotation invalidation; multiplied calls"
+    },
+    "b": {
+     "mechanism": "Unconditional refresh + DB write replacing jsforce lazy refresh, never via refreshOAuthTokens",
+     "trigger": "Every Salesforce availability check/booking",
+     "consequence": "Latency on hot path, multiplied token-endpoint load, disconnected from sync; untraceable to requirement"
+    },
+    "material_differences": [
+     "A claims races/rotation-invalidation; B doesn't",
+     "B adds untraceable-to-requirement claim"
+    ],
+    "same": false,
+    "confidence": 0.8,
+    "reason": "B adds different material claims and omits race/rotation claims."
+   },
+   {
+    "pair": 9,
+    "a": {
+     "mechanism": "Unconditional refresh + DB write; races",
+     "trigger": "Every instantiation",
+     "consequence": "Race-induced rotation invalidation; multiplied calls"
+    },
+    "b": {
+     "mechanism": "Unconditional refresh fetch + prisma update on every instantiation; bypasses refreshOAuthTokens",
+     "trigger": "Every construction",
+     "consequence": "Serial latency and DB write amplification even when cached token valid"
+    },
+    "material_differences": [
+     "A's race/rotation-invalidation claim absent from B"
+    ],
+    "same": false,
+    "confidence": 0.75,
+    "reason": "B is essentially a subset of A; A's race/rotation-invalidation claim is a material claim B lacks."
+   },
+   {
+    "pair": 10,
+    "a": {
+     "mechanism": "Unconditional refresh + DB write; races",
+     "trigger": "Every instantiation",
+     "consequence": "Race-induced rotation invalidation; multiplied calls"
+    },
+    "b": {
+     "mechanism": "Unconditional refresh + DB write regardless of token validity or APP_CREDENTIAL_SHARING_ENABLED",
+     "trigger": "Every service construction",
+     "consequence": "Unflagged behavior change"
+    },
+    "material_differences": [
+     "A's race/rotation-invalidation claim absent from B",
+     "B adds flag-gating/unflagged-change claim"
+    ],
+    "same": false,
+    "confidence": 0.8,
+    "reason": "B adds gating claims and omits A's race/rotation consequence."
+   },
+   {
+    "pair": 11,
+    "a": {
+     "mechanism": "Unconditional refresh + DB write; races",
+     "trigger": "Every instantiation",
+     "consequence": "Race-induced rotation invalidation; multiplied calls"
+    },
+    "b": {
+     "mechanism": "Unconditional refresh + DB write, no expiry check, duplicates jsforce refresh, bypasses refreshOAuthTokens",
+     "trigger": "Every booking/operation",
+     "consequence": "Extra round-trip/write; two sources of truth; sync silently doesn't apply"
+    },
+    "material_differences": [
+     "B adds jsforce two-sources-of-truth claim",
+     "A's race/rotation-invalidation claim absent from B"
+    ],
+    "same": false,
+    "confidence": 0.8,
+    "reason": "Each contains material claims the other lacks."
+   },
+   {
+    "pair": 12,
+    "a": {
+     "mechanism": "Unconditional refresh + DB write; races",
+     "trigger": "Every instantiation",
+     "consequence": "Race-induced rotation invalidation; multiplied calls"
+    },
+    "b": {
+     "mechanism": "Eager refresh on every instantiation instead of on 401; duplicates jsforce refresh logic",
+     "trigger": "Every operation; failed token endpoint",
+     "consequence": "Extra network call; failures become hard failures"
+    },
+    "material_differences": [
+     "B claims refresh should occur on 401 (different trigger framing) and hard-failure consequence",
+     "A's race/rotation-invalidation and DB-write claims absent from B"
+    ],
+    "same": false,
+    "confidence": 0.8,
+    "reason": "Different trigger mechanism (on-401 vs constructor) and failure consequence claims."
+   },
+   {
+    "pair": 13,
+    "a": {
+     "mechanism": "Unconditional refresh + DB write; races",
+     "trigger": "Every instantiation",
+     "consequence": "Race-induced rotation invalidation; multiplied calls and writes"
+    },
+    "b": {
+     "mechanism": "Unconditional refresh in constructor regardless of APP_CREDENTIAL_SHARING_ENABLED",
+     "trigger": "Every instantiation, flag on or off",
+     "consequence": "Network round-trips and rotation pressure for self-hosters"
+    },
+    "material_differences": [
+     "B adds flag-gating claim and self-hoster framing",
+     "B omits DB write and race-on-credential-row claims"
+    ],
+    "same": false,
+    "confidence": 0.75,
+    "reason": "B's rotation-pressure framing is vague and omits A's race/DB-write material claims while adding flag gating."
+   },
+   {
+    "pair": 14,
+    "a": {
+     "mechanism": "Fetch to sync endpoint has no timeout/AbortController",
+     "trigger": "Slow or hung user-configured sync endpoint",
+     "consequence": "Blocks token refresh and booking paths indefinitely"
+    },
+    "b": {
+     "mechanism": "Un-timed, uncached fetch serially on hot path; all apps funnel through one endpoint, no backpressure",
+     "trigger": "Slow/hung sync endpoint",
+     "consequence": "Booking/availability latency inflation or serverless invocation stalls"
+    },
+    "material_differences": [
+     "B adds uncached, single-endpoint funnel, and no-backpressure claims"
+    ],
+    "same": false,
+    "confidence": 0.75,
+    "reason": "B is a compound report with additional material claims beyond A's no-timeout issue."
+   },
+   {
+    "pair": 15,
+    "a": {
+     "mechanism": "Fetch to sync endpoint has no timeout/AbortController",
+     "trigger": "Slow/hung sync endpoint",
+     "consequence": "Blocks token refresh and booking paths indefinitely"
+    },
+    "b": {
+     "mechanism": "No timeout, no retry, no status handling on sync fetch",
+     "trigger": "Hung/slow endpoint; non-2xx response",
+     "consequence": "Blocks booking flows; non-2xx passed to callers as-is"
+    },
+    "material_differences": [
+     "B adds retry and non-2xx response-handling claims"
+    ],
+    "same": false,
+    "confidence": 0.8,
+    "reason": "B adds materially different defect claims (no retry, non-2xx mishandling) beyond A's timeout issue."
+   },
+   {
+    "pair": 16,
+    "a": {
+     "mechanism": "Fetch to sync endpoint has no timeout/AbortController",
+     "trigger": "Slow/hung sync endpoint",
+     "consequence": "Blocks token refresh and booking paths indefinitely"
+    },
+    "b": {
+     "mechanism": "No timeout, no retry/circuit-breaker, no response.ok check, no fallback to local refreshFunction, no auth material",
+     "trigger": "Hung or failing parent instance",
+     "consequence": "Hard outage or latency amplifier for every synced credential"
+    },
+    "material_differences": [
+     "B adds missing auth, missing fallback, circuit-breaker, and hard-outage claims"
+    ],
+    "same": false,
+    "confidence": 0.85,
+    "reason": "B is a much broader compound claim with several defects A does not mention."
+   },
+   {
+    "pair": 17,
+    "a": {
+     "mechanism": "Fetch to sync endpoint has no timeout/AbortController",
+     "trigger": "Slow/hung sync endpoint",
+     "consequence": "Blocks token refresh and booking paths indefinitely"
+    },
+    "b": {
+     "mechanism": "No AbortController timeout and no response.ok check",
+     "trigger": "Hung endpoint; 500/404 response",
+     "consequence": "Stalls request/booking path indefinitely; error body passed as valid token response"
+    },
+    "material_differences": [
+     "B adds the response.ok/non-2xx mishandling claim"
+    ],
+    "same": false,
+    "confidence": 0.8,
+    "reason": "B adds a materially different defect (error body treated as valid token) not in A."
+   },
+   {
+    "pair": 18,
+    "a": {
+     "mechanism": "Fetch to sync endpoint has no timeout/AbortController",
+     "trigger": "Slow/hung user-configured sync endpoint",
+     "consequence": "Blocks token refresh and booking-flow request paths indefinitely"
+    },
+    "b": {
+     "mechanism": "Outbound sync fetch has no timeout, runs inline in calendar/video service construction",
+     "trigger": "Hanging CALCOM_CREDENTIAL_SYNC_ENDPOINT",
+     "consequence": "Stalls booking flows"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "Both claim no timeout on the sync fetch causing booking-flow stalls; B's inline-construction detail is a mechanism elaboration, not a new defect claim."
+   }
+  ]
+ },
+ "usage": {
+  "glm-5.3-background": {
+   "input_tokens": 2671,
+   "cache_read_input_tokens": 384,
+   "cache_creation_input_tokens": 0,
+   "output_tokens": 2644,
+   "reasoning_output_tokens": 1028,
+   "cost_usd": 0.0,
+   "total_tokens": 6727
+  }
+ },
+ "status": "complete",
+ "error_type": null,
+ "elapsed_s": 20.754509925842285
+}

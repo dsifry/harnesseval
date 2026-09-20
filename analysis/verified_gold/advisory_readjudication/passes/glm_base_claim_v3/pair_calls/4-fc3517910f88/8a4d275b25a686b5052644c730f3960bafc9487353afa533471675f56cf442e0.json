@@ -1,0 +1,491 @@
+{
+ "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/4",
+ "pass_digest": "9c5f733ce7a3f996c90c67f262cc4a77e2b234bc415c197afa7c73477ad320be",
+ "request_sha256": "8a4d275b25a686b5052644c730f3960bafc9487353afa533471675f56cf442e0",
+ "request": {
+  "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/4",
+  "model": "glm-5.3-background",
+  "system": "You are clustering code review findings from one PR. Always respond with valid JSON.",
+  "prompt": "You are clustering code review findings from the same PR. For each PAIR below, decide whether the two findings describe the SAME underlying issue — same root cause in the same code location. Different wording is fine. A finding about a DIFFERENT defect in the same file or function is NOT the same issue. Severity or aspect differences of the same root cause ARE the same issue.\n\n\nFor THIS scoring pass, duplicate equivalence is stricter than sharing a root cause.\nYou must compare the COMPLETE MATERIAL CLAIMS, including mechanism, triggering\nconditions, execution path, and consequence. The same line or broad concern does\nnot establish equivalence. A report of wrong-category selection, a case/rename\nmismatch, a crash, and a silent fallback are different claims even at one lookup.\nAn inactive/unbound API concern and an alleged active user-facing failure differ.\nA compound report with an additional material claim does NOT equal its subset.\nDifferences only in wording, severity, or hedging do not create separate claims.\nIf the claimed mechanisms, triggers or consequences conflict, or one report adds\nan unsupported/different material factual claim, return same=false. You are NOT\nverifying which claim is true; do not repair or reinterpret either report to make\nthem match. If unsure whether their full claims are equivalent, return false.\n\nFor every numbered pair, extract what A and B actually CLAIM into mechanism,\ntrigger and consequence. Then list material_differences and give your equivalence\nverdict, confidence and reason. same=true requires no material differences.\nReturn ONLY this JSON object, with EVERY pair index exactly once:\n{\"pairs\":[{\"pair\":1,\"a\":{\"mechanism\":\"...\",\"trigger\":\"...\",\"consequence\":\"...\"},\"b\":{\"mechanism\":\"...\",\"trigger\":\"...\",\"consequence\":\"...\"},\"material_differences\":[],\"same\":true,\"confidence\":0.9,\"reason\":\"...\"}]}\n\nPAIRS:\nPAIR 1:\nA: app/jobs/scheduled/poll_feed.rb:29 — open(SiteSetting.feed_polling_url) reads the whole feed into memory with no timeout/size limit, and feed_key is never used so no If-Modified-Since/ETag conditional fetch — the full feed is re-downloaded and every item re-hashed/looked up hourly.\nB: app/jobs/scheduled/poll_feed.rb:29 — The poller downloads and parses the entire feed without a byte or item limit, so an oversized or growing feed can exhaust worker memory on every poll.\n\nPAIR 2:\nA: app/jobs/scheduled/poll_feed.rb:29 — open(SiteSetting.feed_polling_url) reads the whole feed into memory with no timeout/size limit, and feed_key is never used so no If-Modified-Since/ETag conditional fetch — the full feed is re-downloaded and every item re-hashed/looked up hourly.\nB: app/jobs/scheduled/poll_feed.rb:30 — Feed is fetched via open() with no timeout/size limit and every item is re-imported (string build, SHA1, DB lookup) each poll with no Last-Modified/ETag check despite defining feed_key.\n\nPAIR 3:\nA: app/jobs/scheduled/poll_feed.rb:29 — open(SiteSetting.feed_polling_url) reads the whole feed into memory with no timeout/size limit, and feed_key is never used so no If-Modified-Since/ETag conditional fetch — the full feed is re-downloaded and every item re-hashed/looked up hourly.\nB: app/jobs/scheduled/poll_feed.rb:31 — Iterating every feed item calls an import that performs a separate embed lookup, creating an unbounded N+1 database workload for large feeds.\n\nPAIR 4:\nA: app/jobs/scheduled/poll_feed.rb:29 — open(SiteSetting.feed_polling_url) reads the whole feed into memory with no timeout/size limit, and feed_key is never used so no If-Modified-Since/ETag conditional fetch — the full feed is re-downloaded and every item re-hashed/looked up hourly.\nB: app/jobs/scheduled/poll_feed.rb:31-37 — rss.items.each serially calls TopicEmbed.import (which itself runs PostCreator or PostRevisor) for every item with no batching or limit, so job duration grows unbounded with feed size and the same unbounded loop is also reachable synchronously via TopicRetriever#perform_retrieve on a request-triggered path\n\nPAIR 5:\nA: app/jobs/scheduled/poll_feed.rb:29 — open(SiteSetting.feed_polling_url) reads the whole feed into memory with no timeout/size limit, and feed_key is never used so no If-Modified-Since/ETag conditional fetch — the full feed is re-downloaded and every item re-hashed/looked up hourly.\nB: Feed poll (poll_feed.rb:31-37) iterates all feed items with no cap and a per-item query (N+1 shape): each iteration issues TopicEmbed.where(embed_url: url).first plus a SHA1 over full content and a Nokogiri parse, with no limit on item count and no conditional fetch\n\nPAIR 6:\nA: app/jobs/scheduled/poll_feed.rb:29 — open(SiteSetting.feed_polling_url) reads the whole feed into memory with no timeout/size limit, and feed_key is never used so no If-Modified-Since/ETag conditional fetch — the full feed is re-downloaded and every item re-hashed/looked up hourly.\nB: Neither the feed fetch (app/jobs/scheduled/poll_feed.rb:29) nor the article fetch (app/models/topic_embed.rb:34) sets an `open_timeout`/`read_timeout`, so an unresponsive feed or article host can wedge Sidekiq workers indefinitely\n\nPAIR 7:\nA: app/models/post.rb:133 — Post#cook now returns unsanitized raw for cook_method raw_html, silently changing the `cooked` contract for every consumer (search index, excerpts, emails, RSS, TopicView) with no sanitization step\nB: app/models/post.rb:133 — `return raw if cook_method == Post.cook_methods[:raw_html]` changes core Post cooking for the whole forum and bypasses the entire cook/sanitize pipeline and `after_post_cook` plugin filters, backed by a new `posts.cook_method` column migration; a site-wide core-model behavior change of this breadth exceeds an embed URL validation task (P1, conf 75)\n\nPAIR 8:\nA: app/models/post.rb:133 — Post#cook now returns unsanitized raw for cook_method raw_html, silently changing the `cooked` contract for every consumer (search index, excerpts, emails, RSS, TopicView) with no sanitization step\nB: Stored, unsanitized HTML: Post#cook returns raw unfiltered for raw_html posts (app/models/post.rb:~133), the feed path stores i.content with no whitelist at all (poll_feed.rb:35, where CGI.unescapeHTML re-materializes escaped HTML), and it is rendered via raw post.cooked (best.html.erb:19), so a malicious or compromised feed source becomes stored HTML served from the Discourse origin\n\nPAIR 9:\nA: db/migrate/20131217174004_create_topic_embeds.rb:4 — `t.integer :topic_id, null: false` and `t.integer :post_id, null: false` create unenforced references, so deletion or a failed external write leaves an orphan whose URL lookup returns a nonexistent topic rather than allowing a clean re-import .\nB: db/migrate/20131217174004_create_topic_embeds.rb:4 — topic_id and post_id are NOT NULL with no foreign keys or indexes, so orphaned embeds remain after topic/post deletion and there is no deletion hook in Topic/Post for topic_embeds.\n\nPAIR 10:\nA: db/migrate/20131217174004_create_topic_embeds.rb:4 — `t.integer :topic_id, null: false` and `t.integer :post_id, null: false` create unenforced references, so deletion or a failed external write leaves an orphan whose URL lookup returns a nonexistent topic rather than allowing a clean re-import .\nB: db/migrate/20131217174004_create_topic_embeds.rb:4 — topic_id and post_id get no index and no foreign key, so TopicEmbed#topic/#post lookups are seq scans and rows are orphaned when the topic or post is deleted\n\nPAIR 11:\nA: db/migrate/20131217174004_create_topic_embeds.rb:3 — create_table uses `force: true` unnecessarily on a brand-new table creation, which is misleading/risky boilerplate that would drop the table if it already existed (e.g., re-run after partial failure) without warning\nB: db/migrate/20131217174004_create_topic_embeds.rb:3 — P3/50: `create_table :topic_embeds, force: true` makes a re-run drop every imported embed mapping without warning, and the table's `topic_id`/`post_id` columns (`t.integer :topic_id, null: false` / `t.integer :post_id, null: false`) have no foreign keys or cleanup, so hard-deleting a post or topic leaves orphaned rows and `TopicEmbed.import` then calls `PostRevisor.new(embed.post)` with a nil post while `topic_id_for_embed` still returns the dead topic id.\n\nPAIR 12:\nA: db/migrate/20131217174004_create_topic_embeds.rb:3 — create_table uses `force: true` unnecessarily on a brand-new table creation, which is misleading/risky boilerplate that would drop the table if it already existed (e.g., re-run after partial failure) without warning\nB: `force: true` in `db/migrate/20131217174004_create_topic_embeds.rb:4` silently drops any pre-existing table if the migration is re-run (redo, out-of-sync `schema_migrations`), and editing the already-released `db/migrate/20131223171005_create_top_topics.rb:2` means DBs that ran the original never see the change and diverge from fresh installs\n\nPAIR 13:\nA: db/migrate/20131223171005_create_top_topics.rb:3 — Editing a migration that has already run in production changes nothing for already-migrated databases (Rails keys only on the timestamp, no checksum), so fresh `db:migrate` installs and existing installs permanently diverge in behavior for the same schema version.\nB: Editing already-shipped migrations: force: true added to db/migrate/20131223171005_create_top_topics.rb has no effect on existing installs and silently drops the table if the migration is ever re-run (db:migrate:redo), plus whitespace-only churn in 20131210181901_migrate_word_counts.rb — a local-dev hack leaking into the commit\n\nPAIR 14:\nA: post_revisor.rb skip_validations option allows TopicEmbed raw HTML of arbitrary length/content to bypass post validations like length limits (P1)\nB: skip_validations option leaks from embed import into the generic revision path: PostRevisor exposes `@post.save(validate: !@opts[:skip_validations])` as a general-purpose escape hatch allowing any caller to silently bypass all validations on post edits, with nothing marking the revised post as system-authored (lib/post_revisor.rb:85)\n\nPAIR 15:\nA: Disqus task (lib/tasks/disqus.thor) becomes network-bound: the refactor to TopicEmbed.import_remote made a bulk import fetch every thread's page over HTTP, so it is now slow and fragile where it previously used stored content\nB: disqus.thor import_remote now fetches each thread's link live, making import depend on remote sites being up instead of local dump data (P3)\n\nPAIR 16:\nA: Disqus task (lib/tasks/disqus.thor) becomes network-bound: the refactor to TopicEmbed.import_remote made a bulk import fetch every thread's page over HTTP, so it is now slow and fragile where it previously used stored content\nB: lib/tasks/disqus.thor:148 — [P1, confidence 100] `post = TopicEmbed.import_remote(user, t[:link], title: t[:title])` lets one unavailable source URL abort the import after earlier threads committed, and rerunning then re-enters those existing topics and creates their replies again, duplicating already-imported comments.\n\nPAIR 17:\nA: The diff removes the --category option, its category_id lookup, and the PostCreator permalink format from the Disqus importer, rewriting it to TopicEmbed.import_remote — work not traceable to the stated 'enhance embed URL handling and validation' intent. Users' existing disqus:import invocations with -c now fail with an unknown-option error, and imported topics silently lose their Permalink preamble and category placement; this is an unrelated breaking change hidden in an embedding PR.\nB: The diff rewrites the existing Disqus importer — deleting the documented `--category/-c` option, dropping the `created_at: Date.parse(t[:created_at])` propagation, and replacing the unconditional PostCreator topic creation with `TopicEmbed.import_remote` — work traceable to no embed-URL requirement. Operators re-running `thor disqus:import -c Foo` hit an unknown-option error; all re-imports lose their original post dates and category placement; and any thread whose link is not an http(s) URL or whose page fetch fails now silently produces no topic at all where the old code always created one.\n\nPAIR 18:\nA: The diff removes the --category option, its category_id lookup, and the PostCreator permalink format from the Disqus importer, rewriting it to TopicEmbed.import_remote — work not traceable to the stated 'enhance embed URL handling and validation' intent. Users' existing disqus:import invocations with -c now fail with an unknown-option error, and imported topics silently lose their Permalink preamble and category placement; this is an unrelated breaking change hidden in an embedding PR.\nB: The diff silently removes the public `--category/-c` CLI option and replaces the permalink-post creation with TopicEmbed.import_remote, changing what the existing disqus import command accepts and produces without any mention in the PR's stated objective. Existing operator scripts invoking `thor disqus import -c 'Some Category'` now abort with a Thor unknown-switch error, and even corrected invocations no longer create the '[Permalink](url)' post with category assignment — instead they fetch each Disqus thread's live URL over HTTP and import the scraped article, silently changing the imported data shape for every existing user of the task.\n\nPAIR 19:\nA: The diff removes the --category option, its category_id lookup, and the PostCreator permalink format from the Disqus importer, rewriting it to TopicEmbed.import_remote — work not traceable to the stated 'enhance embed URL handling and validation' intent. Users' existing disqus:import invocations with -c now fail with an unknown-option error, and imported topics silently lose their Permalink preamble and category placement; this is an unrelated breaking change hidden in an embedding PR.\nB: The disqus import was rewritten to call TopicEmbed.import_remote(user, t[:link]) instead of creating posts directly: the documented -c/--category option was deleted (thor errors on unknown options), threads whose link is not http(s) are silently skipped because import returns nil, and the first unreachable link raises inside open() and aborts the whole import mid-run. Operators running the previously documented `disqus import -c <category>` invocation get an unknown-option error, and anyone importing an export containing one dead or non-http link gets a partial, silently incomplete import with no report of which threads were dropped.\n\nPAIR 20:\nA: The diff removes the --category option, its category_id lookup, and the PostCreator permalink format from the Disqus importer, rewriting it to TopicEmbed.import_remote — work not traceable to the stated 'enhance embed URL handling and validation' intent. Users' existing disqus:import invocations with -c now fail with an unknown-option error, and imported topics silently lose their Permalink preamble and category placement; this is an unrelated breaking change hidden in an embedding PR.\nB: The existing Disqus import tool is rewritten to route through TopicEmbed.import_remote and its `--category` option is deleted outright — behavior changes to an existing user-facing tool not traceable to any embedding requirement in this diff. Existing automation invoking `thor disqus:import -c 'Category'` loses category assignment with no replacement, and imports now fetch each thread's link over HTTP and import the remote article body instead of building topics from the local Disqus XML — threads whose link is dead or non-http make import return nil so the thread and all its posts are silently skipped.\n",
+  "effort": "low",
+  "pairs": [
+   [
+    598,
+    600
+   ],
+   [
+    598,
+    602
+   ],
+   [
+    598,
+    608
+   ],
+   [
+    598,
+    621
+   ],
+   [
+    598,
+    1094
+   ],
+   [
+    598,
+    1331
+   ],
+   [
+    690,
+    698
+   ],
+   [
+    690,
+    1675
+   ],
+   [
+    976,
+    977
+   ],
+   [
+    976,
+    978
+   ],
+   [
+    961,
+    970
+   ],
+   [
+    961,
+    1103
+   ],
+   [
+    1016,
+    1058
+   ],
+   [
+    1441,
+    1479
+   ],
+   [
+    1037,
+    1042
+   ],
+   [
+    1037,
+    1211
+   ],
+   [
+    288,
+    289
+   ],
+   [
+    288,
+    290
+   ],
+   [
+    288,
+    294
+   ],
+   [
+    288,
+    300
+   ]
+  ]
+ },
+ "parsed_response": {
+  "pairs": [
+   {
+    "pair": 1,
+    "a": {
+     "mechanism": "Compound: whole feed read into memory with no timeout/size limit AND no conditional fetch (feed_key unused)",
+     "trigger": "hourly poll of feed_polling_url",
+     "consequence": "full feed re-downloaded and every item re-hashed/looked up each poll"
+    },
+    "b": {
+     "mechanism": "download/parse entire feed with no byte or item limit",
+     "trigger": "every poll",
+     "consequence": "oversized feed can exhaust worker memory"
+    },
+    "material_differences": [
+     "A additionally claims missing If-Modified-Since/ETag conditional fetch and per-item re-hash; B omits those, so B is a subset of A's compound claim"
+    ],
+    "same": false,
+    "confidence": 0.85,
+    "reason": "A is a compound claim including the missing conditional fetch; B only claims the memory/limit issue."
+   },
+   {
+    "pair": 2,
+    "a": {
+     "mechanism": "open() reads whole feed, no timeout/size limit; feed_key unused so no conditional fetch",
+     "trigger": "hourly poll",
+     "consequence": "full feed re-downloaded, every item re-hashed/looked up each poll"
+    },
+    "b": {
+     "mechanism": "open() with no timeout/size limit; no Last-Modified/ETag check despite feed_key defined",
+     "trigger": "each poll",
+     "consequence": "every item re-imported (string build, SHA1, DB lookup) each poll"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Same mechanism (unbounded fetch, no conditional fetch) and same consequence (full re-download and re-processing per poll)."
+   },
+   {
+    "pair": 3,
+    "a": {
+     "mechanism": "unbounded in-memory fetch + no conditional fetch",
+     "trigger": "hourly poll",
+     "consequence": "full re-download and per-item re-hash/lookup hourly"
+    },
+    "b": {
+     "mechanism": "per-item import performs separate embed lookup, creating N+1 DB workload",
+     "trigger": "iterating every feed item, large feeds",
+     "consequence": "unbounded N+1 database workload"
+    },
+    "material_differences": [
+     "B claims a specific N+1 embed-lookup mechanism not present in A",
+     "A's core claim is fetch-level; B's is per-item query shape"
+    ],
+    "same": false,
+    "confidence": 0.8,
+    "reason": "B asserts a distinct N+1 database workload mechanism absent from A."
+   },
+   {
+    "pair": 4,
+    "a": {
+     "mechanism": "unbounded fetch + no conditional fetch",
+     "trigger": "hourly poll",
+     "consequence": "full re-download and re-hash/lookup"
+    },
+    "b": {
+     "mechanism": "serial unbounded per-item TopicEmbed.import (PostCreator/PostRevisor), also reachable synchronously via TopicRetriever#perform_retrieve",
+     "trigger": "any feed size; request-triggered path",
+     "consequence": "job duration grows unbounded; sync request path affected"
+    },
+    "material_differences": [
+     "B claims serial import calls and a synchronous request-triggered path, neither in A"
+    ],
+    "same": false,
+    "confidence": 0.85,
+    "reason": "Different mechanism and execution-path claims."
+   },
+   {
+    "pair": 5,
+    "a": {
+     "mechanism": "unbounded fetch + no conditional fetch",
+     "trigger": "hourly poll",
+     "consequence": "full re-download, per-item re-hash/lookup"
+    },
+    "b": {
+     "mechanism": "per-item TopicEmbed.where lookup + SHA1 + Nokogiri parse (N+1 shape), no cap, no conditional fetch",
+     "trigger": "iterating all items",
+     "consequence": "unbounded per-item DB/CPU work"
+    },
+    "material_differences": [
+     "B adds concrete N+1 per-item query claims not asserted by A"
+    ],
+    "same": false,
+    "confidence": 0.75,
+    "reason": "Overlapping but B adds specific per-item query/parse mechanism claims."
+   },
+   {
+    "pair": 6,
+    "a": {
+     "mechanism": "unbounded fetch + no conditional fetch",
+     "trigger": "hourly poll",
+     "consequence": "memory/re-download inefficiency"
+    },
+    "b": {
+     "mechanism": "no open_timeout/read_timeout on feed and article fetch",
+     "trigger": "unresponsive host",
+     "consequence": "Sidekiq workers wedge indefinitely"
+    },
+    "material_differences": [
+     "Consequences conflict: re-download inefficiency vs indefinite worker wedge",
+     "B adds article fetch location (topic_embed.rb:34)"
+    ],
+    "same": false,
+    "confidence": 0.8,
+    "reason": "Different triggering condition (unresponsive host) and consequence (indefinite wedge)."
+   },
+   {
+    "pair": 7,
+    "a": {
+     "mechanism": "Post#cook returns unsanitized raw for raw_html cook_method",
+     "trigger": "raw_html posts",
+     "consequence": "cooked contract changed for all consumers (search, excerpts, emails, RSS, TopicView), no sanitization"
+    },
+    "b": {
+     "mechanism": "return raw for raw_html cook_method bypasses cook/sanitize pipeline and after_post_cook plugin filters",
+     "trigger": "raw_html posts site-wide",
+     "consequence": "core post cooking changed forum-wide, with migration adding cook_method column"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "Same root cause and mechanism: raw_html bypasses sanitization in Post#cook; B adds only detail about plugin filters and scope, no conflicting claim."
+   },
+   {
+    "pair": 8,
+    "a": {
+     "mechanism": "Post#cook returns unsanitized raw for raw_html",
+     "trigger": "raw_html posts",
+     "consequence": "cooked contract changed for all consumers, no sanitization"
+    },
+    "b": {
+     "mechanism": "compound: unsanitized raw cook + feed stores i.content with no whitelist (CGI.unescapeHTML) + rendered via raw post.cooked",
+     "trigger": "malicious or compromised feed source",
+     "consequence": "stored HTML served from Discourse origin (stored XSS)"
+    },
+    "material_differences": [
+     "B adds feed-path storage and rendering-chain claims not in A",
+     "Consequences differ: contract change vs stored XSS from feed"
+    ],
+    "same": false,
+    "confidence": 0.85,
+    "reason": "B is a compound report with additional material claims about the feed path and rendering."
+   },
+   {
+    "pair": 9,
+    "a": {
+     "mechanism": "topic_id/post_id NOT NULL but unenforced references (no FK)",
+     "trigger": "deletion or failed external write",
+     "consequence": "orphaned embed; URL lookup returns nonexistent topic, blocking clean re-import"
+    },
+    "b": {
+     "mechanism": "topic_id/post_id NOT NULL, no FKs or indexes, no deletion hook",
+     "trigger": "topic/post deletion",
+     "consequence": "orphaned embeds remain"
+    },
+    "material_differences": [
+     "A adds failed-external-write trigger and re-import blockage consequence",
+     "B adds index absence mention"
+    ],
+    "same": true,
+    "confidence": 0.7,
+    "reason": "Same root cause (unenforced references causing orphans); differences are trigger/consequence detail of the same defect."
+   },
+   {
+    "pair": 10,
+    "a": {
+     "mechanism": "unenforced topic_id/post_id references",
+     "trigger": "deletion/failed write",
+     "consequence": "orphan whose lookup returns nonexistent topic, blocking re-import"
+    },
+    "b": {
+     "mechanism": "no index and no FK",
+     "trigger": "topic/post deletion; lookups",
+     "consequence": "seq scans on lookups plus orphaned rows"
+    },
+    "material_differences": [
+     "B adds a distinct performance claim (seq scans) absent from A"
+    ],
+    "same": false,
+    "confidence": 0.8,
+    "reason": "B adds a material index/seq-scan performance claim not present in A."
+   },
+   {
+    "pair": 11,
+    "a": {
+     "mechanism": "force: true on new table creation would silently drop existing table on re-run",
+     "trigger": "migration re-run after partial failure",
+     "consequence": "table dropped without warning"
+    },
+    "b": {
+     "mechanism": "compound: force:true drop on re-run PLUS no FKs/cleanup causing orphans and PostRevisor with nil post",
+     "trigger": "re-run; hard delete",
+     "consequence": "data loss and nil-post revision errors"
+    },
+    "material_differences": [
+     "B adds FK/orphan and PostRevisor nil-post claims not in A"
+    ],
+    "same": false,
+    "confidence": 0.85,
+    "reason": "B is a compound report with additional material claims."
+   },
+   {
+    "pair": 12,
+    "a": {
+     "mechanism": "force: true on brand-new table is risky boilerplate that drops pre-existing table on re-run",
+     "trigger": "re-run after partial failure",
+     "consequence": "silent table drop"
+    },
+    "b": {
+     "mechanism": "force: true silently drops pre-existing table on re-run; PLUS editing released migration 20131223171005 causes divergence",
+     "trigger": "redo/out-of-sync schema_migrations",
+     "consequence": "table drop; existing DBs diverge from fresh installs"
+    },
+    "material_differences": [
+     "B adds the edited-released-migration divergence claim not in A"
+    ],
+    "same": false,
+    "confidence": 0.85,
+    "reason": "B compounds the force:true claim with a separate migration-edit divergence claim."
+   },
+   {
+    "pair": 13,
+    "a": {
+     "mechanism": "editing already-run migration has no effect on existing DBs",
+     "trigger": "existing installs vs fresh migrate",
+     "consequence": "permanent divergence for same schema version"
+    },
+    "b": {
+     "mechanism": "editing shipped migrations: force:true added with no effect on existing installs and drops table on redo; whitespace churn in another migration",
+     "trigger": "existing installs; redo",
+     "consequence": "divergence, data drop on redo, local-dev hack leaking"
+    },
+    "material_differences": [
+     "B adds force:true drop-on-redo and whitespace-churn claims not in A"
+    ],
+    "same": false,
+    "confidence": 0.8,
+    "reason": "B is a compound report with additional claims."
+   },
+   {
+    "pair": 14,
+    "a": {
+     "mechanism": "skip_validations in embed import bypasses post validations (length limits)",
+     "trigger": "TopicEmbed raw HTML import of arbitrary length/content",
+     "consequence": "invalid posts bypass validation"
+    },
+    "b": {
+     "mechanism": "skip_validations exposed in PostRevisor as general-purpose escape hatch (save validate: !skip)",
+     "trigger": "any caller of PostRevisor revision path",
+     "consequence": "all validations silently bypassable on arbitrary post edits; no system-author marking"
+    },
+    "material_differences": [
+     "B claims a general-purpose API exposure affecting any caller, not just the embed path",
+     "B adds missing system-author marking claim"
+    ],
+    "same": false,
+    "confidence": 0.8,
+    "reason": "B's claim of a generic revision-path escape hatch is broader/different from A's embed-import-specific claim."
+   },
+   {
+    "pair": 15,
+    "a": {
+     "mechanism": "refactor to TopicEmbed.import_remote makes bulk disqus import fetch every thread's page over HTTP",
+     "trigger": "disqus bulk import",
+     "consequence": "import slow/fragile, depends on remote sites instead of stored content"
+    },
+    "b": {
+     "mechanism": "import_remote fetches each thread's link live",
+     "trigger": "disqus import",
+     "consequence": "depends on remote sites being up instead of local dump data"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.9,
+    "reason": "Identical claim of network-bound disqus import replacing local content."
+   },
+   {
+    "pair": 16,
+    "a": {
+     "mechanism": "bulk import fetches every thread's page over HTTP",
+     "trigger": "disqus bulk import",
+     "consequence": "slow and fragile import"
+    },
+    "b": {
+     "mechanism": "single unavailable source URL aborts mid-import; rerun re-imports existing topics creating duplicate replies",
+     "trigger": "one dead URL; rerun after partial import",
+     "consequence": "aborted import and duplicated comments"
+    },
+    "material_differences": [
+     "B adds abort-on-exception and duplicate-replies-on-rerun claims not in A"
+    ],
+    "same": false,
+    "confidence": 0.85,
+    "reason": "B asserts distinct failure/abort and duplication mechanisms."
+   },
+   {
+    "pair": 17,
+    "a": {
+     "mechanism": "removal of --category, category_id lookup, permalink format; rewrite to import_remote",
+     "trigger": "existing disqus:import -c invocations",
+     "consequence": "unknown-option error; loss of Permalink preamble and category placement"
+    },
+    "b": {
+     "mechanism": "rewrite deletes --category/-c, drops created_at propagation, replaces PostCreator with import_remote",
+     "trigger": "re-running thor disqus:import -c; non-http/failing links",
+     "consequence": "unknown-option error; loss of dates and category; no topic created for non-http or failed-fetch threads"
+    },
+    "material_differences": [
+     "B adds created_at propagation loss and silent no-topic for non-http/failed-fetch threads"
+    ],
+    "same": false,
+    "confidence": 0.85,
+    "reason": "B is a compound report with additional material claims."
+   },
+   {
+    "pair": 18,
+    "a": {
+     "mechanism": "removal of --category and permalink PostCreator format, rewrite to import_remote",
+     "trigger": "existing -c invocations",
+     "consequence": "unknown-switch error; loss of Permalink preamble and category"
+    },
+    "b": {
+     "mechanism": "deletion of --category/-c and replacement with import_remote that fetches live URLs",
+     "trigger": "existing operator scripts",
+     "consequence": "unknown-switch abort; no [Permalink] post/category; imports scraped article instead of local XML data"
+    },
+    "material_differences": [
+     "B adds that imports now fetch/scrape the live article instead of building from local XML, changing data shape"
+    ],
+    "same": false,
+    "confidence": 0.8,
+    "reason": "B adds a material claim about data-shape change from live scraping not asserted in A."
+   },
+   {
+    "pair": 19,
+    "a": {
+     "mechanism": "removal of --category, permalink format, rewrite to import_remote",
+     "trigger": "existing -c invocations",
+     "consequence": "unknown-option error; loss of Permalink and category"
+    },
+    "b": {
+     "mechanism": "rewrite to import_remote; -c deleted; non-http links silently skipped (nil return); unreachable link raises in open() aborting run",
+     "trigger": "documented -c invocation; dead or non-http links",
+     "consequence": "unknown-option error; partial silently incomplete import"
+    },
+    "material_differences": [
+     "B adds silent skipping of non-http links and mid-run abort claims not in A"
+    ],
+    "same": false,
+    "confidence": 0.85,
+    "reason": "B is a compound report with additional failure-mechanism claims."
+   },
+   {
+    "pair": 20,
+    "a": {
+     "mechanism": "removal of --category, category lookup, permalink format; rewrite to import_remote",
+     "trigger": "existing disqus:import -c invocations",
+     "consequence": "unknown-option error; loss of Permalink preamble and category placement"
+    },
+    "b": {
+     "mechanism": "rewrite to import_remote; --category deleted; imports fetch live URLs and import remote article body; dead/non-http links yield nil and thread skipped",
+     "trigger": "existing automation with -c; dead/non-http links",
+     "consequence": "category assignment lost; topics built from remote article instead of local XML; threads silently skipped"
+    },
+    "material_differences": [
+     "B adds live article-body import, data-source change, and silent skip claims not in A"
+    ],
+    "same": false,
+    "confidence": 0.85,
+    "reason": "B compounds the shared removal claims with additional data-source and silent-skip claims."
+   }
+  ]
+ },
+ "usage": {
+  "glm-5.3-background": {
+   "input_tokens": 3181,
+   "cache_read_input_tokens": 384,
+   "cache_creation_input_tokens": 0,
+   "output_tokens": 2965,
+   "reasoning_output_tokens": 946,
+   "cost_usd": 0.0,
+   "total_tokens": 7476
+  }
+ },
+ "status": "complete",
+ "error_type": null,
+ "elapsed_s": 20.98429799079895
+}

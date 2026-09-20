@@ -1,0 +1,134 @@
+class Integer; def minutes; self * 60; end; end
+class NilClass; def blank?; true; end; def present?; false; end; end
+class String; def blank?; strip.empty?; end; def present?; !blank?; end; end
+
+module Jobs
+  class Scheduled
+    def self.every(*); end
+  end
+end
+
+$site_setting_calls = []
+
+class SiteSetting
+  class << self
+    def stubs_registry; @stubs_registry ||= {}; end
+    def reset_stubs!; @stubs_registry = {}; end
+    def feed_polling_enabled?; $site_setting_calls << :feed_polling_enabled?; stubs_registry.fetch(:feed_polling_enabled?, false); end
+    def feed_polling_url; $site_setting_calls << :feed_polling_url; stubs_registry.fetch(:feed_polling_url, nil); end
+    def embed_by_username; $site_setting_calls << :embed_by_username; stubs_registry.fetch(:embed_by_username, nil); end
+  end
+end
+
+loaded_from = nil
+load_errors = []
+['app/jobs/regular/poll_feed.rb', 'app/jobs/poll_feed.rb', 'lib/jobs/regular/poll_feed.rb', 'jobs/regular/poll_feed.rb'].each do |p|
+  next unless File.file?(p)
+  begin
+    load File.expand_path(p)
+    loaded_from = p
+    break
+  rescue => e
+    load_errors << "#{p}: #{e.class}: #{e.message}"
+  end
+end
+unless loaded_from
+  puts "RESULT: FAIL: could not load real Jobs::PollFeed (#{load_errors.inspect})"
+  exit 0
+end
+
+$expectations = []
+
+module MochaShim
+  def stubs(name); StubProxy.new(self, name); end
+  def expects(name); exp = Expectation.new(self, name); $expectations << exp; exp.install; exp; end
+end
+
+class StubProxy
+  def initialize(obj, name); @obj = obj; @name = name; end
+  def returns(val)
+    if @obj.equal?(SiteSetting)
+      SiteSetting.stubs_registry[@name] = val
+    else
+      v = val; @obj.define_singleton_method(@name) { |*a, &b| v }
+    end
+    self
+  end
+end
+
+class Expectation
+  def initialize(obj, name); @obj = obj; @name = name; @count = 0; @expected = nil; end
+  def never; @expected = 0; self; end
+  def once; @expected = 1; self; end
+  def install; exp = self; @obj.define_singleton_method(@name) { |*a, &b| exp.record; nil }; end
+  def record
+    @count += 1
+    raise "expected #{@expected} calls to #{@name}, got #{@count}" if @expected && @count > @expected
+  end
+  def verify
+    raise "expected #{@expected} calls to #{@name}, got #{@count}" if @expected && @count != @expected
+  end
+end
+
+class Object; include MochaShim; end
+
+$examples = []
+class Ctx
+  def initialize(examples, lets = {}); @examples = examples; @lets = lets; end
+  def context(name, &blk); describe(name, &blk); end
+  def describe(name, &blk); Ctx.new(@examples, @lets.dup).instance_eval(&blk); end
+  def let(name, &blk); @lets[name] = blk; end
+  def it(name, &blk); @examples << { name: name, block: blk, lets: @lets.dup }; end
+end
+def describe(name, &blk); Ctx.new($examples).instance_eval(&blk); end
+
+module Kernel
+  alias_method :__orig_require_for_verify, :require
+  def require(path, *args)
+    return false if path.to_s.end_with?('spec_helper')
+    __orig_require_for_verify(path, *args)
+  end
+end
+def require_dependency(*); end
+
+require './spec/jobs/poll_feed_spec.rb'
+
+class ExampleRunner
+  def initialize(lets, block); @lets = lets; @block = block; @memo = {}; end
+  def run; instance_eval(&@block); end
+  def method_missing(name, *args, &blk)
+    if @lets.key?(name); @memo[name] ||= instance_eval(&@lets[name]); else; super; end
+  end
+  def respond_to_missing?(name, inc = false); @lets.key?(name) || super; end
+end
+
+def run_example(ex)
+  $site_setting_calls = []
+  SiteSetting.reset_stubs!
+  $expectations = []
+  ExampleRunner.new(ex[:lets], ex[:block]).run
+  $expectations.each(&:verify)
+  $site_setting_calls.dup
+end
+
+url_ex = $examples.find { |e| e[:name].to_s.include?('requires feed_polling_url') }
+user_ex = $examples.find { |e| e[:name].to_s.include?('requires embed_by_username') }
+
+if url_ex.nil? || user_ex.nil?
+  puts "RESULT: FAIL: could not locate guard examples; found #{$examples.map { |e| e[:name] }.inspect}"
+  exit 0
+end
+
+url_calls = run_example(url_ex)
+user_calls = run_example(user_ex)
+
+url_vacuous = !url_calls.include?(:feed_polling_url)
+user_vacuous = !user_calls.include?(:embed_by_username)
+
+if url_vacuous && user_vacuous
+  puts "RESULT: FAIL: 'requires feed_polling_url' example never invokes feed_polling_url (calls=#{url_calls.inspect}); 'requires embed_by_username' example never invokes embed_by_username (calls=#{user_calls.inspect}); both pass only because feed_polling_enabled? defaults to false and short-circuits"
+elsif url_vacuous || user_vacuous
+  puts "RESULT: FAIL: one guard example vacuous (url=#{url_vacuous}, username=#{user_vacuous})"
+else
+  puts "RESULT: PASS"
+end

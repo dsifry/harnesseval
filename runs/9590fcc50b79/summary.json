@@ -1,0 +1,470 @@
+{
+  "tp": 0,
+  "fp": 14,
+  "fn": 2,
+  "precision": 0.0,
+  "recall": 0.0,
+  "n_findings": 14,
+  "n_golden": 2,
+  "tokens_in": 936357,
+  "tokens_out": 2956,
+  "wall_ms": 1830523.8978862762,
+  "per_model_usage": {
+    "glm-5.3-flash-background": {
+      "input_tokens": 12710,
+      "cache_read_input_tokens": 25024,
+      "cache_creation_input_tokens": 0,
+      "output_tokens": 2956,
+      "reasoning_output_tokens": 898623,
+      "cost_usd": 0.0,
+      "total_tokens": 939313
+    }
+  },
+  "total_cost_usd": 0.0,
+  "resolved_model": "glm-5.3-flash-background",
+  "adjudicated_precision": 0.0,
+  "incremental_recall": 0.6666666666666666,
+  "n_bug_ungold": 4,
+  "n_important_non_bug": 10,
+  "n_true_hallucination": 0,
+  "n_unresolved": 0,
+  "n_real_ungold": 4,
+  "n_hallucination": 0,
+  "decomposition": {
+    "deterministic_tp": 0,
+    "llm_lens_tp": 0,
+    "deterministic_gate_recall": 0.0,
+    "llm_lens_recall": 0.0
+  },
+  "findings": [
+    {
+      "issue_text": "[BUG] The entire fallback mechanism ships with zero verification: the diff contains no spec or test files (scanned for spec/**, test/**, *_spec.rb patterns \u2014 none present), so the feature's core acceptance criterion \u2014 a key missing in the user's locale renders the site-default locale's string, then English \u2014 is never asserted anywhere, and neither are the chain construction in FallbackLocaleList#[] (line 17), the ensure_loaded! preloading (lines 20-22 and translate_accelerator.rb), nor the set_locale wiring. Any regression in the fallback chain order, the uniq/compact handling, or the preloading logic lands silently: CI cannot detect it, and the first signal is production users seeing raw 'translation missing: \u2026' strings or wrong-language UI instead of fallback translations.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] I18n.fallbacks.ensure_loaded! is called only from ApplicationController#set_locale, so no non-web server-side rendering path ever preloads the fallback chain's SiteSetting.default_locale and :en members \u2014 background jobs and mailers, which set I18n.locale per user to localize notification emails, never run this controller before_action and are left out of the feature entirely. In a Sidekiq process, an email for a user whose locale is missing a key resolves the fallback chain [:user_locale, default_locale, :en] against a backend where only the user locale was loaded (the accelerator's translate loads only config.locale, and the backend's internal fallback loop bypasses the accelerator), so the email renders 'translation missing: \u2026' strings \u2014 or nondeterministically the wrong language when another job happened to load that locale \u2014 which is exactly the partially-translated-locale scenario the feature targets; the same gap applies to any I18n.with_locale block outside a controller action.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] FallbackLocaleList subclasses Hash but its [] (lines 13-18) never reads the underlying hash, so the i18n gem's customization surface on I18n.fallbacks silently changes semantics: []= chain overrides (honored by the Locale::Fallbacks instance production ran with before this diff, since config.i18n.fallbacks = true installed one) become a silent no-op, and the Locale::Fallbacks#defaults accessor raises NoMethodError. Plugin or out-of-tree code that customizes fallback chains via I18n.fallbacks[locale] = [...] or reads I18n.fallbacks.defaults gets silently ignored or crashes, while translations fall back per the hardcoded [locale, default_locale, :en] chain with no error signaling that the configured fallbacks were discarded.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] Under-scoped wiring: fallback locale preloading is enforced only by convention at this single call site in ApplicationController#set_locale, so the invariant 'every translating context has its fallback chain loaded' is not enforced anywhere else \u2014 mailers and background jobs that render in the recipient's locale, admin email previews, and any I18n.t(..., locale: x) caller switch I18n.locale without ever triggering I18n.fallbacks.ensure_loaded!. The accelerator's translate only loads config.locale (translate_accelerator.rb line 68) and nothing else in this diff loads the fallback locales, so in a Sidekiq/mailers process rendering an email for a user whose locale is missing a key, the backend Fallbacks probe of SiteSetting.default_locale and :en hits an unloaded store and the recipient gets a literal 'translation missing: xx.key' string in the email subject/body instead of the site-default/English fallback the feature promises \u2014 i.e. the incomplete-locale users this feature exists for are exactly the ones it does not serve outside web requests.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] FallbackLocaleList#[] recomputes the whole chain \u2014 a SiteSetting.default_locale read plus a 3-element array build with uniq/compact \u2014 on every single I18n.t call, because I18n::Backend::Fallbacks#translate invokes I18n.fallbacks[locale] per lookup and the overridden [] neither memoizes nor consults stored hash entries. The Rails default I18n::Locale::Fallbacks that config.i18n.fallbacks = true previously installed memoizes computed chains, so this diff replaces a memoized lookup with per-translation recompute on the hottest path in the app (hundreds of distinct t() calls per page render), adding avoidable per-lookup work to every request for every user.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The diff adds three pieces of behavior-bearing logic \u2014 the fallback chain ordering in FallbackLocaleList#[], the ensure_loaded! preloading in both FallbackLocaleList and the translate accelerator, and the set_locale wiring \u2014 with no test anywhere in the diff. A regression in chain order (e.g. site default accidentally taking priority over the user locale) or in the preload step (ensure_loaded! dropped or iterating the wrong locale) silently changes which language users see, and since unloaded fallback locales fail silently rather than raising, nothing in the test suite would catch it.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] translate's inline load guard on line 68 is a hand-duplicated copy of the ensure_loaded! helper added six lines above it, and the copies already drift: ensure_loaded! defensively initializes @loaded_locales with ||= while translate's guard evaluates @loaded_locales.include? without any initialization. The next change to locale-loading semantics (e.g. adding a mutex or changing the loaded-set representation) must be replicated in both guards or the cached-translate path and the preload path diverge; replacing line 68 with ensure_loaded!(config.locale) deletes the duplicate and unifies initialization at no cost.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The fallback-preload invariant is enforced only at this single call site: I18n.fallbacks.ensure_loaded! is wired solely into ApplicationController#set_locale, while the accelerator's translate (lib/freedom_patches/translate_accelerator.rb, visible in this diff) still loads only config.locale, so any execution context that translates under a non-default locale without passing through set_locale translates with fallbacks active but the fallback locales (site default, :en) not loaded into the backend. Background jobs that build localized emails (Sidekiq processes where nothing has yet translated in :en) render 'translation missing: ...' for keys absent from the user's locale but present in the fallback locale \u2014 the exact failure this feature exists to prevent \u2014 because the backend's fallback lookups hit an unloaded locale and fall through to MissingTranslation. The invariant belongs where translations execute (e.g., ensuring the chain inside the accelerator's translate entry point), not on each caller to remember; as shipped, correctness of the new mechanism depends on one before_action.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] FallbackLocaleList#[] recomputes the fallback chain from SiteSetting.default_locale on every lookup, but the accelerator caches the fallback-resolved translation per (locale, key) for the process lifetime (the translate/translate_no_cache split in this diff) and nothing in this diff invalidates that cache when the site default locale changes. After an admin changes the site default locale, users on locales with incomplete translations keep seeing fallback text resolved under the previous site default \u2014 the live chain and the cached results disagree until every process restarts; the chain input (SiteSetting.default_locale) is read fresh per lookup while the derived cached values keyed only by locale+key are never re-resolved.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[BUG] Fallback-chain locale pre-loading is wired only into ApplicationController#set_locale, silently narrowing the 'server-side fallbacks' objective to the web-request path: nothing in this diff loads the chain's non-current locales from any other entry point. In processes that never run set_locale (Sidekiq workers, ActionMailer rendering per-user-locale emails), the SiteSetting.default_locale entry of the fallback chain is never loaded into the backend, so I18n::Backend::Fallbacks' super(fallback, ...) lookup misses it and keys missing in the user locale fall back straight to English instead of the site default language - the feature's core behavior silently does not apply to background-generated content. The diff's own design proves loading is not automatic (that is why ensure_loaded! was added at all), yet it is invoked at exactly one call site.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[BUG] The accelerator's translation cache stores values resolved through the fallback chain, and this diff makes that chain dynamic (SiteSetting.default_locale-dependent via FallbackLocaleList#[]) without adding any cache invalidation when the site default locale changes. After an admin changes SiteSetting.default_locale, long-running processes keep serving cached translations that were resolved under the old chain (previous site-default language) for keys missing in the user's locale, until the process is restarted; before this diff the chain was static ([locale, en]) so the cache key was sufficient, and this diff breaks that invariant without a corresponding invalidation hook.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug"
+    },
+    {
+      "issue_text": "[ADVISORY] translate's inline guard (load_locale(config.locale) unless @loaded_locales.include?(config.locale)) is an exact duplicate of the newly added ensure_loaded!, leaving two hand-maintained copies of the loaded-locale check in the same file. The next change to locale-loading semantics (per-backend tracking, synchronization, cache resets) must be applied in both places or the two paths drift; translate could simply call ensure_loaded!(config.locale), deleting the duplicated conditional.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The new non-trivial fallback logic (FallbackLocaleList#[] chain construction and ensure_loaded!) ships with no test anywhere in this diff. A regression in chain order or composition (e.g., swapping SiteSetting.default_locale and :en, or dropping the current locale from the chain) silently changes which language users see for missing keys; on en-default test sites such a swap is even invisible to integration specs since the chain collapses to [locale, en] either way, so only a direct unit spec on FallbackLocaleList#[] would catch it.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    },
+    {
+      "issue_text": "[ADVISORY] The fallback-loading invariant this PR introduces (fallback locales must be loaded before translating) is enforced only in ApplicationController#set_locale \u2014 background jobs and per-user mailer rendering switch I18n.locale without any call to I18n.fallbacks.ensure_loaded!, and FallbackLocaleList#ensure_loaded! hardcodes I18n.locale (config/initializers/i18n.rb, lines 19-21) so no other entry point exists to load a chain for a different locale. Emails and other job-generated content rendered under a non-English user locale fall back to the site-default/English locales whose loaded state (TranslationOverride customizations materialized by load_locale) was never established in that process, so admin-customized strings are silently absent from fallback text in emails while the same key renders customized in the web UI \u2014 a silent divergence between surfaces with no error or log surfaced.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory"
+    }
+  ],
+  "goldens": [
+    {
+      "comment": "The @loaded_locales instance variable in translate_accelerator.rb is lazily initialized and accessed by multiple concurrent threads without synchronization.",
+      "severity": "Low",
+      "category": "concurrency"
+    },
+    {
+      "comment": "Consider normalizing the input locale (e.g., to a symbol) when checking/loading here to avoid double-loading if the same locale is passed as a String vs Symbol (also applies to other locations in the PR).",
+      "severity": "Low",
+      "category": "perf"
+    }
+  ],
+  "per_golden_matches": [
+    {
+      "golden_comment": "The @loaded_locales instance variable in translate_accelerator.rb is lazily initialized and accessed by multiple concurrent threads without synchronization.",
+      "severity": "Low",
+      "category": "concurrency"
+    },
+    {
+      "golden_comment": "Consider normalizing the input locale (e.g., to a symbol) when checking/loading here to avoid double-loading if the same locale is passed as a String vs Symbol (also applies to other locations in the PR).",
+      "severity": "Low",
+      "category": "perf"
+    }
+  ],
+  "adjudication_records": [
+    {
+      "issue_text": "[BUG] The entire fallback mechanism ships with zero verification: the diff contains no spec or test files (scanned for spec/**, test/**, *_spec.rb patterns \u2014 none present), so the feature's core acceptance criterion \u2014 a key missing in the user's locale renders the site-default locale's string, then English \u2014 is never asserted anywhere, and neither are the chain construction in FallbackLocaleList#[] (line 17), the ensure_loaded! preloading (lines 20-22 and translate_accelerator.rb), nor the set_locale wiring. Any regression in the fallback chain order, the uniq/compact handling, or the preloading logic lands silently: CI cannot detect it, and the first signal is production users seeing raw 'translation missing: \u2026' strings or wrong-language UI instead of fallback translations.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.86,
+        "rationale": "The diff introduces nontrivial new i18n behavior (new initializer configuring `I18n.fallbacks = FallbackLocaleList.new` with custom chain in `FallbackLocaleList#[]`, adds `FallbackLocaleList#ensure_loaded!`, wires it via `ApplicationController#set_locale` calling `I18n.fallbacks.ensure_loaded!`, and adds `TranslateAccelerator#ensure_loaded!`). Yet the diff adds/changes no files under `spec/**`/`test/**` and no `*_spec.rb` to assert the intended fallback order (user locale -> `SiteSetting.default_locale` -> `:en`) or the preloading/wiring logic. This is a concrete, diff-grounded gap (verification risk), but not itself a verifiable functional defect from the diff alone.",
+        "diff_context_hash": "4bcd6ba39c1fb40585a74526dd58e9877d8d82e3"
+      }
+    },
+    {
+      "issue_text": "[BUG] I18n.fallbacks.ensure_loaded! is called only from ApplicationController#set_locale, so no non-web server-side rendering path ever preloads the fallback chain's SiteSetting.default_locale and :en members \u2014 background jobs and mailers, which set I18n.locale per user to localize notification emails, never run this controller before_action and are left out of the feature entirely. In a Sidekiq process, an email for a user whose locale is missing a key resolves the fallback chain [:user_locale, default_locale, :en] against a backend where only the user locale was loaded (the accelerator's translate loads only config.locale, and the backend's internal fallback loop bypasses the accelerator), so the email renders 'translation missing: \u2026' strings \u2014 or nondeterministically the wrong language when another job happened to load that locale \u2014 which is exactly the partially-translated-locale scenario the feature targets; the same gap applies to any I18n.with_locale block outside a controller action.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.66,
+        "rationale": "The diff introduces a custom `FallbackLocaleList#ensure_loaded!` that explicitly preloads all locales in the fallback chain via `I18n.ensure_loaded!` (which is also newly added to the translate accelerator), but the only new call site shown is `ApplicationController#set_locale` (`I18n.fallbacks.ensure_loaded!`). The environment-level `config.i18n.fallbacks = true` settings are removed, and no other non-controller path in the diff triggers `fallbacks.ensure_loaded!`. Therefore, any code that sets `I18n.locale` outside a controller action (e.g., background jobs/mailers) will not run this preload step, making fallback behavior dependent on whether those locales were previously loaded in the process, which can lead to missing/incorrect translations as described.",
+        "diff_context_hash": "4bcd6ba39c1fb40585a74526dd58e9877d8d82e3"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] FallbackLocaleList subclasses Hash but its [] (lines 13-18) never reads the underlying hash, so the i18n gem's customization surface on I18n.fallbacks silently changes semantics: []= chain overrides (honored by the Locale::Fallbacks instance production ran with before this diff, since config.i18n.fallbacks = true installed one) become a silent no-op, and the Locale::Fallbacks#defaults accessor raises NoMethodError. Plugin or out-of-tree code that customizes fallback chains via I18n.fallbacks[locale] = [...] or reads I18n.fallbacks.defaults gets silently ignored or crashes, while translations fall back per the hardcoded [locale, default_locale, :en] chain with no error signaling that the configured fallbacks were discarded.",
+      "source_lens": "metareview-lens/completeness",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.73,
+        "rationale": "The diff replaces the previous Rails/i18n fallbacks object (previously enabled via `config.i18n.fallbacks = true`, which typically installs an `I18n::Locale::Fallbacks` instance) with a custom `FallbackLocaleList < Hash` assigned via `I18n.fallbacks = FallbackLocaleList.new` (config/initializers/i18n.rb). That class overrides `[]` to always return `[locale, SiteSetting.default_locale.to_sym, :en].uniq.compact` and never consults any stored hash values, so `I18n.fallbacks[locale] = ...` would not affect lookups. Also, methods expected on `I18n::Locale::Fallbacks` (e.g. `defaults`) are not defined on this Hash subclass, so code calling them would raise. However, the diff itself does not show any in-repo usage of `I18n.fallbacks[...]=` or `I18n.fallbacks.defaults`, so this is a compatibility/extension-surface concern rather than a directly verifiable broken behavior in the changed code.",
+        "diff_context_hash": "4bcd6ba39c1fb40585a74526dd58e9877d8d82e3"
+      }
+    },
+    {
+      "issue_text": "[BUG] Under-scoped wiring: fallback locale preloading is enforced only by convention at this single call site in ApplicationController#set_locale, so the invariant 'every translating context has its fallback chain loaded' is not enforced anywhere else \u2014 mailers and background jobs that render in the recipient's locale, admin email previews, and any I18n.t(..., locale: x) caller switch I18n.locale without ever triggering I18n.fallbacks.ensure_loaded!. The accelerator's translate only loads config.locale (translate_accelerator.rb line 68) and nothing else in this diff loads the fallback locales, so in a Sidekiq/mailers process rendering an email for a user whose locale is missing a key, the backend Fallbacks probe of SiteSetting.default_locale and :en hits an unloaded store and the recipient gets a literal 'translation missing: xx.key' string in the email subject/body instead of the site-default/English fallback the feature promises \u2014 i.e. the incomplete-locale users this feature exists for are exactly the ones it does not serve outside web requests.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.62,
+        "rationale": "The diff introduces a new requirement to preload the fallback chain via `I18n.fallbacks.ensure_loaded!`, but it is only invoked in `ApplicationController#set_locale` (added line). The new fallback object (`FallbackLocaleList`) defines `ensure_loaded!` and explicitly loads `[locale, SiteSetting.default_locale, :en]`, implying preloading is needed for correct/fast fallback behavior with the translate accelerator. Other translating contexts (e.g., mailers/jobs or any code that sets `I18n.locale` / passes `locale:`) are not shown calling this, so the wiring is under-scoped and relies on convention. The finding\u2019s concrete failure mode (\u201cemails will definitely show `translation missing`\u201d) is plausible but not strictly provable from this diff alone because fallback translation might still trigger per-locale loads via `translate`/fallback logic; however the scope concern is directly grounded in the diff.",
+        "diff_context_hash": "4bcd6ba39c1fb40585a74526dd58e9877d8d82e3"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] FallbackLocaleList#[] recomputes the whole chain \u2014 a SiteSetting.default_locale read plus a 3-element array build with uniq/compact \u2014 on every single I18n.t call, because I18n::Backend::Fallbacks#translate invokes I18n.fallbacks[locale] per lookup and the overridden [] neither memoizes nor consults stored hash entries. The Rails default I18n::Locale::Fallbacks that config.i18n.fallbacks = true previously installed memoizes computed chains, so this diff replaces a memoized lookup with per-translation recompute on the hottest path in the app (hundreds of distinct t() calls per page render), adding avoidable per-lookup work to every request for every user.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.82,
+        "rationale": "The diff introduces a custom `FallbackLocaleList < Hash` in `config/initializers/i18n.rb` whose `#[]` always constructs a new array `[locale, SiteSetting.default_locale.to_sym, :en].uniq.compact` and does not memoize or read/write any stored hash entry. The initializer also includes `I18n::Backend::Fallbacks` and sets `I18n.fallbacks = FallbackLocaleList.new`, so fallbacks will be consulted through this `#[]` implementation. While not a correctness bug, this is a concrete performance/architecture concern created by the change, especially since the previous `config.i18n.fallbacks = true` settings were removed from multiple environments.",
+        "diff_context_hash": "4bcd6ba39c1fb40585a74526dd58e9877d8d82e3"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The diff adds three pieces of behavior-bearing logic \u2014 the fallback chain ordering in FallbackLocaleList#[], the ensure_loaded! preloading in both FallbackLocaleList and the translate accelerator, and the set_locale wiring \u2014 with no test anywhere in the diff. A regression in chain order (e.g. site default accidentally taking priority over the user locale) or in the preload step (ensure_loaded! dropped or iterating the wrong locale) silently changes which language users see, and since unloaded fallback locales fail silently rather than raising, nothing in the test suite would catch it.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.9,
+        "rationale": "The diff introduces new, behavior-changing i18n logic (new initializer `config/initializers/i18n.rb` with custom `FallbackLocaleList#[]` ordering and `ensure_loaded!`, new `TranslateAccelerator#ensure_loaded!`, and a new call to `I18n.fallbacks.ensure_loaded!` in `ApplicationController#set_locale`) while simultaneously removing `config.i18n.fallbacks = true` from environment configs. No test files or assertions are added/modified anywhere in the diff to lock in the fallback order or verify that preloading is invoked for the intended locales, so regressions in language selection/preloading would not be covered by changes shown here.",
+        "diff_context_hash": "4bcd6ba39c1fb40585a74526dd58e9877d8d82e3"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] translate's inline load guard on line 68 is a hand-duplicated copy of the ensure_loaded! helper added six lines above it, and the copies already drift: ensure_loaded! defensively initializes @loaded_locales with ||= while translate's guard evaluates @loaded_locales.include? without any initialization. The next change to locale-loading semantics (e.g. adding a mutex or changing the loaded-set representation) must be replicated in both guards or the cached-translate path and the preload path diverge; replacing line 68 with ensure_loaded!(config.locale) deletes the duplicate and unifies initialization at no cost.",
+      "source_lens": "metareview-lens/scope",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.74,
+        "rationale": "In lib/freedom_patches/translate_accelerator.rb, a new ensure_loaded!(locale) helper is added that does `@loaded_locales ||= []` and then conditionally calls load_locale. However, the translate method still contains an inline guard `load_locale(config.locale) unless @loaded_locales.include?(config.locale)`, duplicating the same responsibility and already differing in initialization behavior (no nil-guard for @loaded_locales). The finding\u2019s suggestion to replace the inline guard with ensure_loaded!(config.locale) is directly supported by the diff and would unify future locale-loading semantics.",
+        "diff_context_hash": "4bcd6ba39c1fb40585a74526dd58e9877d8d82e3"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The fallback-preload invariant is enforced only at this single call site: I18n.fallbacks.ensure_loaded! is wired solely into ApplicationController#set_locale, while the accelerator's translate (lib/freedom_patches/translate_accelerator.rb, visible in this diff) still loads only config.locale, so any execution context that translates under a non-default locale without passing through set_locale translates with fallbacks active but the fallback locales (site default, :en) not loaded into the backend. Background jobs that build localized emails (Sidekiq processes where nothing has yet translated in :en) render 'translation missing: ...' for keys absent from the user's locale but present in the fallback locale \u2014 the exact failure this feature exists to prevent \u2014 because the backend's fallback lookups hit an unloaded locale and fall through to MissingTranslation. The invariant belongs where translations execute (e.g., ensuring the chain inside the accelerator's translate entry point), not on each caller to remember; as shipped, correctness of the new mechanism depends on one before_action.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.66,
+        "rationale": "The diff wires fallback locale preloading only via `ApplicationController#set_locale` (`I18n.fallbacks.ensure_loaded!`), while the translation entrypoint shown (`TranslateAccelerator#translate`) still only loads `config.locale` (`load_locale(config.locale) unless @loaded_locales.include?(config.locale)`) and does not ensure the fallback chain locales are loaded before fallback lookup occurs. Since `config/initializers/i18n.rb` globally enables backend fallbacks and sets `I18n.fallbacks` to a custom list that relies on `I18n.ensure_loaded!`, any translation execution path that does not pass through `set_locale` (e.g., non-controller contexts) can perform fallback lookups into locales that were never loaded into the accelerator/backend, yielding missing translations despite fallbacks being configured.",
+        "diff_context_hash": "4bcd6ba39c1fb40585a74526dd58e9877d8d82e3"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] FallbackLocaleList#[] recomputes the fallback chain from SiteSetting.default_locale on every lookup, but the accelerator caches the fallback-resolved translation per (locale, key) for the process lifetime (the translate/translate_no_cache split in this diff) and nothing in this diff invalidates that cache when the site default locale changes. After an admin changes the site default locale, users on locales with incomplete translations keep seeing fallback text resolved under the previous site default \u2014 the live chain and the cached results disagree until every process restarts; the chain input (SiteSetting.default_locale) is read fresh per lookup while the derived cached values keyed only by locale+key are never re-resolved.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.58,
+        "rationale": "In `config/initializers/i18n.rb`, `FallbackLocaleList#[]` builds the fallback chain dynamically from `SiteSetting.default_locale` on each lookup (`[locale, SiteSetting.default_locale.to_sym, :en]`). The translate accelerator is explicitly designed to cache translations in-process (the `translate` vs `translate_no_cache` split in `lib/freedom_patches/translate_accelerator.rb` indicates a cached path for the common case), but this diff does not add any cache invalidation keyed on or triggered by `SiteSetting.default_locale` changes. That means cached translations for a given user locale can remain resolved via the old fallback locale until process restart, even though the fallback chain input is now different.",
+        "diff_context_hash": "4bcd6ba39c1fb40585a74526dd58e9877d8d82e3"
+      }
+    },
+    {
+      "issue_text": "[BUG] Fallback-chain locale pre-loading is wired only into ApplicationController#set_locale, silently narrowing the 'server-side fallbacks' objective to the web-request path: nothing in this diff loads the chain's non-current locales from any other entry point. In processes that never run set_locale (Sidekiq workers, ActionMailer rendering per-user-locale emails), the SiteSetting.default_locale entry of the fallback chain is never loaded into the backend, so I18n::Backend::Fallbacks' super(fallback, ...) lookup misses it and keys missing in the user locale fall back straight to English instead of the site default language - the feature's core behavior silently does not apply to background-generated content. The diff's own design proves loading is not automatic (that is why ensure_loaded! was added at all), yet it is invoked at exactly one call site.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.62,
+        "rationale": "The diff adds an explicit preload hook `I18n.fallbacks.ensure_loaded!` only in `ApplicationController#set_locale` (app/controllers/application_controller.rb), and defines that preload behavior in `FallbackLocaleList#ensure_loaded!` (config/initializers/i18n.rb). No other invocation is shown, so any non-controller execution path added/affected by this change (e.g., background jobs/mailers) would not get this eager-loading step unless they independently call it. Whether this causes incorrect fallback behavior everywhere is not fully provable from the diff alone (depends on how/when locales are loaded elsewhere), but the scoping concern is real and grounded in the changed call sites.",
+        "diff_context_hash": "4bcd6ba39c1fb40585a74526dd58e9877d8d82e3"
+      }
+    },
+    {
+      "issue_text": "[BUG] The accelerator's translation cache stores values resolved through the fallback chain, and this diff makes that chain dynamic (SiteSetting.default_locale-dependent via FallbackLocaleList#[]) without adding any cache invalidation when the site default locale changes. After an admin changes SiteSetting.default_locale, long-running processes keep serving cached translations that were resolved under the old chain (previous site-default language) for keys missing in the user's locale, until the process is restarted; before this diff the chain was static ([locale, en]) so the cache key was sufficient, and this diff breaks that invariant without a corresponding invalidation hook.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p2",
+      "category": "bug",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.6,
+        "rationale": "The diff makes the fallback order depend on `SiteSetting.default_locale` at lookup time (`FallbackLocaleList#[]` returns `[locale, SiteSetting.default_locale.to_sym, :en]`). Nothing in the diff adds any mechanism to clear/refresh any cached translation results when `SiteSetting.default_locale` changes. The translate accelerator clearly has a cached path (`translate` calls `translate_no_cache` only when `args.length > 0`, otherwise it uses its cached behavior) and it keys loading/caching off the current locale (`config.locale`) without incorporating the site default locale. That means values resolved via fallbacks can become stale if the site default locale changes in a long-running process.",
+        "diff_context_hash": "4bcd6ba39c1fb40585a74526dd58e9877d8d82e3"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] translate's inline guard (load_locale(config.locale) unless @loaded_locales.include?(config.locale)) is an exact duplicate of the newly added ensure_loaded!, leaving two hand-maintained copies of the loaded-locale check in the same file. The next change to locale-loading semantics (per-backend tracking, synchronization, cache resets) must be applied in both places or the two paths drift; translate could simply call ensure_loaded!(config.locale), deleting the duplicated conditional.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.9,
+        "rationale": "The diff adds `ensure_loaded!(locale)` in `lib/freedom_patches/translate_accelerator.rb` which initializes `@loaded_locales` and runs `load_locale locale unless @loaded_locales.include?(locale)`. The existing `translate` method still contains the inline guard `load_locale(config.locale) unless @loaded_locales.include?(config.locale)`, duplicating the same loaded-locale check/behavior in the same file. This is a concrete maintainability issue (two paths to update if semantics change), not a functional defect shown by the diff.",
+        "diff_context_hash": "4bcd6ba39c1fb40585a74526dd58e9877d8d82e3"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The new non-trivial fallback logic (FallbackLocaleList#[] chain construction and ensure_loaded!) ships with no test anywhere in this diff. A regression in chain order or composition (e.g., swapping SiteSetting.default_locale and :en, or dropping the current locale from the chain) silently changes which language users see for missing keys; on en-default test sites such a swap is even invisible to integration specs since the chain collapses to [locale, en] either way, so only a direct unit spec on FallbackLocaleList#[] would catch it.",
+      "source_lens": "metareview-lens/intent",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.9,
+        "rationale": "The diff adds new non-trivial behavior in `config/initializers/i18n.rb` via `FallbackLocaleList#[]` (constructing `[locale, SiteSetting.default_locale.to_sym, :en].uniq.compact`) and `FallbackLocaleList#ensure_loaded!` (iterating that chain and calling `I18n.ensure_loaded!`). The diff also changes runtime behavior by calling `I18n.fallbacks.ensure_loaded!` in `ApplicationController#set_locale`. No tests are added or modified in this diff to verify the fallback chain order/composition or the ensure_loaded behavior, so a regression in that logic would not be directly caught. This is a concrete, diff-grounded test coverage concern rather than a proven functional defect.",
+        "diff_context_hash": "4bcd6ba39c1fb40585a74526dd58e9877d8d82e3"
+      }
+    },
+    {
+      "issue_text": "[ADVISORY] The fallback-loading invariant this PR introduces (fallback locales must be loaded before translating) is enforced only in ApplicationController#set_locale \u2014 background jobs and per-user mailer rendering switch I18n.locale without any call to I18n.fallbacks.ensure_loaded!, and FallbackLocaleList#ensure_loaded! hardcodes I18n.locale (config/initializers/i18n.rb, lines 19-21) so no other entry point exists to load a chain for a different locale. Emails and other job-generated content rendered under a non-English user locale fall back to the site-default/English locales whose loaded state (TranslationOverride customizations materialized by load_locale) was never established in that process, so admin-customized strings are silently absent from fallback text in emails while the same key renders customized in the web UI \u2014 a silent divergence between surfaces with no error or log surfaced.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": "p3",
+      "category": "advisory",
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.63,
+        "rationale": "The diff introduces a new explicit loading step via `I18n.fallbacks.ensure_loaded!` (added only in `ApplicationController#set_locale`) and adds custom fallback logic in `config/initializers/i18n.rb` where `FallbackLocaleList#ensure_loaded!` loads locales based on the *current* `I18n.locale` (`self[I18n.locale]...`). The diff does not show any other call sites (e.g., job/mail paths) invoking this loading step, so it\u2019s a concrete scope/coverage concern created by the change. However, the finding\u2019s claims about background jobs/mailers actually diverging can\u2019t be verified from this diff alone, and it\u2019s not strictly true that \u201cno other entry point exists\u201d since callers could set `I18n.locale` then call `I18n.fallbacks.ensure_loaded!`.",
+        "diff_context_hash": "4bcd6ba39c1fb40585a74526dd58e9877d8d82e3"
+      }
+    }
+  ],
+  "diff_context_hash": "4bcd6ba39c1fb40585a74526dd58e9877d8d82e3",
+  "primary_judge": "gpt-5.2",
+  "adjudicating_judge": "gpt-5.2",
+  "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/9",
+  "framework": "metareview-realistic",
+  "model": "glm-5.3-flash-background",
+  "effort": "high",
+  "judge": "gpt-5.2",
+  "wall_s": 1867.521164894104,
+  "execution_mode": "api",
+  "run_batch": "20260910-mrv0120-manifold"
+}

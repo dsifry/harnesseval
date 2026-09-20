@@ -1,0 +1,56 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+
+vi.mock("@calcom/lib/constants", () => ({
+  APP_CREDENTIAL_SHARING_ENABLED: true,
+}));
+
+describe("refreshOAuthTokens credential sync authentication", () => {
+  const originalFetch = global.fetch;
+  const fetchMock = vi.fn();
+
+  beforeEach(() => {
+    vi.stubEnv("CALCOM_CREDENTIAL_SYNC_ENDPOINT", "https://example.com/sync");
+    global.fetch = fetchMock as unknown as typeof fetch;
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ access_token: "abc" }) });
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    global.fetch = originalFetch;
+    vi.clearAllMocks();
+  });
+
+  it("authenticates outbound credential-sync requests (e.g. with calcomwebhooksecret)", async () => {
+    const { default: refreshOAuthTokens } = await import("./refreshOAuthTokens");
+    const refreshFunction = vi.fn().mockRejectedValue(new Error("should not be called"));
+    await refreshOAuthTokens(refreshFunction, "google-calendar", 42);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://example.com/sync");
+    expect(init.method).toBe("POST");
+
+    const headers = init.headers ?? {};
+    const headerNames = Object.keys(headers).map((h) => h.toLowerCase());
+    const body = init.body;
+    const bodyString = body instanceof URLSearchParams ? body.toString() : String(body ?? "");
+
+    const hasAuthHeader = headerNames.some((h) =>
+      [
+        "authorization",
+        "x-calcom-webhook-secret",
+        "calcomwebhooksecret",
+        "x-webhook-secret",
+        "x-api-key",
+        "x-shared-secret",
+      ].includes(h)
+    );
+    const authInBody =
+      bodyString.includes("calcomwebhooksecret") || bodyString.includes("webhookSecret");
+
+    expect(
+      hasAuthHeader || authInBody,
+      "credential-sync request must be authenticated (include calcomwebhooksecret or auth header); current request is unauthenticated and can be used to issue tokens for arbitrary users"
+    ).toBe(true);
+  });
+});

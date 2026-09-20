@@ -1,0 +1,396 @@
+{
+  "tp": 2,
+  "fp": 9,
+  "fn": 0,
+  "precision": 0.18181818181818182,
+  "recall": 1.0,
+  "n_findings": 11,
+  "n_golden": 2,
+  "tokens_in": 808876,
+  "tokens_out": 3055,
+  "wall_ms": 320825.3083229065,
+  "per_model_usage": {
+    "gpt-6-astra": {
+      "input_tokens": 27592,
+      "cache_read_input_tokens": 778112,
+      "cache_creation_input_tokens": 0,
+      "output_tokens": 3055,
+      "reasoning_output_tokens": 117,
+      "cost_usd": 0.0,
+      "total_tokens": 808876
+    }
+  },
+  "total_cost_usd": 0.0,
+  "resolved_model": "gpt-6-astra",
+  "adjudicated_precision": 1.0,
+  "incremental_recall": 1.0,
+  "n_bug_ungold": 3,
+  "n_important_non_bug": 5,
+  "n_true_hallucination": 0,
+  "n_unresolved": 1,
+  "n_real_ungold": 3,
+  "n_hallucination": 0,
+  "decomposition": {
+    "deterministic_tp": 0,
+    "llm_lens_tp": 2,
+    "deterministic_gate_recall": 0.0,
+    "llm_lens_recall": 1.0
+  },
+  "findings": [
+    {
+      "issue_text": "pkg/storage/unified/search/bleve.go:137 \u2014 [blocking, P1, confidence 100] Narrowing the lock to `b.cache[key] = idx` allows a search building an uncached in-memory index from an older database snapshot to overlap the event consumer's build for the same key, so the consumer publishes and updates its index before the slower search overwrites it with stale contents, permanently discarding already-consumed updates; serialize creation per key and recheck the cache before building.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null
+    },
+    {
+      "issue_text": "pkg/storage/unified/resource/search.go:216 \u2014 [blocking, P1, confidence 100] Calling `s.search.TotalDocs()` after launching the event consumer races its unlocked `for _, v := range b.cache` in bleve.go:146 against `b.cache[key] = idx` when an event creates an index for a newly populated or startup-skipped namespace, allowing a concurrent-map-iteration/write fatal failure during server initialization; synchronize TotalDocs with cache publication or take the count before starting the consumer.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null
+    },
+    {
+      "issue_text": "pkg/storage/unified/resource/server.go:455 \u2014 [blocking, P2, confidence 100] Removing the request-time Init check so Create proceeds directly to `rsp := &CreateResponse{}` also removes the stopped-state guard: after Stop sets `s.initErr = fmt.Errorf(\"service is stopped\")`, authenticated Create/Update/Delete calls still reach the writable SQL backend although its poller has stopped, accepting mutations outside the server lifecycle instead of rejecting them as before; preserve an explicit synchronized running-state check when removing lazy initialization.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null
+    },
+    {
+      "issue_text": "pkg/storage/unified/resource/search.go:216 \u2014 Blocking P1, confidence 100: the new `s.search.TotalDocs()` call runs after the event goroutine starts, so an event that creates a previously uncached namespace/resource during the count races Bleve's unlocked `for _, v := range b.cache` (bleve.go:146) against `b.cache[key] = idx` (bleve.go:138), producing a concurrent-map iteration/write runtime failure that terminates the storage process; take the cache read lock or count before starting the consumer.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null
+    },
+    {
+      "issue_text": "pkg/storage/unified/search/bleve.go:137 \u2014 Blocking P1, confidence 100: narrowing `b.cacheMu.Lock()` to the final `b.cache[key] = idx` lets a watch event's `getOrCreateIndex` observe a miss while a search request is already building that same in-memory index, so the event can finish a newer build and apply its update before the slower request publishes its older snapshot over it, permanently removing that successfully committed update from subsequent search results until another rebuild or update; preserve per-key in-flight coordination across lookup/build/publication while allowing different keys to build concurrently.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null
+    },
+    {
+      "issue_text": "pkg/storage/unified/resource/server.go:258 \u2014 Blocking P1, confidence 100: eager `err := s.Init(ctx)` now starts SQL-backed watch consumers even when no storage request ever arrives, so constructing a server with the SQL backend as its lifecycle hook and then calling `Stop` makes SQL's `defer close(stream)` (backend.go:572) deliver nil to the unchecked `v := <-events` and `v.Type` dereference (server.go:762-763), crashing the process during an otherwise idle shutdown; handle channel closure in both watch consumers before enabling them unconditionally at construction.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null
+    },
+    {
+      "issue_text": "pkg/storage/unified/resource/server.go:258 \u2014 Advisory P2, confidence 100: `err := s.Init(ctx)` now performs backend initialization, database queries and the complete initial index build synchronously using `context.WithCancel(claims.WithClaims(context.Background(), ...))`, so startup works with responsive dependencies but blocks indefinitely when a backend call waits for context cancellation, because the constructor has no caller context/deadline and does not return the server that owns `cancel`; the strongest rebuttal is that initialization intentionally blocks readiness until indexing finishes, but readiness gating does not justify making startup uncancellable during an indefinitely stalled dependency, so accept a startup context or impose a bounded initialization deadline.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null
+    },
+    {
+      "issue_text": "pkg/server/module_server_test.go:36 \u2014 Blocking P2, confidence 75: `if dbType == \"postgres\" {` followed by `t.Skip(\"skipping - test not working with postgres in Drone. Works locally.\")` expands a stated Drone-only workaround to every PostgreSQL run, so even the explicitly working local integration test stops checking storage-server startup and `/metrics`, removing existing supported-backend coverage outside the unified-storage performance optimization scope; preserve local PostgreSQL execution and isolate any justified CI quarantine to its failing environment.",
+      "source_lens": "metareview-lens/scope-and-alignment",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null
+    },
+    {
+      "issue_text": "pkg/server/module_server_test.go:36 \u2014 Blocking P2, confidence 100: `if dbType == \"postgres\"` followed by `t.Skip(\"skipping - test not working with postgres in Drone. Works locally.\")` disables the storage-target startup and `/metrics` assertions for every PostgreSQL run, including the local runs the message says work, so PostgreSQL startup regressions introduced by eager resource-server initialization now produce a skipped test instead of a failure; restore executable PostgreSQL coverage by fixing the fixture or narrowly isolating the failing environment.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null
+    },
+    {
+      "issue_text": "pkg/storage/unified/resource/server.go:258 \u2014 Blocking P2, confidence 100: the new `err := s.Init(ctx)` constructor branch and removal of RPC initialization guards have no lifecycle assertions in the changed test, whose behavioral assertion remains `assert.Equal(t, 200, res.StatusCode)` at pkg/server/module_server_test.go:63, so constructor initialization failures, initialization completion before return, and RPC behavior after `Stop` are unverified; exercise the resource server through those transitions and assert returned errors and backend activity, since a successful metrics response and shutdown alone do not observe them.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null
+    },
+    {
+      "issue_text": "pkg/storage/unified/search/bleve.go:137 \u2014 Blocking P2, confidence 100: moving `b.cacheMu.Lock()` after `_, err = builder(idx)` changes concurrent build/read behavior without any test that starts overlapping builds or reads the cache during construction, so the changed integration test's `assert.Equal(t, 200, res.StatusCode)` cannot detect either restoration of the global build serialization or publication of an incomplete index; add a synchronized test against the real Bleve backend that proves independent builds overlap and cached documents become visible only after a successful flush.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null
+    }
+  ],
+  "goldens": [
+    {
+      "comment": "A race condition in BuildIndex allows multiple goroutines to concurrently build the same expensive index for the same key. This is caused by moving the b.cacheMu lock from protecting the entire function to only protecting the final cache assignment. ",
+      "severity": "High",
+      "category": "concurrency"
+    },
+    {
+      "comment": "Calling s.search.TotalDocs() here may race with concurrent index creation: TotalDocs iterates b.cache without synchronization, and the event watcher goroutine started just above could trigger BuildIndex writes concurrently, potentially causing a concurrent map read/write panic.",
+      "severity": "High",
+      "category": "concurrency"
+    }
+  ],
+  "per_golden_matches": [
+    {
+      "golden_comment": "A race condition in BuildIndex allows multiple goroutines to concurrently build the same expensive index for the same key. This is caused by moving the b.cacheMu lock from protecting the entire function to only protecting the final cache assignment. ",
+      "severity": "High",
+      "category": "concurrency",
+      "matched_candidate": "pkg/storage/unified/search/bleve.go:137 \u2014 [blocking, P1, confidence 100] Narrowing the lock to `b.cache[key] = idx` allows a search building an uncached in-memory index from an older database snapshot to overlap the event consumer's build for the same key, so the consumer publishes and updates its index before the slower search overwrites it with stale contents, permanently discarding already-consumed updates; serialize creation per key and recheck the cache before building.",
+      "confidence": 0.95,
+      "reasoning": "The candidate issue identifies the same underlying problem as the golden comment: the race condition caused by narrowing the lock scope from protecting the entire function to only protecting the final cache assignment. Both comments point out that this allows multiple goroutines to concurrently build the same index for the same key. The candidate provides additional detail about the specific consequence (stale data overwriting newer data), but it's fundamentally the same race condition issue with the same root cause (moving/narrowing the cacheMu lock)."
+    },
+    {
+      "golden_comment": "Calling s.search.TotalDocs() here may race with concurrent index creation: TotalDocs iterates b.cache without synchronization, and the event watcher goroutine started just above could trigger BuildIndex writes concurrently, potentially causing a concurrent map read/write panic.",
+      "severity": "High",
+      "category": "concurrency",
+      "matched_candidate": "pkg/storage/unified/resource/search.go:216 \u2014 [blocking, P1, confidence 100] Calling `s.search.TotalDocs()` after launching the event consumer races its unlocked `for _, v := range b.cache` in bleve.go:146 against `b.cache[key] = idx` when an event creates an index for a newly populated or startup-skipped namespace, allowing a concurrent-map-iteration/write fatal failure during server initialization; synchronize TotalDocs with cache publication or take the count before starting the consumer.",
+      "confidence": 0.99,
+      "reasoning": "The candidate issue identifies the exact same race condition as the golden comment: calling s.search.TotalDocs() races with the event watcher goroutine because TotalDocs iterates b.cache without synchronization while BuildIndex can write to b.cache concurrently, potentially causing a concurrent map read/write panic. The candidate even provides more specific details (line numbers, the exact map operations involved) but describes the same fundamental issue."
+    }
+  ],
+  "adjudication_records": [
+    {
+      "issue_text": "pkg/storage/unified/search/bleve.go:137 \u2014 [blocking, P1, confidence 100] Narrowing the lock to `b.cache[key] = idx` allows a search building an uncached in-memory index from an older database snapshot to overlap the event consumer's build for the same key, so the consumer publishes and updates its index before the slower search overwrites it with stale contents, permanently discarding already-consumed updates; serialize creation per key and recheck the cache before building.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null,
+      "matched_golden_ids": [
+        "A race condition in BuildIndex allows multiple goroutines to concurrently build the same expensive index for the same key. This is caused by moving the b.cacheMu lock from protecting the entire function to only protecting the final cache assignment. "
+      ],
+      "primary_judge_verdict": "matched",
+      "primary_judge": "claude-opus-4-5-20251101",
+      "primary_judge_confidence": 0.95,
+      "primary_judge_reasoning": "The candidate issue identifies the same underlying problem as the golden comment: the race condition caused by narrowing the lock scope from protecting the entire function to only protecting the final cache assignment. Both comments point out that this allows multiple goroutines to concurrently build the same index for the same key. The candidate provides additional detail about the specific consequence (stale data overwriting newer data), but it's fundamentally the same race condition issue with the same root cause (moving/narrowing the cacheMu lock).",
+      "adjudication": {
+        "verdict": "matched",
+        "adjudicating_judge": null,
+        "confidence": null,
+        "rationale": null,
+        "diff_context_hash": "2691f948f4856c0cbbf460a6b7e17b6953fe78e7"
+      }
+    },
+    {
+      "issue_text": "pkg/storage/unified/resource/search.go:216 \u2014 [blocking, P1, confidence 100] Calling `s.search.TotalDocs()` after launching the event consumer races its unlocked `for _, v := range b.cache` in bleve.go:146 against `b.cache[key] = idx` when an event creates an index for a newly populated or startup-skipped namespace, allowing a concurrent-map-iteration/write fatal failure during server initialization; synchronize TotalDocs with cache publication or take the count before starting the consumer.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null,
+      "matched_golden_ids": [
+        "Calling s.search.TotalDocs() here may race with concurrent index creation: TotalDocs iterates b.cache without synchronization, and the event watcher goroutine started just above could trigger BuildIndex writes concurrently, potentially causing a concurrent map read/write panic."
+      ],
+      "primary_judge_verdict": "matched",
+      "primary_judge": "claude-opus-4-5-20251101",
+      "primary_judge_confidence": 0.99,
+      "primary_judge_reasoning": "The candidate issue identifies the exact same race condition as the golden comment: calling s.search.TotalDocs() races with the event watcher goroutine because TotalDocs iterates b.cache without synchronization while BuildIndex can write to b.cache concurrently, potentially causing a concurrent map read/write panic. The candidate even provides more specific details (line numbers, the exact map operations involved) but describes the same fundamental issue.",
+      "adjudication": {
+        "verdict": "matched",
+        "adjudicating_judge": null,
+        "confidence": null,
+        "rationale": null,
+        "diff_context_hash": "2691f948f4856c0cbbf460a6b7e17b6953fe78e7"
+      }
+    },
+    {
+      "issue_text": "pkg/storage/unified/resource/server.go:455 \u2014 [blocking, P2, confidence 100] Removing the request-time Init check so Create proceeds directly to `rsp := &CreateResponse{}` also removes the stopped-state guard: after Stop sets `s.initErr = fmt.Errorf(\"service is stopped\")`, authenticated Create/Update/Delete calls still reach the writable SQL backend although its poller has stopped, accepting mutations outside the server lifecycle instead of rejecting them as before; preserve an explicit synchronized running-state check when removing lazy initialization.",
+      "source_lens": "metareview-lens/architecture",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null,
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "claude-opus-4-5-20251101",
+        "confidence": 0.75,
+        "rationale": "The diff shows that Init() calls are removed from Create, Update, Delete, and other methods. Previously, these methods called `s.Init(ctx)` which would return `s.initErr` if set. The Stop() method (not shown in diff but referenced) sets `s.initErr = fmt.Errorf(\"service is stopped\")`. Without the Init() check at request time, there's no guard preventing operations after Stop() is called. The finding correctly identifies that removing lazy initialization also removes the stopped-state guard, allowing mutations to proceed even after the server lifecycle has ended.",
+        "diff_context_hash": "2691f948f4856c0cbbf460a6b7e17b6953fe78e7"
+      }
+    },
+    {
+      "issue_text": "pkg/storage/unified/resource/search.go:216 \u2014 Blocking P1, confidence 100: the new `s.search.TotalDocs()` call runs after the event goroutine starts, so an event that creates a previously uncached namespace/resource during the count races Bleve's unlocked `for _, v := range b.cache` (bleve.go:146) against `b.cache[key] = idx` (bleve.go:138), producing a concurrent-map iteration/write runtime failure that terminates the storage process; take the cache read lock or count before starting the consumer.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null,
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "claude-opus-4-5-20251101",
+        "confidence": 0.82,
+        "rationale": "The finding identifies a real race condition. Looking at the diff: 1) In search.go:213, a goroutine is started that calls handleEvent which can call getOrCreateIndex->build->BuildIndex. 2) In search.go:216, after the goroutine starts, s.log.Info calls s.search.TotalDocs(). 3) In bleve.go, the diff shows BuildIndex was modified to move the lock acquisition (b.cacheMu.Lock()) from the beginning of the function to just before b.cache[key] = idx (lines 137-139). 4) The TotalDocs() method (referenced at bleve.go:146 in the finding) would iterate over b.cache. If TotalDocs iterates the cache without holding the lock while BuildIndex is writing to the cache, this creates a concurrent map read/write race. The diff confirms the lock was moved to a narrower scope, and the log statement with TotalDocs() was added after the goroutine starts, making this race condition plausible.",
+        "diff_context_hash": "2691f948f4856c0cbbf460a6b7e17b6953fe78e7"
+      }
+    },
+    {
+      "issue_text": "pkg/storage/unified/search/bleve.go:137 \u2014 Blocking P1, confidence 100: narrowing `b.cacheMu.Lock()` to the final `b.cache[key] = idx` lets a watch event's `getOrCreateIndex` observe a miss while a search request is already building that same in-memory index, so the event can finish a newer build and apply its update before the slower request publishes its older snapshot over it, permanently removing that successfully committed update from subsequent search results until another rebuild or update; preserve per-key in-flight coordination across lookup/build/publication while allowing different keys to build concurrently.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null,
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "claude-opus-4-5-20251101",
+        "confidence": 0.85,
+        "rationale": "The diff shows the lock scope was narrowed from wrapping the entire BuildIndex function (lines 88-89 removed: `b.cacheMu.Lock()` and `defer b.cacheMu.Unlock()`) to only protecting the final cache assignment (lines 137-139: `b.cacheMu.Lock()`, `b.cache[key] = idx`, `b.cacheMu.Unlock()`). This creates a race condition: if two goroutines call BuildIndex for the same key concurrently, both will proceed past the cache check, both will build indexes independently, and whichever finishes last will overwrite the cache entry. If the slower build started with older data, it could overwrite a newer index, causing data loss in search results. The finding correctly identifies this as a coordination problem where per-key locking across lookup/build/publication is needed.",
+        "diff_context_hash": "2691f948f4856c0cbbf460a6b7e17b6953fe78e7"
+      }
+    },
+    {
+      "issue_text": "pkg/storage/unified/resource/server.go:258 \u2014 Blocking P1, confidence 100: eager `err := s.Init(ctx)` now starts SQL-backed watch consumers even when no storage request ever arrives, so constructing a server with the SQL backend as its lifecycle hook and then calling `Stop` makes SQL's `defer close(stream)` (backend.go:572) deliver nil to the unchecked `v := <-events` and `v.Type` dereference (server.go:762-763), crashing the process during an otherwise idle shutdown; handle channel closure in both watch consumers before enabling them unconditionally at construction.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null,
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "unresolved",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "unresolved",
+        "adjudicating_judge": "claude-opus-4-5-20251101",
+        "confidence": 0.45,
+        "rationale": "The diff shows Init() is now called eagerly in NewResourceServer() (lines 258-262), which will call initWatcher() (line 309). The finding claims this creates a race condition where if Stop() is called before any requests, the watch consumer at server.go:762-763 could receive nil from a closed channel. Looking at the diff, the order change (search.init before initWatcher at lines 303-309) and eager initialization are real changes. However, the specific nil dereference claim at lines 762-763 cannot be fully verified from this diff alone - we don't see the watch consumer code or the Stop() implementation. The finding references backend.go:572 which shows 'defer close(stream)' but the actual consumer code isn't in the diff. While the architectural concern about eager initialization is valid, the specific crash scenario cannot be verified from the diff provided.",
+        "diff_context_hash": "2691f948f4856c0cbbf460a6b7e17b6953fe78e7"
+      }
+    },
+    {
+      "issue_text": "pkg/storage/unified/resource/server.go:258 \u2014 Advisory P2, confidence 100: `err := s.Init(ctx)` now performs backend initialization, database queries and the complete initial index build synchronously using `context.WithCancel(claims.WithClaims(context.Background(), ...))`, so startup works with responsive dependencies but blocks indefinitely when a backend call waits for context cancellation, because the constructor has no caller context/deadline and does not return the server that owns `cancel`; the strongest rebuttal is that initialization intentionally blocks readiness until indexing finishes, but readiness gating does not justify making startup uncancellable during an indefinitely stalled dependency, so accept a startup context or impose a bounded initialization deadline.",
+      "source_lens": "metareview-lens/runtime-reliability",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null,
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "claude-opus-4-5-20251101",
+        "confidence": 0.78,
+        "rationale": "The finding correctly identifies that s.Init(ctx) is now called synchronously in NewResourceServer (line 258), and looking at the Init method, it uses context.WithCancel(claims.WithClaims(context.Background(), ...)) which creates a new context independent of any caller context. The diff shows Init was previously called lazily from each method (Create, Update, Delete, etc.) but is now called eagerly during construction. The concern about blocking indefinitely during initialization with no way to cancel is valid - the constructor receives a ctx parameter but Init creates its own background context. This is a legitimate architectural concern about the change, not a bug per se (the code will work), but an important design issue where startup could hang indefinitely with no cancellation mechanism.",
+        "diff_context_hash": "2691f948f4856c0cbbf460a6b7e17b6953fe78e7"
+      }
+    },
+    {
+      "issue_text": "pkg/server/module_server_test.go:36 \u2014 Blocking P2, confidence 75: `if dbType == \"postgres\" {` followed by `t.Skip(\"skipping - test not working with postgres in Drone. Works locally.\")` expands a stated Drone-only workaround to every PostgreSQL run, so even the explicitly working local integration test stops checking storage-server startup and `/metrics`, removing existing supported-backend coverage outside the unified-storage performance optimization scope; preserve local PostgreSQL execution and isolate any justified CI quarantine to its failing environment.",
+      "source_lens": "metareview-lens/scope-and-alignment",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null,
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "claude-opus-4-5-20251101",
+        "confidence": 0.82,
+        "rationale": "The finding correctly identifies that the diff adds a t.Skip for postgres that will skip the test in all environments, not just Drone CI. The TODO comment says 'test not working with postgres in Drone. Works locally' but the code unconditionally skips for postgres everywhere. This is a legitimate scope/architecture concern - the skip is overly broad and removes test coverage for postgres in local development where it reportedly works. However, this is not a bug per se (the test still runs for other DB types), but rather a test coverage concern that could be addressed by detecting the CI environment.",
+        "diff_context_hash": "2691f948f4856c0cbbf460a6b7e17b6953fe78e7"
+      }
+    },
+    {
+      "issue_text": "pkg/server/module_server_test.go:36 \u2014 Blocking P2, confidence 100: `if dbType == \"postgres\"` followed by `t.Skip(\"skipping - test not working with postgres in Drone. Works locally.\")` disables the storage-target startup and `/metrics` assertions for every PostgreSQL run, including the local runs the message says work, so PostgreSQL startup regressions introduced by eager resource-server initialization now produce a skipped test instead of a failure; restore executable PostgreSQL coverage by fixing the fixture or narrowly isolating the failing environment.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null,
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "claude-opus-4-5-20251101",
+        "confidence": 0.75,
+        "rationale": "The finding correctly identifies that the diff adds a t.Skip for postgres that will skip the test in all postgres environments, not just Drone CI. The TODO comment acknowledges this is a workaround. While this is a legitimate concern about test coverage reduction (especially given the PR's changes to resource-server initialization), it's not a bug per se - it's a deliberate (if suboptimal) decision to skip a failing test. The finding raises a valid point about reduced test coverage for postgres, which is an important non-bug issue since it could mask regressions from the initialization changes in this PR.",
+        "diff_context_hash": "2691f948f4856c0cbbf460a6b7e17b6953fe78e7"
+      }
+    },
+    {
+      "issue_text": "pkg/storage/unified/resource/server.go:258 \u2014 Blocking P2, confidence 100: the new `err := s.Init(ctx)` constructor branch and removal of RPC initialization guards have no lifecycle assertions in the changed test, whose behavioral assertion remains `assert.Equal(t, 200, res.StatusCode)` at pkg/server/module_server_test.go:63, so constructor initialization failures, initialization completion before return, and RPC behavior after `Stop` are unverified; exercise the resource server through those transitions and assert returned errors and backend activity, since a successful metrics response and shutdown alone do not observe them.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null,
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "claude-opus-4-5-20251101",
+        "confidence": 0.72,
+        "rationale": "The diff shows a significant architectural change: Init() is now called during NewResourceServer() construction (lines 258-262 in server.go) and all the per-RPC Init() guards are removed. The test file change only adds a skip for postgres, with the existing test still just checking HTTP 200 status. The finding correctly identifies that this lifecycle change (constructor initialization, removal of lazy init) lacks test coverage for failure cases, initialization timing, and post-Stop behavior. This is a legitimate test coverage gap for newly changed initialization logic, not a bug but an important non-bug concern about missing tests for nontrivial logic changes.",
+        "diff_context_hash": "2691f948f4856c0cbbf460a6b7e17b6953fe78e7"
+      }
+    },
+    {
+      "issue_text": "pkg/storage/unified/search/bleve.go:137 \u2014 Blocking P2, confidence 100: moving `b.cacheMu.Lock()` after `_, err = builder(idx)` changes concurrent build/read behavior without any test that starts overlapping builds or reads the cache during construction, so the changed integration test's `assert.Equal(t, 200, res.StatusCode)` cannot detect either restoration of the global build serialization or publication of an incomplete index; add a synchronized test against the real Bleve backend that proves independent builds overlap and cached documents become visible only after a successful flush.",
+      "source_lens": "metareview-lens/testing-quality",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null,
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "claude-opus-4-5-20251101",
+        "confidence": 0.72,
+        "rationale": "The finding correctly identifies that the lock scope changed - previously the entire BuildIndex function was protected by the mutex, now only the cache insertion is protected. This means multiple concurrent builds for the same key could proceed simultaneously, and the cache could be read while a build is in progress. The finding's request for a test to verify the new concurrent behavior is reasonable. However, this is not necessarily a bug - it could be an intentional optimization to allow parallel index building. The finding is grounded in real diff changes (lines 88-90 removed lock at start, lines 137-139 added lock only around cache insertion), but whether this is a defect or intentional design change cannot be determined from the diff alone.",
+        "diff_context_hash": "2691f948f4856c0cbbf460a6b7e17b6953fe78e7"
+      }
+    }
+  ],
+  "diff_context_hash": "2691f948f4856c0cbbf460a6b7e17b6953fe78e7",
+  "primary_judge": "claude-opus-4-5-20251101",
+  "adjudicating_judge": "claude-opus-4-5-20251101",
+  "url": "https://github.com/grafana/grafana/pull/97529",
+  "framework": "metareview-realistic",
+  "model": "gpt-6-astra",
+  "effort": "high",
+  "judge": "claude-opus-4-5-20251101",
+  "wall_s": 335.2256500720978,
+  "execution_mode": "cli",
+  "run_batch": "20260910-mrv0120-manifold"
+}

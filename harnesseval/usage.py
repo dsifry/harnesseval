@@ -120,7 +120,10 @@ def from_openai_api(resp, model: str) -> dict[str, dict]:
     cached = int(getattr(pd, "cached_tokens", 0) or 0) if pd else 0
     mu = ModelUsage(input_tokens=int(getattr(u, "prompt_tokens", 0)) - cached,
                     cache_read_input_tokens=cached,
-                    output_tokens=int(getattr(u, "completion_tokens", 0)) - int(rt),
+                    # clamp: some SGLang responses report reasoning_tokens exceeding
+                    # completion_tokens (double-counted thinking) — a negative output
+                    # field poisons downstream sums
+                    output_tokens=max(0, int(getattr(u, "completion_tokens", 0)) - int(rt)),
                     reasoning_output_tokens=int(rt))
     return {model: asdict(mu) | {"total_tokens": mu.total_tokens}}
 

@@ -1,0 +1,83 @@
+diff --git a/spec/verify/admin-embedding.js_verify.rb b/spec/verify/admin-embedding.js_verify.rb
+new file mode 100644
+--- /dev/null
++++ b/spec/verify/admin-embedding.js_verify.rb
+@@ -0,0 +1,78 @@
++require 'json'
++
++# Standalone regression test for
++#   app/assets/javascripts/admin/routes/admin-embedding.js.es6
++# Run from the repo root: ruby -I. spec/verify/admin-embedding.js_verify.rb
++#
++# No Rails, no DB. The REAL route source is loaded and its model() body is
++# executed against a minimal Ember Data store stub, so the only real logic
++# exercised is the code under test.
++
++PATH = File.expand_path('app/assets/javascripts/admin/routes/admin-embedding.js.es6', Dir.pwd)
++
++unless File.file?(PATH)
++  puts "RESULT: FAIL: route source not found at #{PATH}"
++  exit 0
++end
++
++src = File.read(PATH)
++
++model_body = src[/model\s*\(\s*\)\s*\{(.*?)\}/m, 1]
++if model_body.to_s.strip.empty?
++  puts "RESULT: FAIL: could not locate model() in #{PATH}"
++  exit 0
++end
++
++expr = model_body[/return\s+(.+?);?\s*\z/m, 1].to_s.strip.sub(/;\z/, '')
++expr = expr.sub(/\Athis\./, '') # `this.store` -> `store` inside the instance_eval ctx
++
++# The admin#show route renders a SINGLETON embedding; the server answers with the
++# singular root key, matching the shape the fixture in this PR exercises.
++SERVER_PAYLOAD = {
++  'embedding' => {
++    'id'               => 'singleton',
++    'embeddable_hosts' => [{ 'host' => 'example.com' }]
++  }
++}.freeze
++
++# Minimal Ember Data 1.x store semantics:
++#   store.find(type)     -> findAll: reads the PLURAL root key ('embeddings')
++#   store.find(type, id) -> reads the SINGULAR root key for a singleton record
++class EmberDataStore
++  def initialize(payload); @payload = payload; end
++
++  def find(type, id = nil)
++    id.nil? ? @payload["#{type}s"] : @payload[type]
++  end
++end
++
++ctx = Object.new
++ctx.define_singleton_method(:store) { EmberDataStore.new(SERVER_PAYLOAD) }
++
++begin
++  model = ctx.instance_eval(expr)
++rescue StandardError => e
++  puts "RESULT: FAIL: model() raised #{e.class}: #{e.message}"
++  exit 0
++end
++
++expected = SERVER_PAYLOAD['embedding']
++
++# Claimed downstream symptom: {{if embedding.embeddableHosts}} stays falsy and
++# the add-host handler dies on undefined.pushObject.
++add_host_crashed =
++  begin
++    (model.is_a?(Hash) ? model['embeddable_hosts'] : nil).push({ 'host' => 'new' })
++    false
++  rescue NoMethodError
++    true
++  end
++
++if model.nil? || model != expected || add_host_crashed
++  puts "RESULT: FAIL: model() evaluated `#{expr}` -- store.find with no id is routed to " \
++       "findAll, which parses the plural root key 'embeddings'; the payload only carries " \
++       "the singular 'embedding' key, so the route model became #{model.inspect} instead " \
++       "of the embedding record (add-host crashed: #{add_host_crashed})."
++else
++  puts 'RESULT: PASS'
++end

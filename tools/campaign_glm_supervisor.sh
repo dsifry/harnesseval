@@ -1,0 +1,130 @@
+#!/bin/bash
+# GLM campaign supervisor: waits for the two orphan runners to finish their cells,
+# then completes the remaining GLM cells (flash x3 + any vision stragglers).
+set -u
+cd "$(dirname "$0")/.."
+LOG=logs/campaign_phase2_glm.log
+log() { echo "$(date +%H:%M) $*" | tee -a "$LOG"; }
+export HARNESS_KEYS_FILE=~/.config/harnesseval/keys.env.bench
+BATCH=20260910-mrv0120-manifold
+
+log "supervisor: waiting for orphan runners 66087 (vision-high) and 66309 (vision-medium)"
+while ps -p 66087 >/dev/null 2>&1 || ps -p 66309 >/dev/null 2>&1; do sleep 60; done
+log "supervisor: orphan runners finished"
+
+PYCLEAN='
+import json, glob, os, shutil, sys
+model, eff = sys.argv[1], sys.argv[2]
+for f in glob.glob("runs/*/summary.json"):
+    try: s = json.load(open(f))
+    except Exception: continue
+    if (s.get("run_batch") == "20260910-mrv0120-manifold" and s.get("model") == model and s.get("effort") == eff):
+        if (s.get("tokens_in", 0) or 0) + (s.get("tokens_out", 0) or 0) == 0 or s.get("error"):
+            shutil.rmtree(os.path.dirname(f), ignore_errors=True)
+            print("removed poison:", f)
+'
+poison_specs() {
+  .venv/bin/python - "$1" "$2" <<'PYEOF'
+import json, glob, sys
+model, eff = sys.argv[1], sys.argv[2]
+for f in glob.glob("runs/*/summary.json"):
+    try: s = json.load(open(f))
+    except Exception: continue
+    if (s.get("run_batch") == "20260910-mrv0120-manifold" and s.get("model") == model and s.get("effort") == eff):
+        if (s.get("tokens_in", 0) or 0) + (s.get("tokens_out", 0) or 0) == 0 or s.get("error"):
+            print(f"metareview-realistic/{model}/{eff}/{(s.get('url') or '').rsplit('/', 1)[-1]}")
+PYEOF
+}
+
+run_cell() {  # model effort
+  local model=$1 eff=$2
+  for try in 1 2 3 4 5; do
+    log "supervisor: cell $model/$eff attempt $try"
+    .venv/bin/python -u -m harnesseval.run_model_matrix --prs 50 --frameworks metareview-realistic \
+      --models $model --efforts $eff --mode api --concurrency 5 \
+      --run-batch $BATCH --skip-batch $BATCH >> logs/mx_campaign_${model}_${eff}.log 2>&1
+    if [ "$( .venv/bin/python - "$model" "$eff" <<'PYEOF'
+import json, glob, sys
+model, eff = sys.argv[1], sys.argv[2]
+have = {}
+for f in glob.glob("runs/*/summary.json"):
+    try: s = json.load(open(f))
+    except Exception: continue
+    if (s.get("run_batch") == "20260910-mrv0120-manifold" and s.get("model") == model and s.get("effort") == eff):
+        n_find = len(s.get("findings", []))
+        tok = (s.get("tokens_in", 0) or 0) + (s.get("tokens_out", 0) or 0)
+        bad = tok == 0 or bool(s.get("error")) or (n_find == 0 and tok > 20000)
+        u = s.get("url")
+        have[u] = have.get(u, False) or (not bad)
+missing = [u for u, ok in have.items() if not ok]
+print(len(missing))
+PYEOF
+)" = "0" ]; then
+      log "supervisor: cell $model/$eff CLEAN (healthy run for every PR)"; return 0
+    fi
+    local SPECS; SPECS=$(poison_specs "$model" "$eff")
+    # only refill if the cell lacks a healthy run for some PR (dead duplicates are fine)
+    NEED=$( .venv/bin/python - "$model" "$eff" <<'PYEOF'
+import json, glob, sys
+model, eff = sys.argv[1], sys.argv[2]
+have = {}
+for f in glob.glob("runs/*/summary.json"):
+    try: s = json.load(open(f))
+    except Exception: continue
+    if (s.get("run_batch") == "20260910-mrv0120-manifold" and s.get("model") == model and s.get("effort") == eff):
+        n_find = len(s.get("findings", []))
+        tok = (s.get("tokens_in", 0) or 0) + (s.get("tokens_out", 0) or 0)
+        bad = tok == 0 or bool(s.get("error")) or (n_find == 0 and tok > 20000)
+        u = s.get("url")
+        have[u] = have.get(u, False) or (not bad)
+missing = [u for u, ok in have.items() if not ok]
+print(len(missing))
+print(",".join(f"metareview-realistic/{model}/{eff}/{u.rsplit('/',1)[-1]}" for u in missing), end="")
+PYEOF
+)
+    NEED_N=$(echo "$NEED" | head -1)
+    FILL_SPECS=$(echo "$NEED" | tail -1)
+    if [ "$NEED_N" = "0" ]; then
+      log "supervisor: cell $model/$eff effectively complete (healthy run for every PR; residue only)"; return 0
+    fi
+    log "supervisor: cell $model/$eff missing $NEED_N healthy PRs — scrubbing laundered registry entries, then refilling"
+    .venv/bin/python - <<'PYSCRUB'
+import json, glob, os, sys
+model, eff = "$model", "$eff"
+bad = set()
+for f in glob.glob("runs/*/summary.json"):
+    try: s = json.load(open(f))
+    except Exception: continue
+    if (s.get("run_batch") == "20260910-mrv0120-manifold" and s.get("model") == model and s.get("effort") == eff):
+        if len(s.get("findings", [])) == 0 and (s.get("tokens_in", 0) or 0) + (s.get("tokens_out", 0) or 0) > 0:
+            bad.add(os.path.abspath(f))
+rows, n = [], 0
+for line in open("runs/registry.jsonl"):
+    try: r = json.loads(line)
+    except Exception: rows.append(line.rstrip("
+")); continue
+    sp = os.path.abspath(r.get("summary_path") or "")
+    if r.get("status") == "pass" and sp in bad:
+        r["status"] = "fail"; n += 1
+    rows.append(json.dumps(r))
+open("runs/registry.jsonl", "w").write("
+".join(rows) + "
+")
+print(f"scrubbed {n} laundered registry entries")
+PYSCRUB
+    .venv/bin/python -u -m harnesseval.run_model_matrix --prs 50 --frameworks metareview-realistic \
+      --models $model --efforts $eff --mode api --concurrency 1 \
+      --run-batch $BATCH --skip-batch $BATCH --fill "$FILL_SPECS" >> logs/mx_campaign_${model}_${eff}.log 2>&1
+  done
+  log "supervisor: cell $model/$eff FAILED after 5 attempts"
+  return 1
+}
+
+# order (2026-09-10 24:00): vision serving UP (3/3 probes) while flash still hangs —
+# vision refills run NOW into the healthy window; flash medium/high resume after
+# (flash-low is banked 50/50 CLEAN).
+run_cell glm-5.3-vision-background medium
+run_cell glm-5.3-vision-background high
+run_cell glm-5.3-flash-background medium
+run_cell glm-5.3-flash-background high
+log "supervisor: GLM legs complete"

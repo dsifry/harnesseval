@@ -1,0 +1,480 @@
+{
+ "url": "https://github.com/calcom/cal.com/pull/10967",
+ "pass_digest": "9c5f733ce7a3f996c90c67f262cc4a77e2b234bc415c197afa7c73477ad320be",
+ "request_sha256": "f0ed1db6c40c083555d2d9bd229a3e6de11023e71884062643ca697d7490829f",
+ "request": {
+  "url": "https://github.com/calcom/cal.com/pull/10967",
+  "model": "glm-5.3-background",
+  "system": "You are clustering code review findings from one PR. Always respond with valid JSON.",
+  "prompt": "You are clustering code review findings from the same PR. For each PAIR below, decide whether the two findings describe the SAME underlying issue — same root cause in the same code location. Different wording is fine. A finding about a DIFFERENT defect in the same file or function is NOT the same issue. Severity or aspect differences of the same root cause ARE the same issue.\n\n\nFor THIS scoring pass, duplicate equivalence is stricter than sharing a root cause.\nYou must compare the COMPLETE MATERIAL CLAIMS, including mechanism, triggering\nconditions, execution path, and consequence. The same line or broad concern does\nnot establish equivalence. A report of wrong-category selection, a case/rename\nmismatch, a crash, and a silent fallback are different claims even at one lookup.\nAn inactive/unbound API concern and an alleged active user-facing failure differ.\nA compound report with an additional material claim does NOT equal its subset.\nDifferences only in wording, severity, or hedging do not create separate claims.\nIf the claimed mechanisms, triggers or consequences conflict, or one report adds\nan unsupported/different material factual claim, return same=false. You are NOT\nverifying which claim is true; do not repair or reinterpret either report to make\nthem match. If unsure whether their full claims are equivalent, return false.\n\nFor every numbered pair, extract what A and B actually CLAIM into mechanism,\ntrigger and consequence. Then list material_differences and give your equivalence\nverdict, confidence and reason. same=true requires no material differences.\nReturn ONLY this JSON object, with EVERY pair index exactly once:\n{\"pairs\":[{\"pair\":1,\"a\":{\"mechanism\":\"...\",\"trigger\":\"...\",\"consequence\":\"...\"},\"b\":{\"mechanism\":\"...\",\"trigger\":\"...\",\"consequence\":\"...\"},\"material_differences\":[],\"same\":true,\"confidence\":0.9,\"reason\":\"...\"}]}\n\nPAIRS:\nPAIR 1:\nA: P2: Google createEvent silently falls back to 'primary' on credential mismatch — event created on wrong calendar while externalId points at intended calendar, causing later update/delete to target wrong event (packages/app-store/googlecalendar/lib/CalendarService.ts:~146-149)\nB: packages/app-store/googlecalendar/lib/CalendarService.ts:154 — createEvent silently falls back to `\"primary\"` when no destinationCalendar matches the credentialId, writing the event to the wrong calendar while reporting success (and storing a non-matching externalCalendarId reference).\n\nPAIR 2:\nA: packages/app-store/googlecalendar/lib/CalendarService.ts:312-315 — Same inverted fallback in deleteEvent: when externalCalendarId is not provided, the find matches nothing and deleteEvent is invoked with calendarId: undefined, orphaning calendar events on cancellation/reschedule-delete\nB: packages/app-store/googlecalendar/lib/CalendarService.ts:317 — deleteEvent has the same always-undefined `find`, so cancels for references without externalCalendarId now hit `\"primary\"`, and the 404 handler resolves successfully, leaving an orphaned external event while cal.com reports the booking cancelled.\n\nPAIR 3:\nA: packages/app-store/googlecalendar/lib/CalendarService.ts:312-315 — Same inverted fallback in deleteEvent: when externalCalendarId is not provided, the find matches nothing and deleteEvent is invoked with calendarId: undefined, orphaning calendar events on cancellation/reschedule-delete\nB: packages/app-store/googlecalendar/lib/CalendarService.ts:317 — Google `deleteEvent` has the same dead fallback, so references without a stored calendar id always delete from \"primary\"; events that live on a non-primary destination calendar hit the swallowed 404 and remain on the host's calendar after cancellation (P2, conf 75; verbatim: `: event.destinationCalendar?.find((cal) => cal.externalId === externalCalendarId)?.externalId;`)\n\nPAIR 4:\nA: packages/app-store/larkcalendar/lib/CalendarService.ts:128 — Non-Google createEvent implementations ignore the new credentialId selector and use destinationCalendar[0], so collective hosts can target another host's calendar\nB: packages/app-store/larkcalendar/lib/CalendarService.ts:128,164,192,237 and packages/app-store/office365calendar/lib/CalendarService.ts:73 and packages/lib/CalendarService.ts:156,509 — every create/update/delete path in these three calendar providers uses only `const [mainHostDestinationCalendar] = event.destinationCalendar ?? []` (first array element), unlike googlecalendar's CalendarService which resolves the destination by `credentialId`; for Lark, Office365, and the generic ICS provider, a COLLECTIVE booking with multiple hosts on the same provider will create/update/delete events only against the first host's calendar, leaving other hosts' calendars unsynced.\n\nPAIR 5:\nA: packages/app-store/larkcalendar/lib/CalendarService.ts:128 — Non-Google createEvent implementations ignore the new credentialId selector and use destinationCalendar[0], so collective hosts can target another host's calendar\nB: packages/app-store/larkcalendar/lib/CalendarService.ts:128-129,164-165,192-193,237-238; packages/app-store/office365calendar/lib/CalendarService.ts:73; packages/lib/CalendarService.ts:156-163,509; packages/emails/src/templates/BrokenIntegrationEmail.tsx:88-89; packages/core/EventManager.ts:117-119 — every one of these sites destructures only `[mainHostDestinationCalendar] = event.destinationCalendar ?? []` and operates solely on index 0, so for a COLLECTIVE booking with N hosts, Lark/Office365/CalDAV(iCal) calendar writes and the broken-integration email all target/report only the first host's calendar and silently ignore the rest — the task's stated goal (multi-host destination calendars) is only actually honored by GoogleCalendarService, producing a half-migrated, integration-inconsistent design. Severity: P1. Confidence: 78.\n\nPAIR 6:\nA: packages/app-store/larkcalendar/lib/CalendarService.ts:128 — Non-Google createEvent implementations ignore the new credentialId selector and use destinationCalendar[0], so collective hosts can target another host's calendar\nB: packages/app-store/larkcalendar/lib/CalendarService.ts:129 — Each collective host's Lark event is created in destinationCalendar[0], so later hosts can overwrite/create duplicates in the first host's calendar.\n\nPAIR 7:\nA: packages/core/EventManager.ts:170 — Video (non-calendar) booking references are now saved with `credentialId: undefined` for every booking type, so the `bookingVideoReference.credentialId` guard in handleCancelBooking.ts:491 skips `deleteMeeting` and cancelled Zoom/Teams/Daily meetings stay live even for plain single-host bookings (P1, conf 100; verbatim: `credentialId: isCalendarType ? result.credentialId : undefined,`)\nB: packages/core/EventManager.ts:170 — Video bookingReference rows (zoom/daily/etc.) are now persisted with credentialId NULL where they previously stored result.credentialId, so handleCancelBooking.ts:491 (`if (bookingVideoReference && bookingVideoReference.credentialId)`) and lastAttendeeDeleteBooking skip them and every video meeting created after deploy is orphaned on cancel/reschedule, with no backfill possible once written (P1, conf 100; verbatim: `credentialId: isCalendarType ? result.credentialId : undefined,`)\n\nPAIR 8:\nA: packages/core/EventManager.ts:170 — Video (non-calendar) booking references are now saved with `credentialId: undefined` for every booking type, so the `bookingVideoReference.credentialId` guard in handleCancelBooking.ts:491 skips `deleteMeeting` and cancelled Zoom/Teams/Daily meetings stay live even for plain single-host bookings (P1, conf 100; verbatim: `credentialId: isCalendarType ? result.credentialId : undefined,`)\nB: packages/core/EventManager.ts:170 — Video references (Zoom/Daily/etc.) no longer store credentialId because the non-calendar branch changed from `result.credentialId` to `undefined`, so handleCancelBooking.ts:491 (`bookingVideoReference.credentialId`) and lastAttendeeDeleteBooking skip them and cancelled bookings leave their video meetings behind (P1, conf 100; verbatim: `credentialId: isCalendarType ? result.credentialId : undefined,`)\n\nPAIR 9:\nA: packages/core/EventManager.ts:170 — Video (non-calendar) booking references are now saved with `credentialId: undefined` for every booking type, so the `bookingVideoReference.credentialId` guard in handleCancelBooking.ts:491 skips `deleteMeeting` and cancelled Zoom/Teams/Daily meetings stay live even for plain single-host bookings (P1, conf 100; verbatim: `credentialId: isCalendarType ? result.credentialId : undefined,`)\nB: Video booking references lose their credentialId: the non-calendar half of the ternary in EventManager.ts:169-170 changed from `result.credentialId` (the Zoom/Teams credential) to `undefined`, so every new booking's `_video` reference stores `credentialId: null`, breaking credential-based video-meeting deletion on cancel and `deleteCredentialHandler` matching, orphaning video meetings or picking the wrong credential when a user has multiple video integrations.\n\nPAIR 10:\nA: packages/core/EventManager.ts:170 — Video (non-calendar) booking references are now saved with `credentialId: undefined` for every booking type, so the `bookingVideoReference.credentialId` guard in handleCancelBooking.ts:491 skips `deleteMeeting` and cancelled Zoom/Teams/Daily meetings stay live even for plain single-host bookings (P1, conf 100; verbatim: `credentialId: isCalendarType ? result.credentialId : undefined,`)\nB: Video references silently lose credentialId (packages/core/EventManager.ts:~166-169): the first reference-mapping block changed from `credentialId: isCalendarType ? evt.destinationCalendar?.credentialId : result.credentialId` to `... : undefined`, so for non-calendar (video) results the video app's credential id is no longer recorded, while the second block (~line 208) still stores result.credentialId — the two blocks are now inconsistent, and downstream flows that locate bookings by reference credentialId (e.g., credential uninstall cleanup) will miss video meetings.\n\nPAIR 11:\nA: packages/core/EventManager.ts:339 — createAllCalendarEvents awaits one external calendar API create per destination serially, so a COLLECTIVE event with N hosts adds N sequential round-trips (~0.3-1s each) to the booking request instead of one Promise.all fan-out.\nB: packages/core/EventManager.ts:339-383 and packages/core/EventManager.ts:504-551 — the credential-fetch-from-DB fallback runs inside a `for` loop with a blocking `await prisma.credential.findUnique(...)` per destination/reference instead of a single batched `findMany`, so booking create/update latency on this hot path now scales linearly with the number of destination calendars (i.e., with team size for collective multi-host events) where before the diff it was at most one such lookup.\n\nPAIR 12:\nA: packages/core/EventManager.ts:339 — createAllCalendarEvents awaits one external calendar API create per destination serially, so a COLLECTIVE event with N hosts adds N sequential round-trips (~0.3-1s each) to the booking request instead of one Promise.all fan-out.\nB: packages/core/EventManager.ts:344 — New per-destination prisma.credential.findUnique runs inside the loop and always misses the cache for team hosts (EventManager is built only from the organizer's credentials), giving a guaranteed serial N+1 query per booking that a single findMany({ id: { in: ids } }) would replace.\n\nPAIR 13:\nA: packages/core/EventManager.ts:339 — createAllCalendarEvents awaits one external calendar API create per destination serially, so a COLLECTIVE event with N hosts adds N sequential round-trips (~0.3-1s each) to the booking request instead of one Promise.all fan-out.\nB: packages/core/EventManager.ts:370 — Awaiting each destination calendar creation inside the loop serializes all remote calendar API calls, so collective booking latency grows linearly with host count.\n\nPAIR 14:\nA: packages/core/EventManager.ts:339 — createAllCalendarEvents awaits one external calendar API create per destination serially, so a COLLECTIVE event with N hosts adds N sequential round-trips (~0.3-1s each) to the booking request instead of one Promise.all fan-out.\nB: packages/core/EventManager.ts:370 — Awaiting each host's remote createEvent inside the destination loop serializes calendar creation and makes booking latency scale with host count.\n\nPAIR 15:\nA: packages/core/EventManager.ts:339 — createAllCalendarEvents awaits one external calendar API create per destination serially, so a COLLECTIVE event with N hosts adds N sequential round-trips (~0.3-1s each) to the booking request instead of one Promise.all fan-out.\nB: packages/core/EventManager.ts:370 — createAllCalendarEvents awaits createEvent (external calendar API call) sequentially per collective host destination instead of in parallel, so booking latency grows linearly with host count\n\nPAIR 16:\nA: packages/core/EventManager.ts:339 — createAllCalendarEvents awaits one external calendar API create per destination serially, so a COLLECTIVE event with N hosts adds N sequential round-trips (~0.3-1s each) to the booking request instead of one Promise.all fan-out.\nB: Sequential event creation across destination calendars in packages/core/EventManager.ts ~line 340 (createAllCalendarEvents) — createEvent awaited serially per destination instead of Promise.all, increasing wall time for collective bookings\n\nPAIR 17:\nA: packages/core/EventManager.ts:339 — createAllCalendarEvents awaits one external calendar API create per destination serially, so a COLLECTIVE event with N hosts adds N sequential round-trips (~0.3-1s each) to the booking request instead of one Promise.all fan-out.\nB: Sequential per-host calendar event creation in `createAllCalendarEvents` (`packages/core/EventManager.ts:~339–362`) replaces the previous parallel `Promise.all` execution, so external API round trips (Google/O365 insert, `getCalendar()` construction, possible OAuth token refresh) now run strictly serially, making booking-creation latency grow linearly with host count (a 5-host collective event can add multiple seconds of serial provider API latency with timeout risk); parallelize across destinations or document the sequencing rationale.\n\nPAIR 18:\nA: packages/core/EventManager.ts:339 — createAllCalendarEvents awaits one external calendar API create per destination serially, so a COLLECTIVE event with N hosts adds N sequential round-trips (~0.3-1s each) to the booking request instead of one Promise.all fan-out.\nB: Sequential, unbounded external calls in packages/core/EventManager.ts createAllCalendarEvents (~340-360): createEvent is awaited per destination inside a for...of with no Promise.all and no timeout on external API calls, so a single hung calendar API call blocks the entire booking request indefinitely and latency grows linearly with host count on collective events\n\nPAIR 19:\nA: packages/features/bookings/lib/handleCancelBooking.ts:440-460 — the recurring-event branch moved inside the per-reference loop still iterates all credentials × all updatedBookings, issuing N duplicate deleteEvent calls per credential per booking, and the inner references.find still only handles the first calendar ref of each instance\nB: packages/features/bookings/lib/handleCancelBooking.ts:441 — The whole recurring-booking delete branch, which loops over all user credentials and all updatedBookings, was moved inside the per-reference loop, so it runs once per calendar reference and the control flow is now deeply nested and hard to follow.\n\nPAIR 20:\nA: packages/features/bookings/lib/handleCancelBooking.ts:440-460 — the recurring-event branch moved inside the per-reference loop still iterates all credentials × all updatedBookings, issuing N duplicate deleteEvent calls per credential per booking, and the inner references.find still only handles the first calendar ref of each instance\nB: packages/features/bookings/lib/handleCancelBooking.ts:444 — The recurring-cancellation Promise.all block is now nested inside the new per-reference loop, so deleteEvent calls multiply to references x calendar credentials x updatedBookings (e.g. 5 hosts x 5 creds x 50 recurring bookings = 1250 vs 250 before) and each reference's batch is awaited serially.\n",
+  "effort": "low",
+  "pairs": [
+   [
+    977,
+    1040
+   ],
+   [
+    1118,
+    1128
+   ],
+   [
+    1118,
+    1131
+   ],
+   [
+    1158,
+    1160
+   ],
+   [
+    1158,
+    1164
+   ],
+   [
+    1158,
+    1165
+   ],
+   [
+    1293,
+    1294
+   ],
+   [
+    1293,
+    1296
+   ],
+   [
+    1293,
+    1931
+   ],
+   [
+    1293,
+    1932
+   ],
+   [
+    1319,
+    1334
+   ],
+   [
+    1319,
+    1362
+   ],
+   [
+    1319,
+    1391
+   ],
+   [
+    1319,
+    1392
+   ],
+   [
+    1319,
+    1393
+   ],
+   [
+    1319,
+    1893
+   ],
+   [
+    1319,
+    1894
+   ],
+   [
+    1319,
+    1896
+   ],
+   [
+    1546,
+    1548
+   ],
+   [
+    1546,
+    1551
+   ]
+  ]
+ },
+ "parsed_response": {
+  "pairs": [
+   {
+    "pair": 1,
+    "a": {
+     "mechanism": "createEvent silently falls back to 'primary' when no destinationCalendar matches credentialId",
+     "trigger": "credential mismatch / no matching destination calendar on create",
+     "consequence": "event written to wrong calendar with externalId pointing at intended calendar; later update/delete target wrong event"
+    },
+    "b": {
+     "mechanism": "createEvent silently falls back to \"primary\" when no destinationCalendar matches the credentialId",
+     "trigger": "no matching destination calendar on create",
+     "consequence": "event written to wrong calendar while reporting success, storing non-matching externalCalendarId reference"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.95,
+    "reason": "Same fallback mechanism, same trigger, same wrong-calendar consequence and stale externalId claim."
+   },
+   {
+    "pair": 2,
+    "a": {
+     "mechanism": "deleteEvent's find matches nothing, invoked with calendarId: undefined",
+     "trigger": "externalCalendarId not provided on cancel/reschedule-delete",
+     "consequence": "calendar events orphaned"
+    },
+    "b": {
+     "mechanism": "deleteEvent's always-undefined find hits \"primary\"; 404 handler resolves successfully",
+     "trigger": "cancels for references without externalCalendarId",
+     "consequence": "orphaned external event while cal.com reports booking cancelled"
+    },
+    "material_differences": [
+     "A claims calendarId undefined without specifying primary fallback or 404 swallow; B specifies primary deletion and swallowed 404"
+    ],
+    "same": true,
+    "confidence": 0.7,
+    "reason": "Same broken find in deleteEvent orphaning events on cancellation; B elaborates the fallback/404 path but root cause and consequence match."
+   },
+   {
+    "pair": 3,
+    "a": {
+     "mechanism": "deleteEvent's find matches nothing, invoked with calendarId: undefined",
+     "trigger": "externalCalendarId not provided",
+     "consequence": "orphaned calendar events on cancellation/reschedule-delete"
+    },
+    "b": {
+     "mechanism": "same dead fallback always deletes from \"primary\"",
+     "trigger": "references without stored calendar id whose events live on non-primary calendar",
+     "consequence": "swallowed 404, event remains on host's calendar after cancellation"
+    },
+    "material_differences": [
+     "B adds 404-swallow detail and non-primary-calendar condition"
+    ],
+    "same": true,
+    "confidence": 0.7,
+    "reason": "Same dead find fallback in deleteEvent; B elaborates the primary/404 path but same root cause and orphaned-event consequence."
+   },
+   {
+    "pair": 4,
+    "a": {
+     "mechanism": "Lark createEvent ignores credentialId selector, uses destinationCalendar[0]",
+     "trigger": "non-Google provider createEvent",
+     "consequence": "collective hosts can target another host's calendar"
+    },
+    "b": {
+     "mechanism": "all create/update/delete paths in Lark, Office365, and generic ICS use only first destinationCalendar element",
+     "trigger": "collective booking with multiple hosts on these providers",
+     "consequence": "create/update/delete only against first host's calendar, others unsynced"
+    },
+    "material_differences": [
+     "B is a compound claim covering multiple providers and update/delete paths beyond A's createEvent-only Lark claim"
+    ],
+    "same": false,
+    "confidence": 0.85,
+    "reason": "B adds material claims about other providers and update/delete operations; compound report ≠ subset."
+   },
+   {
+    "pair": 5,
+    "a": {
+     "mechanism": "Lark createEvent ignores credentialId, uses destinationCalendar[0]",
+     "trigger": "non-Google createEvent",
+     "consequence": "collective hosts can target another host's calendar"
+    },
+    "b": {
+     "mechanism": "all listed sites operate on destinationCalendar index 0 only",
+     "trigger": "collective booking with N hosts across Lark/Office365/CalDAV plus broken-integration email",
+     "consequence": "half-migrated integration-inconsistent design, all but first host ignored"
+    },
+    "material_differences": [
+     "B adds Office365, generic lib, BrokenIntegrationEmail, and EventManager sites and a design-level claim"
+    ],
+    "same": false,
+    "confidence": 0.9,
+    "reason": "B is a much broader compound claim with additional material locations and consequences."
+   },
+   {
+    "pair": 6,
+    "a": {
+     "mechanism": "non-Google createEvent uses destinationCalendar[0] instead of credentialId selector",
+     "trigger": "collective booking",
+     "consequence": "events can target another host's calendar"
+    },
+    "b": {
+     "mechanism": "each collective host's Lark event created in destinationCalendar[0]",
+     "trigger": "collective booking with multiple hosts",
+     "consequence": "later hosts overwrite/create duplicates in first host's calendar"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "Same mechanism (index-0 selection in Lark createEvent) and same consequence of all hosts' events landing on the first host's calendar."
+   },
+   {
+    "pair": 7,
+    "a": {
+     "mechanism": "video bookingReference saved with credentialId: undefined; handleCancelBooking.ts:491 guard skips deleteMeeting",
+     "trigger": "cancellation of Zoom/Teams/Daily bookings, even single-host",
+     "consequence": "cancelled video meetings stay live"
+    },
+    "b": {
+     "mechanism": "video bookingReference rows persisted with credentialId NULL; handleCancelBooking.ts:491 and lastAttendeeDeleteBooking skip deletion",
+     "trigger": "cancel/reschedule of any video meeting created after deploy",
+     "consequence": "video meetings orphaned, no backfill possible once written"
+    },
+    "material_differences": [
+     "B adds lastAttendeeDeleteBooking path and no-backfill irreversibility claim"
+    ],
+    "same": true,
+    "confidence": 0.7,
+    "reason": "Same root cause and same orphaned-video-meeting consequence; B's additions are aspect/consequence elaborations of the same defect."
+   },
+   {
+    "pair": 8,
+    "a": {
+     "mechanism": "video refs saved with credentialId: undefined; guard at handleCancelBooking.ts:491 skips deleteMeeting",
+     "trigger": "cancellation of video bookings, even single-host",
+     "consequence": "cancelled Zoom/Teams/Daily meetings stay live"
+    },
+    "b": {
+     "mechanism": "non-calendar branch changed from result.credentialId to undefined; handleCancelBooking.ts:491 and lastAttendeeDeleteBooking skip",
+     "trigger": "cancelled bookings",
+     "consequence": "video meetings left behind"
+    },
+    "material_differences": [
+     "B additionally names lastAttendeeDeleteBooking skip path"
+    ],
+    "same": true,
+    "confidence": 0.8,
+    "reason": "Same mechanism, trigger, and consequence; the extra skip path is an aspect of the same guard-based root cause."
+   },
+   {
+    "pair": 9,
+    "a": {
+     "mechanism": "video refs stored with credentialId: undefined; guard at handleCancelBooking.ts:491 skips deleteMeeting",
+     "trigger": "cancellation of video bookings",
+     "consequence": "cancelled meetings stay live"
+    },
+    "b": {
+     "mechanism": "video refs lose credentialId; breaks credential-based deletion and deleteCredentialHandler matching",
+     "trigger": "cancel; credential uninstall",
+     "consequence": "orphaned video meetings OR wrong credential picked when user has multiple video integrations"
+    },
+    "material_differences": [
+     "B adds a distinct claim about deleteCredentialHandler picking the wrong credential for users with multiple integrations"
+    ],
+    "same": false,
+    "confidence": 0.75,
+    "reason": "B adds a different material failure mode (wrong-credential selection in deleteCredentialHandler) beyond A's claims."
+   },
+   {
+    "pair": 10,
+    "a": {
+     "mechanism": "video refs saved with credentialId: undefined; guard at handleCancelBooking.ts:491 skips deleteMeeting",
+     "trigger": "cancellation of video bookings",
+     "consequence": "cancelled meetings stay live"
+    },
+    "b": {
+     "mechanism": "first reference block stores undefined for video; second block (~208) still stores result.credentialId — blocks now inconsistent",
+     "trigger": "non-calendar results",
+     "consequence": "downstream credentialId-based lookups (credential uninstall cleanup) miss video meetings"
+    },
+    "material_differences": [
+     "B adds a claim of inconsistency between two reference blocks and a different downstream (credential uninstall cleanup) impact"
+    ],
+    "same": false,
+    "confidence": 0.75,
+    "reason": "B adds a distinct material claim (second block still storing credentialId, block inconsistency) not present in A."
+   },
+   {
+    "pair": 11,
+    "a": {
+     "mechanism": "createAllCalendarEvents awaits external calendar API create serially per destination",
+     "trigger": "collective event with N hosts",
+     "consequence": "N sequential API round-trips added to booking request instead of Promise.all"
+    },
+    "b": {
+     "mechanism": "per-destination prisma.credential.findUnique DB lookups inside loop instead of batched findMany",
+     "trigger": "booking create/update with multiple destinations",
+     "consequence": "DB lookup latency scales linearly with destination count"
+    },
+    "material_differences": [
+     "A concerns external API calls; B concerns DB credential fetches — different mechanisms"
+    ],
+    "same": false,
+    "confidence": 0.9,
+    "reason": "Different bottlenecks: external API round-trips vs DB N+1 queries."
+   },
+   {
+    "pair": 12,
+    "a": {
+     "mechanism": "serial external calendar API creates per destination",
+     "trigger": "collective event with N hosts",
+     "consequence": "N sequential API round-trips"
+    },
+    "b": {
+     "mechanism": "per-destination prisma.credential.findUnique always cache-miss for team hosts, serial N+1 queries",
+     "trigger": "collective booking",
+     "consequence": "guaranteed serial N+1 DB queries per booking"
+    },
+    "material_differences": [
+     "A is about external API latency; B about DB queries"
+    ],
+    "same": false,
+    "confidence": 0.9,
+    "reason": "Different mechanism (API calls vs DB credential lookups)."
+   },
+   {
+    "pair": 13,
+    "a": {
+     "mechanism": "createAllCalendarEvents awaits external calendar API create serially per destination",
+     "trigger": "collective event with N hosts",
+     "consequence": "N sequential round-trips on booking request instead of Promise.all fan-out"
+    },
+    "b": {
+     "mechanism": "awaiting each destination calendar creation inside loop serializes remote API calls",
+     "trigger": "collective booking",
+     "consequence": "latency grows linearly with host count"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.95,
+    "reason": "Identical mechanism and consequence."
+   },
+   {
+    "pair": 14,
+    "a": {
+     "mechanism": "serial await of external calendar API create per destination",
+     "trigger": "collective event with N hosts",
+     "consequence": "N sequential round-trips on booking request"
+    },
+    "b": {
+     "mechanism": "awaiting each host's remote createEvent inside destination loop",
+     "trigger": "collective booking",
+     "consequence": "booking latency scales with host count"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.95,
+    "reason": "Same serial createEvent claim, same linear-latency consequence."
+   },
+   {
+    "pair": 15,
+    "a": {
+     "mechanism": "serial await of createEvent per destination",
+     "trigger": "collective event with N hosts",
+     "consequence": "N sequential round-trips instead of Promise.all"
+    },
+    "b": {
+     "mechanism": "createEvent awaited sequentially per collective host destination instead of parallel",
+     "trigger": "collective booking",
+     "consequence": "booking latency grows linearly with host count"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.95,
+    "reason": "Same claim restated."
+   },
+   {
+    "pair": 16,
+    "a": {
+     "mechanism": "serial await of external calendar API create per destination",
+     "trigger": "collective event with N hosts",
+     "consequence": "N sequential round-trips instead of Promise.all fan-out"
+    },
+    "b": {
+     "mechanism": "createEvent awaited serially per destination instead of Promise.all",
+     "trigger": "collective bookings",
+     "consequence": "increased wall time"
+    },
+    "material_differences": [],
+    "same": true,
+    "confidence": 0.95,
+    "reason": "Same serial-creation mechanism and latency consequence."
+   },
+   {
+    "pair": 17,
+    "a": {
+     "mechanism": "serial await of external calendar API create per destination",
+     "trigger": "collective event with N hosts",
+     "consequence": "N sequential round-trips (~0.3-1s each) instead of Promise.all"
+    },
+    "b": {
+     "mechanism": "serial per-host createEvent replaces previous parallel Promise.all",
+     "trigger": "collective events (e.g., 5 hosts)",
+     "consequence": "linear latency growth, multiple seconds of serial provider API latency, timeout risk"
+    },
+    "material_differences": [
+     "B mentions getCalendar/OAuth token refresh internals and timeout risk as elaboration"
+    ],
+    "same": true,
+    "confidence": 0.85,
+    "reason": "Same serial-vs-parallel mechanism and linear-latency consequence; B's extra details elaborate the same calls, no different factual claim."
+   },
+   {
+    "pair": 18,
+    "a": {
+     "mechanism": "serial await of external calendar API create per destination",
+     "trigger": "collective event with N hosts",
+     "consequence": "N sequential round-trips adding latency instead of Promise.all"
+    },
+    "b": {
+     "mechanism": "serial createEvent with no timeout on external API calls",
+     "trigger": "any single hung calendar API call; collective events",
+     "consequence": "hung call blocks entire booking request indefinitely; linear latency growth"
+    },
+    "material_differences": [
+     "B adds a distinct claim: no timeout causes indefinite blocking of the whole booking request on a hung call"
+    ],
+    "same": false,
+    "confidence": 0.65,
+    "reason": "B adds a material unsupported-by-A claim (unbounded hang blocking the request indefinitely), beyond A's latency-only claim."
+   },
+   {
+    "pair": 19,
+    "a": {
+     "mechanism": "recurring branch inside per-reference loop issues N duplicate deleteEvent calls per credential per booking; inner references.find handles only first calendar ref",
+     "trigger": "recurring booking cancellation",
+     "consequence": "duplicate deletes and missed non-first calendar refs"
+    },
+    "b": {
+     "mechanism": "recurring-booking delete branch moved inside per-reference loop, runs once per calendar reference",
+     "trigger": "recurring cancellation",
+     "consequence": "deeply nested control flow, hard to follow"
+    },
+    "material_differences": [
+     "B claims a maintainability/readability problem and does not claim duplicate deleteEvent calls; A adds the first-ref-only find claim"
+    ],
+    "same": false,
+    "confidence": 0.7,
+    "reason": "B frames the issue as code readability, not duplicate API calls; A's duplication and find-first-ref claims are material and absent from B."
+   },
+   {
+    "pair": 20,
+    "a": {
+     "mechanism": "recurring branch inside per-reference loop issues duplicate deleteEvent calls (credentials × bookings); inner find handles only first calendar ref",
+     "trigger": "recurring cancellation",
+     "consequence": "N duplicate deleteEvent calls; missed non-first refs"
+    },
+    "b": {
+     "mechanism": "recurring-cancellation Promise.all nested in per-reference loop multiplies deleteEvent calls (refs × creds × bookings); each reference's batch awaited serially",
+     "trigger": "recurring cancellation",
+     "consequence": "e.g., 1250 vs 250 calls; serial batch awaits"
+    },
+    "material_differences": [
+     "A adds the references.find first-ref-only claim absent in B; B adds a serial batch-await claim absent in A"
+    ],
+    "same": false,
+    "confidence": 0.6,
+    "reason": "Core duplication claim matches, but each report carries a different additional material claim (find first-ref handling vs serial batch awaits), so neither is equivalent under strict comparison."
+   }
+  ]
+ },
+ "usage": {
+  "glm-5.3-background": {
+   "input_tokens": 3155,
+   "cache_read_input_tokens": 384,
+   "cache_creation_input_tokens": 0,
+   "output_tokens": 2946,
+   "reasoning_output_tokens": 1637,
+   "cost_usd": 0.0,
+   "total_tokens": 8122
+  }
+ },
+ "status": "complete",
+ "error_type": null,
+ "elapsed_s": 20.755573987960815
+}

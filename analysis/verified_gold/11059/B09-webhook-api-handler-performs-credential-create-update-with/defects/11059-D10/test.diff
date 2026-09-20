@@ -1,0 +1,55 @@
+import { expect, it, vi } from "vitest";
+
+vi.mock("@calcom/lib/constants", () => ({
+  APP_CREDENTIAL_SHARING_ENABLED: true,
+}));
+
+vi.mock("@calcom/prisma", () => {
+  const prisma = {
+    user: { findUnique: vi.fn() },
+    app: { findUnique: vi.fn() },
+    credential: { findFirst: vi.fn(), update: vi.fn(), create: vi.fn() },
+  };
+  return { default: prisma };
+});
+
+vi.mock("@calcom/lib/crypto", () => ({
+  symmetricDecrypt: vi.fn(),
+}));
+
+vi.mock("@calcom/app-store/appStoreMetaData", () => ({
+  appStoreMetadata: {
+    "test-app": { slug: "test-app", type: "test_type" },
+  },
+}));
+
+it("rejects decrypted credential payloads that are not valid credential objects", async () => {
+  process.env.CALCOM_WEBHOOK_SECRET = "secret";
+
+  const { default: handler } = await import("./app-credential");
+  const { default: prisma } = (await import("@calcom/prisma")) as any;
+  const { symmetricDecrypt } = (await import("@calcom/lib/crypto")) as any;
+
+  prisma.user.findUnique.mockResolvedValue({ id: 1 });
+  prisma.app.findUnique.mockResolvedValue({ slug: "test-app" });
+  prisma.credential.findFirst.mockResolvedValue(null);
+  prisma.credential.create.mockResolvedValue({});
+
+  // Decrypted payload is a non-object (number) rather than a credential object
+  symmetricDecrypt.mockReturnValue(JSON.stringify(123));
+
+  const req = {
+    headers: { "calcom-webhook-secret": "secret" },
+    body: { userId: 1, appSlug: "test-app", keys: "encrypted" },
+  } as any;
+
+  const res = {
+    status: vi.fn().mockReturnThis(),
+    json: vi.fn().mockReturnThis(),
+  } as any;
+
+  await handler(req, res);
+
+  expect(res.status).toHaveBeenCalledWith(400);
+  expect(prisma.credential.create).not.toHaveBeenCalled();
+});

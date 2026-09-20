@@ -1,0 +1,106 @@
+diff --git a/packages/core/EventManager.ts b/packages/core/EventManager.ts
+index cc8d5c55b9..8fec914215 100644
+--- a/packages/core/EventManager.ts
++++ b/packages/core/EventManager.ts
+@@ -336,51 +336,61 @@ export default class EventManager {
+   private async createAllCalendarEvents(event: CalendarEvent) {
+     let createdEvents: EventResult<NewCalendarEventType>[] = [];
+     if (event.destinationCalendar && event.destinationCalendar.length > 0) {
+-      for (const destination of event.destinationCalendar) {
+-        if (destination.credentialId) {
+-          let credential = this.calendarCredentials.find((c) => c.id === destination.credentialId);
+-          if (!credential) {
+-            // Fetch credential from DB
+-            const credentialFromDB = await prisma.credential.findUnique({
+-              include: {
+-                app: {
+-                  select: {
+-                    slug: true,
++      const resolvedEvents = await Promise.all(
++        event.destinationCalendar.map(async (destination) => {
++          const destinationEvents: EventResult<NewCalendarEventType>[] = [];
++          if (destination.credentialId) {
++            let credential = this.calendarCredentials.find((c) => c.id === destination.credentialId);
++            if (!credential) {
++              // Fetch credential from DB
++              const credentialFromDB = await prisma.credential.findUnique({
++                include: {
++                  app: {
++                    select: {
++                      slug: true,
++                    },
+                   },
+                 },
+-              },
+-              where: {
+-                id: destination.credentialId,
+-              },
+-            });
+-            if (credentialFromDB && credentialFromDB.app?.slug) {
+-              credential = {
+-                appName: credentialFromDB?.app.slug ?? "",
+-                id: credentialFromDB.id,
+-                type: credentialFromDB.type,
+-                key: credentialFromDB.key,
+-                userId: credentialFromDB.userId,
+-                teamId: credentialFromDB.teamId,
+-                invalid: credentialFromDB.invalid,
+-                appId: credentialFromDB.appId,
+-              };
++                where: {
++                  id: destination.credentialId,
++                },
++              });
++              if (credentialFromDB && credentialFromDB.app?.slug) {
++                credential = {
++                  appName: credentialFromDB?.app.slug ?? "",
++                  id: credentialFromDB.id,
++                  type: credentialFromDB.type,
++                  key: credentialFromDB.key,
++                  userId: credentialFromDB.userId,
++                  teamId: credentialFromDB.teamId,
++                  invalid: credentialFromDB.invalid,
++                  appId: credentialFromDB.appId,
++                };
++              }
+             }
+-          }
+-          if (credential) {
+-            const createdEvent = await createEvent(credential, event, destination.externalId);
+-            if (createdEvent) {
+-              createdEvents.push(createdEvent);
++            if (credential) {
++              const createdEvent = await createEvent(credential, event, destination.externalId);
++              if (createdEvent) {
++                destinationEvents.push(createdEvent);
++              }
+             }
++          } else {
++            const destinationCalendarCredentials = this.calendarCredentials.filter(
++              (c) => c.type === destination.integration
++            );
++            const createdEventsForCredentials = await Promise.all(
++              destinationCalendarCredentials.map(async (c) => await createEvent(c, event))
++            );
++            destinationEvents.push(
++              ...createdEventsForCredentials.filter(
++                (createdEvent): createdEvent is EventResult<NewCalendarEventType> => !!createdEvent
++              )
++            );
+           }
+-        } else {
+-          const destinationCalendarCredentials = this.calendarCredentials.filter(
+-            (c) => c.type === destination.integration
+-          );
+-          createdEvents = createdEvents.concat(
+-            await Promise.all(destinationCalendarCredentials.map(async (c) => await createEvent(c, event)))
+-          );
+-        }
+-      }
++          return destinationEvents;
++        })
++      );
++      createdEvents = resolvedEvents.flat();
+     } else {
+       /**
+        *  Not ideal but, if we don't find a destination calendar,

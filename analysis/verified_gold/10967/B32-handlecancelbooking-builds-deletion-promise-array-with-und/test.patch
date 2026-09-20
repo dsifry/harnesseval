@@ -1,0 +1,175 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const { prismaMock, deleteEventSpy, getCalendarMock } = vi.hoisted(() => {
+  const deleteEventSpy = vi.fn().mockResolvedValue({ id: "evt" });
+  const prismaMock: any = {
+    booking: {
+      findUnique: vi.fn(),
+      findFirst: vi.fn(),
+      findMany: vi.fn().mockResolvedValue([]),
+      update: vi.fn().mockResolvedValue({}),
+      updateMany: vi.fn().mockResolvedValue({}),
+    },
+    credential: { findUnique: vi.fn().mockResolvedValue(null) },
+    membership: { findFirst: vi.fn().mockResolvedValue(null) },
+    payment: { findMany: vi.fn().mockResolvedValue([]) },
+    user: { findFirst: vi.fn().mockResolvedValue(null) },
+    webhook: { findMany: vi.fn().mockResolvedValue([]) },
+  };
+  return {
+    prismaMock,
+    deleteEventSpy,
+    getCalendarMock: vi.fn().mockResolvedValue({ deleteEvent: deleteEventSpy }),
+  };
+});
+
+vi.mock("@calcom/prisma", () => ({ default: prismaMock, bookingMinimalSelect: {} }));
+vi.mock("@calcom/prisma/zod-utils", () => ({ schemaBookingCancelParams: { parse: (v: unknown) => v } }));
+vi.mock("@calcom/prisma/enums", () => ({
+  BookingStatus: { CANCELLED: "CANCELLED", ACCEPTED: "ACCEPTED" },
+  MembershipRole: { OWNER: "OWNER", ADMIN: "ADMIN", MEMBER: "MEMBER" },
+  WorkflowMethods: { EMAIL: "EMAIL", SMS: "SMS", WHATSAPP: "WHATSAPP" },
+  WebhookTriggerEvents: { BOOKING_CANCELLED: "BOOKING_CANCELLED" },
+}));
+vi.mock("@calcom/app-store/_utils/getCalendar", () => ({ getCalendar: getCalendarMock }));
+vi.mock("@calcom/app-store", () => ({
+  default: { getAppRegistry: () => ({ getApp: () => null, getAllApps: () => [] }), getApp: () => null },
+}));
+vi.mock("@calcom/app-store/dailyvideo/lib/VideoApiAdapter", () => ({ FAKE_DAILY_CREDENTIAL: {} }));
+vi.mock("@calcom/app-store/locations", () => ({ DailyLocationType: "daily" }));
+vi.mock("@calcom/app-store/zapier/lib/nodeScheduler", () => ({ cancelScheduledJobs: vi.fn() }));
+vi.mock("@calcom/core/videoClient", () => ({ deleteMeeting: vi.fn(), updateMeeting: vi.fn() }));
+vi.mock("@calcom/dayjs", () => {
+  const d: any = () => ({ utc: () => ({ toISOString: () => "" }), toISOString: () => "" });
+  d.utc = () => ({ toISOString: () => "" });
+  return { default: d };
+});
+vi.mock("@calcom/emails", () => ({ sendCancelledEmails: vi.fn(), sendCancelledSeatEmails: vi.fn() }));
+vi.mock("@calcom/features/bookings/lib/getCalEventResponses", () => ({ getCalEventResponses: () => ({}) }));
+vi.mock("@calcom/features/ee/workflows/lib/isEventTypeOwnerKYCVerified", () => ({ isEventTypeOwnerKYCVerified: vi.fn() }));
+vi.mock("@calcom/features/ee/workflows/lib/reminders/emailReminderManager", () => ({ deleteScheduledEmailReminder: vi.fn() }));
+vi.mock("@calcom/features/ee/workflows/lib/reminders/reminderScheduler", () => ({ sendCancelledReminders: vi.fn() }));
+vi.mock("@calcom/features/ee/workflows/lib/reminders/smsReminderManager", () => ({ deleteScheduledSMSReminder: vi.fn() }));
+vi.mock("@calcom/features/ee/workflows/lib/reminders/whatsappReminderManager", () => ({ deleteScheduledWhatsappReminder: vi.fn() }));
+vi.mock("@calcom/features/webhooks/lib/getWebhooks", () => ({ default: vi.fn().mockResolvedValue([]) }));
+vi.mock("@calcom/features/webhooks/lib/sendPayload", () => ({ default: vi.fn() }));
+vi.mock("@calcom/lib", () => ({
+  isPrismaObjOrUndefined: (v: unknown) => (v && typeof v === "object" ? v : undefined),
+  parseRecurringEvent: () => null,
+}));
+vi.mock("@calcom/lib/getTeamIdFromEventType", () => ({ getTeamIdFromEventType: vi.fn().mockResolvedValue(null) }));
+vi.mock("@calcom/lib/http-error", () => ({
+  HttpError: class HttpError extends Error {
+    statusCode = 500;
+    constructor(opts: { message: string }) {
+      super(opts.message);
+    }
+  },
+}));
+vi.mock("@calcom/lib/logger", () => {
+  const noop = vi.fn();
+  return {
+    default: {
+      debug: noop,
+      error: noop,
+      info: noop,
+      warn: noop,
+      getSubLogger: () => ({ debug: noop, error: noop, info: noop, warn: noop }),
+    },
+  };
+});
+vi.mock("@calcom/lib/payment/handleRefundError", () => ({ handleRefundError: vi.fn() }));
+vi.mock("@calcom/lib/server/i18n", () => ({ getTranslation: vi.fn().mockResolvedValue((k: string) => k) }));
+vi.mock("@calcom/lib/timeFormat", () => ({ getTimeFormatStringFromUserTimeFormat: () => "12" }));
+
+describe("handleCancelBooking external calendar deletions", () => {
+  beforeEach(() => {
+    deleteEventSpy.mockClear();
+  });
+
+  it("deletes each external calendar event only once even with multiple calendar references", async () => {
+    const { default: handler } = await import("./handleCancelBooking");
+
+    const credential = {
+      id: 100,
+      type: "google_calendar",
+      key: {},
+      appId: "google-calendar",
+      userId: 1,
+      teamId: null,
+      invalid: false,
+    };
+
+    const reference = {
+      id: 1,
+      type: "google_calendar",
+      uid: "same-external-uid",
+      externalCalendarId: "ext-cal-1",
+      credentialId: null,
+      bookingId: 1,
+      deleted: false,
+    };
+
+    const booking = {
+      id: 1,
+      uid: "booking-uid",
+      title: "Test booking",
+      description: "",
+      startTime: new Date(),
+      endTime: new Date(Date.now() + 3600_000),
+      userId: 1,
+      status: "ACCEPTED",
+      paid: false,
+      payment: [],
+      location: null,
+      customInputs: null,
+      metadata: null,
+      recurringEventId: null,
+      fromReschedule: null,
+      rescheduled: null,
+      cancellationReason: null,
+      smsReminderNumber: null,
+      seatsReferences: [],
+      attendees: [],
+      destinationCalendar: null,
+      references: [reference, { ...reference, id: 2 }],
+      user: {
+        id: 1,
+        email: "owner@example.com",
+        name: "Owner",
+        username: "owner",
+        timeZone: "UTC",
+        timeFormat: 12,
+        locale: "en",
+        destinationCalendar: null,
+        credentials: [credential],
+      },
+      eventType: {
+        id: 1,
+        title: "Event",
+        slug: "event",
+        teamId: null,
+        owner: null,
+        recurringEvent: null,
+        bookingFields: null,
+        seatsPerTimeSlot: null,
+        requiresConfirmation: false,
+      },
+    };
+
+    prismaMock.booking.findUnique.mockResolvedValue(booking);
+
+    const req = {
+      body: { id: 1, uid: "booking-uid" },
+      session: { user: { id: 1, email: "owner@example.com", username: "owner", role: "ADMIN" } },
+    } as any;
+
+    try {
+      await handler(req);
+    } catch {
+      // Some post-deletion steps may still fail; the deletion calls already happened.
+    }
+
+    expect(deleteEventSpy).toHaveBeenCalledTimes(1);
+  });
+});

@@ -1,0 +1,53 @@
+require 'uri'
+
+# --- Minimal stubs so the real file under test can load and run ---
+class SiteSetting
+  def self.embeddable_host; 'example.com'; end
+  def self.feed_polling_enabled?; true; end
+  def self.embed_by_username; 'embedder'; end
+end
+
+class FakeRedis
+  def initialize; @h = {}; end
+  def setnx(k, v); return false if @h.key?(k); @h[k] = v; true; end
+  def expire(k, t); true; end
+end
+$redis = FakeRedis.new
+
+class FakeUser; def blank?; false; end; end
+class User
+  def self.where(*); self; end
+  def self.first; FakeUser.new; end
+end
+
+class FakeScope
+  def initialize(e); @e = e; end
+  def exists?; @e; end
+end
+
+$imported = []
+class TopicEmbed
+  def self.where(embed_url:); FakeScope.new(false); end
+  def self.import_remote(user, url); $imported << url; end
+end
+
+$poll_count = 0
+module Jobs; end
+class Jobs::PollFeed
+  def execute(*args); $poll_count += 1; end
+end
+
+# Load the REAL file under test (no Rails, no DB).
+require_relative '../../lib/topic_retriever'
+
+# Three distinct embed URLs, none of them previously seen -> all cache misses.
+urls = (1..3).map { |i| "http://example.com/article/#{i}" }
+urls.each { |u| TopicRetriever.new(u).retrieve }
+
+# Claimed defect: every cache miss synchronously runs a full feed poll.
+# Correct behaviour: at most one poll (e.g. the scheduled one), not one per request.
+if $poll_count <= 1
+  puts "RESULT: PASS"
+else
+  puts "RESULT: FAIL: every cache-miss embed ran a synchronous full feed poll #{'(' + $poll_count.to_s} PollFeed.execute calls for #{urls.size} embed URLs)"
+end

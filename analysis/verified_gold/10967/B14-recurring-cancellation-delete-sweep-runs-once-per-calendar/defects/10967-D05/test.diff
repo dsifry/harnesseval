@@ -1,0 +1,168 @@
+import { describe, expect, it, vi } from "vitest";
+
+process.env.CALCOM_LICENSE_KEY = "test";
+process.env.NEXT_PUBLIC_WEBAPP_URL = "http://localhost:3000";
+
+vi.mock("@calcom/prisma", () => ({
+  default: {
+    booking: { findUnique: vi.fn(), findMany: vi.fn(), update: vi.fn(), updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
+    bookingReference: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
+    bookingSeat: { delete: vi.fn().mockResolvedValue({}) },
+    attendee: { delete: vi.fn().mockResolvedValue({}), deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
+    credential: { findUnique: vi.fn().mockResolvedValue(null), findMany: vi.fn().mockResolvedValue([]) },
+    membership: { findFirst: vi.fn().mockResolvedValue(null) },
+    user: { findFirstOrThrow: vi.fn().mockResolvedValue({ id: 1, username: "testuser", name: "Test User", email: "user@example.com", timeFormat: 12, locale: "en", credentials: [] }) },
+  },
+  bookingMinimalSelect: {},
+}));
+vi.mock("@calcom/app-store/_utils/getCalendar", () => ({ getCalendar: vi.fn() }));
+vi.mock("@calcom/core/videoClient", () => ({ deleteMeeting: vi.fn(), updateMeeting: vi.fn() }));
+vi.mock("@calcom/emails", () => ({ sendCancelledEmails: vi.fn(), sendCancelledSeatEmails: vi.fn() }));
+vi.mock("@calcom/features/bookings/lib/getCalEventResponses", () => ({ getCalEventResponses: vi.fn().mockReturnValue({}) }));
+vi.mock("@calcom/features/ee/workflows/lib/isEventTypeOwnerKYCVerified", () => ({ isEventTypeOwnerKYCVerified: vi.fn().mockResolvedValue(true) }));
+vi.mock("@calcom/features/ee/workflows/lib/reminders/emailReminderManager", () => ({ deleteScheduledEmailReminder: vi.fn() }));
+vi.mock("@calcom/features/ee/workflows/lib/reminders/reminderScheduler", () => ({ sendCancelledReminders: vi.fn() }));
+vi.mock("@calcom/features/ee/workflows/lib/reminders/smsReminderManager", () => ({ deleteScheduledSMSReminder: vi.fn() }));
+vi.mock("@calcom/features/ee/workflows/lib/reminders/whatsappReminderManager", () => ({ deleteScheduledWhatsappReminder: vi.fn() }));
+vi.mock("@calcom/features/webhooks/lib/getWebhooks", () => ({ default: vi.fn().mockResolvedValue([]) }));
+vi.mock("@calcom/features/webhooks/lib/sendPayload", () => ({ default: vi.fn().mockResolvedValue({}) }));
+vi.mock("@calcom/lib", () => ({ isPrismaObjOrUndefined: vi.fn((o) => o), parseRecurringEvent: vi.fn((r) => r) }));
+vi.mock("@calcom/lib/getTeamIdFromEventType", () => ({ getTeamIdFromEventType: vi.fn().mockResolvedValue(null) }));
+vi.mock("@calcom/lib/http-error", () => ({ HttpError: class extends Error { statusCode: number; constructor({ message, statusCode }: any) { super(message); this.statusCode = statusCode; } } }));
+vi.mock("@calcom/lib/logger", () => ({ default: { error: vi.fn(), debug: vi.fn(), info: vi.fn(), warn: vi.fn() } }));
+vi.mock("@calcom/lib/payment/handleRefundError", () => ({ handleRefundError: vi.fn() }));
+vi.mock("@calcom/lib/server/i18n", () => ({ getTranslation: vi.fn().mockResolvedValue((k: string) => k) }));
+vi.mock("@calcom/lib/timeFormat", () => ({ getTimeFormatStringFromUserTimeFormat: vi.fn().mockReturnValue("h:mm A") }));
+vi.mock("@calcom/prisma/enums", () => ({ BookingStatus: { CANCELLED: "CANCELLED", ACCEPTED: "ACCEPTED", REJECTED: "REJECTED", PENDING: "PENDING" }, MembershipRole: { OWNER: "OWNER", ADMIN: "ADMIN", MEMBER: "MEMBER" }, WorkflowMethods: { EMAIL: "EMAIL", SMS: "SMS", WHATSAPP: "WHATSAPP" }, WebhookTriggerEvents: { BOOKING_CANCELLED: "BOOKING_CANCELLED" } }));
+vi.mock("@calcom/prisma/zod-utils", () => ({ schemaBookingCancelParams: { parse: vi.fn((d) => d) } }));
+vi.mock("@calcom/app-store", () => ({ default: {} }));
+vi.mock("@calcom/app-store/dailyvideo/lib/VideoApiAdapter", () => ({ FAKE_DAILY_CREDENTIAL: { id: -1, type: "daily_video", key: {}, userId: 1, teamId: null, appId: "dailyvideo", invalid: false } }));
+vi.mock("@calcom/app-store/locations", () => ({ DailyLocationType: "integrations:daily" }));
+vi.mock("@calcom/app-store/zapier/lib/nodeScheduler", () => ({ cancelScheduledJobs: vi.fn() }));
+vi.mock("@calcom/dayjs", () => {
+  const dayjs: any = vi.fn(() => ({
+    tz: vi.fn().mockReturnThis(),
+    format: vi.fn().mockReturnValue("2024-01-01T00:00:00Z"),
+    toISOString: vi.fn().mockReturnValue("2024-01-01T00:00:00Z"),
+    add: vi.fn().mockReturnThis(),
+    subtract: vi.fn().mockReturnThis(),
+    isBefore: vi.fn().mockReturnValue(false),
+    isAfter: vi.fn().mockReturnValue(false),
+  }));
+  dayjs.extend = vi.fn();
+  return { default: dayjs };
+});
+
+describe("handleCancelBooking - recurring event deletion", () => {
+  it("should delete all calendar references for each updated booking, not just the first", async () => {
+    const { getCalendar } = await import("@calcom/app-store/_utils/getCalendar");
+    const prisma = (await import("@calcom/prisma")).default;
+
+    const mockDeleteEvent = vi.fn().mockResolvedValue({});
+    (getCalendar as any).mockResolvedValue({ deleteEvent: mockDeleteEvent });
+
+    const mainBooking = {
+      id: 1,
+      userId: 1,
+      uid: "main-uid",
+      title: "Test Booking",
+      description: "Test Description",
+      status: "ACCEPTED",
+      startTime: new Date(),
+      endTime: new Date(),
+      location: "integrations:google:meet",
+      eventType: {
+        id: 1,
+        slug: "test-event",
+        title: "Test Event",
+        length: 30,
+        recurringEvent: true,
+        teamId: null,
+        owner: { id: 1, username: "testuser", name: "Test User", email: "user@example.com", timeFormat: 12, locale: "en" },
+      },
+      recurringEventId: "recurring-123",
+      user: {
+        id: 1,
+        username: "testuser",
+        name: "Test User",
+        email: "user@example.com",
+        timeFormat: 12,
+        locale: "en",
+        credentials: [
+          { id: 101, type: "google_calendar", key: {}, userId: 1, teamId: null, appId: "google", invalid: false },
+        ],
+      },
+      references: [
+        { type: "google_calendar", uid: "main-ref1", externalCalendarId: "main-cal1", credentialId: 101 },
+        { type: "google_calendar", uid: "main-ref2", externalCalendarId: "main-cal2", credentialId: 101 },
+      ],
+      workflowReminders: [],
+      scheduledJobs: [],
+      attendees: [],
+    };
+    (prisma.booking.findUnique as any).mockResolvedValue(mainBooking);
+
+    (prisma.booking.findMany as any).mockResolvedValue([
+      { id: 2, uid: "upd-uid-1", recurringEventId: "recurring-123", status: "ACCEPTED", startTime: new Date(), endTime: new Date(),
+        references: [
+          { uid: "upd1-ref1", type: "google_calendar", externalCalendarId: "upd1-cal1", credentialId: 101 },
+          { uid: "upd1-ref2", type: "google_calendar", externalCalendarId: "upd1-cal2", credentialId: 101 },
+        ], workflowReminders: [], scheduledJobs: [] },
+      { id: 3, uid: "upd-uid-2", recurringEventId: "recurring-123", status: "ACCEPTED", startTime: new Date(), endTime: new Date(),
+        references: [
+          { uid: "upd2-ref1", type: "google_calendar", externalCalendarId: "upd2-cal1", credentialId: 101 },
+          { uid: "upd2-ref2", type: "google_calendar", externalCalendarId: "upd2-cal2", credentialId: 101 },
+        ], workflowReminders: [], scheduledJobs: [] },
+    ]);
+
+    (prisma.booking.update as any).mockImplementation(({ where }: any) => {
+      if (where.uid === "upd-uid-1") {
+        return Promise.resolve({
+          startTime: new Date(),
+          endTime: new Date(),
+          references: [
+            { uid: "upd1-ref1", type: "google_calendar", externalCalendarId: "upd1-cal1", credentialId: 101 },
+            { uid: "upd1-ref2", type: "google_calendar", externalCalendarId: "upd1-cal2", credentialId: 101 },
+          ],
+          workflowReminders: [],
+          uid: "upd-uid-1",
+          scheduledJobs: [],
+        });
+      }
+      if (where.uid === "upd-uid-2") {
+        return Promise.resolve({
+          startTime: new Date(),
+          endTime: new Date(),
+          references: [
+            { uid: "upd2-ref1", type: "google_calendar", externalCalendarId: "upd2-cal1", credentialId: 101 },
+            { uid: "upd2-ref2", type: "google_calendar", externalCalendarId: "upd2-cal2", credentialId: 101 },
+          ],
+          workflowReminders: [],
+          uid: "upd-uid-2",
+          scheduledJobs: [],
+        });
+      }
+      return Promise.resolve(null);
+    });
+
+    const { default: handleCancelBooking } = await import("./handleCancelBooking");
+    const evt = {
+      title: "Test Event",
+      startTime: new Date().toISOString(),
+      endTime: new Date().toISOString(),
+      additionalInformation: "",
+      description: "",
+      eventTypeId: 1,
+    };
+
+    await handleCancelBooking({
+      body: { id: 1, uid: "main-uid", allRemainingBookings: true, cancellationReason: "User requested" },
+      userId: 1,
+    } as any);
+
+    // The current code only deletes the first calendar reference of each updated booking.
+    // It should delete all calendar references, including the secondary ones.
+    expect(mockDeleteEvent).toHaveBeenCalledWith("upd1-ref2", expect.anything(), expect.anything());
+    expect(mockDeleteEvent).toHaveBeenCalledWith("upd2-ref2", expect.anything(), expect.anything());
+  });
+});

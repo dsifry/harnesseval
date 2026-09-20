@@ -1,0 +1,629 @@
+{
+  "tp": 2,
+  "fp": 17,
+  "fn": 0,
+  "precision": 0.10526315789473684,
+  "recall": 1.0,
+  "n_findings": 19,
+  "n_golden": 2,
+  "tokens_in": 3516932,
+  "tokens_out": 80880,
+  "wall_ms": 378261.3618373871,
+  "per_model_usage": {
+    "claude-haiku-4-5-20251001": {
+      "input_tokens": 2153,
+      "cache_read_input_tokens": 0,
+      "cache_creation_input_tokens": 0,
+      "output_tokens": 15,
+      "reasoning_output_tokens": 0,
+      "cost_usd": 0.002228,
+      "total_tokens": 2168
+    },
+    "claude-sonnet-5": {
+      "input_tokens": 172,
+      "cache_read_input_tokens": 3206322,
+      "cache_creation_input_tokens": 227405,
+      "output_tokens": 80865,
+      "reasoning_output_tokens": 0,
+      "cost_usd": 2.0724754,
+      "total_tokens": 3514764
+    }
+  },
+  "total_cost_usd": 2.0747034,
+  "resolved_model": "claude-haiku-4-5-20251001,claude-sonnet-5",
+  "adjudicated_precision": 1.0,
+  "incremental_recall": 1.0,
+  "n_bug_ungold": 4,
+  "n_important_non_bug": 13,
+  "n_true_hallucination": 0,
+  "n_unresolved": 0,
+  "n_real_ungold": 4,
+  "n_hallucination": 0,
+  "decomposition": {
+    "deterministic_tp": 0,
+    "llm_lens_tp": 0,
+    "deterministic_gate_recall": 0.0,
+    "llm_lens_recall": 0.0
+  },
+  "findings": [
+    {
+      "issue_text": "| P1 | pkg/storage/unified/search/bleve.go:72-139 | BuildIndex no longer holds cacheMu across index creation/build, so two concurrent callers for the same uncached key (e.g. two simultaneous Search() requests hitting searchSupport.getOrCreateIndex in pkg/storage/unified/resource/search.go:287-306, whose own comment admits \"we don't want to block... simple mutex not great\") both build a full index and race to write b.cache[key] at bleve.go:138, silently discarding the loser's *bleveIndex (never Close()'d) while its caller may still be using it for that request. | adversarial | 55 |",
+      "source_lens": "compound-realistic",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null
+    },
+    {
+      "issue_text": "| P0 | pkg/storage/unified/search/bleve.go:98 | For file-backed indexes (size > FileThreshold), the same directory-collision race means two concurrent BuildIndex calls for the same key both call bleve.New(dir, mapper) on the identical path; bleve.New fails if the path already exists, so the losing goroutine's index directory is left on disk unreferenced by the cache, and every subsequent rebuild attempt for that key (e.g. after a cache eviction/restart) will permanently fail with \"path already exists\" until the stale directory is manually removed. | adversarial | 40 |",
+      "source_lens": "compound-realistic",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null
+    },
+    {
+      "issue_text": "| P1 | pkg/server/module_server_test.go:35-37 | The newly added t.Skip for postgres (\"works locally... not in Drone\") disables the only integration test that boots a real ModuleServer with target=StorageServer, which is exactly the code path affected by this same diff's change in pkg/storage/unified/resource/server.go:258-264 making NewResourceServer() call s.Init(ctx) synchronously (including the blocking search.init which queries GetResourceStats and builds indexes) before returning, instead of the old lazy per-RPC Init; disabling the test for postgres means CI can go green while a startup-timing regression against postgres introduced by this exact PR goes uncaught. | adversarial | 40 |",
+      "source_lens": "compound-realistic",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null
+    },
+    {
+      "issue_text": "| P2 | pkg/storage/unified/resource/server.go:258-264 | NewResourceServer now returns an error (failing server construction entirely) if the one-shot s.Init(ctx) fails, whereas previously a failed Init() only affected the first RPC call that triggered it and could be retried on subsequent calls (sync.Once still caches the error, but the server object itself was reachable); now any transient failure of search.init() (e.g. a slow/not-yet-ready DB at process startup) permanently prevents the resource server from ever being constructed, with no retry path, turning a transient dependency hiccup into a hard startup failure. | adversarial | 35 |",
+      "source_lens": "compound-realistic",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null
+    },
+    {
+      "issue_text": "| P1 | pkg/storage/unified/search/bleve.go:88-139 | BuildIndex now only holds cacheMu around the final `b.cache[key] = idx` write instead of the whole function, so two concurrent callers building the same not-yet-cached NamespacedResource (e.g. two simultaneous Search() requests, or Search() racing the async handleEvent watcher in search.go) can both run `bleve.New(dir, mapper)`/`NewMemOnly` and the full builder scan concurrently for the same key, risking on-disk index corruption for file-backed indexes (two writers to the same directory) or a wasted duplicate build whose finished bleve.Index is silently dropped and never closed (leaked file handles/goroutines) when the losing goroutine's cache write is overwritten. | correctness | 75 |",
+      "source_lens": "compound-realistic",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null
+    },
+    {
+      "issue_text": "| P2 | pkg/storage/unified/resource/server.go:304-311 | Swapping search.init() before initWatcher() inside Init() means that if search.init() succeeds (which, per search.go:202-213, spawns a long-lived goroutine reading from `s.storage.WatchWriteEvents(context.Background())` that is never tied to s.ctx/cancel) and initWatcher() then fails, s.initErr is set and NewResourceServer discards the whole server object, permanently leaking that goroutine and its backend watch subscription with no way to cancel it; under the old ordering search.init() was always the last step, so this leak path was unreachable. | correctness | 55 |",
+      "source_lens": "compound-realistic",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null
+    },
+    {
+      "issue_text": "| P2 | pkg/storage/unified/resource/server.go:258-262 | Init() (search index build + storage stats scan across all resources) now runs synchronously and unconditionally inside NewResourceServer() instead of lazily on first RPC, turning what used to be fast, non-blocking construction into a potentially long blocking call that gates the rest of process/module startup; this is corroborated by pkg/server/module_server_test.go:35-38 which had to add a t.Skip for postgres because the test's fixed 500ms wait for the HTTP metrics server to come up is no longer sufficient in CI, indicating the eager Init changed startup timing/state-transition behavior for real backends. | correctness | 45 |",
+      "source_lens": "compound-realistic",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null
+    },
+    {
+      "issue_text": "| P1 | pkg/storage/unified/search/bleve.go:87-140 | Narrowing cacheMu to only guard the final `b.cache[key] = idx` write removes the only serialization that prevented duplicate concurrent BuildIndex calls for the same key (searchSupport.getOrCreateIndex in pkg/storage/unified/resource/search.go:298-315 has no per-key mutex/singleflight, per its own \"simple mutex not great\" TODO comment), so concurrent first-access requests for an uncached namespace/resource now run two full unbounded ListIterator (Limit: 1e12) reindex builds in parallel instead of serialized, doubling CPU/memory and storage backend load under concurrent load. | performance | 70 |",
+      "source_lens": "compound-realistic",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null
+    },
+    {
+      "issue_text": "| P2 | pkg/storage/unified/search/bleve.go:96-102 | For file-backed indices (size > FileThreshold), the now-unsynchronized duplicate build race means two goroutines can call bleve.New(dir, mapper) on the identical directory concurrently; bleve.New errors when the index path already exists, so one of the racing builds fails outright (wasted full document build work) and its bleve.Index/idx object is discarded with no Close() call anywhere in BuildIndex's error paths, leaking the underlying open index/file handle. | performance | 55 |",
+      "source_lens": "compound-realistic",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null
+    },
+    {
+      "issue_text": "| P2 | pkg/storage/unified/resource/server.go:293-318,455,494,631,687,777,917 | Removing the per-RPC s.Init(ctx) call yields negligible perf benefit since Init is already guarded by sync.Once (the repeated call was just a cheap Once.Do fast-path check), but it removes the fail-fast gate that returned s.initErr (\"service is stopping\"/\"service is stopped\", set in Stop() at line 321/339) to callers; now Create/Update/Delete/Read/List/Watch/Search/PutBlob/GetBlob no longer check init/shutdown state at all, so in-flight or new requests can keep hitting the backend/broadcaster after Stop() has already canceled s.ctx (line 333), risking wasted work against a shutting-down backend and orphaned Watch subscriptions/goroutines on a broadcaster whose watch loop has exited. | performance | 55 |",
+      "source_lens": "compound-realistic",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null
+    },
+    {
+      "issue_text": "| P1 | pkg/storage/unified/resource/search.go:216 | The newly-added `s.log.Info(\"search index initialized\", ..., s.search.TotalDocs())` call happens immediately after starting the event-handling goroutine at search.go:207-212 (which can call `getOrCreateIndex`\u2192`build`\u2192`BuildIndex` and write to `bleveBackend.cache` under `cacheMu.Lock()` in pkg/storage/unified/search/bleve.go:139-141), while `bleveBackend.TotalDocs()` (bleve.go:144-153) iterates `b.cache` without acquiring `cacheMu` at all, creating a real concurrent map read/write race that can crash the whole process with an unrecoverable \"fatal error: concurrent map iteration and map write\" if a write event arrives right at startup. | reliability | 65 |",
+      "source_lens": "compound-realistic",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null
+    },
+    {
+      "issue_text": "| P1 | pkg/server/module_server_test.go:34-36 | The new `t.Skip` for postgres on `TestIntegrationWillRunInstrumentationServerWhenTargetHasNoHttpServer` (a test that only starts the storage-server module and hits `/metrics`, never issuing an RPC) is suspiciously coincident with this same diff moving `s.Init(ctx)` \u2014 including the blocking `search.init(ctx)` which calls the storage backend's `GetResourceStats`/`ListIterator` \u2014 into `NewResourceServer` (server.go:258) so it now runs eagerly during module-server construction instead of lazily on first RPC; since this test never made an RPC before, it never exercised Init() against a live Postgres backend, so the \"works locally / fails in Drone\" skip looks like it is masking a real regression (a flaky/slow/erroring eager Init against Postgres in CI) introduced by this diff rather than being an unrelated pre-existing flake. | reliability | 55 |",
+      "source_lens": "compound-realistic",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null
+    },
+    {
+      "issue_text": "| P2 | pkg/storage/unified/resource/server.go:258-262 | `NewResourceServer` now runs the full, potentially long-running and previously-deferred `s.Init(ctx)` (search index build across every namespace via `search.init`, plus `initWatcher`) synchronously during construction and returns `(nil, err)` on any failure instead of returning a constructed server whose first RPC call would retry/report the error; there is no retry or backoff around this call in this file, so any transient failure of a dependency during startup (e.g. storage backend briefly unavailable) now fails object construction outright, and whether the (unseen) caller of `NewResourceServer` retries or crash-loops the whole process is unverifiable from this file alone. | reliability | 40 |",
+      "source_lens": "compound-realistic",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null
+    },
+    {
+      "issue_text": "| P3 | pkg/storage/unified/resource/server.go:305-311 | Swapping the order so `s.search.init(ctx)` now runs before `s.initWatcher()` means a search-index initialization failure now prevents the write-event broadcaster (used by the `Watch` RPC) from ever starting, whereas previously `initWatcher()` ran first and always succeeded/attempted regardless of search outcome; currently this is masked because `NewResourceServer` aborts entirely on any `Init` error either way, but it is a latent ordering dependency that will silently change which subsystem gets skipped if construction is ever changed to tolerate partial `Init` failures. | reliability | 35 |",
+      "source_lens": "compound-realistic",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null
+    },
+    {
+      "issue_text": "| P0 | pkg/storage/unified/resource/server.go:258 | NewResourceServer now calls s.Init(ctx) once at construction and returns (nil, err) on failure (a new behavior replacing lazy per-RPC init), but no test anywhere in the repo constructs NewResourceServer and asserts this failure path, so a regression in startup error propagation would go undetected | testing | 85 |",
+      "source_lens": "compound-realistic",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null
+    },
+    {
+      "issue_text": "| P1 | pkg/storage/unified/resource/server.go:305 | The order of search.init(ctx) and initWatcher() was swapped (search index init now runs before the watcher starts) with no test verifying that write events occurring in the gap before the watcher starts are still captured/indexed correctly, leaving a plausible missed-event window unverified | testing | 70 |",
+      "source_lens": "compound-realistic",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null
+    },
+    {
+      "issue_text": "| P0 | pkg/storage/unified/search/bleve.go:137 | BuildIndex's cacheMu lock was narrowed from wrapping the entire function to only the final b.cache[key] = idx write, allowing concurrent BuildIndex calls for the same key to run the (expensive, file/mem index creation) build logic in parallel, but there is no concurrency/race test (go test -race) exercising this path, so duplicate-build or resource-leak regressions from the narrowed lock scope cannot be caught by CI | testing | 85 |",
+      "source_lens": "compound-realistic",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null
+    },
+    {
+      "issue_text": "| P1 | pkg/server/module_server_test.go:36 | Skipping TestIntegrationWillRunInstrumentationServerWhenTargetHasNoHttpServer for postgres removes the only integration test that starts the storage-server module (and therefore exercises NewResourceServer's new synchronous Init-at-construction path added in this same diff) against a postgres backend, so a postgres-specific startup regression from this PR would not be caught in CI even though sqlite is already excluded and postgres was the other DB path relevant to this change | testing | 55 |",
+      "source_lens": "compound-realistic",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null
+    },
+    {
+      "issue_text": "| P2 | pkg/server/module_server_test.go:35 | The postgres skip is guarded only by a bare \"TODO - fix this test for postgres\" comment with no linked issue/ticket, so there is no forcing function to restore coverage and a real risk the skip becomes permanent | testing | 80 |",
+      "source_lens": "compound-realistic",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null
+    }
+  ],
+  "goldens": [
+    {
+      "comment": "A race condition in BuildIndex allows multiple goroutines to concurrently build the same expensive index for the same key. This is caused by moving the b.cacheMu lock from protecting the entire function to only protecting the final cache assignment. ",
+      "severity": "High",
+      "category": "concurrency"
+    },
+    {
+      "comment": "Calling s.search.TotalDocs() here may race with concurrent index creation: TotalDocs iterates b.cache without synchronization, and the event watcher goroutine started just above could trigger BuildIndex writes concurrently, potentially causing a concurrent map read/write panic.",
+      "severity": "High",
+      "category": "concurrency"
+    }
+  ],
+  "per_golden_matches": [
+    {
+      "golden_comment": "A race condition in BuildIndex allows multiple goroutines to concurrently build the same expensive index for the same key. This is caused by moving the b.cacheMu lock from protecting the entire function to only protecting the final cache assignment. ",
+      "severity": "High",
+      "category": "concurrency",
+      "matched_candidate": "| P1 | pkg/storage/unified/search/bleve.go:72-139 | BuildIndex no longer holds cacheMu across index creation/build, so two concurrent callers for the same uncached key (e.g. two simultaneous Search() requests hitting searchSupport.getOrCreateIndex in pkg/storage/unified/resource/search.go:287-306, whose own comment admits \"we don't want to block... simple mutex not great\") both build a full index and race to write b.cache[key] at bleve.go:138, silently discarding the loser's *bleveIndex (never Close()'d) while its caller may still be using it for that request. | adversarial | 55 |",
+      "confidence": 0.94,
+      "reasoning": "The candidate flags that BuildIndex no longer holds cacheMu during index creation, allowing concurrent callers for the same key to build the expensive index simultaneously and then race when writing to b.cache[key]. This is the same underlying race condition described in the golden comment (lock scope reduced to only the final cache assignment)."
+    },
+    {
+      "golden_comment": "Calling s.search.TotalDocs() here may race with concurrent index creation: TotalDocs iterates b.cache without synchronization, and the event watcher goroutine started just above could trigger BuildIndex writes concurrently, potentially causing a concurrent map read/write panic.",
+      "severity": "High",
+      "category": "concurrency",
+      "matched_candidate": "| P1 | pkg/storage/unified/resource/search.go:216 | The newly-added `s.log.Info(\"search index initialized\", ..., s.search.TotalDocs())` call happens immediately after starting the event-handling goroutine at search.go:207-212 (which can call `getOrCreateIndex`\u2192`build`\u2192`BuildIndex` and write to `bleveBackend.cache` under `cacheMu.Lock()` in pkg/storage/unified/search/bleve.go:139-141), while `bleveBackend.TotalDocs()` (bleve.go:144-153) iterates `b.cache` without acquiring `cacheMu` at all, creating a real concurrent map read/write race that can crash the whole process with an unrecoverable \"fatal error: concurrent map iteration and map write\" if a write event arrives right at startup. | reliability | 65 |",
+      "confidence": 0.98,
+      "reasoning": "The candidate flags the exact same race: calling s.search.TotalDocs() right after starting the event watcher goroutine can overlap with concurrent index creation that writes to bleveBackend.cache, while TotalDocs iterates cache without locking, risking a concurrent map read/write panic."
+    }
+  ],
+  "adjudication_records": [
+    {
+      "issue_text": "| P1 | pkg/storage/unified/search/bleve.go:72-139 | BuildIndex no longer holds cacheMu across index creation/build, so two concurrent callers for the same uncached key (e.g. two simultaneous Search() requests hitting searchSupport.getOrCreateIndex in pkg/storage/unified/resource/search.go:287-306, whose own comment admits \"we don't want to block... simple mutex not great\") both build a full index and race to write b.cache[key] at bleve.go:138, silently discarding the loser's *bleveIndex (never Close()'d) while its caller may still be using it for that request. | adversarial | 55 |",
+      "source_lens": "compound-realistic",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null,
+      "matched_golden_ids": [
+        "A race condition in BuildIndex allows multiple goroutines to concurrently build the same expensive index for the same key. This is caused by moving the b.cacheMu lock from protecting the entire function to only protecting the final cache assignment. "
+      ],
+      "primary_judge_verdict": "matched",
+      "primary_judge": "gpt-5.2",
+      "primary_judge_confidence": 0.94,
+      "primary_judge_reasoning": "The candidate flags that BuildIndex no longer holds cacheMu during index creation, allowing concurrent callers for the same key to build the expensive index simultaneously and then race when writing to b.cache[key]. This is the same underlying race condition described in the golden comment (lock scope reduced to only the final cache assignment).",
+      "adjudication": {
+        "verdict": "matched",
+        "adjudicating_judge": null,
+        "confidence": null,
+        "rationale": null,
+        "diff_context_hash": "2691f948f4856c0cbbf460a6b7e17b6953fe78e7"
+      }
+    },
+    {
+      "issue_text": "| P0 | pkg/storage/unified/search/bleve.go:98 | For file-backed indexes (size > FileThreshold), the same directory-collision race means two concurrent BuildIndex calls for the same key both call bleve.New(dir, mapper) on the identical path; bleve.New fails if the path already exists, so the losing goroutine's index directory is left on disk unreferenced by the cache, and every subsequent rebuild attempt for that key (e.g. after a cache eviction/restart) will permanently fail with \"path already exists\" until the stale directory is manually removed. | adversarial | 40 |",
+      "source_lens": "compound-realistic",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null,
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.72,
+        "rationale": "In pkg/storage/unified/search/bleve.go, the diff removes the broad cacheMu lock around the whole BuildIndex (lines ~85-90) and now only locks when writing b.cache[key] = idx. BuildIndex still chooses a deterministic on-disk directory for file-backed indexes: dir := filepath.Join(b.opts.Root, key.Namespace, fmt.Sprintf(\"%s.%s\", key.Resource, key.Group)) and then calls bleve.New(dir, mapper). With no per-key or global build lock shown, two concurrent BuildIndex calls for the same key can both attempt bleve.New on the same path, which can race/fail due to existing path. The additional claim about permanent failure until manual cleanup depends on bleve.New semantics not shown here, but the directory-collision concurrency bug is directly exposed by this change.",
+        "diff_context_hash": "2691f948f4856c0cbbf460a6b7e17b6953fe78e7"
+      }
+    },
+    {
+      "issue_text": "| P1 | pkg/server/module_server_test.go:35-37 | The newly added t.Skip for postgres (\"works locally... not in Drone\") disables the only integration test that boots a real ModuleServer with target=StorageServer, which is exactly the code path affected by this same diff's change in pkg/storage/unified/resource/server.go:258-264 making NewResourceServer() call s.Init(ctx) synchronously (including the blocking search.init which queries GetResourceStats and builds indexes) before returning, instead of the old lazy per-RPC Init; disabling the test for postgres means CI can go green while a startup-timing regression against postgres introduced by this exact PR goes uncaught. | adversarial | 40 |",
+      "source_lens": "compound-realistic",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null,
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.67,
+        "rationale": "The diff explicitly adds a postgres-only `t.Skip` in `pkg/server/module_server_test.go` and also changes `NewResourceServer` to call `s.Init(ctx)` synchronously before returning (and `Init` now runs `s.search.init(ctx)` before starting the watcher). That makes it diff-grounded that (a) postgres CI coverage is reduced for this integration test and (b) the PR introduces meaningful startup-time behavior changes that this test could have exercised. The claim that it is the *only* such integration test / that a specific postgres regression will occur isn\u2019t provable from this diff alone, but the coverage-loss concern tied to these concrete changes is actionable and not just generic \u201cadd tests.\u201d",
+        "diff_context_hash": "2691f948f4856c0cbbf460a6b7e17b6953fe78e7"
+      }
+    },
+    {
+      "issue_text": "| P2 | pkg/storage/unified/resource/server.go:258-264 | NewResourceServer now returns an error (failing server construction entirely) if the one-shot s.Init(ctx) fails, whereas previously a failed Init() only affected the first RPC call that triggered it and could be retried on subsequent calls (sync.Once still caches the error, but the server object itself was reachable); now any transient failure of search.init() (e.g. a slow/not-yet-ready DB at process startup) permanently prevents the resource server from ever being constructed, with no retry path, turning a transient dependency hiccup into a hard startup failure. | adversarial | 35 |",
+      "source_lens": "compound-realistic",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null,
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.66,
+        "rationale": "The diff does show a behavioral change: `NewResourceServer` now calls `s.Init(ctx)` and returns an error if it fails (server.go:255-264), whereas previously initialization was triggered lazily inside each RPC method (those `s.Init(ctx)` calls were removed). This can indeed turn an init-time failure (e.g., search index init) into a hard construction/startup failure rather than a per-request failure. However, the finding\u2019s claim about being \u201cretried on subsequent calls\u201d is not supported by the diff: `Init` uses `sync.Once` and caches `s.initErr`, so a failure would not be retried even in the old lazy-init design.",
+        "diff_context_hash": "2691f948f4856c0cbbf460a6b7e17b6953fe78e7"
+      }
+    },
+    {
+      "issue_text": "| P1 | pkg/storage/unified/search/bleve.go:88-139 | BuildIndex now only holds cacheMu around the final `b.cache[key] = idx` write instead of the whole function, so two concurrent callers building the same not-yet-cached NamespacedResource (e.g. two simultaneous Search() requests, or Search() racing the async handleEvent watcher in search.go) can both run `bleve.New(dir, mapper)`/`NewMemOnly` and the full builder scan concurrently for the same key, risking on-disk index corruption for file-backed indexes (two writers to the same directory) or a wasted duplicate build whose finished bleve.Index is silently dropped and never closed (leaked file handles/goroutines) when the losing goroutine's cache write is overwritten. | correctness | 75 |",
+      "source_lens": "compound-realistic",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null,
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.82,
+        "rationale": "In pkg/storage/unified/search/bleve.go, the diff removes holding b.cacheMu for the entire BuildIndex call and now only locks around the final `b.cache[key] = idx` write. There is no cache check or per-key synchronization shown in this function, and file-backed indexes use a deterministic directory path `filepath.Join(b.opts.Root, key.Namespace, fmt.Sprintf(\"%s.%s\", ...))`. Two concurrent BuildIndex calls for the same key can therefore both run `bleve.New(dir, mapper)`/builder work concurrently against the same directory (risking conflicting writers/corruption or failures) and then race to store into `b.cache`, with the losing `idx` reference being overwritten and never closed (resource leak).",
+        "diff_context_hash": "2691f948f4856c0cbbf460a6b7e17b6953fe78e7"
+      }
+    },
+    {
+      "issue_text": "| P2 | pkg/storage/unified/resource/server.go:304-311 | Swapping search.init() before initWatcher() inside Init() means that if search.init() succeeds (which, per search.go:202-213, spawns a long-lived goroutine reading from `s.storage.WatchWriteEvents(context.Background())` that is never tied to s.ctx/cancel) and initWatcher() then fails, s.initErr is set and NewResourceServer discards the whole server object, permanently leaking that goroutine and its backend watch subscription with no way to cancel it; under the old ordering search.init() was always the last step, so this leak path was unreachable. | correctness | 55 |",
+      "source_lens": "compound-realistic",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null,
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.65,
+        "rationale": "The diff in pkg/storage/unified/resource/server.go reorders Init() so that s.search.init(ctx) runs before s.initWatcher(). NewResourceServer() now calls s.Init(ctx) and returns nil on error. If s.search.init(ctx) starts long-lived background work (the diff shows it spawning a goroutine in pkg/storage/unified/resource/search.go) and then s.initWatcher() fails, Init() returns an error after the goroutine has already been started, and NewResourceServer() discards the server without any shown cleanup/cancellation path. Under the previous ordering (initWatcher before search.init), this failure path would not have started search.init\u2019s goroutine. The exact claim that it uses context.Background() for WatchWriteEvents isn\u2019t directly visible in the provided diff, but the reorder + lack of teardown on error makes the leak scenario credible and diff-grounded.",
+        "diff_context_hash": "2691f948f4856c0cbbf460a6b7e17b6953fe78e7"
+      }
+    },
+    {
+      "issue_text": "| P2 | pkg/storage/unified/resource/server.go:258-262 | Init() (search index build + storage stats scan across all resources) now runs synchronously and unconditionally inside NewResourceServer() instead of lazily on first RPC, turning what used to be fast, non-blocking construction into a potentially long blocking call that gates the rest of process/module startup; this is corroborated by pkg/server/module_server_test.go:35-38 which had to add a t.Skip for postgres because the test's fixed 500ms wait for the HTTP metrics server to come up is no longer sufficient in CI, indicating the eager Init changed startup timing/state-transition behavior for real backends. | correctness | 45 |",
+      "source_lens": "compound-realistic",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null,
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.7,
+        "rationale": "The diff clearly changes initialization semantics: `NewResourceServer` now calls `s.Init(ctx)` synchronously and returns an error if it fails (server.go added block around lines ~255-262), and the per-RPC `s.Init(ctx)` calls in `Create/Update/Delete/Read/List/Watch/Search/...` were removed. This does turn construction from \u201ccheap + lazy init on first RPC\u201d into \u201ceager init during server creation\u201d, which can lengthen/gate startup. However, the claim that this specifically caused the postgres test skip due to a fixed 500ms wait is not directly verifiable from the shown diff (the skip comment cites Drone flakiness but doesn\u2019t tie it to timing), so the correctness linkage is speculative; the grounded issue is a significant startup/perf/behavior change that warrants review but is not conclusively a defect from the diff alone.",
+        "diff_context_hash": "2691f948f4856c0cbbf460a6b7e17b6953fe78e7"
+      }
+    },
+    {
+      "issue_text": "| P1 | pkg/storage/unified/search/bleve.go:87-140 | Narrowing cacheMu to only guard the final `b.cache[key] = idx` write removes the only serialization that prevented duplicate concurrent BuildIndex calls for the same key (searchSupport.getOrCreateIndex in pkg/storage/unified/resource/search.go:298-315 has no per-key mutex/singleflight, per its own \"simple mutex not great\" TODO comment), so concurrent first-access requests for an uncached namespace/resource now run two full unbounded ListIterator (Limit: 1e12) reindex builds in parallel instead of serialized, doubling CPU/memory and storage backend load under concurrent load. | performance | 70 |",
+      "source_lens": "compound-realistic",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null,
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.66,
+        "rationale": "The diff in `pkg/storage/unified/search/bleve.go` removes holding `b.cacheMu` for the full duration of `BuildIndex` and instead only locks around the final `b.cache[key] = idx` write. From the diff alone, this does reduce serialization and can allow two concurrent callers to both proceed with an expensive index build on a cache miss before either stores into `b.cache`. The finding\u2019s broader claim about `searchSupport.getOrCreateIndex` lacking per-key singleflight and about the exact iterator limit/load is not directly verifiable from the provided diff, but the core concurrency/performance concern is grounded in this change.",
+        "diff_context_hash": "2691f948f4856c0cbbf460a6b7e17b6953fe78e7"
+      }
+    },
+    {
+      "issue_text": "| P2 | pkg/storage/unified/search/bleve.go:96-102 | For file-backed indices (size > FileThreshold), the now-unsynchronized duplicate build race means two goroutines can call bleve.New(dir, mapper) on the identical directory concurrently; bleve.New errors when the index path already exists, so one of the racing builds fails outright (wasted full document build work) and its bleve.Index/idx object is discarded with no Close() call anywhere in BuildIndex's error paths, leaking the underlying open index/file handle. | performance | 55 |",
+      "source_lens": "compound-realistic",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null,
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "real_but_ungold",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "real_but_ungold",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.72,
+        "rationale": "In pkg/storage/unified/search/bleve.go, the diff removes the function-wide cacheMu lock at the start of BuildIndex and only locks around the final write to b.cache. With no other synchronization shown, two goroutines can now concurrently execute the file-backed path (size > FileThreshold) and both call bleve.New(dir, mapper) for the same key/directory before either stores into b.cache, which can cause one build to fail due to directory/index already existing and waste the full build work. The additional claim about leaking an unclosed bleve.Index on error paths is not fully verifiable from the shown diff (the error-handling/Close logic isn\u2019t visible here), but the duplicate-build race itself is clearly introduced by this change.",
+        "diff_context_hash": "2691f948f4856c0cbbf460a6b7e17b6953fe78e7"
+      }
+    },
+    {
+      "issue_text": "| P2 | pkg/storage/unified/resource/server.go:293-318,455,494,631,687,777,917 | Removing the per-RPC s.Init(ctx) call yields negligible perf benefit since Init is already guarded by sync.Once (the repeated call was just a cheap Once.Do fast-path check), but it removes the fail-fast gate that returned s.initErr (\"service is stopping\"/\"service is stopped\", set in Stop() at line 321/339) to callers; now Create/Update/Delete/Read/List/Watch/Search/PutBlob/GetBlob no longer check init/shutdown state at all, so in-flight or new requests can keep hitting the backend/broadcaster after Stop() has already canceled s.ctx (line 333), risking wasted work against a shutting-down backend and orphaned Watch subscriptions/goroutines on a broadcaster whose watch loop has exited. | performance | 55 |",
+      "source_lens": "compound-realistic",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null,
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.6,
+        "rationale": "The diff clearly removes `s.Init(ctx)` calls from many RPC handlers (Create/Update/Delete/Read/List/Watch/Search/History/Origin/IsHealthy/PutBlob/GetBlob) and instead calls `s.Init(ctx)` once in `NewResourceServer` (now returning an error if init fails). That means any lifecycle/guard logic that used to be enforced per-request via `Init` will no longer run on each RPC. However, the finding\u2019s specific claims about `Stop()` setting `s.initErr` to \u201cservice is stopping/stopped\u201d, and about `Init` being the fail-fast gate for shutdown, are not verifiable from the shown diff (the `Stop()` implementation and any shutdown checks inside `Init` are not included). So the general lifecycle concern is grounded, but the concrete defect behavior described can\u2019t be confirmed from this diff alone.",
+        "diff_context_hash": "2691f948f4856c0cbbf460a6b7e17b6953fe78e7"
+      }
+    },
+    {
+      "issue_text": "| P1 | pkg/storage/unified/resource/search.go:216 | The newly-added `s.log.Info(\"search index initialized\", ..., s.search.TotalDocs())` call happens immediately after starting the event-handling goroutine at search.go:207-212 (which can call `getOrCreateIndex`\u2192`build`\u2192`BuildIndex` and write to `bleveBackend.cache` under `cacheMu.Lock()` in pkg/storage/unified/search/bleve.go:139-141), while `bleveBackend.TotalDocs()` (bleve.go:144-153) iterates `b.cache` without acquiring `cacheMu` at all, creating a real concurrent map read/write race that can crash the whole process with an unrecoverable \"fatal error: concurrent map iteration and map write\" if a write event arrives right at startup. | reliability | 65 |",
+      "source_lens": "compound-realistic",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null,
+      "matched_golden_ids": [
+        "Calling s.search.TotalDocs() here may race with concurrent index creation: TotalDocs iterates b.cache without synchronization, and the event watcher goroutine started just above could trigger BuildIndex writes concurrently, potentially causing a concurrent map read/write panic."
+      ],
+      "primary_judge_verdict": "matched",
+      "primary_judge": "gpt-5.2",
+      "primary_judge_confidence": 0.98,
+      "primary_judge_reasoning": "The candidate flags the exact same race: calling s.search.TotalDocs() right after starting the event watcher goroutine can overlap with concurrent index creation that writes to bleveBackend.cache, while TotalDocs iterates cache without locking, risking a concurrent map read/write panic.",
+      "adjudication": {
+        "verdict": "matched",
+        "adjudicating_judge": null,
+        "confidence": null,
+        "rationale": null,
+        "diff_context_hash": "2691f948f4856c0cbbf460a6b7e17b6953fe78e7"
+      }
+    },
+    {
+      "issue_text": "| P1 | pkg/server/module_server_test.go:34-36 | The new `t.Skip` for postgres on `TestIntegrationWillRunInstrumentationServerWhenTargetHasNoHttpServer` (a test that only starts the storage-server module and hits `/metrics`, never issuing an RPC) is suspiciously coincident with this same diff moving `s.Init(ctx)` \u2014 including the blocking `search.init(ctx)` which calls the storage backend's `GetResourceStats`/`ListIterator` \u2014 into `NewResourceServer` (server.go:258) so it now runs eagerly during module-server construction instead of lazily on first RPC; since this test never made an RPC before, it never exercised Init() against a live Postgres backend, so the \"works locally / fails in Drone\" skip looks like it is masking a real regression (a flaky/slow/erroring eager Init against Postgres in CI) introduced by this diff rather than being an unrelated pre-existing flake. | reliability | 55 |",
+      "source_lens": "compound-realistic",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null,
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.62,
+        "rationale": "The diff adds a new postgres-only `t.Skip` in `TestIntegrationWillRunInstrumentationServerWhenTargetHasNoHttpServer` (module_server_test.go) while also changing initialization semantics by calling `s.Init(ctx)` eagerly in `NewResourceServer` (server.go) and removing the lazy `Init` calls from each RPC handler. This makes it plausible that a test which previously never triggered `Init` could now fail during server construction in CI, and the added skip could mask that. The exact claim that the test \u201cnever issues an RPC\u201d isn\u2019t verifiable from the provided diff, but the coincident skip plus eager init change is a concrete, diff-grounded reliability concern rather than a proven defect.",
+        "diff_context_hash": "2691f948f4856c0cbbf460a6b7e17b6953fe78e7"
+      }
+    },
+    {
+      "issue_text": "| P2 | pkg/storage/unified/resource/server.go:258-262 | `NewResourceServer` now runs the full, potentially long-running and previously-deferred `s.Init(ctx)` (search index build across every namespace via `search.init`, plus `initWatcher`) synchronously during construction and returns `(nil, err)` on any failure instead of returning a constructed server whose first RPC call would retry/report the error; there is no retry or backoff around this call in this file, so any transient failure of a dependency during startup (e.g. storage backend briefly unavailable) now fails object construction outright, and whether the (unseen) caller of `NewResourceServer` retries or crash-loops the whole process is unverifiable from this file alone. | reliability | 40 |",
+      "source_lens": "compound-realistic",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null,
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.78,
+        "rationale": "The diff shows a clear behavioral change: `NewResourceServer` now calls `s.Init(ctx)` synchronously during construction and returns `nil, err` on failure (server.go ~255-262). At the same time, the per-RPC lazy init calls were removed from `Create/Update/Delete/Read/List/Watch/Search/...` (multiple hunks), so initialization is no longer deferred to first use. `Init` includes `s.search.init(ctx)` (which can build the search index) and `s.initWatcher()` and is wrapped in `s.initOnce.Do`, but there is no retry/backoff logic visible in this file around the new eager init path. This is a concrete, diff-grounded reliability/architecture concern, but not a provable correctness defect from the diff alone because eager-fail-at-startup may be an intentional design choice depending on how callers handle errors.",
+        "diff_context_hash": "2691f948f4856c0cbbf460a6b7e17b6953fe78e7"
+      }
+    },
+    {
+      "issue_text": "| P3 | pkg/storage/unified/resource/server.go:305-311 | Swapping the order so `s.search.init(ctx)` now runs before `s.initWatcher()` means a search-index initialization failure now prevents the write-event broadcaster (used by the `Watch` RPC) from ever starting, whereas previously `initWatcher()` ran first and always succeeded/attempted regardless of search outcome; currently this is masked because `NewResourceServer` aborts entirely on any `Init` error either way, but it is a latent ordering dependency that will silently change which subsystem gets skipped if construction is ever changed to tolerate partial `Init` failures. | reliability | 35 |",
+      "source_lens": "compound-realistic",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null,
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.68,
+        "rationale": "The diff in pkg/storage/unified/resource/server.go reorders initialization so s.search.init(ctx) runs before s.initWatcher() (Init(): search init block moved above the watcher-start block). That change is real and does mean that if search init fails, initWatcher() will not be attempted in this code path, whereas previously initWatcher() would have been attempted before a search init failure. However, NewResourceServer now calls s.Init(ctx) and returns an error on any Init failure, so today the server construction aborts either way and Watch RPC won\u2019t be available; the finding\u2019s impact is therefore about a latent ordering/partial-init dependency rather than a concrete functional bug in the current diff.",
+        "diff_context_hash": "2691f948f4856c0cbbf460a6b7e17b6953fe78e7"
+      }
+    },
+    {
+      "issue_text": "| P0 | pkg/storage/unified/resource/server.go:258 | NewResourceServer now calls s.Init(ctx) once at construction and returns (nil, err) on failure (a new behavior replacing lazy per-RPC init), but no test anywhere in the repo constructs NewResourceServer and asserts this failure path, so a regression in startup error propagation would go undetected | testing | 85 |",
+      "source_lens": "compound-realistic",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null,
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.6,
+        "rationale": "The diff shows a real behavior change: `NewResourceServer` now eagerly calls `s.Init(ctx)` and returns `nil, err` on failure (added at `pkg/storage/unified/resource/server.go` around the `NewResourceServer` return), while the previous per-RPC lazy `Init` calls were removed from many methods (`Create`, `Update`, `Delete`, `Read`, `List`, `Watch`, `Search`, etc.). This introduces a new failure path at construction/startup that is not accompanied by any new/updated tests in the diff to validate error propagation from `NewResourceServer` when `Init` fails. The claim that *no test anywhere in the repo* covers it can\u2019t be proven from the diff alone, but the lack of coverage in this change is a concrete review concern.",
+        "diff_context_hash": "2691f948f4856c0cbbf460a6b7e17b6953fe78e7"
+      }
+    },
+    {
+      "issue_text": "| P1 | pkg/storage/unified/resource/server.go:305 | The order of search.init(ctx) and initWatcher() was swapped (search index init now runs before the watcher starts) with no test verifying that write events occurring in the gap before the watcher starts are still captured/indexed correctly, leaving a plausible missed-event window unverified | testing | 70 |",
+      "source_lens": "compound-realistic",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null,
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.66,
+        "rationale": "In pkg/storage/unified/resource/server.go Init(), the diff moves initWatcher() to run after s.search.init(ctx) (previously watcher started before search init). This change can plausibly introduce an untested window where writes occurring after the search index build/snapshot but before the watcher starts might not be observed for indexing, depending on how initWatcher()/search.init() coordinate. The diff does not include any new test coverage or other visible mechanism ensuring events during that gap are captured, so the concern is diff-grounded but not provably a concrete defect from the shown code alone.",
+        "diff_context_hash": "2691f948f4856c0cbbf460a6b7e17b6953fe78e7"
+      }
+    },
+    {
+      "issue_text": "| P0 | pkg/storage/unified/search/bleve.go:137 | BuildIndex's cacheMu lock was narrowed from wrapping the entire function to only the final b.cache[key] = idx write, allowing concurrent BuildIndex calls for the same key to run the (expensive, file/mem index creation) build logic in parallel, but there is no concurrency/race test (go test -race) exercising this path, so duplicate-build or resource-leak regressions from the narrowed lock scope cannot be caught by CI | testing | 85 |",
+      "source_lens": "compound-realistic",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null,
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.74,
+        "rationale": "In pkg/storage/unified/search/bleve.go, BuildIndex previously held b.cacheMu for the whole function (removed at lines ~85-88) and now only locks around `b.cache[key] = idx` (added near the end). This clearly changes concurrency semantics: concurrent calls can now both miss the cache and run the expensive index creation/build work in parallel for the same key, potentially causing duplicate work and possibly conflicting file-backed index creation (`bleve.New(dir, ...)`) without any single-flight/guard. The diff does not add any concurrency/race-focused test to exercise this changed behavior, so the concern is specific and diff-grounded, but it is not a provable defect from the diff alone.",
+        "diff_context_hash": "2691f948f4856c0cbbf460a6b7e17b6953fe78e7"
+      }
+    },
+    {
+      "issue_text": "| P1 | pkg/server/module_server_test.go:36 | Skipping TestIntegrationWillRunInstrumentationServerWhenTargetHasNoHttpServer for postgres removes the only integration test that starts the storage-server module (and therefore exercises NewResourceServer's new synchronous Init-at-construction path added in this same diff) against a postgres backend, so a postgres-specific startup regression from this PR would not be caught in CI even though sqlite is already excluded and postgres was the other DB path relevant to this change | testing | 55 |",
+      "source_lens": "compound-realistic",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null,
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.66,
+        "rationale": "The diff explicitly adds a postgres-specific `t.Skip(...)` in `TestIntegrationWillRunInstrumentationServerWhenTargetHasNoHttpServer` (pkg/server/module_server_test.go), and sqlite is already skipped. In the same PR, `NewResourceServer` now calls `s.Init(ctx)` synchronously during construction (pkg/storage/unified/resource/server.go). Skipping this integration test for postgres reduces CI coverage for the postgres backend around startup/initialization behavior, making postgres-specific regressions from the new init-at-construction path less likely to be caught. The claim that this is the \"only\" such integration test can\u2019t be fully verified from the provided diff alone, but the coverage reduction is concrete.",
+        "diff_context_hash": "2691f948f4856c0cbbf460a6b7e17b6953fe78e7"
+      }
+    },
+    {
+      "issue_text": "| P2 | pkg/server/module_server_test.go:35 | The postgres skip is guarded only by a bare \"TODO - fix this test for postgres\" comment with no linked issue/ticket, so there is no forcing function to restore coverage and a real risk the skip becomes permanent | testing | 80 |",
+      "source_lens": "compound-realistic",
+      "file": null,
+      "line": null,
+      "severity": null,
+      "category": null,
+      "matched_golden_ids": null,
+      "primary_judge_verdict": "important_non_bug",
+      "primary_judge": null,
+      "primary_judge_confidence": null,
+      "primary_judge_reasoning": null,
+      "adjudication": {
+        "verdict": "important_non_bug",
+        "adjudicating_judge": "gpt-5.2",
+        "confidence": 0.9,
+        "rationale": "The diff adds a new unconditional skip for postgres in `TestIntegrationWillRunInstrumentationServerWhenTargetHasNoHttpServerWhenTargetHasNoHttpServer` guarded only by a `// TODO - fix this test for postgres` comment (and a note about Drone vs local). There is no linked issue/ticket or other forcing function in the code change, so the finding about risk of permanently losing postgres coverage is directly grounded in the diff.",
+        "diff_context_hash": "2691f948f4856c0cbbf460a6b7e17b6953fe78e7"
+      }
+    }
+  ],
+  "diff_context_hash": "2691f948f4856c0cbbf460a6b7e17b6953fe78e7",
+  "primary_judge": "gpt-5.2",
+  "adjudicating_judge": "gpt-5.2",
+  "url": "https://github.com/grafana/grafana/pull/97529",
+  "framework": "compound-realistic",
+  "model": "claude-sonnet-5",
+  "effort": "high",
+  "judge": "gpt-5.2",
+  "wall_s": 403.14532709121704,
+  "execution_mode": "cli",
+  "run_batch": "20260910-mrv0120-manifold"
+}

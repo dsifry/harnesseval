@@ -1,0 +1,82 @@
+require 'uri'
+
+# --- minimal unrelated support stubs so the REAL file loads ---
+class FakeRedis
+  def initialize; @h = {}; end
+  def setnx(k, v)
+    return false if @h.key?(k)
+    @h[k] = v
+    true
+  end
+  def expire(k, _t); @h.key?(k); end
+  def exists?(k); @h.key?(k); end
+end
+$redis = FakeRedis.new
+
+class SiteSetting
+  def self.embeddable_host; 'example.com'; end
+  def self.feed_polling_enabled?; false; end
+  def self.embed_by_username; 'admin'; end
+end
+
+class TopicEmbed
+  class Rel
+    def exists?; false; end
+  end
+  class << self
+    attr_accessor :where_calls
+  end
+  self.where_calls = 0
+  def self.where(*_args)
+    self.where_calls += 1
+    Rel.new
+  end
+  def self.import_remote(*_args)
+    raise 'simulated network failure during retrieval'
+  end
+end
+
+class User
+  class Rel
+    def first; :fake_user; end
+  end
+  def self.where(*_args); Rel.new; end
+end
+
+module Jobs
+  class PollFeed
+    def execute(*_args); end
+  end
+end
+
+# --- load the REAL file under test ---
+require_relative '../../lib/topic_retriever'
+
+url = 'http://example.com/post/1'
+key = "retrieved:#{url}"
+
+raised = false
+begin
+  TopicRetriever.new(url).retrieve
+rescue => e
+  raised = true
+end
+
+key_present = $redis.exists?(key)
+
+after_failure = TopicEmbed.where_calls
+begin
+  TopicRetriever.new(url).retrieve
+rescue => _e
+  # any raise on retry is also evidence the throttle did not mask a failure cleanly
+end
+retry_where_calls = TopicEmbed.where_calls - after_failure
+
+if raised && key_present && retry_where_calls.zero?
+  puts "RESULT: FAIL: perform_retrieve raised, but throttle key '#{key}' was already committed " \
+       "(setnx+expire ran in retrieved_recently? before retrieval); the retry within the 60s TTL " \
+       "made #{retry_where_calls} TopicEmbed lookup(s) and quietly no-opped"
+else
+  puts "RESULT: PASS: throttle key not committed before retrieval succeeded " \
+       "(raised=#{raised}, key_present=#{key_present}, retry_work=#{retry_where_calls})"
+end

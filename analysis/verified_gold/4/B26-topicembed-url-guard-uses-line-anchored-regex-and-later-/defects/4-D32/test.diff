@@ -1,0 +1,61 @@
+# frozen_string_literal: true
+# Standalone check of the claimed defect:
+#   "EmbedController rescues wrong URI exception for invalid referer bytes"
+# exercised on the REAL app/models/topic_embed.rb.  The model's
+# absolutize_urls parses `URI(url)`; if invalid byte sequences raise
+# ArgumentError (not URI::InvalidURIError), then any caller that rescues
+# only URI::InvalidURIError (the EmbedController pattern) will leak an
+# unhandled 500 instead of the intended 4xx.
+
+require 'uri'
+require 'digest'
+
+module Kernel
+  def require_dependency(name)
+    require name unless name == 'nokogiri'
+  end
+end
+
+module I18n
+  def self.t(key, opts = {})
+    "imported"
+  end
+end
+
+module Nokogiri
+  module HTML
+    class StubFragment
+      def initialize(str); @str = str; end
+      def css(sel); []; end
+      def to_html; @str; end
+    end
+    def self.fragment(str); StubFragment.new(str); end
+  end
+end
+
+module ActiveRecord
+  class Base
+    def self.belongs_to(*args); nil; end
+    def self.validates_presence_of(*args); nil; end
+  end
+end
+
+begin
+  require_relative '../../app/models/topic_embed.rb'
+rescue Exception => e
+  puts "RESULT: FAIL: could not load real topic_embed.rb: #{e.class}: #{e.message}"
+  exit
+end
+
+invalid_url = "http://example.com/\xFF"  # invalid UTF-8 byte sequence
+
+begin
+  TopicEmbed.absolutize_urls(invalid_url, "<p>hi</p>")
+  puts "RESULT: PASS"
+rescue URI::InvalidURIError
+  puts "RESULT: PASS"
+rescue ArgumentError => e
+  puts "RESULT: FAIL: URI parsing of invalid bytes in topic_embed.rb raised #{e.class} (#{e.message.inspect}) instead of URI::InvalidURIError; rescuing only URI::InvalidURIError (EmbedController pattern) would leave this unhandled as a 500"
+rescue Exception => e
+  puts "RESULT: FAIL: unexpected #{e.class}: #{e.message.inspect}"
+end

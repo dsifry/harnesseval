@@ -1,0 +1,83 @@
+diff --git a/spec/verify/topic_retriever_verify.rb b/spec/verify/topic_retriever_verify.rb
+new file mode 100644
+--- /dev/null
++++ b/spec/verify/topic_retriever_verify.rb
+@@ -0,0 +1,78 @@
++require 'uri'
++require_relative '../../lib/topic_retriever'
++
++# ---- minimal stubs (no Rails, no DB) ----
++class FakeRedis
++  def initialize; @h = {}; end
++  def setnx(k, v); return false if @h.key?(k); @h[k] = v; true; end
++  def expire(k, t); @h[k] = t; true; end
++  def exists?(k); @h.key?(k); end
++end
++$redis = FakeRedis.new
++
++module SiteSetting
++  class << self
++    attr_accessor :embeddable_host, :feed_polling_enabled, :embed_by_username
++    def feed_polling_enabled?; !!@feed_polling_enabled; end
++  end
++end
++SiteSetting.embeddable_host = 'example.com'
++SiteSetting.feed_polling_enabled = false
++SiteSetting.embed_by_username = 'system'
++
++class User
++  def self.where(_); self; end
++  def self.first; new; end
++  def blank?; false; end
++end
++
++class TopicEmbed
++  class << self
++    attr_accessor :import_calls, :import_should_raise
++  end
++  self.import_calls = 0
++  self.import_should_raise = false
++
++  def self.where(_); self; end
++  def self.exists?; false; end
++
++  def self.import_remote(_user, _url)
++    self.import_calls += 1
++    raise 'simulated transient fetch failure' if import_should_raise
++    :imported
++  end
++end
++
++module Jobs
++  class PollFeed
++    def initialize; end
++    def execute(_); end
++  end
++end
++
++URL = 'http://example.com/post/1'.freeze
++
++# ---- scenario: throttle recorded BEFORE a successful fetch ----
++# Attempt 1: retrieval fails (transient network error) AFTER the throttle key
++# has already been written by retrieved_recently?.
++TopicEmbed.import_should_raise = true
++begin
++  TopicRetriever.new(URL).retrieve
++rescue StandardError
++  # the failed fetch surfaces the error (as Sidekiq would see it)
++end
++first_calls = TopicEmbed.import_calls
++
++# Attempt 2: Sidekiq retries the job (within the 60s window). The fetch would
++# now succeed, but only if perform_retrieve is actually reached.
++TopicEmbed.import_should_raise = false
++retry_result = TopicRetriever.new(URL).retrieve
++second_calls = TopicEmbed.import_calls - first_calls
++
++if first_calls != 1
++  puts "RESULT: FAIL: setup wrong, first attempt did not attempt a fetch"
++elsif second_calls.zero?
++  puts "RESULT: FAIL: throttle acquired before successful fetch; retry within 60s exited successfully without re-fetching"
++else
++  puts "RESULT: PASS"
++end

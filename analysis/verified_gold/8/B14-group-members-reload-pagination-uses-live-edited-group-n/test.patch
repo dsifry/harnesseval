@@ -1,0 +1,72 @@
+require 'open3'
+
+src_path = File.expand_path('../../app/assets/javascripts/discourse/models/group.js', __dir__)
+unless File.exist?(src_path)
+  puts "RESULT: FAIL: real source not found at #{src_path}"
+  exit
+end
+src = File.read(src_path)
+
+js_stubs = <<~'JS'
+global.Em = {
+  isEmpty: function(v){ return v === undefined || v === null || v === ''; },
+  Object: { create: function(o){ return o; } }
+};
+function __makeClass(props){
+  function K(){}
+  for (var k in props){ K.prototype[k] = props[k]; }
+  K.prototype.get = function(k){ return this[k]; };
+  K.prototype.set = function(k,v){ this[k] = v; return v; };
+  K.prototype.setProperties = function(o){ for (var k in o) this[k] = o[k]; };
+  K.create = function(p){ var i = Object.create(this.prototype); if (p) for (var k in p) i[k] = p[k]; return i; };
+  K.reopenClass = function(c){ for (var k in c) K[k] = c[k]; };
+  return K;
+}
+global.__calls = [];
+global.Discourse = {
+  ajax: function(url, opts){
+    __calls.push({url: url, opts: opts});
+    return { then: function(cb){
+      var r = { meta: { total: 0, limit: 50, offset: 0 }, members: [] };
+      try { cb(r); } catch(e){}
+      return { then: function(){} };
+    }};
+  },
+  User: { create: function(m){ return m; } }
+};
+Discourse.Model = { extend: function(props){ return __makeClass(props); } };
+JS
+
+js_test = <<~'JS'
+var g = Discourse.Group.create({ name: 'original-name', id: 42, user_count: 10, offset: 0, limit: 50 });
+g.set('name', 'brand-new-name-unsaved');
+__calls.length = 0;
+g.findMembers();
+var url = __calls.length ? __calls[0].url : '(no url captured)';
+console.log('URL:' + url);
+JS
+
+script = js_stubs + "\n" + src + "\n" + js_test
+
+begin
+  stdout, stderr, status = Open3.capture3('node', '-e', script)
+rescue Errno::ENOENT
+  puts "RESULT: FAIL: node executable not available"
+  exit
+end
+
+unless status.success?
+  puts "RESULT: FAIL: node error: #{stderr.lines.first.to_s.strip}"
+  exit
+end
+
+line = stdout.lines.find { |l| l.start_with?('URL:') }
+url = line ? line.strip.sub('URL:', '') : ''
+
+if url.include?('brand-new-name-unsaved')
+  puts "RESULT: FAIL: findMembers built URL from live-edited name: #{url}"
+elsif url.include?('/groups/')
+  puts "RESULT: PASS"
+else
+  puts "RESULT: FAIL: unexpected url: #{url}"
+end

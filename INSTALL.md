@@ -1,5 +1,12 @@
 # Install
 
+> **⚠️ Historical (August 2026, tag `v0.8.2-eval`).** This page documents the environment for the
+> **August 384-cell matrix experiment** (`batch_083`, described in [`report.md`](report.md)).
+> The **current report** is [`REPORT.md`](REPORT.md) (the 2026-09 50-PR campaign, verified
+> true golden set, post-publication audit); its reproduction chain, pinned revision
+> (`report-2026-09-18`), and mode taxonomy are in **`REPORT.md` §5**. The environment basics
+> below still apply, but treat every August-specific pointer accordingly.
+
 How to set up the `harnesseval` lab so you can run the matrix and reproduce the results in
 [`report.md`](report.md). Reproducibility-pin setup (the exact tested combo) is in
 [`REPRODUCE.md`](REPRODUCE.md); this page covers the environment once.
@@ -42,7 +49,10 @@ mkdir -p ~/.config/harnesseval && chmod 700 ~/.config/harnesseval
 cat > ~/.config/harnesseval/keys.env <<'EOF'
 HARNESS_ANTHROPIC_API_KEY=sk-ant-...
 HARNESS_OPENAI_API_KEY=sk-...
-HARNESS_LUNAROUTE_API_KEY=...        # only if you run GLM/Kimi via Lunaroute
+HARNESS_LUNAROUTE_API_KEY=...        # OPTIONAL: only for the open-weight GLM/Kimi lanes, and only if you
+                                     # use a Lunaroute gateway. Any OpenAI-compatible endpoint works
+                                     # (own router, OpenRouter, vLLM, or the provider directly) - set
+                                     # LUNAROUTE_BASE_URL accordingly or call the provider API directly.
 LUNAROUTE_BASE_URL=https://gw.lunaroute.com/v1
 HARNESS_MARTIAN_API_KEY=...          # optional: Martian-proxy judge cross-check
 EOF
@@ -88,8 +98,9 @@ realistic adapter invokes. Two ways to provide the binary:
   git checkout 0.8.2-eval && go build -o bin/metareview ./cmd/metareview`. Then point the
   harness at it via `MRV_BIN` (see [`adapters/metareview_realistic.py`](harnesseval/adapters/metareview_realistic.py)).
 
-- A prebuilt `bin/metareview` is vendored in this repo's `bin/` for convenience (from the
-  metareview 0.8.0 build); rebuild from the metareview `0.8.2-eval` branch to match the pin.
+- `bin/` is **gitignored**, so a fresh clone contains no binary — build it (recommended, matches the pin)
+  or copy a prebuilt one into `bin/metareview` and point `HARNESS_MRV_BIN` at it. `calibrate --check`
+  reports which one it resolves and whether it is executable.
 
 ## 6. CLIs (for the realistic / primary mode)
 
@@ -110,8 +121,23 @@ transient API overload (`cli_backends.is_transient_claude_error`).
 uv run python -m harnesseval.calibrate --check
 ```
 
-This reproduces the Martian bench's published anchor numbers before any framework comparison
-is trusted (Phase A calibration). If it passes, the lab is valid.
+Offline preflight — **no API calls, no spend**. It reports, item by item, whether the pieces a run needs are
+present: the keys file (names only, never values), the judge instrument, the golden comments, the Martian
+candidate results (INSTALL §4), writable `results/` + `runs/`, plus the framework-specific items (the
+metareview binary for metareview runs, the `claude`/`codex` CLIs for `--mode cli`). Exit 0 means the lab can
+run. Example in a clone that has not yet fetched the upstream checkouts:
+
+```
+[OK  ] API keys (~/.config/harnesseval/keys.env)      5 names: HARNESS_ANTHROPIC_API_KEY, ...
+[OK  ] judge instrument (harnesseval/judge.py)        score_from_matches present
+[OK  ] golden comments                                50 PRs from golden_comments
+[FAIL] candidate results (benchmark checkout)         FileNotFoundError: missing third_party/code-review-benchmark (INSTALL.md §4)
+[warn] metareview binary (metareview harness)         bin/metareview - build per INSTALL.md §5 or set HARNESS_MRV_BIN
+```
+
+To reproduce the bench's published anchor numbers (Phase A.1, the paid calibration run) use the same module
+without `--check` — that re-judges N shipped pairs (~$1/pair, `--pairs` default 5) and registers the result
+in `runs/registry.jsonl`.
 
 ## Notes
 
@@ -122,3 +148,37 @@ small (one PR, one model) before running the 384-cell matrix.
 - **Python entry points** are under `bin/` (`analyze_batch_083.py`,
   `analyze_083_interactions.py`, `run_sdlc_loop.py`, …) and `harnesseval/` (`run_model_matrix`,
   `analysis`, `report`, `calibrate`). All invoked via `uv run python …`.
+
+## 7. Smoke test — run ONE cell (recommended before any campaign)
+
+Verify the whole eval path (model call → findings → judging → adjudication → run registration) with a single
+cheap cell. `--fill` selects a cell **within** the `--prs × --models × --efforts × --frameworks` matrix, so the
+model/effort/framework must also be passed explicitly:
+
+```bash
+export HARNESS_KEYS_FILE=~/.config/harnesseval/keys.env          # your own keys (see §3)
+.venv/bin/python -u -m harnesseval.run_model_matrix \
+  --prs 6 --models glm-5.3-flash-background --efforts low --frameworks vanilla-engineered \
+  --fill vanilla-engineered/glm-5.3-flash-background/low/8 \
+  --mode api --run-batch smoke-$(date +%s) --out /tmp/smoke.json
+```
+
+(Use `--mode cli` for the Claude/Codex OAuth lanes; `api` is the paid, clean-token mode used for
+open-weight models like GLM/Kimi. `bin/metareview` is only needed for the metareview harness.)
+
+Expected: one line per cell plus a summary, e.g.
+
+```
+[mx] [1/1] vanilla-engineered glm-5.3-flash-background low ...
+[mx] [1/1] vanilla-engineered glm-5.3-flash-background low TP=5 FP=6 FN=1 rec=0.83 adj_p=0.83 incr_r=0.90 real=4 hal=1 11,803tok 42s
+```
+
+It writes `runs/<id>/{manifest.json,summary.json}` (findings with `issue_text`, per-model usage, the judge id
+and the adjudicated real/hallucination split) and appends a row to `runs/registry.jsonl`. Only one run per
+(cell, PR) is described above — the campaign's 72 cells × 6 PRs is the full sweep, and costs real money.
+
+**Two things to expect.** (1) Run-to-run variance on a single PR is large — the same cell scored TP 2/2/2 on
+PR 8 in the campaign and TP 5 in the smoke test above; that variance is why the report compares cells over
+several PRs with cluster-bootstrap CIs. (2) `cost_usd` comes from the provider/gateway response, so a gateway
+that does not return cost (some Lunarroute plans) yields `0.0`; the report's GLM costs were retrieved from the
+gateway's ledger, not computed locally.

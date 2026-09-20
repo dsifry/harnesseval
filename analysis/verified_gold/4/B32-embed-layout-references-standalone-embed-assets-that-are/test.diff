@@ -1,0 +1,75 @@
+diff --git a/spec/verify/embed.html_verify.rb b/spec/verify/embed.html_verify.rb
+new file mode 100644
+--- /dev/null
++++ b/spec/verify/embed.html_verify.rb
+@@ -0,0 +1,70 @@
++require 'erb'
++
++ROOT = File.expand_path(File.join(File.dirname(__FILE__), '..', '..'))
++LAYOUT_PATH = File.join(ROOT, 'app/views/layouts/embed.html.erb')
++
++unless File.exist?(LAYOUT_PATH)
++  puts "RESULT: FAIL: real file not found at #{LAYOUT_PATH}"
++  exit 1
++end
++
++RequestStub = Struct.new(:referer)
++
++# Minimum host used to exercise the real ERB layout. Captures the asset
++# basenames the view asks Rails to link/emit.
++class EmbedLayoutHost
++  attr_reader :referenced_stylesheets, :referenced_javascripts
++
++  def initialize
++    @referenced_stylesheets = []
++    @referenced_javascripts = []
++  end
++
++  def stylesheet_link_tag(*sources)
++    @referenced_stylesheets.concat(sources.map(&:to_s))
++    ''
++  end
++
++  def javascript_include_tag(*sources)
++    @referenced_javascripts.concat(sources.map(&:to_s))
++    ''
++  end
++
++  def request
++    @request ||= RequestStub.new('http://example.com/')
++  end
++end
++
++host = EmbedLayoutHost.new
++erb = ERB.new(File.read(LAYOUT_PATH), nil, '-')
++erb.filename = LAYOUT_PATH
++erb.def_method(host.singleton_class, :__render_embed_layout, LAYOUT_PATH)
++host.__render_embed_layout { '' }
++
++referenced = (host.referenced_stylesheets + host.referenced_javascripts).uniq
++
++ALWAYS_PRECOMPILED = %w[application application.css application.js]
++standalone = referenced.reject do |name|
++  base = name.sub(/\.(css|js|scss)\z/, '')
++  ALWAYS_PRECOMPILED.include?(name) || ALWAYS_PRECOMPILED.include?(base)
++end
++
++# Collect every config.assets.precompile statement from the real config tree.
++config_text = Dir[File.join(ROOT, 'config/**/*.rb')].sort.map { |f| File.read(f) }.join("\n")
++statements = []
++config_text.scan(/^[^\n]*precompile[^\n]*$/) { |m| statements << m }
++config_text.scan(/precompile\s*\+?=\s*(?:%w[\(\[\{][^\)\]\}]*[\)\]\}]|\[[^\]]*\])/m) do |m|
++  statements << m
++end
++precompile_blob = statements.join("\n")
++
++missing = standalone.reject do |name|
++  base = name.sub(/\.(css|js|scss)\z/, '')
++  precompile_blob =~ /(?:\A|[^\w\/])#{Regexp.escape(base)}(?:\z|[\s,\.\)\]\}])/
++end
++
++if standalone.empty? || missing.empty?
++  puts 'RESULT: PASS'
++else
++  puts "RESULT: FAIL: embed layout references standalone asset bundle(s) #{missing.inspect} that are missing from config.assets.precompile (production would 404/500)"
++end
