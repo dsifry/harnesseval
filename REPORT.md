@@ -2350,3 +2350,16 @@ Companion documents: **`EXECUTIVE_SUMMARY.md`** (1–2 pages, decision-first),
 **Disclosure:** the author maintains **metareview** (MRV), one of the harnesses evaluated in this
 report. It is open source, MIT licensed, and available free of charge at
 <https://github.com/dsifry/metareview>.
+
+## Special thanks
+
+Thank you to the team at [LunaRoute](https://lunaroute.com), who supported this work with an account and
+free usage while their service was in alpha. The open-weight GLM review lanes in this report ran through
+their gateway (§3.4.1), which is what made a grid this size affordable to run.
+
+LunaRoute serves open-weight models (GLM-5.3-vision, GLM-5.3-flash, DeepSeek-4.1-flash and many others)
+from US datacenters on flat-rate plans, and its stated policy is that request and response bodies are
+processed in memory and never written to disk. In the author's experience it was fast and low-latency.
+
+**Disclosure:** the author has no relationship with LunaRoute other than as a happy user, and used the
+service free of charge as part of the alpha.

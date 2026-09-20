@@ -15,7 +15,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 # Tokens that contain digits or number-words but are names, not claims.
-ALLOWED = [r"F[12]′?", r"§\s?[\d.]+", r"September 2026", r"one-shot", r"One-shot"]
+ALLOWED = [r"F[12]′?", r"§\s?[\d.]+", r"September 2026", r"one-shot", r"One-shot",
+           r"GLM-5\.3-(?:vision|flash)", r"DeepSeek-4\.1-flash"]
 NUMBER_WORDS = r"\b(two|three|four|five|six|seven|eight|nine|ten|dozen|double|twice|half|third|quarter)\b"
 
 
