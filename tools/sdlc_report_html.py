@@ -218,6 +218,8 @@ def compute(M: dict, D: dict) -> tuple[dict, dict, dict]:
     sel = {k: v for k, v in M["selection_effect"].items() if v["n_full"] >= 40}
     sel_recall_gap = statistics.mean(v["recall_t6"] - v["recall_full"] for v in sel.values())
     sel_f1_gap = statistics.mean(v["F1_t6"] - v["F1_full"] for k, v in sel.items() if VAN not in k)
+    sel_adjp_gap = statistics.mean(v["adjP_t6"] - v["adjP_full"] for k, v in sel.items() if VAN not in k)
+    pilot_sel = M["selection_effect"][PILOT]
     rank = M["rank_agreement"]
     rank_high = sum(v["spearman"] >= 0.8 - 1e-9 for v in rank.values())
     all_repos = {u.split("/pull/")[0].rsplit("/", 1)[-1].split("-")[0] for u in D["pr_golden"]}
@@ -285,8 +287,9 @@ def compute(M: dict, D: dict) -> tuple[dict, dict, dict]:
         "top_unsup": str(top["unsupported"]),
         "n_runs": f"{len(D['all_healthy_runs']):,}", "n_bench_prs": str(len(D["pr_golden"])),
         "n_bench_codebases": word(len(all_repos)),
+        "pilot_f1_six": f"{pilot_sel['F1_t6']:.2f}", "pilot_f1_full": f"{pilot_sel['F1_full']:.2f}",
         "rank_groups": word(len(rank)), "rank_high": word(rank_high),
-        "sel_cells": str(len(sel)), "sel_recall_gap": signed3(sel_recall_gap), "sel_f1_gap": signed(sel_f1_gap),
+        "sel_cells": str(len(sel)), "sel_recall_gap": signed3(sel_recall_gap), "sel_f1_gap": signed(sel_f1_gap), "sel_f1_gap_abs": f"{abs(sel_f1_gap):.2f}",
         "n_closed_h": str(len(closed_h)), "n_closed_above": word(len(closed_above)),
         "ptok_ref_model_full": MODEL_FULL["claude-fable-5-1"],
         "pilot_model_full": MODEL_FULL[pm], "cheap_model_full": MODEL_FULL[cheap["model_id"]],
@@ -316,7 +319,7 @@ def compute(M: dict, D: dict) -> tuple[dict, dict, dict]:
     guards = {"ranked": ranked, "top": top, "pilot": pilot, "closed": closed, "cheap": cheap,
               "frontier": frontier, "cheap_floor": cheap_floor, "rows": rows, "eff_best": eff_best, "eb": eb,
               "best_by_vendor": best_by_vendor, "closed_h": closed_h, "closed_above": closed_above, "runner": runner, "low_fastest": low_fastest, "low_best_value": low_best_value, "n_ladders": len(ladders), "slow": slow,
-              "sel_recall_gap": sel_recall_gap, "sel_f1_gap": sel_f1_gap, "top_n": top_n, "exceptions": exceptions, "ratios": ratios, "n_eff": n_eff, "effort": effort}
+              "sel_adjp_gap": sel_adjp_gap, "pilot_sel": pilot_sel, "sel_recall_gap": sel_recall_gap, "sel_f1_gap": sel_f1_gap, "top_n": top_n, "exceptions": exceptions, "ratios": ratios, "n_eff": n_eff, "effort": effort}
     return facts, data, guards
 
 
@@ -361,6 +364,8 @@ def check_guards(g: dict) -> None:
          "'above low effort the open-weight model is far slower than the closed model in the same harness'")
     need(abs(g["sel_recall_gap"]) < 0.02 and g["sel_f1_gap"] > 0.03,
          "'recall on the six matches the full benchmark closely, while harness F1 runs higher on the six'")
+    need(g["sel_adjp_gap"] > 0 and g["pilot_sel"]["n_full"] >= 40 and g["pilot_sel"]["F1_t6"] > g["pilot_sel"]["F1_full"],
+         "'harnesses were noisier on the rest of the benchmark, so their scores on the six run high'")
     need(g["n_eff"]["unresolved"] > len(g["effort"]) * 0.7,
          "'in most comparisons, high effort bought no measurable gain over medium'")
 
