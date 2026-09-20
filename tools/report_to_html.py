@@ -90,7 +90,7 @@ nav.toc .toc-links a { color:var(--accent); }
 /* Prose is centred in the content column; tables, figure cards and folds span it, breaking out symmetrically. */
 main > p, main > ul, main > ol, main > blockquote, main > h1, main > h2, main > h3, main > h4, main > pre, main > .meta,
 main > .generated, main > footer { max-width:var(--measure); margin-left:auto; margin-right:auto; }
-h1,h2,h3,h4 { line-height:1.22; font-weight:700; letter-spacing:-.012em; scroll-margin-top:1rem; color:var(--ink); }
+h1,h2,h3,h4 { line-height:1.22; font-weight:700; letter-spacing:-.012em; scroll-margin-top:1rem; color:var(--ink); text-wrap:balance; }
 h1 { font-size:2.05rem; letter-spacing:-.022em; margin:2.6rem 0 .9rem; }
 h2 { font-size:1.5rem; margin:3.2rem 0 .9rem; padding-top:1.2rem; border-top:1px solid var(--rule-strong); }
 h3 { font-size:1.17rem; margin:2.1rem 0 .6rem; }
