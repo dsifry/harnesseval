@@ -130,6 +130,11 @@ class SdlcReportTests(unittest.TestCase):
             self.assertTrue(1000 <= len(text) <= 1900, f"{len(text)} chars: " + lines[0])
             self.assertLessEqual(len(text) + 2 + 23 + 2 + 60, 3000)  # with link and hashtags, inside LinkedIn's limit
 
+    def test_link_preview_description_fits_the_networks(self):
+        desc = html.unescape(re.search(r'<meta property="og:description" content="([^"]*)"', self.page).group(1))
+        self.assertLessEqual(len(desc), 220, f"{len(desc)} chars; X and LinkedIn truncate around 200: {desc}")
+        self.assertNotRegex(desc, r"\{\{")
+
     def test_share_images_carry_a_qr_code_for_their_own_link(self):
         ids = re.findall(r'id="([^"]+)"[^>]*data-share=', self.page)
         self.assertEqual(sorted(ids), sorted(self.data["qr"]))
