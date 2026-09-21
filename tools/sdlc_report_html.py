@@ -372,7 +372,7 @@ def compute(M: dict, D: dict) -> tuple[dict, dict, dict]:
             "qr": {sid: qr.as_strings(qr.encode(f"{PUBLIC_BASE}{PAGE_NAME}#{sid}")) for sid in SHARE_IDS},
             "page_url": facts["page_url"]}
     guards = {"ranked": ranked, "top": top, "pilot": pilot, "closed": closed, "cheap": cheap,
-              "frontier": frontier, "open_h": open_h, "closed_oneshot": closed_oneshot, "harness_lead": harness_lead, "ce_pilot": ce_pilot, "harness": harness, "cheap_floor": cheap_floor, "rows": rows, "eff_best": eff_best, "eb": eb,
+              "frontier": frontier, "open_h": open_h, "closed_oneshot": closed_oneshot, "harness_lead": harness_lead, "lead_fws": {r["fw"] for r in by_bugs[:harness_lead]} | {r["fw"] for r in ranked[:harness_lead]}, "ce_pilot": ce_pilot, "harness": harness, "cheap_floor": cheap_floor, "rows": rows, "eff_best": eff_best, "eb": eb,
               "best_by_vendor": best_by_vendor, "closed_h": closed_h, "closed_above": closed_above, "runner": runner, "low_fastest": low_fastest, "low_best_value": low_best_value, "n_ladders": len(ladders), "slow": slow,
               "sel_adjp_gap": sel_adjp_gap, "pilot_sel": pilot_sel, "sel_recall_gap": sel_recall_gap, "sel_f1_gap": sel_f1_gap, "top_n": top_n, "exceptions": exceptions, "ratios": ratios, "n_eff": n_eff, "effort": effort}
     return facts, data, guards
@@ -424,6 +424,7 @@ def check_guards(g: dict) -> None:
     need(min(g["harness"], key=lambda r: r["cost"]) is g["ce_pilot"] and min(g["harness"], key=lambda r: r["secs"]) is g["ce_pilot"]
          and g["top"]["fw"] == "CE",
          "'the Compound Engineering pick was the cheapest and fastest harness configuration, and Compound Engineering holds the top score'")
+    need(g["lead_fws"] == {"CE", "MRV"}, "'the leading harness runs are a mix of both harnesses, either metareview or Compound Engineering'")
     need(g["harness_lead"] >= 10, "'the top of the leaderboard is all harness runs'")
     need(g["eff_best"]["verdict"] == "better" and g["eff_best"]["fw"] == "one-shot"
          and min(g["eb"][CE], g["eb"][MRV]) > g["eb"][VAN] > 0,
