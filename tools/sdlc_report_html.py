@@ -46,6 +46,7 @@ OG_IMAGE = "analysis/figures/dash_chart1a.png"
 VAN, CE, MRV = "vanilla-engineered", "compound-realistic", "metareview-realistic"
 FW_SHORT = {VAN: "one-shot", CE: "CE", MRV: "MRV"}
 FW_LONG = {VAN: "one-shot", CE: "Compound Engineering", MRV: "metareview"}
+FW_URL = {CE: "https://github.com/EveryInc/compound-engineering-plugin", MRV: "https://github.com/dsifry/metareview"}
 FW_PROSE = {VAN: "as a one-shot prompt", CE: "running Compound Engineering", MRV: "running metareview"}
 EFFORTS = ["low", "medium", "high"]
 MODEL_NAME = {
@@ -128,6 +129,11 @@ def long_label(key: str) -> str:
     """For tables, tooltips and captions, where no legend is in sight: 'Opus 5 · Compound Engineering · medium'."""
     m, f, e = key.split("|")
     return f"{MODEL_FULL[m]} · {FW_LONG[f]} · {e}"
+
+
+def fw_url(key: str) -> str:
+    """The repo of the harness a configuration ran. A one-shot prompt has none; check_guards rejects a pick without one."""
+    return FW_URL.get(key.split("|")[1], "")
 
 
 def prose_label(key: str) -> str:
@@ -336,8 +342,10 @@ def compute(M: dict, D: dict) -> tuple[dict, dict, dict]:
         "ptok_ref_model_full": MODEL_FULL["claude-fable-5-1"],
         "pilot_model_full": MODEL_FULL[pm], "cheap_model_full": MODEL_FULL[cheap["model_id"]],
         "pilot_effort": pilot["effort"], "top_effort": top["effort"], "cheap_effort": cheap["effort"],
-        "pilot_fw_long": FW_LONG[PILOT.split("|")[1]], "top_fw_long": FW_LONG[top["key"].split("|")[1]],
-        "cheap_fw_long": FW_LONG[PILOT_CHEAP.split("|")[1]],
+        "pilot_fw_long": FW_LONG[pilot["key"].split("|")[1]], "top_fw_long": FW_LONG[top["key"].split("|")[1]],
+        "cheap_fw_long": FW_LONG[cheap["key"].split("|")[1]],
+        # each pick's harness name and repo link are read off that pick's own key, never typed beside it
+        "pilot_fw_url": fw_url(pilot["key"]), "top_fw_url": fw_url(top["key"]), "cheap_fw_url": fw_url(cheap["key"]),
         "closed_model_full": MODEL_FULL[closed["model_id"]], "runner_model_full": MODEL_FULL[runner["model_id"]],
         "closed_vendor": VENDOR[closed["model_id"].split("-")[0]], "runner_vendor": VENDOR[runner["model_id"].split("-")[0]],
         "runner_model": runner["model"], "runner_label": runner["long"], "runner_prose": prose_label(runner["key"]), "runner_score": f"{runner['score']:.3f}",
@@ -375,6 +383,13 @@ def check_guards(g: dict) -> None:
     def need(ok: bool, sentence: str) -> None:
         if not ok:
             raise ClaimGuardError(f"template claim no longer holds: {sentence}")
+
+    fw_of = lambda key: key.split("|")[1]
+    need(all(fw_of(g[n]["key"]) in FW_URL for n in ("top", "pilot", "cheap", "ce_pilot")),
+         "'every pick is a harness run, so its tile can link to that harness'")
+    need(fw_of(PILOT) == fw_of(PILOT_CHEAP) == fw_of(CLOSED_SAME_HARNESS) == MRV and fw_of(CE_PILOT) == CE,
+         "the template's prose says 'running metareview' for the pilot, budget and same-harness picks, and "
+         "'running Compound Engineering' for the CE pick: change the template if these constants change")
 
     need(not g["top"]["open"] and g["top"]["fw"] != "one-shot",
          "'the single highest score belongs to a closed model in a harness'")

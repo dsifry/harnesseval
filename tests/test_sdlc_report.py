@@ -103,6 +103,38 @@ class SdlcReportTests(unittest.TestCase):
         for name in ("top_label", "pilot_label", "cheap_label", "closed_label", "runner_label", "top_prose", "pilot_prose"):
             self.assertNotRegex(self.facts[name], r"\b(CE|MRV)\b", name)
 
+    def test_every_harness_link_points_at_that_harness(self):
+        url, name = self.gen.FW_URL, self.gen.FW_LONG
+        links = re.findall(r'<a href="([^"]+)">([^<]+)</a>', self.page)
+        for fw in url:
+            named = [h for h, text in links if text == name[fw]]
+            self.assertGreater(len(named), 2, name[fw])
+            self.assertEqual(set(named), {url[fw]}, f"a link labelled {name[fw]} points elsewhere")
+            self.assertEqual({text for h, text in links if h == url[fw]}, {name[fw]}, f"a link to {url[fw]} is labelled as something else")
+
+    def test_pick_tiles_name_and_link_the_harness_their_configuration_ran(self):
+        tiles = re.findall(r'<div class="pick"><span class="pick-k">([^<]+)</span><b>(.*?)</b>', self.page, flags=re.S)
+        want = {"Best value": self.guards["pilot"], "Top score": self.guards["top"], "Tightest budget": self.guards["cheap"]}
+        seen = {k: b for k, b in tiles if k in want}
+        self.assertEqual(set(seen), set(want))
+        for label, row in want.items():
+            m, fw, effort = row["key"].split("|")
+            self.assertEqual(seen[label], f'{self.gen.MODEL_FULL[m]} running <a href="{self.gen.FW_URL[fw]}">{self.gen.FW_LONG[fw]}</a>, {effort} effort', label)
+
+    def test_top_score_tile_follows_the_data_to_a_different_harness(self):
+        M = copy.deepcopy(self.metrics)
+        M["true_gold_defects"]["verified"]["cells"]["claude-opus-5|metareview-realistic|high"]["F2p"] = 0.95
+        facts = self.gen.compute(M, self.dataset)[0]
+        self.assertEqual((facts["top_fw_long"], facts["top_fw_url"]), ("metareview", self.gen.FW_URL[self.gen.MRV]))
+
+    def test_guard_rejects_a_pick_that_is_not_a_harness_run(self):
+        M = copy.deepcopy(self.metrics)
+        M["true_gold_defects"]["verified"]["cells"]["claude-fable-5-1|vanilla-engineered|medium"]["F2p"] = 0.95
+        facts, _, guards = self.gen.compute(M, self.dataset)  # must not crash on the missing repo link
+        self.assertEqual(facts["top_fw_url"], "")
+        with self.assertRaises(self.gen.ClaimGuardError):
+            self.gen.check_guards(guards)
+
     def test_answer_box_sits_above_the_findings_and_links_to_the_leaderboard(self):
         self.assertLess(self.page.index('id="answer"'), self.page.index('id="findings"'))
         self.assertIn('href="#leaderboard"', self.page)
