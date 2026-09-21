@@ -69,7 +69,7 @@ class SdlcReportTests(unittest.TestCase):
             f"{f['gold_total']} distinct bugs",                     # 147
             f"{f['gold_hidden']} verified hidden defects",          # 105
             f"union covers {f['union_found']}/{f['gold_total']}",   # 140/147
-            f"| {f['top_label']} | {f['best_bugs']} |",             # Opus · CE · medium | 88
+            f"| {self.gen.cell_label(self.guards['top']['key'])} | {f['best_bugs']} |",  # Opus · CE · medium | 88 (REPORT shorthand)
             f"{f['top_score']} [",                                  # 0.641 [CI]
             f"**{f['eff_unresolved']} not resolved by this sample**",
             f"| vision | {f['pilot_bugs']} | {cell[self.gen.PILOT]['advice']} | {f['pilot_unsup']} |",
@@ -84,7 +84,8 @@ class SdlcReportTests(unittest.TestCase):
             f"overstated by {f['sel_f1_gap'].replace('−', '-')}4",  # +0.084
         ):
             self.assertIn(needle, self.report_md)
-        self.assertEqual(f["best_oneshot_label"], "Fable · one-shot · medium")
+        self.assertEqual(self.gen.cell_label(best_oneshot["key"]), "Fable · one-shot · medium")
+        self.assertEqual(f["best_oneshot_label"], self.gen.long_label(best_oneshot["key"]))
         self.assertIn("median token multiple **10.1×**", self.report_md)
         self.assertEqual(f["tok_mult"], "10")
 
@@ -93,6 +94,25 @@ class SdlcReportTests(unittest.TestCase):
         self.assertGreater(len(anchors), 8)
         for anchor in anchors:
             self.assertIn(f'id="{anchor}"', self.report_html, f"REPORT.html has no #{anchor}")
+
+    def test_labels_spell_out_model_names_and_tables_spell_out_harnesses(self):
+        short = set(self.gen.MODEL_NAME.values()) - set(self.gen.MODEL_FULL.values())  # 'Sol', 'GLM vision', ...
+        for r in self.data["cells"]:
+            self.assertNotIn(r["label"].split(" · ")[0], short, r["label"])
+            self.assertNotRegex(r["long"], r"\b(CE|MRV)\b", r["long"])
+        for name in ("top_label", "pilot_label", "cheap_label", "closed_label", "runner_label", "top_prose", "pilot_prose"):
+            self.assertNotRegex(self.facts[name], r"\b(CE|MRV)\b", name)
+
+    def test_answer_box_sits_above_the_findings_and_links_to_the_leaderboard(self):
+        self.assertLess(self.page.index('id="answer"'), self.page.index('id="findings"'))
+        self.assertIn('href="#leaderboard"', self.page)
+        self.assertIn('id="leaderboard"', self.page)
+
+    def test_guard_rejects_a_closed_one_shot_prompt_beating_an_open_weight_harness(self):
+        M = copy.deepcopy(self.metrics)
+        M["true_gold_defects"]["verified"]["cells"]["claude-fable-5-1|vanilla-engineered|medium"]["F2p"] = 0.50
+        with self.assertRaises(self.gen.ClaimGuardError):
+            self.gen.check_guards(self.gen.compute(M, self.dataset)[2])
 
     def test_disclosure_is_on_the_page_and_on_every_share_card(self):
         text = re.sub(r"\s+", " ", visible_text(self.page))
@@ -129,8 +149,15 @@ class SdlcReportTests(unittest.TestCase):
             self.assertLessEqual(len(lines[0]), 210, "hook must fit before 'see more': " + lines[0])
             self.assertTrue(text.rstrip().endswith("?"), "end with a question: " + text[-80:])
             self.assertNotRegex(text, r"\b([Ww]e|[Oo]ur|[Uu]s)\b", "the reader is not an author: " + lines[0])
-            self.assertTrue(1000 <= len(text) <= 1900, f"{len(text)} chars: " + lines[0])
-            self.assertLessEqual(len(text) + 2 + 23 + 2 + 60, 3000)  # with link and hashtags, inside LinkedIn's limit
+            # a post must stand alone in an email or a LinkedIn post: what was studied, who ran it, the disclosure, and where to read it
+            self.assertTrue(1000 <= len(text) <= 2400, f"{len(text)} chars: " + lines[0])
+            self.assertLessEqual(len(text) + 2 + 60, 3000)  # with hashtags, inside LinkedIn's limit; the links are in the text
+            self.assertIn(self.facts["page_url"] + "#", text, "link to the finding: " + lines[0])
+            self.assertIn(self.facts["report_url"], text, "link to the full report: " + lines[0])
+            self.assertIn("AI code review", text, lines[0])
+            self.assertIn("Sifry wrote metareview", text, "author disclosure: " + lines[0])
+            self.assertIn("Compound Engineering and metareview", text, "names the ways of working: " + lines[0])
+            self.assertNotRegex(text, r"\b(CE|MRV)\b", "abbreviations a stranger cannot decode: " + lines[0])
 
     def test_link_preview_description_fits_the_networks(self):
         desc = html.unescape(re.search(r'<meta property="og:description" content="([^"]*)"', self.page).group(1))

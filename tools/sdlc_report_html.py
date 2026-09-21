@@ -45,6 +45,8 @@ OG_IMAGE = "analysis/figures/dash_chart1a.png"
 
 VAN, CE, MRV = "vanilla-engineered", "compound-realistic", "metareview-realistic"
 FW_SHORT = {VAN: "one-shot", CE: "CE", MRV: "MRV"}
+FW_LONG = {VAN: "one-shot", CE: "Compound Engineering", MRV: "metareview"}
+FW_PROSE = {VAN: "as a one-shot prompt", CE: "running Compound Engineering", MRV: "running metareview"}
 EFFORTS = ["low", "medium", "high"]
 MODEL_NAME = {
     "claude-fable-5-1": "Fable", "claude-opus-5": "Opus", "claude-sonnet-5": "Sonnet",
@@ -65,6 +67,7 @@ SHARE_IDS = ["f-harness", "f-cost", "f-effort", "c-harness", "c-money", "c-effor
 PILOT = f"glm-5.3-vision-background|{MRV}|low"
 PILOT_CHEAP = f"glm-5.3-flash-background|{MRV}|low"
 CLOSED_SAME_HARNESS = f"claude-opus-5|{MRV}|low"
+CE_PILOT = f"glm-5.3-flash-background|{CE}|low"  # the Compound Engineering pick for the next-steps list
 
 
 class ClaimGuardError(AssertionError):
@@ -110,8 +113,27 @@ def signed3(x: float) -> str:
 
 
 def cell_label(key: str) -> str:
+    """The shorthand REPORT.md uses ('Opus · CE · medium'). Kept for cross-checks; the page spells names out."""
     m, f, e = key.split("|")
     return f"{MODEL_NAME[m]} · {FW_SHORT[f]} · {e}"
+
+
+def chart_label(key: str) -> str:
+    """For marks inside a chart whose legend spells out CE and MRV: 'Opus 5 · CE · medium'."""
+    m, f, e = key.split("|")
+    return f"{MODEL_FULL[m]} · {FW_SHORT[f]} · {e}"
+
+
+def long_label(key: str) -> str:
+    """For tables, tooltips and captions, where no legend is in sight: 'Opus 5 · Compound Engineering · medium'."""
+    m, f, e = key.split("|")
+    return f"{MODEL_FULL[m]} · {FW_LONG[f]} · {e}"
+
+
+def prose_label(key: str) -> str:
+    """For sentences: 'Opus 5 running Compound Engineering at medium effort'."""
+    m, f, e = key.split("|")
+    return f"{MODEL_FULL[m]} {FW_PROSE[f]} at {e} effort"
 
 
 def compute(M: dict, D: dict) -> tuple[dict, dict, dict]:
@@ -126,7 +148,7 @@ def compute(M: dict, D: dict) -> tuple[dict, dict, dict]:
         c, x = full[k], matrix[k]
         m, f, e = k.split("|")
         rows.append({
-            "key": k, "label": cell_label(k), "model": MODEL_NAME[m], "model_id": m, "fw": FW_SHORT[f],
+            "key": k, "label": chart_label(k), "long": long_label(k), "model": MODEL_FULL[m], "model_id": m, "fw": FW_SHORT[f],
             "effort": e, "open": m in OPEN_WEIGHT, "bugs": int(c["TP"]), "score": round(c["F2p"], 3),
             "score_lo": round(c["ci"]["F2p"][1], 3), "score_hi": round(c["ci"]["F2p"][2], 3),
             "advice": int(c["advisory_count"]), "unsupported": int(c["penalty_count"]),
@@ -152,7 +174,7 @@ def compute(M: dict, D: dict) -> tuple[dict, dict, dict]:
                for f in (VAN, CE, MRV)}
         if all(len(v) == len(EFFORTS) for v in per.values()):
             mean = {f: statistics.mean(v) for f, v in per.items()}
-            models.append({"model": MODEL_NAME[m], "open": m in OPEN_WEIGHT,
+            models.append({"model": MODEL_FULL[m], "open": m in OPEN_WEIGHT,
                            "oneshot": round(mean[VAN], 1), "ce": round(mean[CE], 1),
                            "mrv": round(mean[MRV], 1),
                            "ratio": round((mean[CE] + mean[MRV]) / 2 / mean[VAN], 2)})
@@ -177,6 +199,12 @@ def compute(M: dict, D: dict) -> tuple[dict, dict, dict]:
         v = VENDOR[r["model_id"].split("-")[0]]
         if v not in best_by_vendor or r["score"] > best_by_vendor[v]["score"]:
             best_by_vendor[v] = r
+    # the answer box: open-weight harness runs against closed one-shot prompts, and who leads the leaderboard
+    open_h = [r for r in harness if r["open"]]
+    closed_oneshot = [r for r in one_shot if not r["open"]]
+    by_bugs = sorted(rows, key=lambda r: (-r["bugs"], -r["score"]))  # the leaderboard's default order
+    harness_lead = min(next(i for i, r in enumerate(order) if r["fw"] == "one-shot") for order in (by_bugs, ranked))
+    ce_pilot = by_key[CE_PILOT]
     csr = M["cost_structure_ratios"][
         f"glm-5.3-flash-background|{MRV}|low vs claude-fable-5-1|{VAN}|low"]
 
@@ -186,7 +214,8 @@ def compute(M: dict, D: dict) -> tuple[dict, dict, dict]:
         m, f = k.split("|")
         pt, lo, hi = v["delta"]["F1"]
         verdict = "better" if lo > 0 else "worse" if hi < 0 else "unresolved"
-        effort.append({"model_id": m, "fw": FW_SHORT[f], "label": f"{MODEL_NAME[m]} · {FW_SHORT[f]}", "d": round(pt, 3), "lo": round(lo, 3),
+        effort.append({"model_id": m, "fw": FW_SHORT[f], "label": f"{MODEL_FULL[m]} · {FW_SHORT[f]}",
+                       "long": f"{MODEL_FULL[m]} · {FW_LONG[f]}", "prose": f"{MODEL_FULL[m]} {FW_PROSE[f]}", "d": round(pt, 3), "lo": round(lo, 3),
                        "hi": round(hi, 3), "cost": round(v["cost_ratio"][0], 2), "verdict": verdict})
     effort.sort(key=lambda r: -r["d"])
     n_eff = {v: sum(r["verdict"] == v for r in effort) for v in ("better", "worse", "unresolved")}
@@ -236,7 +265,7 @@ def compute(M: dict, D: dict) -> tuple[dict, dict, dict]:
     facts = {
         # scope
         "n_prs": word(n_pr), "n_prs_cap": word(n_pr).capitalize(), "n_codebases": word(len(repos)),
-        "n_models": word(len(MODEL_NAME)), "n_models_num": str(len(MODEL_NAME)),
+        "n_models": word(len(MODEL_NAME)), "n_models_cap": word(len(MODEL_NAME)).capitalize(), "n_models_num": str(len(MODEL_NAME)),
         "n_ways": word(len(FW_SHORT)), "n_ways_num": str(len(FW_SHORT)),
         "n_efforts": word(len(EFFORTS)), "n_efforts_num": str(len(EFFORTS)),
         "n_cells": str(len(rows)), "n_cells_total": str(len(cells)),
@@ -246,32 +275,40 @@ def compute(M: dict, D: dict) -> tuple[dict, dict, dict]:
         # finding 1
         "hv_pos": str(hv["n_positive_recall"]), "hv_pairs": str(hv["n_pairs"]),
         "hv_exceptions": word(len(exceptions)),
-        "hv_exception_names": ", ".join(sorted({cell_label(k).rsplit(" · ", 1)[0] for k in exceptions})),
+        "hv_exception_names": ", ".join(sorted({prose_label(k).rsplit(" at ", 1)[0] for k in exceptions})),
         "hv_ratio": f"{statistics.median(ratios.values()):.1f}",
         "hv_recall_pts": f"{hv['mean_dRecall'] * 100:.1f}",
         "pilot_ratio": f"{ratios[PILOT]:.1f}", "cheap_ratio": f"{ratios[PILOT_CHEAP]:.1f}",
         "pilot_base_bugs": str(by_key[f'glm-5.3-vision-background|{VAN}|low']["bugs"]),
         "cheap_base_bugs": str(by_key[f'glm-5.3-flash-background|{VAN}|low']["bugs"]),
         "best_bugs": str(top["bugs"]), "best_oneshot_bugs": str(best_oneshot["bugs"]),
-        "best_oneshot_label": best_oneshot["label"],
+        "best_oneshot_label": best_oneshot["long"], "best_oneshot_score": f"{best_oneshot['score']:.3f}",
         "tok_mult": f"{tok:.0f}", "cost_mult": f"{cost_mult:.0f}",
         "unsup_oneshot": f"{statistics.median(r['unsupported'] for r in one_shot):g}",
         "unsup_harness": f"{statistics.median(r['unsupported'] for r in harness):g}",
         "advice_oneshot": f"{statistics.median(r['advice'] for r in one_shot):g}",
         "advice_harness": f"{statistics.median(r['advice'] for r in harness):g}",
         # finding 2
-        "top_label": top["label"], "top_score": f"{top['score']:.3f}", "top_cost": money(top["cost"]),
-        "pilot_label": pilot["label"], "pilot_score": f"{pilot['score']:.3f}",
+        "top_label": top["long"], "top_prose": prose_label(top["key"]), "top_score": f"{top['score']:.3f}", "top_cost": money(top["cost"]),
+        "pilot_label": pilot["long"], "pilot_prose": prose_label(pilot["key"]), "pilot_score": f"{pilot['score']:.3f}",
         "pilot_cost": money(pilot["cost"]), "pilot_bugs": str(pilot["bugs"]), "pilot_secs": str(pilot["secs"]),
         "pilot_unsup": str(pilot["unsupported"]),
-        "cheap_label": cheap["label"], "cheap_score": f"{cheap['score']:.3f}",
+        "cheap_label": cheap["long"], "cheap_prose": prose_label(cheap["key"]), "cheap_score": f"{cheap['score']:.3f}",
         "cheap_cost": money(cheap["cost"]), "cheap_bugs": str(cheap["bugs"]), "cheap_secs": str(cheap["secs"]),
         "cheap_unsup": str(cheap["unsupported"]),
-        "closed_label": closed["label"], "closed_score": f"{closed['score']:.3f}",
+        "closed_label": closed["long"], "closed_prose": prose_label(closed["key"]), "closed_score": f"{closed['score']:.3f}",
         "closed_cost": money(closed["cost"]), "closed_bugs": str(closed["bugs"]),
         "pilot_vs_closed": one_over(pilot["cost"] / closed["cost"]),
         "pilot_vs_top": one_over(pilot["cost"] / top["cost"]),
         "top_vs_pilot_x": f"{top['cost'] / pilot['cost']:.0f}",
+        "n_open_h": str(len(open_h)), "open_h_min_score": f"{min(r['score'] for r in open_h):.3f}",
+        "open_h_min_bugs": str(min(r["bugs"] for r in open_h)),
+        "closed_oneshot_best_score": f"{max(r['score'] for r in closed_oneshot):.3f}",
+        "closed_oneshot_best_bugs": str(max(r["bugs"] for r in closed_oneshot)),
+        "harness_lead": str(harness_lead), "top_dur": duration(top["secs"]),
+        "ce_pilot_model_full": MODEL_FULL[ce_pilot["model_id"]], "ce_pilot_effort": ce_pilot["effort"],
+        "ce_pilot_bugs": str(ce_pilot["bugs"]), "ce_pilot_cost": money(ce_pilot["cost"]),
+        "ce_pilot_dur": duration(ce_pilot["secs"]), "ce_pilot_unsup": str(ce_pilot["unsupported"]),
         "n_open_top": word(n_open_top), "n_open_top_cap": word(n_open_top).capitalize(), "top_n": word(top_n),
         "ptok_pct": f"{csr['ptok_ratio'][0] * 100:.1f}%", "ptask_pct": f"{csr['costtask_ratio'][0] * 100:.1f}%",
         # finding 3
@@ -283,9 +320,9 @@ def compute(M: dict, D: dict) -> tuple[dict, dict, dict]:
         "eff_unsup_down": str(sum(h["unsupported"] < l["unsupported"] for l, h in lo_hi)),
         "eff_unsup_up": str(sum(h["unsupported"] > l["unsupported"] for l, h in lo_hi)),
         "eff_cost_more": str(sum(r["cost"] > 1 for r in effort)),
-        "eff_ex_label": eff_ex["label"], "eff_ex_d": signed(eff_ex["d"]), "eff_ex_lo": signed(eff_ex["lo"]),
+        "eff_ex_label": eff_ex["prose"], "eff_ex_d": signed(eff_ex["d"]), "eff_ex_lo": signed(eff_ex["lo"]),
         "eff_ex_hi": signed(eff_ex["hi"]),
-        "eff_best_label": eff_best["label"], "eff_best_model": MODEL_NAME[eff_best["model_id"]],
+        "eff_best_label": eff_best["prose"], "eff_best_model": MODEL_FULL[eff_best["model_id"]],
         "eff_best_d": signed(eff_best["d"]), "eff_best_lo": signed(eff_best["lo"]), "eff_best_hi": signed(eff_best["hi"]),
         "eff_best_high_bugs": str(eb[VAN]), "eff_best_ce_low_bugs": str(eb[CE]), "eff_best_mrv_low_bugs": str(eb[MRV]),
         "cheap_floor": str(cheap_floor), "top_vs_cheap": f"1/{round(top['cost'] / cheap['cost'], -1):.0f}",
@@ -298,10 +335,12 @@ def compute(M: dict, D: dict) -> tuple[dict, dict, dict]:
         "n_closed_h": str(len(closed_h)), "n_closed_above": word(len(closed_above)),
         "ptok_ref_model_full": MODEL_FULL["claude-fable-5-1"],
         "pilot_model_full": MODEL_FULL[pm], "cheap_model_full": MODEL_FULL[cheap["model_id"]],
-        "pilot_effort": pilot["effort"],
+        "pilot_effort": pilot["effort"], "top_effort": top["effort"], "cheap_effort": cheap["effort"],
+        "pilot_fw_long": FW_LONG[PILOT.split("|")[1]], "top_fw_long": FW_LONG[top["key"].split("|")[1]],
+        "cheap_fw_long": FW_LONG[PILOT_CHEAP.split("|")[1]],
         "closed_model_full": MODEL_FULL[closed["model_id"]], "runner_model_full": MODEL_FULL[runner["model_id"]],
         "closed_vendor": VENDOR[closed["model_id"].split("-")[0]], "runner_vendor": VENDOR[runner["model_id"].split("-")[0]],
-        "runner_model": runner["model"], "runner_label": runner["label"], "runner_score": f"{runner['score']:.3f}",
+        "runner_model": runner["model"], "runner_label": runner["long"], "runner_prose": prose_label(runner["key"]), "runner_score": f"{runner['score']:.3f}",
         "runner_cost": money(runner["cost"]),
         "top_model_full": MODEL_FULL[top["model_id"]],
         "wall_mult": f"{wall_mult:.1f}",
@@ -309,11 +348,12 @@ def compute(M: dict, D: dict) -> tuple[dict, dict, dict]:
         "wall_oneshot_low": duration(statistics.median(r["secs"] for r in one_shot if r["effort"] == "low")),
         "n_ladders": str(len(ladders)), "low_fastest": str(low_fastest), "low_best_value": str(low_best_value),
         "pilot_dur": duration(pilot["secs"]), "closed_dur": duration(closed["secs"]), "cheap_dur": duration(cheap["secs"]),
-        "pilot_family": f"{MODEL_NAME[pm]} · {FW_SHORT[fw_p]}", "closed_model": MODEL_NAME[cm],
+        "pilot_family": f"{MODEL_FULL[pm]} · {FW_LONG[fw_p]}", "closed_model": MODEL_FULL[cm],
         "pilot_med_dur": duration(slow["medium"][0]), "pilot_high_dur": duration(slow["high"][0]),
         "closed_med_dur": duration(slow["medium"][1]), "closed_high_dur": duration(slow["high"][1]),
         # plumbing
-        "page_url": PUBLIC_BASE + PAGE_NAME, "og_image": PUBLIC_BASE + OG_IMAGE,
+        "page_url": PUBLIC_BASE + PAGE_NAME, "report_url": PUBLIC_BASE + "REPORT.html",
+        "pilot_vendor": VENDOR[pm.split("-")[0]], "og_image": PUBLIC_BASE + OG_IMAGE,
         "price_date": M["price_retrieved"] if isinstance(M["price_retrieved"], str) else "",
     }
     data = {"cells": rows, "models": models, "effort": effort, "gold_total": cov["den"],
@@ -324,7 +364,7 @@ def compute(M: dict, D: dict) -> tuple[dict, dict, dict]:
             "qr": {sid: qr.as_strings(qr.encode(f"{PUBLIC_BASE}{PAGE_NAME}#{sid}")) for sid in SHARE_IDS},
             "page_url": facts["page_url"]}
     guards = {"ranked": ranked, "top": top, "pilot": pilot, "closed": closed, "cheap": cheap,
-              "frontier": frontier, "cheap_floor": cheap_floor, "rows": rows, "eff_best": eff_best, "eb": eb,
+              "frontier": frontier, "open_h": open_h, "closed_oneshot": closed_oneshot, "harness_lead": harness_lead, "ce_pilot": ce_pilot, "harness": harness, "cheap_floor": cheap_floor, "rows": rows, "eff_best": eff_best, "eb": eb,
               "best_by_vendor": best_by_vendor, "closed_h": closed_h, "closed_above": closed_above, "runner": runner, "low_fastest": low_fastest, "low_best_value": low_best_value, "n_ladders": len(ladders), "slow": slow,
               "sel_adjp_gap": sel_adjp_gap, "pilot_sel": pilot_sel, "sel_recall_gap": sel_recall_gap, "sel_f1_gap": sel_f1_gap, "top_n": top_n, "exceptions": exceptions, "ratios": ratios, "n_eff": n_eff, "effort": effort}
     return facts, data, guards
@@ -361,6 +401,15 @@ def check_guards(g: dict) -> None:
     need(min((r for r in g["rows"] if r["bugs"] >= g["cheap_floor"]), key=lambda r: r["cost"]) is g["cheap"],
          "'the cheapest configuration to find that many bugs'")
     need(g["pilot"]["unsupported"] < g["cheap"]["unsupported"], "'with fewer unsupported findings'")
+    need(g["pilot"] in g["frontier"] and g["cheap"] in g["frontier"],
+         "'best value' and 'tightest budget': both picks sit on the efficiency frontier")
+    need(min(r["score"] for r in g["open_h"]) > max(r["score"] for r in g["closed_oneshot"])
+         and min(r["bugs"] for r in g["open_h"]) > max(r["bugs"] for r in g["closed_oneshot"]),
+         "'every open-weight harness configuration beat every closed-model one-shot prompt, on score and on bugs'")
+    need(min(g["harness"], key=lambda r: r["cost"]) is g["ce_pilot"] and min(g["harness"], key=lambda r: r["secs"]) is g["ce_pilot"]
+         and g["top"]["fw"] == "CE",
+         "'the Compound Engineering pick was the cheapest and fastest harness configuration, and Compound Engineering holds the top score'")
+    need(g["harness_lead"] >= 10, "'the top of the leaderboard is all harness runs'")
     need(g["eff_best"]["verdict"] == "better" and g["eff_best"]["fw"] == "one-shot"
          and min(g["eb"][CE], g["eb"][MRV]) > g["eb"][VAN] > 0,
          "'the clearest gain was a one-shot prompt, and either harness at low effort still found more bugs'")
