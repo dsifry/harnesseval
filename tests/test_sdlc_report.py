@@ -56,6 +56,21 @@ class SdlcReportTests(unittest.TestCase):
         self.assertEqual((ROOT / "sdlc-report.html").read_text(encoding="utf-8"), self.page,
                          "sdlc-report.html is stale: run tools/sdlc_report_html.py")
 
+    def test_comparison_units_follow_generated_pr_count(self):
+        for count in ('3', '12'):
+            facts = dict(self.facts, n_prs=count)
+            page = self.gen.render(self.template, facts, self.data)
+            self.assertIn(f'Finding counts are totals across {count} pull requests; cost and time are averages per review.', page)
+            self.assertIn(f'Finding counts total {count} PRs; cost and time average per review.', page)
+
+    def test_developer_scope_and_metric_explanation_follow_facts(self):
+        facts = dict(self.facts, n_prs='12', gold_benchmark='50', gold_total='200')
+        page = self.gen.render(self.template, facts, self.data)
+        text = re.sub(r"\s+", " ", visible_text(page))
+        self.assertIn('These recommendations come from 12 selected pull requests, with a single run per configuration.', text)
+        self.assertIn('original 50 benchmark labels, rather than the expanded set of 200 verified bugs', text)
+        self.assertNotIn('have reached parity on AI code review', text)
+
     def test_render_is_deterministic(self):
         facts, data, _ = self.gen.compute(copy.deepcopy(self.metrics), self.dataset)
         self.assertEqual(self.gen.render(self.template, facts, data), self.page)
@@ -188,7 +203,7 @@ class SdlcReportTests(unittest.TestCase):
         for post in posts:
             lines = [re.sub(r"\s+", " ", ln).strip() for ln in html.unescape(post).split("\n")]
             text = "\n".join(lines).strip()
-            self.assertLessEqual(len(lines[0]), 210, "hook must fit before 'see more': " + lines[0])
+            self.assertLessEqual(len(lines[0]), 200, "hook must fit before 'see more': " + lines[0])
             self.assertTrue(text.rstrip().endswith("?"), "end with a question: " + text[-80:])
             self.assertNotRegex(text, r"\b([Ww]e|[Oo]ur|[Uu]s)\b", "the reader is not an author: " + lines[0])
             # a post must stand alone in an email or a LinkedIn post: what was studied, who ran it, the disclosure, and where to read it

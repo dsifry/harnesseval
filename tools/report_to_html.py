@@ -104,9 +104,9 @@ a:hover { text-decoration:underline; }
 .meta a:hover { border-color:var(--rule-strong); color:var(--ink); text-decoration:none; }
 .meta a.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
 code, pre { font:.82rem/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
-code { background:var(--tint); padding:.1em .35em; border-radius:4px; }
+code { background:var(--tint); padding:.1em .35em; border-radius:4px; overflow-wrap:anywhere; }
 pre { background:var(--tint); border:1px solid var(--rule); border-radius:8px; padding:.9rem 1.1rem; overflow-x:auto; }
-pre code { background:none; padding:0; }
+pre code { background:none; padding:0; overflow-wrap:normal; }
 blockquote { margin:1.2rem 0; padding:.2rem 0 .2rem 1.1rem; border-left:3px solid var(--rule-strong); color:var(--ink2); }
 blockquote p:last-child { margin-bottom:0; }
 hr { border:none; border-top:1px solid var(--rule); margin:2rem 0; }
