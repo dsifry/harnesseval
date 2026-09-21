@@ -229,7 +229,7 @@ class SdlcReportTests(unittest.TestCase):
             self.assertEqual(len(set(values)), 1)
             self.assertLessEqual(len(values[0]), 200)
             self.assertIn(f"{facts['n_models_cap']} models", values[0])
-            self.assertIn(f"{facts['gold_total']} verified bugs", values[0])
+            self.assertIn("Practical advice backed by thousands of runs.", values[0])
             self.assertNotIn("—", values[0])
 
     def test_share_images_carry_a_qr_code_for_their_own_link(self):
