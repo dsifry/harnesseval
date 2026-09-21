@@ -153,13 +153,17 @@ rule deciding which batches a framework may draw from are in §2.3.2.
 | `glm-5.3-vision-background` | open-weight (GLM) | GLM-5.3, "vision" below; the recommended cell's model |
 | `glm-5.3-flash-background` | open-weight (GLM) | GLM-5.3-Flash, "flash" below; cheapest strong cell |
 
-**A note on the GLM names.** `glm-5.3-vision-background` and `glm-5.3-flash-background` are the route names on the gateway the
-GLM runs went through (LunaRoute; see Special thanks). They are kept verbatim so that every row can be matched to the run registry.
-As we understand it from the provider, `-vision` is GLM-5.3 served with an added vision-input capability, and `-background` selects a
-routing option on the gateway; neither suffix denotes a different underlying model. Every request in this study was text only
-(diffs and code; no adapter sends image input), so the vision capability was never exercised. We did not independently verify the
-gateway's serving configuration. We therefore call the two models Z.ai's open-weight **GLM-5.3** and **GLM-5.3-Flash**. Where a table
-or sentence below says "vision" or "GLM vision", read GLM-5.3; where it says "flash" or "GLM flash", read GLM-5.3-Flash.
+**A note on the GLM names, and on what was actually served.** `glm-5.3-vision-background` and `glm-5.3-flash-background` are the
+route names on the gateway the GLM runs went through (LunaRoute; see Special thanks). They are kept verbatim so that every row can be
+matched to the run registry. The `-vision` route serves [lunaroute/GLM-5.3-Vision-NVFP4](https://huggingface.co/lunaroute/GLM-5.3-Vision-NVFP4).
+Its model card describes it as the GLM-5.3 text backbone taken unmodified from `RadixArk/GLM-5.3-NVFP4`, an NVFP4 (4-bit floating point)
+quantization of Z.ai's open-weight GLM-5.3, with a vision tower and projector added. Every request in this study was text only (diffs and
+code; no adapter sends image input), so the vision components were never exercised. **The GLM-5.3 results in this report are therefore
+results for a 4-bit quantized build, not for the full-precision weights**; another build, or another host's deployment, may score
+differently. As we understand it from the provider, `-background` selects a routing option on the gateway and not a different model. We
+did not independently verify the gateway's serving configuration, and the build behind the `-flash` route is not documented here. We
+call the two models **GLM-5.3** and **GLM-5.3-Flash**. Where a table or sentence below says "vision" or "GLM vision", read GLM-5.3;
+where it says "flash" or "GLM flash", read GLM-5.3-Flash.
 
 **Frameworks.** `vanilla-engineered` is an engineered single prompt (8-category rubric plus severity
 guidance) executed as one model call with no subagents — the baseline of pointing a coding agent at a

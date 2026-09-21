@@ -18,8 +18,9 @@ two duplicates. The benchmark's original 42-golden analysis is retained as a sep
 ## The recommendation
 
 **Pilot the low-effort MRV options, GLM-5.3 ("vision" in the tables below) and GLM-5.3-Flash ("flash"), on your own reviews.** The
-short names come from the gateway route names the runs used (`glm-5.3-vision-background`, `glm-5.3-flash-background`); as we understand it
-from the provider, neither suffix denotes a different underlying model, and every request here was text only (REPORT §2.2). Flash is the
+short names come from the gateway route names the runs used (`glm-5.3-vision-background`, `glm-5.3-flash-background`); the
+`-vision` route served a 4-bit (NVFP4) quantized build of GLM-5.3 with a vision tower added, and every request here was text only, so
+these are results for that quantized build (REPORT §2.2). Flash is the
 lower-API-cost choice; accepted advisory usefulness and unsupported output must be assessed separately.
 Vision has the lower scored unsupported count; developer time saved is unmeasured.
 
