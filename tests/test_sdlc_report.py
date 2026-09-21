@@ -221,6 +221,17 @@ class SdlcReportTests(unittest.TestCase):
         self.assertLessEqual(len(desc), 220, f"{len(desc)} chars; X and LinkedIn truncate around 200: {desc}")
         self.assertNotRegex(desc, r"\{\{")
 
+    def test_preview_descriptions_match_and_follow_updated_facts(self):
+        for facts in (self.facts, dict(self.facts, n_models='10', n_models_cap='Ten', gold_total='200', n_prs='12')):
+            page = self.gen.render(self.template, facts, self.data)
+            values = [html.unescape(re.search(r'<meta (?:name|property)="' + re.escape(key) + r'" content="([^"]*)"', page).group(1))
+                      for key in ('description', 'og:description', 'twitter:description')]
+            self.assertEqual(len(set(values)), 1)
+            self.assertLessEqual(len(values[0]), 200)
+            self.assertIn(f"{facts['n_models_cap']} models", values[0])
+            self.assertIn(f"{facts['gold_total']} verified bugs", values[0])
+            self.assertNotIn("—", values[0])
+
     def test_share_images_carry_a_qr_code_for_their_own_link(self):
         ids = re.findall(r'id="([^"]+)"[^>]*data-share=', self.page)
         self.assertEqual(sorted(ids), sorted(self.data["qr"]))
