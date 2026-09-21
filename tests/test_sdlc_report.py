@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 # Tokens that contain digits or number-words but are names, not claims.
 ALLOWED = [r"F[12]′?", r"§\s?[\d.]+", r"September 2026", r"one-shot", r"One-shot",
-           r"GLM-5\.3-(?:vision|flash)", r"DeepSeek-4\.1-flash"]
+           r"GLM-5\.3(?:-Flash)?", r"DeepSeek-4\.1-flash"]
 NUMBER_WORDS = r"\b(two|three|four|five|six|seven|eight|nine|ten|dozen|double|twice|half|third|quarter)\b"
 
 
@@ -102,6 +102,15 @@ class SdlcReportTests(unittest.TestCase):
             self.assertNotRegex(r["long"], r"\b(CE|MRV)\b", r["long"])
         for name in ("top_label", "pilot_label", "cheap_label", "closed_label", "runner_label", "top_prose", "pilot_prose"):
             self.assertNotRegex(self.facts[name], r"\b(CE|MRV)\b", name)
+
+    def test_gateway_route_names_never_reach_the_reader(self):
+        # 'glm-5.3-vision-background' is a gateway route id for GLM-5.3: the suffixes name a route, not a different model
+        text = visible_text(self.page)
+        self.assertNotRegex(text, r"(?i)-background|GLM[- ]vision|5\.3-vision")  # the limits list may say the route is vision-capable
+        self.assertNotIn("r.model_id;", self.template, "a raw model id is written into the page")
+        for r in self.data["cells"]:
+            self.assertNotRegex(r["label"] + r["long"] + r["model"] + r["vendor"], r"(?i)vision|background")
+        self.assertIn("every request in this study was text only", re.sub(r"\s+", " ", text))
 
     def test_every_harness_link_points_at_that_harness(self):
         url, name = self.gen.FW_URL, self.gen.FW_LONG

@@ -71,10 +71,10 @@ scored the same frameworks against human labels only; what is new here is execut
 ground truth and per-review metered cost.
 
 **In brief.** Under the strict 42-golden lens, the recommended open-weight cell
-(`glm-5.3-vision-background`, metareview, low effort) had the same golden-recall point estimate as opus CE-low
+(GLM-5.3, run under the gateway route name `glm-5.3-vision-background`; metareview, low effort) had the same golden-recall point estimate as opus CE-low
 (0.81 each; paired ratio CI 0.91–1.09) and a higher F1 point estimate at **7.5% [6.7–8.5%] of the opus compound-engineering cost**;
 the cheaper
-`glm-5.3-flash-background` reaches recall 0.83 [0.74, 0.92] at **0.8% of the opus CE-low cost**, paying
+GLM-5.3-Flash (`glm-5.3-flash-background`; both names are explained in §2.2) reaches recall 0.83 [0.74, 0.92] at **0.8% of the opus CE-low cost**, paying
 in precision (adjP 0.54 vs 0.67). Under the true-set lens, harnesses improve recall over their own
 model’s vanilla baseline in **39/42** matched comparisons (mean Δrecall **+0.135**). Read §3.1 for
 the advisory-reward F2′ comparison, which is a revised preference rather than a change in bug discovery.
@@ -150,8 +150,16 @@ rule deciding which batches a framework may draw from are in §2.3.2.
 | `claude-opus-5` | Claude | frontier reference for the cost comparisons |
 | `claude-sonnet-5` | Claude | mid-tier commercial |
 | `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-6-astra` | OpenAI | commercial comparison family |
-| `glm-5.3-vision-background` | open-weight (GLM) | the recommended cell's model |
-| `glm-5.3-flash-background` | open-weight (GLM) | cheapest strong cell |
+| `glm-5.3-vision-background` | open-weight (GLM) | GLM-5.3, "vision" below; the recommended cell's model |
+| `glm-5.3-flash-background` | open-weight (GLM) | GLM-5.3-Flash, "flash" below; cheapest strong cell |
+
+**A note on the GLM names.** `glm-5.3-vision-background` and `glm-5.3-flash-background` are the route names on the gateway the
+GLM runs went through (LunaRoute; see Special thanks). They are kept verbatim so that every row can be matched to the run registry.
+As we understand it from the provider, `-vision` is GLM-5.3 served with an added vision-input capability, and `-background` selects a
+routing option on the gateway; neither suffix denotes a different underlying model. Every request in this study was text only
+(diffs and code; no adapter sends image input), so the vision capability was never exercised. We did not independently verify the
+gateway's serving configuration. We therefore call the two models Z.ai's open-weight **GLM-5.3** and **GLM-5.3-Flash**. Where a table
+or sentence below says "vision" or "GLM vision", read GLM-5.3; where it says "flash" or "GLM flash", read GLM-5.3-Flash.
 
 **Frameworks.** `vanilla-engineered` is an engineered single prompt (8-category rubric plus severity
 guidance) executed as one model call with no subagents — the baseline of pointing a coding agent at a
@@ -2358,7 +2366,7 @@ free usage while their service was in alpha. The open-weight GLM review lanes in
 their gateway (§3.4.1), and that help was much appreciated. The Anthropic and OpenAI usage in this campaign
 was paid for by the author.
 
-LunaRoute serves open-weight models (GLM-5.3-vision, GLM-5.3-flash, DeepSeek-4.1-flash and many others)
+LunaRoute serves open-weight models (GLM-5.3, GLM-5.3-Flash, DeepSeek-4.1-flash and many others)
 from US datacenters on flat-rate plans, and its stated policy is that request and response bodies are
 processed in memory and never written to disk. In the author's experience it was fast and low-latency.
 

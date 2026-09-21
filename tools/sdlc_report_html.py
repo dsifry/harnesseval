@@ -154,7 +154,7 @@ def compute(M: dict, D: dict) -> tuple[dict, dict, dict]:
         c, x = full[k], matrix[k]
         m, f, e = k.split("|")
         rows.append({
-            "key": k, "label": chart_label(k), "long": long_label(k), "model": MODEL_FULL[m], "model_id": m, "fw": FW_SHORT[f],
+            "key": k, "label": chart_label(k), "long": long_label(k), "model": MODEL_FULL[m], "vendor": VENDOR[m.split("-")[0]], "model_id": m, "fw": FW_SHORT[f],
             "effort": e, "open": m in OPEN_WEIGHT, "bugs": int(c["TP"]), "score": round(c["F2p"], 3),
             "score_lo": round(c["ci"]["F2p"][1], 3), "score_hi": round(c["ci"]["F2p"][2], 3),
             "advice": int(c["advisory_count"]), "unsupported": int(c["penalty_count"]),
