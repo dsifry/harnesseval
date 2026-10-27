@@ -552,14 +552,15 @@ async def review_realistic_async(pr: PRSample, model: str, effort: str = "medium
     findings = _extract_findings_from_session(src_text)
     if work_root is not None:
         shutil.rmtree(work_root, ignore_errors=True)
-    from harnesseval.usage import grand_total
+    from harnesseval.usage import grand_total, split_in_out
     gt = grand_total(per_model)
+    tokens_in, tokens_out = split_in_out(per_model)
     # Realistic Claude Code behavior: orchestrator on the requested model, but Task-tool subagent
     # dispatch defaults to Haiku for lightweight subtasks even with --model opus (verified
     # 2026-08-22). `resolved` captures the full modelUsage set (e.g. 'claude-haiku-4-5-20251001,
     # claude-opus-5'). We record this honestly rather than fighting the host — it IS what a user gets.
     return ReviewRun(framework=name, model=(resolved or model), effort=effort, execution_mode="cli",
-                     raw_output=text, findings=findings, tokens_in=gt["total_tokens"],
-                     tokens_out=sum(u.get("output_tokens",0) for u in per_model.values()),
+                     raw_output=text, findings=findings, tokens_in=tokens_in,
+                     tokens_out=tokens_out,
                      wall_ms=(time.time() - t0) * 1000, per_model_usage=per_model,
                      total_cost_usd=gt["total_cost_usd"])

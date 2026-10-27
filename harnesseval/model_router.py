@@ -46,12 +46,10 @@ async def call_model(model: str, system: str, user: str, *, effort: str = "mediu
       never compare api vs cli numbers head-to-head. The REVIEWER arm may use cli (free);
       the JUDGE arm must use api (calibrated trio + no scaffolding tax on judge calls).
     """
-    from harnesseval.usage import grand_total
+    from harnesseval.usage import split_in_out
     if execution_mode == "cli":
         text, per_model = await _call_cli(model, system, user, effort)
-        gt = grand_total(per_model)
-        return text, gt["total_tokens"] - sum(u.get("output_tokens", 0) for u in per_model.values()), \
-               sum(u.get("output_tokens", 0) for u in per_model.values()), per_model
+        return text, *split_in_out(per_model), per_model
     if is_anthropic(model):
         return await _call_anthropic(model, system, user, effort, max_tokens, temperature)
     elif is_openai_compat(model):
@@ -103,7 +101,7 @@ async def _call_cli(model: str, system: str, user: str, effort: str) -> tuple[st
 
 
 async def _call_anthropic(model, system, user, effort, max_tokens, temperature) -> tuple[str, int, int, dict]:
-    from harnesseval.usage import from_anthropic_api, grand_total
+    from harnesseval.usage import from_anthropic_api, split_in_out
     client = keys.anthropic_client()
     body = anthropic_effort_body(effort, max_tokens=max_tokens)
     thinking_enabled = body.get("thinking", {}).get("type") == "enabled"
@@ -125,9 +123,7 @@ async def _call_anthropic(model, system, user, effort, max_tokens, temperature) 
         messages=[{"role": "user", "content": user}], extra_body=extra,
     )
     per_model = from_anthropic_api(resp, model)
-    gt = grand_total(per_model)
-    return text_content(resp), gt["total_tokens"] - sum(u.get("output_tokens", 0) for u in per_model.values()), \
-           sum(u.get("output_tokens", 0) for u in per_model.values()), per_model
+    return text_content(resp), *split_in_out(per_model), per_model
 
 
 _KEY_INFLIGHT: dict[int, int] = {}  # live requests per key-pool index (least-loaded selection)
@@ -247,7 +243,7 @@ def _log_key_usage(idx: int, model: str, seconds: float, resp, ok: bool, ev: str
 
 
 async def _call_openai_compat(model, system, user, effort, max_tokens, temperature) -> tuple[str, int, int, dict]:
-    from harnesseval.usage import from_openai_api, grand_total
+    from harnesseval.usage import from_openai_api, split_in_out
     # Lunaroute (glm/kimi/deepseek/…) or native OpenAI (gpt) — both OpenAI-compat
     from harnesseval.effort import is_lunaroute as _is_lr
     is_lunaroute = _is_lr(model)
@@ -379,9 +375,7 @@ async def _call_openai_compat(model, system, user, effort, max_tokens, temperatu
             if text.strip():
                 break
     per_model = from_openai_api(resp, model)
-    gt = grand_total(per_model)
-    return text, gt["total_tokens"] - sum(u.get("output_tokens", 0) for u in per_model.values()), \
-           sum(u.get("output_tokens", 0) for u in per_model.values()), per_model
+    return text, *split_in_out(per_model), per_model
 
 
 async def call_model_json(model: str, system: str, user: str, *, effort: str = "medium",

@@ -155,6 +155,16 @@ def merge(into: dict[str, dict], other: dict[str, dict]) -> dict[str, dict]:
     return into
 
 
+def split_in_out(per_model: dict[str, dict]) -> tuple[int, int]:
+    """(tokens_in, tokens_out) for ReviewRun: input side incl. cache read/creation, output side
+    incl. reasoning. Sums to grand_total's total_tokens (harnesseval#20)."""
+    tin = sum(u.get("input_tokens", 0) + u.get("cache_read_input_tokens", 0) +
+              u.get("cache_creation_input_tokens", 0) for u in per_model.values())
+    tout = sum(u.get("output_tokens", 0) + u.get("reasoning_output_tokens", 0)
+               for u in per_model.values())
+    return tin, tout
+
+
 def grand_total(per_model: dict[str, dict]) -> dict:
     """Sum across all models. Returns {total_tokens, total_cost_usd, n_models}."""
     return {
