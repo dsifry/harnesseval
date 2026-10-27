@@ -22,7 +22,7 @@ MARKER = "codex_reasoning_normalized"  # harnesseval#19
 
 
 def _is_codex(model: str, u: dict) -> bool:
-    return model.startswith("gpt") and not (u.get("cost_usd") or 0)
+    return model.startswith("gpt") and not u.get("cost_usd")
 
 
 def normalize(summary: dict) -> int:
@@ -44,7 +44,7 @@ def normalize(summary: dict) -> int:
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--runs", default="runs")
     ap.add_argument("--write", action="store_true")
     args = ap.parse_args()
