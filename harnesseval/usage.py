@@ -73,12 +73,19 @@ def from_claude_cli(d: dict) -> dict[str, dict]:
 
 
 def from_codex_cli(usage: dict, model_slug: str) -> dict[str, dict]:
-    """Parse codex exec turn.completed usage into {model: usage_dict}."""
+    """Parse codex exec turn.completed usage into {model: usage_dict}.
+
+    Codex follows the Responses API convention: output_tokens already INCLUDES
+    reasoning_output_tokens (its own total_tokens == input + output). Normalize to
+    the from_openai_api shape — output excludes reasoning — so total_tokens doesn't
+    count reasoning twice (harnesseval#19).
+    """
+    rt = int(usage.get("reasoning_output_tokens", 0))
     u = ModelUsage(
         input_tokens=int(usage.get("input_tokens", 0)) - int(usage.get("cached_input_tokens", 0)),
         cache_read_input_tokens=int(usage.get("cached_input_tokens", 0)),
-        output_tokens=int(usage.get("output_tokens", 0)),
-        reasoning_output_tokens=int(usage.get("reasoning_output_tokens", 0)),
+        output_tokens=max(0, int(usage.get("output_tokens", 0)) - rt),
+        reasoning_output_tokens=rt,
     )
     return {model_slug: asdict(u) | {"total_tokens": u.total_tokens}}
 
