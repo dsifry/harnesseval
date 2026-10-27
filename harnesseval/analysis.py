@@ -34,6 +34,8 @@ import random
 from pathlib import Path
 from collections import defaultdict
 
+from harnesseval.usage import corrected_per_model_usage
+
 RUNS_DIR = Path(__file__).resolve().parents[1] / "runs"
 REGISTRY = RUNS_DIR / "registry.jsonl"
 RESULTS = Path(__file__).resolve().parents[1] / "results"
@@ -157,7 +159,7 @@ def segment(runs: list[dict]) -> list[dict]:
             "has_adjudication_counts": s.get("n_hallucination") is not None,
             "tokens_in": r.get("tokens_in", 0) or 0, "tokens_out": r.get("tokens_out", 0) or 0,
             "total_cost_usd": s.get("total_cost_usd", 0) or 0,
-            "per_model_usage": s.get("per_model_usage") or {},
+            "per_model_usage": corrected_per_model_usage(s, r.get("registered_at")),
             "has_pmu": has_pmu, "resolved_model": s.get("resolved_model"),
             "decomposition": decomp, "wall_s": r.get("wall_s", 0) or 0,
             "registered_at": r.get("registered_at"),

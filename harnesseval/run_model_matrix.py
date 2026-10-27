@@ -28,6 +28,7 @@ from harnesseval.adapters.base import PRSample
 from harnesseval.judge import judge_pairs_router, score_from_matches
 from harnesseval.adjudicate import reclassify_async
 from harnesseval.runs import register
+from harnesseval.usage import USAGE_CONVENTION
 
 # Cross-family judge selection (SPEC §9): for a given under-test model, use a DIFFERENT family
 # as the primary judge. claude-* -> gpt-5.2; gpt-* -> claude-opus-4-5; glm/kimi -> gpt-5.2.
@@ -208,7 +209,8 @@ async def _run_cell_async(pr, framework, model, effort, judge_model, mode: str =
             "precision": scored["precision"], "recall": scored["recall"],
             "n_findings": len(run.findings), "n_golden": len(goldens),
             "tokens_in": run.tokens_in, "tokens_out": run.tokens_out, "wall_ms": run.wall_ms,
-            "per_model_usage": run.per_model_usage, "total_cost_usd": run.total_cost_usd,
+            "per_model_usage": run.per_model_usage, "usage_convention": USAGE_CONVENTION,
+            "total_cost_usd": run.total_cost_usd,
             "resolved_model": run.model,
             "adjudicated_precision": adjudicated.get("adjudicated_precision", 0.0),
             "incremental_recall": adjudicated.get("incremental_recall", 0.0),
