@@ -38,6 +38,7 @@ from collections import defaultdict
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 from readjudicate3 import normalize_for_cluster  # same normalization rj3 clusters use
+from harnesseval.usage import corrected_per_model_usage
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BATCH_TIER = {
@@ -131,10 +132,14 @@ def extract(f, models=MODELS):
             else:
                 fn_p += 1
         prof[name] = {"tp": tp_p, "fn": fn_p}
-    # token split
+    try:
+        ts = json.load(open(f"runs/{rid}/manifest.json")).get("registered_at") or ""
+    except Exception:
+        ts = ""
+    # token split (pre-#19 Codex entries double-count reasoning; corrected at read time)
     fresh_in = cached_in = cache_w = out_tok = 0
     pmu_cost = 0.0
-    for u in (s.get("per_model_usage") or {}).values():
+    for u in corrected_per_model_usage(s, ts).values():
         fresh_in += u.get("input_tokens", 0) or 0
         cached_in += u.get("cache_read_input_tokens", 0) or 0
         cache_w += u.get("cache_creation_input_tokens", 0) or 0
@@ -185,10 +190,6 @@ def extract(f, models=MODELS):
                             for rec in recs if (rec.get("new_verdict") or "").lower() == "bug"]
         except Exception:
             rj3 = None
-    try:
-        ts = json.load(open(f"runs/{rid}/manifest.json")).get("registered_at") or ""
-    except Exception:
-        ts = ""
     # confirmed-bug texts (hidden-gold candidates) for the cross-run union:
     # rj3 'bug' verdicts if the run was re-adjudicated, else in-run 'real_but_ungold'
     bugtexts = []

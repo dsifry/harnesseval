@@ -22,6 +22,15 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field, asdict
+from datetime import datetime, timezone
+
+# Stamped on summary.json as "usage_convention". 2 = Codex output_tokens EXCLUDE reasoning
+# (harnesseval#19). Unstamped summaries registered before CODEX_REASONING_FIX_AT (the #21
+# merge) carry Codex's raw output_tokens, which already include reasoning; stored runs are
+# never rewritten (frozen readjudication passes pin their hash), so readers correct them via
+# corrected_per_model_usage().
+USAGE_CONVENTION = 2
+CODEX_REASONING_FIX_AT = datetime(2026, 10, 27, 0, 45, 27, tzinfo=timezone.utc)
 
 
 @dataclass
@@ -133,6 +142,56 @@ def from_openai_api(resp, model: str) -> dict[str, dict]:
                     output_tokens=max(0, int(getattr(u, "completion_tokens", 0)) - int(rt)),
                     reasoning_output_tokens=int(rt))
     return {model: asdict(mu) | {"total_tokens": mu.total_tokens}}
+
+
+def _is_codex(model: str, u: dict) -> bool:
+    # Only meaningful for LEGACY summaries (see needs_codex_correction), a closed set: new
+    # summaries are stamped, and unstamped ones dated after the fix are never corrected.
+    # Usage entries carry no source marker and from_openai_api also stores cost_usd=0, so
+    # "gpt-* at $0" alone could match API usage; it is exact here because every legacy gpt-*
+    # entry was audited as `codex exec` output (1,561 cli-mode cells, plus one cell labeled
+    # api whose tokens_in == total_tokens and ~1M cached input mark a realistic Codex session).
+    return model.startswith("gpt") and not u.get("cost_usd")
+
+
+def needs_codex_correction(summary: dict, registered_at: str | None) -> bool:
+    """True if this summary's Codex entries predate the harnesseval#19 fix.
+
+    Unstamped summaries with a missing or unparseable registered_at count as legacy: every
+    stored pre-fix Codex run has a valid one, and every post-fix run is stamped with
+    USAGE_CONVENTION. A timestamp without an offset is read as UTC.
+    """
+    if summary.get("usage_convention", 1) >= USAGE_CONVENTION:
+        return False
+    try:
+        ts = datetime.fromisoformat(registered_at)
+    except (TypeError, ValueError):
+        return True
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    return ts < CODEX_REASONING_FIX_AT
+
+
+def corrected_per_model_usage(summary: dict, registered_at: str | None) -> dict:
+    """summary["per_model_usage"] in the current convention, without modifying the summary.
+
+    Legacy Codex entries get output_tokens -= reasoning (clamped at 0) and total_tokens
+    recomputed: the same normalization from_codex_cli now applies at parse time.
+    """
+    per_model = summary.get("per_model_usage") or {}
+    if not needs_codex_correction(summary, registered_at):
+        return dict(per_model)
+    out = {}
+    for model, u in per_model.items():
+        if isinstance(u, dict) and _is_codex(model, u):
+            rt = int(u.get("reasoning_output_tokens") or 0)
+            u = dict(u, output_tokens=max(0, int(u.get("output_tokens") or 0) - rt))
+            u["total_tokens"] = (int(u.get("input_tokens") or 0) +
+                                 int(u.get("cache_read_input_tokens") or 0) +
+                                 int(u.get("cache_creation_input_tokens") or 0) +
+                                 u["output_tokens"] + rt)
+        out[model] = u
+    return out
 
 
 def merge(into: dict[str, dict], other: dict[str, dict]) -> dict[str, dict]:
