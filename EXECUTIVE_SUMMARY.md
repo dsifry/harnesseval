@@ -79,7 +79,7 @@ itself used a flat-fee gateway. Flash MRV-low costs **1/57 per blended token and
 Fable vanilla-low, and **1/26 per token and 1/17 per task** versus Opus vanilla-low. The proposed
 “1/200th per token, 1/10th per task” shorthand is unsupported. Against commercial harnesses, flash's
 savings come from both lower token volume and lower per-token prices. Vision MRV-low is also cheaper
-than the low-effort vanilla references: about 25% of Fable, 55% of Opus and 54% of Astra cost.
+than the low-effort vanilla references: about 25% of Fable, 55% of Opus and 55% of Astra cost.
 
 The hidden-defect evidence includes fail-on-head/pass-on-fix tests, duplicate audits and finding-to-defect
 assignments (`analysis/verified_gold/GOLD_DEFECT_CATALOG.md`). The universe was discovered largely from
