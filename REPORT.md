@@ -977,6 +977,15 @@ counts would cost on the public APIs. Reasoning output is billed at the output r
 rows (it is a large share: e.g. glm-vis MRV high ≈ 470k reasoning tokens/run). Anthropic
 reconciliation in §2.3.4.
 
+> **Correction (2026-10-26).** Codex CLI reports `output_tokens` with reasoning already included,
+> but the stored usage for the 1,562 Codex runs (sol, terra, astra) kept it there *and* recorded
+> `reasoning_output_tokens` separately, so the formula above priced their reasoning twice
+> (harnesseval#19). Those runs are now corrected when they are read; the stored summaries are
+> unchanged. All 27 Codex cells cost less than this report first showed: vanilla cells by
+> 2.1–25.9%, harness cells by 0.2–5.4%, and tokens per run fell by 0.01–2.2%. No quality metric,
+> run selection or Pareto-frontier membership changed. Details:
+> `analysis/REPORT_CORRECTIONS_2026-10-26.md`.
+
 #### 3.4.2 Cost & throughput per cell
 
 #### T2 — cost & throughput per cell (top-6), 95% cluster-bootstrap CIs
@@ -998,24 +1007,24 @@ Values < $0.01 are shown in cents (¢) to avoid leading-zero drowning; ≥ $0.01
 | fable-5.1 | MRV | low | $8.93581 [$8.93581, $8.93581] | $0.15957 [$0.15957, $0.15957] | $1.4893 [$1.4893, $1.4893] | 2,315,429 [2,315,429, 2,315,429] | 274 [274, 274] | 0.38592¢ [0.38592¢, 0.38592¢] |
 | fable-5.1 | MRV | medium | $12.42245 [$12.42245, $12.42245] | $0.17496 [$0.17496, $0.17496] | $2.07041 [$2.07041, $2.07041] | 2,978,748 [2,978,748, 2,978,748] | 518 [518, 518] | 0.41704¢ [0.41704¢, 0.41704¢] |
 | fable-5.1 | MRV | high | $17.60581 [$17.60581, $17.60581] | $0.27086 [$0.27086, $0.27086] | $2.9343 [$2.9343, $2.9343] | 4,081,982 [4,081,982, 4,081,982] | 467 [467, 467] | 0.43131¢ [0.43131¢, 0.43131¢] |
-| astra | van | low | $0.41009 [$0.39022, $0.42919] | $0.07689 [$0.054, $0.10732] | $0.14474 [$0.10489, $0.19254] | 82,234 [75,700, 91,576] | 44 [37, 53] | 0.49868¢ [0.45804¢, 0.54523¢] |
-| astra | van | medium | $0.45193 [$0.4297, $0.47395] | $0.08474 [$0.07478, $0.09674] | $0.15064 [$0.11449, $0.19948] | 110,601 [101,440, 117,775] | 88 [84, 90] | 0.40861¢ [0.3796¢, 0.44477¢] |
-| astra | van | high | $0.57528 [$0.4963, $0.68959] | $0.10152 [$0.07611, $0.14462] | $0.20304 [$0.13391, $0.31671] | 138,119 [109,068, 190,666] | 105 [85, 137] | 0.41651¢ [0.35583¢, 0.49493¢] |
-| astra | CE | low | $1.94294 [$1.80527, $2.07706] | $0.12953 [$0.1151, $0.14629] | $0.52989 [$0.45667, $0.6227] | 1,289,516 [1,193,476, 1,358,941] | 340 [293, 396] | 0.15067¢ [0.1452¢, 0.15687¢] |
-| astra | CE | medium | $2.20319 [$1.99423, $2.44326] | $0.16524 [$0.10912, $0.29851] | $0.50843 [$0.42705, $0.61081] | 1,448,556 [1,279,832, 1,660,926] | 343 [326, 363] | 0.1521¢ [0.14562¢, 0.1608¢] |
-| astra | CE | high | $2.55536 [$2.29064, $2.94778] | $0.21003 [$0.16468, $0.29493] | $0.66662 [$0.49982, $0.98574] | 1,673,915 [1,472,350, 1,980,316] | 445 [370, 532] | 0.15266¢ [0.14777¢, 0.15757¢] |
-| astra | MRV | low | $1.56438 [$1.43195, $1.69065] | $0.11309 [$0.09696, $0.13658] | $0.36101 [$0.25066, $0.52089] | 1,119,058 [1,017,521, 1,215,700] | 273 [238, 321] | 0.13979¢ [0.13878¢, 0.14111¢] |
-| astra | MRV | medium | $1.61394 [$1.47618, $1.77112] | $0.13086 [$0.0833, $0.21612] | $0.38735 [$0.29706, $0.50468] | 1,123,343 [1,000,408, 1,279,905] | 311 [264, 368] | 0.14367¢ [0.13817¢, 0.14929¢] |
-| astra | MRV | high | $1.54941 [$1.4456, $1.6522] | $0.09684 [$0.072, $0.13643] | $0.37186 [$0.27059, $0.53825] | 985,535 [916,834, 1,065,486] | 357 [286, 431] | 0.15722¢ [0.14971¢, 0.17022¢] |
-| sol | van | low | $0.20456 [$0.18659, $0.2249] | $0.02557 [$0.02252, $0.03104] | $0.04721 [$0.0322, $0.07664] | 102,740 [92,864, 112,325] | 69 [58, 81] | 0.1991¢ [0.18681¢, 0.21516¢] |
-| sol | van | medium | $0.51022 [$0.38896, $0.64302] | $0.06248 [$0.05162, $0.07461] | $0.11774 [$0.08535, $0.17988] | 340,590 [204,142, 499,578] | 168 [150, 188] | 0.1498¢ [0.12694¢, 0.19353¢] |
-| sol | van | high | $1.25099 [$0.94013, $1.57224] | $0.13647 [$0.09769, $0.18722] | $0.28869 [$0.25059, $0.33673] | 1,300,885 [719,345, 1,815,179] | 359 [304, 415] | 0.09616¢ [0.08505¢, 0.12993¢] |
-| sol | CE | low | $0.52457 [$0.47952, $0.5712] | $0.02403 [$0.02098, $0.02778] | $0.13684 [$0.09965, $0.23511] | 664,934 [617,469, 714,112] | 239 [200, 285] | 0.07889¢ [0.07444¢, 0.08347¢] |
-| sol | CE | medium | $0.63898 [$0.58205, $0.71395] | $0.02473 [$0.01779, $0.03868] | $0.14746 [$0.10915, $0.22781] | 818,232 [757,414, 896,048] | 451 [351, 539] | 0.07809¢ [0.07063¢, 0.08553¢] |
-| sol | CE | high | $0.73363 [$0.6203, $0.83683] | $0.01922 [$0.01614, $0.02372] | $0.14199 [$0.11314, $0.17459] | 1,111,710 [920,118, 1,291,572] | 839 [587, 1,088] | 0.06599¢ [0.06433¢, 0.06803¢] |
-| sol | MRV | low | $0.64059 [$0.5881, $0.69734] | $0.03696 [$0.03076, $0.04571] | $0.15374 [$0.11278, $0.23026] | 951,387 [903,351, 1,010,724] | 360 [337, 384] | 0.06733¢ [0.06307¢, 0.07232¢] |
-| sol | MRV | medium | $0.75677 [$0.66104, $0.86231] | $0.03131 [$0.0255, $0.04012] | $0.16216 [$0.13117, $0.23757] | 1,147,056 [1,028,438, 1,284,697] | 432 [341, 562] | 0.06597¢ [0.0619¢, 0.07103¢] |
-| sol | MRV | high | $0.80288 [$0.73777, $0.87846] | $0.02974 [$0.02558, $0.03596] | $0.18528 [$0.14584, $0.26099] | 1,200,600 [1,104,018, 1,335,211] | 634 [383, 957] | 0.06687¢ [0.06354¢, 0.07124¢] |
+| astra | van | low | $0.40137 [$0.37916, $0.42329] | $0.07526 [$0.05255, $0.10563] | $0.14166 [$0.10251, $0.18882] | 82,060 [75,580, 91,421] | 44 [37, 53] | 0.48912¢ [0.44907¢, 0.53724¢] |
+| astra | van | medium | $0.44122 [$0.4164, $0.46542] | $0.08273 [$0.07286, $0.09504] | $0.14707 [$0.11067, $0.19612] | 110,387 [101,116, 117,593] | 88 [84, 90] | 0.3997¢ [0.37272¢, 0.43253¢] |
+| astra | van | high | $0.54322 [$0.47137, $0.63996] | $0.09586 [$0.07182, $0.13623] | $0.19172 [$0.12712, $0.29646] | 137,478 [108,635, 189,656] | 105 [85, 137] | 0.39513¢ [0.33107¢, 0.477¢] |
+| astra | CE | low | $1.93903 [$1.80219, $2.07259] | $0.12927 [$0.1149, $0.14603] | $0.52883 [$0.45583, $0.62142] | 1,289,438 [1,193,412, 1,358,870] | 340 [293, 396] | 0.15038¢ [0.14498¢, 0.15656¢] |
+| astra | CE | medium | $2.19708 [$1.99014, $2.43416] | $0.16478 [$0.10894, $0.29736] | $0.50702 [$0.42593, $0.60854] | 1,448,434 [1,279,750, 1,660,728] | 343 [326, 363] | 0.15169¢ [0.1452¢, 0.16031¢] |
+| astra | CE | high | $2.54589 [$2.28153, $2.93844] | $0.20925 [$0.16408, $0.29372] | $0.66414 [$0.49774, $0.98253] | 1,673,725 [1,472,176, 1,980,128] | 445 [370, 532] | 0.15211¢ [0.14733¢, 0.15697¢] |
+| astra | MRV | low | $1.55998 [$1.42855, $1.68509] | $0.11277 [$0.0967, $0.13623] | $0.36 [$0.24989, $0.51937] | 1,118,970 [1,017,461, 1,215,600] | 273 [238, 321] | 0.13941¢ [0.13834¢, 0.1408¢] |
+| astra | MRV | medium | $1.60854 [$1.47167, $1.766] | $0.13042 [$0.08305, $0.21541] | $0.38605 [$0.29576, $0.50331] | 1,123,235 [1,000,329, 1,279,795] | 311 [264, 368] | 0.14321¢ [0.13778¢, 0.14885¢] |
+| astra | MRV | high | $1.54168 [$1.44064, $1.64191] | $0.09635 [$0.07165, $0.1358] | $0.37 [$0.26928, $0.53577] | 985,380 [916,672, 1,065,300] | 357 [286, 431] | 0.15646¢ [0.14901¢, 0.16915¢] |
+| sol | van | low | $0.18282 [$0.17198, $0.19733] | $0.02285 [$0.0203, $0.02746] | $0.04219 [$0.02961, $0.06649] | 101,653 [91,653, 111,197] | 69 [58, 81] | 0.17985¢ [0.17201¢, 0.19424¢] |
+| sol | van | medium | $0.42842 [$0.31387, $0.5607] | $0.05246 [$0.04272, $0.06307] | $0.09887 [$0.07287, $0.15359] | 336,500 [199,836, 495,533] | 168 [150, 188] | 0.12732¢ [0.11222¢, 0.15813¢] |
+| sol | van | high | $1.07066 [$0.74006, $1.37867] | $0.1168 [$0.07852, $0.165] | $0.24708 [$0.21503, $0.28835] | 1,291,868 [709,306, 1,806,792] | 359 [304, 415] | 0.08288¢ [0.07608¢, 0.10304¢] |
+| sol | CE | low | $0.51482 [$0.47131, $0.56014] | $0.02358 [$0.02058, $0.0273] | $0.1343 [$0.09772, $0.23113] | 664,446 [617,044, 713,568] | 239 [200, 285] | 0.07748¢ [0.0731¢, 0.08193¢] |
+| sol | CE | medium | $0.60422 [$0.56285, $0.64925] | $0.02339 [$0.01726, $0.0357] | $0.13944 [$0.10408, $0.21508] | 816,494 [756,374, 894,364] | 451 [351, 539] | 0.074¢ [0.06847¢, 0.0791¢] |
+| sol | CE | high | $0.70626 [$0.59677, $0.80463] | $0.0185 [$0.01553, $0.02282] | $0.1367 [$0.1094, $0.16794] | 1,110,342 [918,942, 1,289,972] | 839 [587, 1,088] | 0.06361¢ [0.06227¢, 0.06527¢] |
+| sol | MRV | low | $0.63093 [$0.57872, $0.68734] | $0.0364 [$0.03034, $0.04507] | $0.15142 [$0.11101, $0.22707] | 950,904 [902,849, 1,010,212] | 360 [337, 384] | 0.06635¢ [0.06211¢, 0.07137¢] |
+| sol | MRV | medium | $0.73981 [$0.64611, $0.84445] | $0.03061 [$0.02488, $0.03926] | $0.15853 [$0.12834, $0.23243] | 1,146,208 [1,027,645, 1,283,820] | 432 [341, 562] | 0.06454¢ [0.06063¢, 0.06955¢] |
+| sol | MRV | high | $0.77918 [$0.71624, $0.85217] | $0.02886 [$0.02489, $0.03491] | $0.17981 [$0.14119, $0.25371] | 1,199,415 [1,102,861, 1,333,872] | 634 [383, 957] | 0.06496¢ [0.06166¢, 0.06921¢] |
 | opus-5 | van | low | $0.40387 [$0.37106, $0.43668] | $0.02885 [$0.02567, $0.03313] | $0.08654 [$0.07478, $0.10343] | 85,801 [80,978, 91,027] | 53 [48, 59] | 0.4707¢ [0.4568¢, 0.48259¢] |
 | opus-5 | van | medium | $0.46887 [$0.42624, $0.51107] | $0.03751 [$0.03247, $0.04771] | $0.09701 [$0.07677, $0.14191] | 88,793 [83,371, 94,290] | 84 [72, 96] | 0.52805¢ [0.50787¢, 0.54549¢] |
 | opus-5 | van | high | $0.61069 [$0.5884, $0.63697] | $0.03777 [$0.03369, $0.0426] | $0.12635 [$0.09887, $0.16709] | 108,497 [92,130, 135,808] | 263 [127, 505] | 0.56286¢ [0.44684¢, 0.66785¢] |
@@ -1034,15 +1043,15 @@ Values < $0.01 are shown in cents (¢) to avoid leading-zero drowning; ≥ $0.01
 | glm-vis* | MRV | low | $0.22162 [$0.20061, $0.24184] | 0.36937¢ [0.32181¢, 0.43282¢] | $0.03911 [$0.03471, $0.04663] | 133,707 [121,635, 145,122] | 95 [77, 114] | 0.16575¢ [0.16274¢, 0.16881¢] |
 | glm-vis | MRV | medium | $2.08234 [$1.71685, $2.46321] | $0.02173 [$0.01661, $0.02981] | $0.35697 [$0.29551, $0.42857] | 568,192 [478,247, 655,326] | 2,282 [1,458, 3,305] | 0.36649¢ [0.35591¢, 0.37848¢] |
 | glm-vis | MRV | high | $2.58585 [$2.05458, $3.26775] | $0.02531 [$0.01809, $0.03715] | $0.48485 [$0.3386, $0.70759] | 679,347 [545,940, 836,272] | 2,933 [1,209, 5,037] | 0.38064¢ [0.37012¢, 0.39084¢] |
-| terra | van | low | $0.10866 [$0.09678, $0.12142] | $0.02103 [$0.01771, $0.02585] | $0.04346 [$0.03242, $0.06294] | 97,082 [83,058, 112,643] | 59 [53, 64] | 0.11192¢ [0.08907¢, 0.13513¢] |
-| terra | van | medium | $0.14768 [$0.13496, $0.16097] | $0.02858 [$0.02322, $0.03669] | $0.05212 [$0.04137, $0.07267] | 120,100 [100,026, 138,704] | 74 [68, 82] | 0.12297¢ [0.10572¢, 0.14482¢] |
-| terra | van | high | $0.27518 [$0.23053, $0.3375] | $0.04586 [$0.03081, $0.07258] | $0.0869 [$0.05989, $0.13529] | 269,919 [168,377, 416,805] | 149 [134, 166] | 0.10195¢ [0.07987¢, 0.14356¢] |
-| terra | CE | low | $0.23018 [$0.22571, $0.23482] | $0.01644 [$0.01352, $0.02098] | $0.06906 [$0.05409, $0.09988] | 618,230 [593,025, 645,588] | 173 [146, 198] | 0.03723¢ [0.03621¢, 0.03846¢] |
-| terra | CE | medium | $0.2406 [$0.2155, $0.25979] | $0.0152 [$0.01383, $0.01722] | $0.07218 [$0.05664, $0.1051] | 635,630 [541,319, 716,624] | 207 [167, 255] | 0.03785¢ [0.03584¢, 0.04009¢] |
-| terra | CE | high | $0.29276 [$0.28248, $0.30652] | $0.02196 [$0.01357, $0.05235] | $0.10979 [$0.07283, $0.1975] | 733,006 [686,279, 774,629] | 338 [215, 487] | 0.03994¢ [0.0384¢, 0.0418¢] |
-| terra | MRV | low | $0.32879 [$0.28216, $0.37193] | $0.02901 [$0.02301, $0.03907] | $0.11604 [$0.08212, $0.18715] | 910,042 [759,794, 1,036,912] | 234 [189, 282] | 0.03613¢ [0.03522¢, 0.03725¢] |
-| terra | MRV | medium | $0.34769 [$0.32447, $0.37581] | $0.02045 [$0.0128, $0.0331] | $0.09482 [$0.06622, $0.15366] | 963,549 [843,360, 1,077,508] | 306 [203, 494] | 0.03608¢ [0.03445¢, 0.03912¢] |
-| terra | MRV | high | $0.3715 [$0.34037, $0.40009] | $0.02164 [$0.01854, $0.02545] | $0.10614 [$0.07515, $0.17299] | 959,658 [897,595, 1,031,670] | 350 [270, 430] | 0.03871¢ [0.03709¢, 0.04053¢] |
+| terra | van | low | $0.08668 [$0.07791, $0.09652] | $0.01678 [$0.01442, $0.01988] | $0.03467 [$0.02603, $0.05039] | 95,250 [81,118, 110,952] | 59 [53, 64] | 0.091¢ [0.07273¢, 0.1105¢] |
+| terra | van | medium | $0.11596 [$0.10498, $0.12684] | $0.02244 [$0.01854, $0.02839] | $0.04093 [$0.03312, $0.05531] | 117,456 [97,322, 135,885] | 74 [68, 82] | 0.09873¢ [0.08517¢, 0.11568¢] |
+| terra | van | high | $0.20387 [$0.16143, $0.26616] | $0.03398 [$0.02143, $0.05693] | $0.06438 [$0.04242, $0.1043] | 263,976 [162,274, 410,690] | 149 [134, 166] | 0.07723¢ [0.06381¢, 0.1029¢] |
+| terra | CE | low | $0.22404 [$0.21921, $0.22933] | $0.016 [$0.01312, $0.02044] | $0.06721 [$0.05249, $0.09741] | 617,717 [592,477, 645,149] | 173 [146, 198] | 0.03627¢ [0.03538¢, 0.03742¢] |
+| terra | CE | medium | $0.23128 [$0.20599, $0.25012] | $0.01461 [$0.01327, $0.01648] | $0.06938 [$0.05469, $0.1005] | 634,854 [540,602, 715,891] | 207 [167, 255] | 0.03643¢ [0.03465¢, 0.0384¢] |
+| terra | CE | high | $0.27717 [$0.26767, $0.28978] | $0.02079 [$0.01285, $0.04944] | $0.10394 [$0.06911, $0.18656] | 731,707 [685,090, 773,357] | 338 [215, 487] | 0.03788¢ [0.0366¢, 0.03955¢] |
+| terra | MRV | low | $0.31957 [$0.27426, $0.36131] | $0.0282 [$0.02237, $0.03795] | $0.11279 [$0.07975, $0.18194] | 909,274 [759,152, 1,036,007] | 234 [189, 282] | 0.03515¢ [0.0343¢, 0.03624¢] |
+| terra | MRV | medium | $0.33959 [$0.31734, $0.36693] | $0.01998 [$0.01249, $0.03232] | $0.09262 [$0.06463, $0.15014] | 962,874 [842,759, 1,076,758] | 306 [203, 494] | 0.03527¢ [0.03361¢, 0.03831¢] |
+| terra | MRV | high | $0.35694 [$0.32787, $0.38306] | $0.02079 [$0.01782, $0.0245] | $0.10198 [$0.07231, $0.16656] | 958,445 [896,575, 1,030,258] | 350 [270, 430] | 0.03724¢ [0.03576¢, 0.03907¢] |
 | sonnet-5 | van | low | $0.15972 [$0.14661, $0.17458] | $0.01917 [$0.01574, $0.02537] | $0.05324 [$0.03765, $0.08786] | 106,101 [101,105, 111,647] | 30 [25, 37] | 0.15053¢ [0.145¢, 0.15637¢] |
 | sonnet-5 | van | medium | $0.18124 [$0.17633, $0.18612] | $0.02589 [$0.02008, $0.03082] | $0.05723 [$0.04048, $0.08977] | 108,308 [103,922, 113,058] | 55 [43, 64] | 0.16734¢ [0.16087¢, 0.17416¢] |
 | sonnet-5 | van | high | $0.27956 [$0.24606, $0.31059] | $0.03727 [$0.03107, $0.04673] | $0.07987 [$0.06823, $0.09957] | 117,769 [111,811, 124,221] | 147 [115, 178] | 0.23738¢ [0.21854¢, 0.25457¢] |
@@ -1210,7 +1219,7 @@ Across 42 harness-vs-vanilla pairs on the same 6 PRs.
 Summary (**42-golden benchmark lens**): median token multiple **10.1×**
 (van about 3.5k–270k tokens → harness about 100k–6.4M), median Δrecall **+0.12**; resolved positive
 (CI excludes 0) in 17/42 pairs, negative in 2 (sonnet CE high and terra CE high), unresolved in 23. Cost
-multiples 0.6×–20×. The pairs where the harness pays for itself in recall are opus-5 (CE low
+multiples 0.7×–20×. The pairs where the harness pays for itself in recall are opus-5 (CE low
 +0.14 [0.02, 0.25] at 20× tokens), the GLM rows (vision MRV low +0.26 [0.12, 0.41] at 9.6×
 tokens, 8.0× cost; flash MRV low +0.31 [0.18, 0.49] at 9.4× tokens, 8.1× cost) and astra
 (MRV low +0.21 [0.10, 0.33] at 13.6× tokens). sol/terra pairs: token multiples with recall gains
@@ -1236,8 +1245,8 @@ The per-pair ratios are below (collapsed so they do not interrupt the argument):
 | glm-5.3-vision-background · metareview-realistic · low vs claude-fable-5-1 · vanilla-engineered · low | 0.15598 [0.14958, 0.16257] | 1.5791× [1.4937, 1.6662] | 0.24631 [0.23054, 0.26338] |
 | glm-5.3-flash-background · metareview-realistic · low vs claude-opus-5 · vanilla-engineered · low | 0.03924 [0.0357, 0.04267] | 1.4853× [1.4149, 1.5443] | 0.05828 [0.05263, 0.0625] |
 | glm-5.3-vision-background · metareview-realistic · low vs claude-opus-5 · vanilla-engineered · low | 0.35213 [0.3414, 0.36389] | 1.5583× [1.4825, 1.6296] | 0.54874 [0.5264, 0.56933] |
-| glm-5.3-flash-background · metareview-realistic · low vs gpt-6-astra · vanilla-engineered · low | 0.03704 [0.03441, 0.03983] | 1.5497× [1.3437, 1.7425] | 0.0574 [0.04873, 0.0677] |
-| glm-5.3-vision-background · metareview-realistic · low vs gpt-6-astra · vanilla-engineered · low | 0.33238 [0.30127, 0.36598] | 1.6259× [1.4584, 1.7778] | 0.54042 [0.4753, 0.61013] |
+| glm-5.3-flash-background · metareview-realistic · low vs gpt-6-astra · vanilla-engineered · low | 0.03776 [0.03487, 0.04102] | 1.553× [1.3457, 1.7473] | 0.05865 [0.04944, 0.06983] |
+| glm-5.3-vision-background · metareview-realistic · low vs gpt-6-astra · vanilla-engineered · low | 0.33888 [0.30657, 0.3737] | 1.6294× [1.4601, 1.7828] | 0.55216 [0.48254, 0.62977] |
 | glm-5.3-vision-background · metareview-realistic · low vs claude-opus-5 · metareview-realistic · medium | 0.97996 [0.92149, 1.03174] | 0.0462× [0.0398, 0.0536] | 0.04529 [0.04087, 0.05024] |
 <!-- /collapsible -->
 
@@ -1255,7 +1264,7 @@ Key rows:
 
 The correct summary is not "1/200th per token" but: **the flash tier is ~1/25–1/60 of frontier
 per blended token and ~1/17–1/40 per task; the vision tier is ~1/3 of frontier per token vs
-opus vanilla; vision MRV-low is also cheaper per task than the low-effort vanilla references (about 25% of Fable, 55% of Opus and 54% of Astra).** Token overhead
+opus vanilla; vision MRV-low is also cheaper per task than the low-effort vanilla references (about 25% of Fable, 55% of Opus and 55% of Astra).** Token overhead
 partly (not fully) offsets the cheap rate — that is why both ratios must be quoted together.
 
 #### 3.5.3 Higher thinking budgets do not reliably buy more bugs — a null result, stated as one
@@ -1563,6 +1572,14 @@ policy grouping is not accepted as a valid scored result. `tools/advisory_policy
 the frozen grouping implementation; the current model-calling entry point is
 `.venv/bin/python -m tools.advisory_timeout`, which applies the archived 120-second timeout extension.
 This belongs to mode (iii), not the offline numerical chain.
+The frozen pass and policy manifests pin the sha256 of their source files. Two of those files
+changed after the passes completed (2026-09-19): `harnesseval/model_router.py` (harnesseval#20)
+and `analysis/final_report_dataset.json` (the 2026-10-26 Codex correction). Neither change touches
+anything the frozen judgments consumed: the router change affects only the returned token split,
+and the dataset change affects only the `out_tok` field, with identical run selection. The
+manifests are left as frozen, so model-calling re-execution must run from commit `ca3eed9e`, the
+last commit whose sources match them. On later commits these entry points refuse to run, by design.
+The offline refresh below does not check those pins and runs on the current source.
 `tools/advisory_framework_comparison.py` filters the same identities at ≥0.80 and writes the matched
 `framework_comparison.json` and `FRAMEWORK_COMPARISON.md` into the policy directory.
 To refresh current true-gold statistics and the confidence-cutoff comparison from saved judgments:
@@ -1598,8 +1615,8 @@ Figures may still differ in bytes across matplotlib versions, which the pins nar
 
 | artifact | sha256 (expected) |
 |---|---|
-| `analysis/final_report_dataset.json` | `76bf029718e49d85ae28ea102887260b064bef7bb0dbfa06be6abe0d13d02bc2` |
-| `analysis/final_report_metrics.json` | `49a309a4ab99bf2cb9df9c33478ac001d2230840a9f660887de8e17e91d57381` |
+| `analysis/final_report_dataset.json` | `21214ec82b7abd58d518cfc413feab0763c7e9270dd4ee38f3cf6ca9f3c90418` |
+| `analysis/final_report_metrics.json` | `b0ddac65087fb5daa8bcecc933819addfdf2b38997457aa26a15551b1c2dd8d9` |
 | `analysis/verified_gold/DEFECT_METRICS.json` | `878a25bb337b2bc1aaa5e78f4b8e96d15fd639c16f3aa5005c47fae9e06bb285` |
 | `analysis/verified_gold/DEFECT_ASSIGN.json` | `67dca6a64ee5779fd86e24f95a82f531fef85f677cecca7b5aa7d7db97bb772d` |
 | `analysis/verified_gold/GOLD_DEFECT_CATALOG.json` | `67474d09d4e1dcd1b42a06e606464b8c769a0974a25dc0a5630c2c6fa622e0a8` |
@@ -1930,18 +1947,18 @@ the semantic union).
 
 | cell (model fw effort) | Δrecall [CI] | token × [CI] | cost × [CI] |
 |---|---|---|---|
-| astra CE low | +0.12 [+0.04, +0.22] | 15.7× [14.4, 16.9] | 4.7× [4.3, 5.2] |
-| astra CE medium | +0.19 [+0.09, +0.30] | 13.1× [11.7, 14.7] | 4.9× [4.5, 5.4] |
-| astra CE high | +0.14 [+0.00, +0.32] | 12.1× [8.2, 17.1] | 4.4× [3.5, 5.7] |
-| astra MRV low | +0.21 [+0.10, +0.33] | 13.6× [12.6, 14.8] | 3.8× [3.5, 4.2] |
-| astra MRV medium | +0.17 [+0.10, +0.23] | 10.2× [8.6, 11.9] | 3.6× [3.2, 3.9] |
-| astra MRV high | +0.19 [+0.09, +0.31] | 7.1× [5.5, 8.8] | 2.7× [2.3, 3.1] |
-| sol CE low | -0.07 [-0.24, +0.18] | 6.5× [5.6, 7.6] | 2.6× [2.2, 2.9] |
-| sol CE medium | +0.00 [-0.16, +0.19] | 2.4× [1.6, 4.0] | 1.3× [1.0, 1.7] |
-| sol CE high | +0.12 [-0.02, +0.25] | 0.9× [0.5, 1.7] | 0.6× [0.4, 0.9] |
-| sol MRV low | -0.02 [-0.16, +0.19] | 9.3× [8.2, 10.5] | 3.1× [2.7, 3.5] |
-| sol MRV medium | +0.05 [-0.17, +0.30] | 3.4× [2.4, 5.5] | 1.5× [1.2, 1.9] |
-| sol MRV high | +0.00 [-0.09, +0.10] | 0.9× [0.7, 1.6] | 0.6× [0.5, 0.8] |
+| astra CE low | +0.12 [+0.04, +0.22] | 15.7× [14.5, 17.0] | 4.8× [4.4, 5.3] |
+| astra CE medium | +0.19 [+0.09, +0.30] | 13.1× [11.7, 14.7] | 5.0× [4.6, 5.5] |
+| astra CE high | +0.14 [+0.00, +0.32] | 12.2× [8.2, 17.2] | 4.7× [3.8, 6.0] |
+| astra MRV low | +0.21 [+0.10, +0.33] | 13.6× [12.6, 14.8] | 3.9× [3.5, 4.3] |
+| astra MRV medium | +0.17 [+0.10, +0.23] | 10.2× [8.7, 12.0] | 3.6× [3.3, 4.0] |
+| astra MRV high | +0.19 [+0.09, +0.31] | 7.2× [5.5, 8.8] | 2.8× [2.5, 3.2] |
+| sol CE low | -0.07 [-0.24, +0.18] | 6.5× [5.6, 7.7] | 2.8× [2.4, 3.1] |
+| sol CE medium | +0.00 [-0.16, +0.19] | 2.4× [1.6, 4.1] | 1.4× [1.1, 1.9] |
+| sol CE high | +0.12 [-0.02, +0.25] | 0.9× [0.6, 1.7] | 0.7× [0.5, 1.1] |
+| sol MRV low | -0.02 [-0.16, +0.19] | 9.4× [8.3, 10.6] | 3.5× [3.0, 3.9] |
+| sol MRV medium | +0.05 [-0.17, +0.30] | 3.4× [2.4, 5.6] | 1.7× [1.4, 2.2] |
+| sol MRV high | +0.00 [-0.09, +0.10] | 0.9× [0.7, 1.7] | 0.7× [0.6, 1.0] |
 | opus-5 CE low | +0.14 [+0.02, +0.25] | 20.4× [17.8, 22.9] | 7.3× [6.6, 7.9] |
 | opus-5 CE medium | +0.14 [+0.00, +0.31] | 48.9× [36.1, 64.3] | 13.1× [10.9, 15.2] |
 | opus-5 CE high | +0.02 [-0.09, +0.16] | 40.6× [31.0, 52.5] | 11.4× [8.5, 13.9] |
@@ -1954,12 +1971,12 @@ the semantic union).
 | glm-vis MRV low | +0.26 [+0.12, +0.41] | 9.6× [9.1, 10.1] | 8.0× [7.4, 8.5] |
 | glm-vis MRV medium | +0.21 [+0.11, +0.31] | 11.7× [9.2, 15.2] | 12.4× [9.2, 17.3] |
 | glm-vis MRV high | +0.19 [+0.08, +0.33] | 14.3× [10.8, 20.5] | 15.9× [11.4, 24.0] |
-| terra CE low | +0.12 [+0.00, +0.20] | 6.4× [5.3, 7.8] | 2.1× [1.9, 2.4] |
-| terra CE medium | +0.07 [-0.11, +0.24] | 5.3× [4.1, 6.7] | 1.6× [1.4, 1.8] |
-| terra CE high | -0.07 [-0.14, -0.02] | 2.7× [1.8, 4.2] | 1.1× [0.9, 1.3] |
-| terra MRV low | +0.05 [-0.05, +0.15] | 9.4× [7.7, 11.3] | 3.0× [2.5, 3.7] |
-| terra MRV medium | +0.12 [-0.11, +0.31] | 8.0× [6.5, 9.9] | 2.4× [2.2, 2.5] |
-| terra MRV high | +0.05 [-0.14, +0.21] | 3.6× [2.2, 5.7] | 1.4× [1.0, 1.7] |
+| terra CE low | +0.12 [+0.00, +0.20] | 6.5× [5.3, 7.9] | 2.6× [2.3, 2.9] |
+| terra CE medium | +0.07 [-0.11, +0.24] | 5.4× [4.2, 6.9] | 2.0× [1.7, 2.3] |
+| terra CE high | -0.07 [-0.14, -0.02] | 2.8× [1.8, 4.4] | 1.4× [1.0, 1.7] |
+| terra MRV low | +0.05 [-0.05, +0.15] | 9.5× [7.9, 11.6] | 3.7× [3.1, 4.4] |
+| terra MRV medium | +0.12 [-0.11, +0.31] | 8.2× [6.6, 10.1] | 2.9× [2.7, 3.2] |
+| terra MRV high | +0.05 [-0.14, +0.21] | 3.6× [2.2, 5.9] | 1.8× [1.3, 2.3] |
 | sonnet-5 CE low | -0.24 [-0.49, +0.02] | 19.8× [16.9, 22.7] | 7.4× [6.6, 8.2] |
 | sonnet-5 CE medium | -0.14 [-0.30, +0.05] | 42.9× [32.1, 54.5] | 12.4× [10.6, 14.3] |
 | sonnet-5 CE high | -0.24 [-0.46, -0.04] | 54.4× [42.0, 67.5] | 12.6× [11.0, 14.3] |
@@ -1981,21 +1998,21 @@ the semantic union).
 | model × framework | ΔF1 [CI] | Δrecall [CI] | cost high/med |
 |---|---|---|---|
 | fable-5.1 van | +0.03 [-0.04, +0.10] | +0.02 [-0.07, +0.15] | 1.17× [1.04, 1.37] |
-| astra van | -0.01 [-0.11, +0.06] | -0.02 [-0.11, +0.05] | 1.27× [1.07, 1.55] |
+| astra van | -0.01 [-0.11, +0.06] | -0.02 [-0.11, +0.05] | 1.23× [1.04, 1.48] |
 | astra CE | -0.09 [-0.21, -0.01] | -0.07 [-0.18, +0.00] | 1.16× [1.09, 1.23] |
-| astra MRV | -0.04 [-0.16, +0.10] | +0.00 [-0.07, +0.07] | 0.96× [0.83, 1.10] |
-| sol van | +0.00 [-0.12, +0.14] | +0.00 [-0.16, +0.19] | 2.45× [1.71, 3.37] |
-| sol CE | -0.03 [-0.13, +0.10] | +0.12 [-0.02, +0.29] | 1.15× [0.97, 1.32] |
-| sol MRV | -0.02 [-0.11, +0.08] | -0.05 [-0.17, +0.05] | 1.06× [0.97, 1.18] |
+| astra MRV | -0.04 [-0.16, +0.10] | +0.00 [-0.07, +0.07] | 0.96× [0.83, 1.09] |
+| sol van | +0.00 [-0.12, +0.14] | +0.00 [-0.16, +0.19] | 2.50× [1.62, 3.62] |
+| sol CE | -0.03 [-0.13, +0.10] | +0.12 [-0.02, +0.29] | 1.17× [1.00, 1.33] |
+| sol MRV | -0.02 [-0.11, +0.08] | -0.05 [-0.17, +0.05] | 1.05× [0.96, 1.18] |
 | opus-5 van | +0.24 [+0.08, +0.39] | +0.00 [-0.14, +0.15] | 1.30× [1.20, 1.42] |
 | opus-5 CE | +0.00 [-0.14, +0.14] | -0.12 [-0.24, -0.02] | 1.13× [0.80, 1.54] |
 | opus-5 MRV | +0.01 [-0.03, +0.08] | +0.07 [+0.02, +0.13] | 1.28× [1.21, 1.35] |
 | glm-vis van | -0.05 [-0.22, +0.09] | -0.05 [-0.26, +0.11] | 0.96× [0.92, 1.01] |
 | glm-vis CE | +0.07 [-0.05, +0.15] | -0.07 [-0.13, -0.02] | 1.05× [0.96, 1.15] |
 | glm-vis MRV | -0.05 [-0.12, +0.01] | -0.07 [-0.17, +0.00] | 1.24× [1.11, 1.36] |
-| terra van | +0.05 [-0.11, +0.21] | +0.05 [-0.11, +0.20] | 1.86× [1.50, 2.31] |
-| terra CE | -0.08 [-0.28, +0.09] | -0.10 [-0.33, +0.10] | 1.22× [1.13, 1.35] |
-| terra MRV | -0.03 [-0.16, +0.17] | -0.02 [-0.17, +0.18] | 1.07× [0.95, 1.17] |
+| terra van | +0.05 [-0.11, +0.21] | +0.05 [-0.11, +0.20] | 1.76× [1.34, 2.33] |
+| terra CE | -0.08 [-0.28, +0.09] | -0.10 [-0.33, +0.10] | 1.20× [1.11, 1.33] |
+| terra MRV | -0.03 [-0.16, +0.17] | -0.02 [-0.17, +0.18] | 1.05× [0.94, 1.14] |
 | sonnet-5 van | +0.09 [+0.01, +0.18] | +0.05 [-0.04, +0.13] | 1.54× [1.38, 1.70] |
 | sonnet-5 CE | -0.08 [-0.34, +0.11] | -0.05 [-0.25, +0.15] | 1.57× [1.29, 1.89] |
 | sonnet-5 MRV | +0.09 [-0.07, +0.26] | +0.14 [-0.09, +0.39] | 1.43× [1.12, 1.86] |
@@ -2030,23 +2047,23 @@ the semantic union).
 | glm-5.3-vision-background/metareview-realistic/low vs claude-opus-5/compound-realistic/low | 1 [0.91176, 1.08824] | 1.27957 [1.00385, 1.58151] | 0.07521 [0.06665, 0.0854] |
 | glm-5.3-vision-background/metareview-realistic/low vs claude-opus-5/compound-realistic/high | 1.13333 [1, 1.41667] | 1.64516 [1.21722, 2.11846] | 0.03195 [0.02662, 0.04035] |
 | glm-5.3-vision-background/metareview-realistic/low vs claude-fable-5-1/vanilla-engineered/low | 1.09677 [1.0303, 1.17241] | 0.94346 [0.87179, 1.05266] | 0.24631 [0.23078, 0.26308] |
-| glm-5.3-vision-background/metareview-realistic/low vs gpt-6-astra/metareview-realistic/high | 1.36 [1.19355, 1.68421] | 1.09677 [0.98217, 1.2713] | 0.14304 [0.12475, 0.16081] |
-| glm-5.3-vision-background/metareview-realistic/low vs gpt-5.6-sol/compound-realistic/low | 1.47826 [1.09677, 2.5] | 1.27162 [1.07563, 1.82039] | 0.42249 [0.39341, 0.45586] |
+| glm-5.3-vision-background/metareview-realistic/low vs gpt-6-astra/metareview-realistic/high | 1.36 [1.19355, 1.68421] | 1.09677 [0.98217, 1.2713] | 0.14375 [0.12553, 0.16149] |
+| glm-5.3-vision-background/metareview-realistic/low vs gpt-5.6-sol/compound-realistic/low | 1.47826 [1.09677, 2.5] | 1.27162 [1.07563, 1.82039] | 0.43049 [0.40102, 0.46428] |
 | glm-5.3-flash-background/metareview-realistic/low vs claude-opus-5/compound-realistic/low | 1.02941 [1, 1.09677] | 1.14486 [0.91271, 1.4412] | 0.00799 [0.00731, 0.00882] |
 | glm-5.3-flash-background/metareview-realistic/low vs claude-opus-5/compound-realistic/high | 1.16667 [1.05263, 1.34783] | 1.47196 [1.04245, 1.98058] | 0.00339 [0.00251, 0.00465] |
 | glm-5.3-flash-background/metareview-realistic/low vs claude-fable-5-1/vanilla-engineered/low | 1.12903 [1.05714, 1.21429] | 0.84414 [0.79205, 0.89598] | 0.02616 [0.02446, 0.02746] |
-| glm-5.3-flash-background/metareview-realistic/low vs gpt-6-astra/metareview-realistic/high | 1.4 [1.21212, 1.76471] | 0.98131 [0.81731, 1.20743] | 0.01519 [0.01291, 0.01747] |
-| glm-5.3-flash-background/metareview-realistic/low vs gpt-5.6-sol/compound-realistic/low | 1.52174 [1.15625, 2.38462] | 1.13775 [0.89697, 1.67821] | 0.04487 [0.03885, 0.05144] |
+| glm-5.3-flash-background/metareview-realistic/low vs gpt-6-astra/metareview-realistic/high | 1.4 [1.21212, 1.76471] | 0.98131 [0.81731, 1.20743] | 0.01527 [0.01299, 0.01754] |
+| glm-5.3-flash-background/metareview-realistic/low vs gpt-5.6-sol/compound-realistic/low | 1.52174 [1.15625, 2.38462] | 1.13775 [0.89697, 1.67821] | 0.04572 [0.03958, 0.05244] |
 | glm-5.3-vision-background/compound-realistic/low vs claude-opus-5/compound-realistic/low | 0.94118 [0.86667, 1] | 1.04673 [0.7195, 1.43089] | 0.06226 [0.05541, 0.07163] |
 | glm-5.3-vision-background/compound-realistic/low vs claude-opus-5/compound-realistic/high | 1.06667 [1, 1.17391] | 1.34579 [0.91295, 1.85714] | 0.02645 [0.02232, 0.03314] |
 | glm-5.3-vision-background/compound-realistic/low vs claude-fable-5-1/vanilla-engineered/low | 1.03226 [0.92857, 1.13333] | 0.77178 [0.62842, 0.93683] | 0.20391 [0.1878, 0.22124] |
-| glm-5.3-vision-background/compound-realistic/low vs gpt-6-astra/metareview-realistic/high | 1.28 [1.18182, 1.47368] | 0.8972 [0.76128, 1.02788] | 0.11841 [0.10451, 0.13279] |
-| glm-5.3-vision-background/compound-realistic/low vs gpt-5.6-sol/compound-realistic/low | 1.3913 [1.1, 2.07143] | 1.04023 [0.8139, 1.49083] | 0.34976 [0.32092, 0.38138] |
+| glm-5.3-vision-background/compound-realistic/low vs gpt-6-astra/metareview-realistic/high | 1.28 [1.18182, 1.47368] | 0.8972 [0.76128, 1.02788] | 0.11901 [0.10507, 0.13328] |
+| glm-5.3-vision-background/compound-realistic/low vs gpt-5.6-sol/compound-realistic/low | 1.3913 [1.1, 2.07143] | 1.04023 [0.8139, 1.49083] | 0.35639 [0.32704, 0.38784] |
 | glm-5.3-flash-background/compound-realistic/low vs claude-opus-5/compound-realistic/low | 0.94118 [0.8, 1.0625] | 1.2043 [0.87772, 1.56202] | 0.00638 [0.00572, 0.00723] |
 | glm-5.3-flash-background/compound-realistic/low vs claude-opus-5/compound-realistic/high | 1.06667 [0.84202, 1.36] | 1.54839 [1.09047, 2.13862] | 0.00271 [0.00226, 0.00339] |
 | glm-5.3-flash-background/compound-realistic/low vs claude-fable-5-1/vanilla-engineered/low | 1.03226 [0.92857, 1.13333] | 0.88796 [0.80049, 0.98551] | 0.0209 [0.01962, 0.02232] |
-| glm-5.3-flash-background/compound-realistic/low vs gpt-6-astra/metareview-realistic/high | 1.28 [1, 1.68421] | 1.03226 [0.82022, 1.33796] | 0.01214 [0.01063, 0.01368] |
-| glm-5.3-flash-background/compound-realistic/low vs gpt-5.6-sol/compound-realistic/low | 1.3913 [1, 2.15385] | 1.19682 [0.89893, 1.8263] | 0.03585 [0.03301, 0.03922] |
+| glm-5.3-flash-background/compound-realistic/low vs gpt-6-astra/metareview-realistic/high | 1.28 [1, 1.68421] | 1.03226 [0.82022, 1.33796] | 0.0122 [0.01069, 0.01374] |
+| glm-5.3-flash-background/compound-realistic/low vs gpt-5.6-sol/compound-realistic/low | 1.3913 [1, 2.15385] | 1.19682 [0.89893, 1.8263] | 0.03653 [0.03367, 0.03995] |
 <!-- /collapsible -->
 
 <a id="t3"></a>
@@ -2342,6 +2359,13 @@ the robust comparison.
 ## About this revision
 
 *(corrected report revision 2026-09-18 · based on pre-correction tag `report-2026-09-18`; see §5)*
+
+**Correction 2026-10-26 (Codex reasoning tokens).** Metered cost and token figures for the 27 Codex
+cells (sol, terra, astra) are recomputed after removing reasoning tokens that were counted twice
+(harnesseval#19; §3.4.1). Two prose figures changed: the T4 cost-multiple range is now 0.7×–20×
+(was 0.6×–20×), and vision MRV-low costs 55% of Astra vanilla-low per task (was 54%). The
+affected rows of Tables T2, T4, T5, T7 and T8 (63 rows), the cost figures and the dashboard were
+regenerated. Quality metrics are unchanged. Record: `analysis/REPORT_CORRECTIONS_2026-10-26.md`.
 
 **Campaign:** `20260910-mrv0120-manifold` (+ vanilla reuse batches, era rule in §2.3.2) · **Data freeze:**
 2026-09-16 09:35 (verified: no data-generating lanes alive at 09:45; every number below is
