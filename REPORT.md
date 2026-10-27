@@ -1577,8 +1577,8 @@ changed after the passes completed (2026-09-19): `harnesseval/model_router.py` (
 and `analysis/final_report_dataset.json` (the 2026-10-26 Codex correction). Neither change touches
 anything the frozen judgments consumed: the router change affects only the returned token split,
 and the dataset change affects only the `out_tok` field, with identical run selection. The
-manifests are left as frozen, so model-calling re-execution must run from commit `ca3eed9e`, the
-last commit whose sources match them. On later commits these entry points refuse to run, by design.
+manifests are left as frozen, so model-calling re-execution must run from tag
+`advisory-frozen-glm_base_claim_v3` (commit `ca3eed9e`), the last commit whose sources match them. On later commits these entry points refuse to run, by design.
 The offline refresh below does not check those pins and runs on the current source.
 `tools/advisory_framework_comparison.py` filters the same identities at ≥0.80 and writes the matched
 `framework_comparison.json` and `FRAMEWORK_COMPARISON.md` into the policy directory.

@@ -69,8 +69,9 @@ The frozen pass and policy manifests (`passes/glm_base_claim_v3`, `passes/reuse_
 `scoring_policies/advisory070_penalty080_v1`) pin `analysis/final_report_dataset.json`,
 and the active pass and policy also pin `harnesseval/model_router.py`. Both files changed.
 The manifests are not edited. Model-calling re-execution (`tools/advisory_timeout.py`,
-`tools/advisory_policy_dedup.py`, `tools/advisory_resume.py`) must run from commit
-`ca3eed9e`, the last commit whose sources match the active pass and policy. The offline
+`tools/advisory_policy_dedup.py`, `tools/advisory_resume.py`) must run from tag
+`advisory-frozen-glm_base_claim_v3` (commit `ca3eed9e`), the last commit whose sources
+match the active pass and policy. The offline
 refresh (`verified_gold_defect_metrics.py`, `final_report_true_gold.py`,
 `-m tools.advisory_framework_comparison`) does not check those pins. It was run on the
 corrected source and succeeded.
