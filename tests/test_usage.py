@@ -3,14 +3,15 @@ import contextlib
 import io
 import json
 import os
-from pathlib import Path
 import tempfile
 import unittest
+from pathlib import Path
+from typing import ClassVar
 from unittest.mock import patch
 
 from harnesseval.usage import ModelUsage, from_codex_cli, from_openai_api, grand_total, merge
-from tools.backfill_codex_reasoning import main as backfill_main, normalize
-
+from tools.backfill_codex_reasoning import main as backfill_main
+from tools.backfill_codex_reasoning import normalize
 
 # Real codex-cli 0.160.0 last_token_usage record: total_tokens == input + output,
 # so reasoning is already inside output_tokens and cached inside input_tokens.
@@ -136,7 +137,7 @@ class BackfillTests(unittest.TestCase):
 
 
 class BackfillMainTests(unittest.TestCase):
-    CODEX = {"per_model_usage": {"gpt-6-astra": {
+    CODEX: ClassVar[dict] = {"per_model_usage": {"gpt-6-astra": {
         "input_tokens": 10, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0,
         "output_tokens": 8, "reasoning_output_tokens": 3, "cost_usd": 0.0, "total_tokens": 21}}}
 
