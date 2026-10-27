@@ -7,7 +7,7 @@ const ROOT='/Users/dsifry/Documents/Codex/2026-09-28/we-a';
 const SKILL='/Users/dsifry/.codex/plugins/cache/openai-primary-runtime/presentations/26.904.11930/skills/presentations';
 const PY='/Users/dsifry/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3';
 const {finalizePresentation,applyPresentationChartFont}=await import(pathToFileURL(path.join(SKILL,'container_tools/artifact_tool_utils.mjs')));
-const story=JSON.parse(await fs.readFile(path.join(ROOT,'work/deck/story.json'),'utf8'));
+const story=JSON.parse(await fs.readFile(path.join(ROOT,'work/improve-v10/story.json'),'utf8'));
 const W=1600,H=900,F='Helvetica Neue';
 const C={bg:'#101110',white:'#F4F1E9',muted:'#C4C1B9',orange:'#F17A43',gray:'#92938F',dim:'#3D403C'};
 const p=Presentation.create({slideSize:{width:W,height:H}});
@@ -17,13 +17,13 @@ function text(s,str,x,y,w,h,size=90,color=C.white,bold=false,font=F){
   const t=s.shapes.add({geometry:'textbox',position:{left:x,top:y,width:w,height:h},fill:'none',line:noLine});
   t.text=str;t.text.style={typeface:font,fontSize:size,color,bold,autoFit:'none'};return t;
 }
-function title(s,str){return text(s,str,96,72,1408,140,88,C.white,true);}
+function title(s,str){return text(s,str,96,72,1408,132,88,C.white,true);}
 function sub(s,str){return text(s,str,100,203,1400,75,34,C.muted);}
 async function photo(s,file){s.images.add({blob:new Uint8Array(await fs.readFile(path.join(ROOT,'outputs/assets',file))),contentType:'image/png',fit:'cover',position:{left:0,top:0,width:W,height:H},alt:`Generated editorial illustration: ${file}`});}
 function dots(s,series,opts={}){
   const cols=opts.cols??21, rows=opts.rows??7;
   const cfg={position:{left:opts.left??640,top:opts.top??270,width:opts.width??845,height:opts.height??500},
-    series:series.map(q=>({name:q.name,xValues:q.ids.map(i=>i%cols+1),values:q.ids.map(i=>rows-Math.floor(i/cols)),fill:q.color,line:noLine,marker:{symbol:opts.symbol??'circle',size:opts.size??19}})),
+    series:series.map(q=>({name:q.name,xValues:q.ids.map(i=>i%cols+1),values:q.ids.map(i=>rows-Math.floor(i/cols)),fill:q.color,line:q.hollow?{fill:C.orange,width:3}:noLine,marker:{symbol:opts.symbol??'circle',size:opts.size??19}})),
     hasLegend:false,scatterOptions:{style:'marker'},dataLabels:{showValue:false},xAxis:{visible:false,tickLabelPosition:'none',min:0,max:cols+1,majorGridlines:null,line:noLine},yAxis:{visible:false,tickLabelPosition:'none',min:0,max:rows+1,majorGridlines:null,line:noLine},chartFill:C.bg,chartLine:noLine,plotAreaFill:C.bg,plotAreaLine:noLine};
   const ch=s.charts.add('scatter',cfg);applyPresentationChartFont(ch,{fontFamily:F});return ch;
 }
@@ -50,28 +50,27 @@ function arrow(s,x1,y1,x2,y2,color=C.gray,width=4){
  poly(s,[[x2,y2],[x2-len*Math.cos(a)+half*Math.sin(a),y2-len*Math.sin(a)-half*Math.cos(a)],[x2-len*Math.cos(a)-half*Math.sin(a),y2-len*Math.sin(a)+half*Math.cos(a)],[x2,y2]],color,0,color);
 }
 function harnessDiagram(s){
- title(s,'Same model. Better process.');
- text(s,'One prompt',100,235,650,70,42,C.gray,true);
- text(s,'Change',100,337,250,90,48,C.white,true);
- text(s,'Review',735,337,245,90,48,C.white,true);
- text(s,'Findings',1260,337,300,90,48,C.white,true);
- arrow(s,335,373,700,373,C.gray);arrow(s,955,373,1224,373,C.gray);
- text(s,'A harness',100,490,550,70,42,C.orange,true);
- text(s,'Change',100,646,250,90,48,C.white,true);
- text(s,'Checks',402,646,200,90,48,C.orange,true);
- text(s,'Combine',1007,646,260,90,48,C.orange,true);
- text(s,'Findings',1260,646,300,90,48,C.white,true);
- text(s,'Focused reviews',650,474,515,70,39,C.orange,true);
- arrow(s,335,681,377,681,C.gray);
- // Three example lenses, not an exhaustive roster or a claimed reviewer count.
- const lens=[['Security',570],['Architecture',646],['Tests',722]];
- for(const [label,y]of lens){
-   text(s,label,687,y,310,66,40,C.white,true);
-   poly(s,[[604,681],[640,681],[640,y+29],[670,y+29]],C.orange,3);
-   poly(s,[[970,y+29],[994,y+29],[994,681],[1000,681]],C.orange,3);
- }
- text(s,'…',780,793,110,60,42,C.muted);
- arrow(s,1228,681,1249,681,C.gray);
+ title(s,'Inside a review harness');
+ text(s,'One prompt',100,220,600,64,40,C.gray,true);
+ text(s,'Change',100,309,230,80,48,C.white,true);
+ text(s,'Review',730,309,250,80,48,C.white,true);
+ text(s,'Findings',1305,309,250,80,48,C.white,true);
+ arrow(s,332,345,688,345,C.gray,4);arrow(s,958,345,1258,345,C.gray,4);
+ text(s,'A harness',100,472,450,64,40,C.orange,true);
+ text(s,'Focused reviews',585,472,640,64,40,C.orange,true);
+ text(s,'Change',100,638,230,80,46,C.white,true);
+ text(s,'Checks',350,638,210,80,46,C.orange,true);
+ text(s,'Combine',1020,638,250,80,46,C.orange,true);
+ text(s,'Findings',1305,638,250,80,46,C.white,true);
+ arrow(s,290,674,326,674,C.gray,4);
+ poly(s,[[542,674],[570,674]],C.orange,4);
+ poly(s,[[592,592],[570,592],[570,756],[592,756]],C.orange,4);
+ poly(s,[[570,674],[592,674]],C.orange,4);
+ [['Security',559],['Architecture',641],['Tests',723]].forEach(([label,y])=>text(s,label,610,y,340,72,44,C.white,true));
+ poly(s,[[936,592],[970,592],[970,756],[936,756]],C.orange,4);
+ poly(s,[[936,674],[970,674]],C.orange,4);arrow(s,970,674,1000,674,C.orange,4);
+ arrow(s,1242,674,1278,674,C.gray,4);
+ text(s,'…',733,798,140,60,44,C.gray);
 }
 function developerLoop(s){
  const y=305;
@@ -85,38 +84,84 @@ function developerLoop(s){
  text(s,'Repeat',603,684,460,130,96,C.orange,true);
 }
 
+
+function singleBar(s,value,max,color,y,category){
+ const ch=s.charts.add('bar',{
+  position:{left:590,top:y,width:665,height:118},categories:[category],
+  series:[{name:'Metric',values:[value],fill:color,line:noLine}],
+  barOptions:{direction:'bar',grouping:'clustered',gapWidth:12},hasLegend:false,
+  dataLabels:{showValue:false},
+  xAxis:{visible:false,tickLabelPosition:'none',min:0,max,majorGridlines:null,line:noLine},
+  yAxis:{visible:false,tickLabelPosition:'none',min:0,max,majorGridlines:null,line:noLine},
+  chartFill:C.bg,chartLine:noLine,plotAreaFill:C.bg,plotAreaLine:noLine
+ });applyPresentationChartFont(ch,{fontFamily:F});return ch;
+}
+function pair(s,heading,unit,values,max,labels){
+ title(s,heading);text(s,unit,102,205,1398,74,36,C.muted);
+ const names=['Fable 5.1','GLM 5.3 Flash'];
+ const methods=['Single prompt','Harness'];const efforts=['High reasoning','Low reasoning'];
+ [322,590].forEach((y,i)=>{
+  const color=i?C.orange:C.gray;
+  text(s,names[i],101,y,475,70,49,i?C.orange:C.white,true);
+  text(s,methods[i],105,y+68,465,55,36,C.muted);
+  text(s,efforts[i],105,y+116,465,55,36,C.muted);
+  singleBar(s,values[i],max,color,y+28,`${names[i]} / ${methods[i]} / ${efforts[i]}`);
+  text(s,labels[i],1234,y+31,288,118,84,i?C.orange:C.white,true);
+ });
+}
+function uncertainty(s){
+ title(s,'Often, no clear difference');
+ text(s,'High vs. medium reasoning, original benchmark F1',102,205,1400,74,36,C.muted);
+ const labels=['Unresolved','High better','Medium better'];const values=[17,4,1];
+ [325,482,639].forEach((y,i)=>{
+  text(s,labels[i],102,y+24,475,90,49,i?C.muted:C.white,i===0);
+  singleBar(s,values[i],22,i===0?C.orange:C.gray,y,labels[i]);
+  text(s,String(values[i]),1290,y+12,230,110,89,i===0?C.orange:C.white,true);
+ });
+}
+function evidence(s){
+ title(s,'Evidence you can rerun');
+ text(s,'Discourse: re-importing a deleted post',102,215,1400,82,48,C.white);
+ text(s,'Before fix',150,393,570,86,51,C.muted);
+ text(s,'After fix',938,393,560,86,51,C.muted);
+ text(s,'FAIL',134,489,640,205,163,'#DD8978',true);
+ text(s,'PASS',919,489,650,205,163,'#9FC9B2',true);
+ arrow(s,630,587,840,587,C.gray,5);
+ text(s,'Isolated reproduction, verified defect 4-D14',106,778,1370,66,35,C.muted);
+}
+
 const ids=(start,n)=>Array.from({length:n},(_,i)=>i+start);
 const cats=['Fable 5.1\nSingle prompt\nHigh reasoning','GLM 5.3 Flash\nHarness\nLow reasoning'];
 for(let i=0;i<20;i++){
  const s=p.slides.add();allSlides.push(s);s.background.fill=C.bg;
- s.speakerNotes.textFrame.setText(`${story[i].source}\nPrimary research: https://github.com/dsifry/harnesseval/blob/8f634b68664751527a9ad0123d1a082dd70a0931/REPORT.md`);
+ s.speakerNotes.textFrame.setText(`${story[i].stageCue}\n\n${story[i].script}\n\nSOURCES AND SCOPE\n${story[i].source}\nPrimary research: https://github.com/dsifry/harnesseval/blob/8f634b68664751527a9ad0123d1a082dd70a0931/REPORT.md`);
  switch(i+1){
  case 1: text(s,'I thought',92,173,1410,200,158,C.white,true);text(s,'it was me.',90,390,1420,220,174,C.orange,true);break;
  case 2: text(s,'−',108,274,130,160,128,'#DD8978');text(s,'Is it me?',263,274,1190,160,128,'#A9ACA9');text(s,'+',108,494,130,160,128,'#9FC9B2');text(s,'What works?',263,494,1240,160,128,C.white,true);break;
- case 3: text(s,'2,416',86,173,700,260,206,C.orange,true);text(s,'AI code reviews',101,447,720,110,76,C.white,true);text(s,'72 configurations',858,90,675,80,46,C.white,true);text(s,'8 models × 3 approaches × 3 effort levels',105,740,1395,66,38,C.white);text(s,'Six-PR coverage: 66 complete, 6 partial',105,810,1395,54,30,C.muted);dots(s,[{name:'Complete configurations',ids:ids(0,72).filter(n=>n<3||n>8),color:C.orange},{name:'Partial configurations',ids:ids(3,6),color:C.gray}],{left:825,top:163,width:665,height:500,size:22,cols:9,rows:8,symbol:'square'});break;
+ case 3: text(s,'Dave Sifry',108.533333,53.333333,730,112,64,C.white);s.images.add({blob:new Uint8Array(await fs.readFile(path.join(ROOT,'outputs/assets/Dave_Sifry_Waving.png'))),contentType:'image/png',fit:'contain',position:{left:1173.333333,top:66.666667,width:320,height:266.666667},alt:'AI-generated portrait of Dave Sifry waving, based on his photograph'});text(s,'2,416',86,144,1450,365,300,C.orange,true);text(s,'AI code reviews',105,475,1380,145,94,C.white,true);text(s,'50 pull requests',109,694,730,112,64,C.white);text(s,'5 codebases',968,694,590,112,64,C.white);break;
  case 4: text(s,'42',80,175,535,325,280,C.white,true);text(s,'known bugs',100,530,525,105,62,C.white,true);dots(s,[{name:'Original benchmark bugs',ids:ids(0,42),color:C.white}]);break;
- case 5: text(s,'+105',80,180,605,300,226,C.orange,true);text(s,'verified defects',100,520,570,90,56,C.white,true);text(s,'147 in total',105,665,500,80,42,C.muted);dots(s,[{name:'Original benchmark bugs',ids:ids(0,42),color:C.white},{name:'Additional verified defects',ids:ids(42,105),color:C.orange}]);break;
+ case 5: text(s,'+105',80,180,605,300,226,C.orange,true);text(s,'verified defects',100,520,570,90,56,C.white,true);text(s,'147 in total',105,665,550,100,53,C.white,true);dots(s,[{name:'Original benchmark bugs',ids:ids(0,42),color:C.white},{name:'Additional verified defects',ids:ids(42,105),color:C.orange}]);break;
  case 6: harnessDiagram(s);break;
- case 7: text(s,'39',85,110,720,335,290,C.orange,true);text(s,'of 42',105,452,585,130,104,C.white,true);text(s,'matched comparisons',108,616,645,82,49,C.white,true);text(s,'found more bugs',110,710,610,75,45,C.white);dots(s,[{name:'Harness found more',ids:ids(0,39),color:C.orange},{name:'No increase',ids:ids(39,3),color:C.gray}],{left:750,top:135,width:745,height:635,size:27,cols:6,rows:7,symbol:'square'});break;
- case 8: text(s,'10×',85,118,1390,370,310,C.orange,true);text(s,'the tokens',104,550,1380,150,107,C.white,true);text(s,'Median matched comparison',110,754,1250,65,34,C.muted);break;
+ case 7: title(s,'The harness found more');text(s,'39',82,238,655,325,264,C.orange,true);text(s,'of 42',103,557,560,135,102,C.white,true);text(s,'matched comparisons',105,736,760,81,49,C.white,true);dots(s,[{name:'Harness found more',ids:ids(0,39),color:C.orange},{name:'No increase',ids:ids(39,3),color:C.gray}],{left:810,top:269,width:700,height:478,size:27,cols:6,rows:7,symbol:'square'});break;
+ case 8: text(s,'≈10×',82,125,1450,370,284,C.orange,true);text(s,'the tokens',104,550,1380,150,107,C.white,true);text(s,'Median matched comparison',110,754,1250,65,36,C.muted);break;
  case 9: await photo(s,'reasoning-dial.png');text(s,'More\nthinking?',96,270,715,320,120,C.white,true);break;
- case 10: title(s,'Often, no clear gain');bars(s,['No clear winner','High better','Medium better'],[17,4,1],[C.orange,C.gray,C.gray],{max:21,unit:'High vs. medium reasoning on benchmark F1'});break;
- case 11: title(s,'This setup found more');bars(s,cats,[51,71],[C.gray,C.orange],{max:90,unit:'Verified bugs found across six PRs, out of 147'});break;
- case 12: title(s,'1/55 the API cost');bars(s,cats,[1.29594,.02354],[C.gray,C.orange],{max:1.6,format:'$0.000',labels:['$1.30','$0.024'],unit:'Mean API cost per review, at study list prices'});break;
- case 13: title(s,'Nearly twice as fast');bars(s,cats,[147.69631,78.54169],[C.gray,C.orange],{max:180,labels:['148s','79s'],unit:'Mean elapsed time per review'});break;
- case 14: text(s,'59',80,155,570,345,285,C.orange,true);text(s,'bugs missed',100,532,560,100,62,C.white,true);text(s,'Even the best found 88 / 147',104,720,1280,74,40,C.muted);dots(s,[{name:'Found by highest recall configuration',ids:ids(0,88),color:C.white},{name:'Missed by highest recall configuration',ids:ids(88,59),color:C.orange}]);break;
- case 15: text(s,'50 PRs.',93,155,1400,190,166,C.white,true);text(s,'Five codebases.',94,405,1400,200,133,C.orange,true);text(s,'Full campaign: 2,416 healthy reviews',106,707,1350,75,38,C.muted);break;
+ case 10: uncertainty(s);break;
+ case 11: pair(s,'20 more bugs','Verified bugs across the same six PRs, out of 147',[51,71],90,['51','71']);break;
+ case 12: pair(s,'1/55 the API cost','Mean API cost per review, at study list prices',[1.29594,.02354],1.5,['$1.30','$0.024']);break;
+ case 13: pair(s,'Nearly twice as fast','Mean elapsed time per review',[147.69631,78.54169],180,['148s','79s']);break;
+ case 14: text(s,'59',80,155,570,345,285,C.orange,true);text(s,'bugs still missed',100,532,610,100,58,C.white,true);text(s,'Highest recall: 88 of 147 found',104,785,1380,78,43,C.white);dots(s,[{name:'Found by highest recall configuration',ids:ids(0,88),color:C.white},{name:'Missed by highest recall configuration',ids:ids(88,59),color:C.bg,hollow:true}]);break;
+ case 15: evidence(s);break;
  case 16: text(s,'Find bugs.',96,184,1400,200,158,C.white,true);text(s,'Before users do.',94,427,1420,200,136,C.orange,true);break;
  case 17: developerLoop(s);break;
- case 18: text(s,'Use a',96,180,1350,170,130,C.white,true);text(s,'harness.',90,365,1420,235,192,C.orange,true);break;
- case 19: text(s,'Start low.',94,166,1420,170,141,C.white,true);text(s,'Try open weights.',94,390,1430,220,137,C.orange,true);break;
+ case 18: text(s,'Use a harness',95,275,1460,255,169,C.orange,true);text(s,'Give reviewers focused jobs',110,578,1350,113,59,C.white);break;
+ case 19: text(s,'Start low',94,166,1420,190,156,C.white,true);text(s,'Try open weights',94,422,1430,215,134,C.orange,true);break;
  case 20: text(s,'Follow the',96,187,1410,180,151,C.white,true);text(s,'evidence.',92,411,1420,235,194,C.orange,true);break;
  }
 }
-await fs.mkdir(path.join(ROOT,'work/deck/previews-v9'),{recursive:true});
-await (await PresentationFile.exportPptx(p)).save(path.join(ROOT,'work/deck/candidate-v9.pptx'));
+await fs.mkdir(path.join(ROOT,'work/improve-v10/previews'),{recursive:true});
+await (await PresentationFile.exportPptx(p)).save(path.join(ROOT,'work/improve-v10/candidate.pptx'));
 for(let i=0;i<20;i++){
  const preview=await p.export({slide:allSlides[i],format:'png',scale:1});
- await fs.writeFile(path.join(ROOT,`work/deck/previews-v9/slide-${String(i+1).padStart(2,'0')}.png`),new Uint8Array(await preview.arrayBuffer()));
+ await fs.writeFile(path.join(ROOT,`work/improve-v10/previews/slide-${String(i+1).padStart(2,'0')}.png`),new Uint8Array(await preview.arrayBuffer()));
 }
 console.log('Exported and rendered 20 slides for compatibility repair and validation.');
