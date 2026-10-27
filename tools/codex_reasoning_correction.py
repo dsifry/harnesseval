@@ -18,9 +18,11 @@ from harnesseval.usage import _is_codex, corrected_per_model_usage, needs_codex_
 
 def _registered_at(run_dir: Path) -> str | None:
     try:
-        return json.loads((run_dir / "manifest.json").read_text()).get("registered_at")
+        manifest = json.loads((run_dir / "manifest.json").read_text())
     except (OSError, json.JSONDecodeError):
         return None
+    ts = manifest.get("registered_at") if isinstance(manifest, dict) else None
+    return ts if isinstance(ts, str) else None
 
 
 def main() -> None:

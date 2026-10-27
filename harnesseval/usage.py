@@ -145,22 +145,31 @@ def from_openai_api(resp, model: str) -> dict[str, dict]:
 
 
 def _is_codex(model: str, u: dict) -> bool:
-    # Codex OAuth (`codex exec`) entries: gpt-* at $0. Paid OpenAI API entries came through
-    # from_openai_api, which always excluded reasoning from output_tokens.
+    # Only meaningful for LEGACY summaries (see needs_codex_correction), a closed set: new
+    # summaries are stamped, and unstamped ones dated after the fix are never corrected.
+    # Usage entries carry no source marker and from_openai_api also stores cost_usd=0, so
+    # "gpt-* at $0" alone could match API usage; it is exact here because every legacy gpt-*
+    # entry was audited as `codex exec` output (1,561 cli-mode cells, plus one cell labeled
+    # api whose tokens_in == total_tokens and ~1M cached input mark a realistic Codex session).
     return model.startswith("gpt") and not u.get("cost_usd")
 
 
 def needs_codex_correction(summary: dict, registered_at: str | None) -> bool:
     """True if this summary's Codex entries predate the harnesseval#19 fix.
 
-    Unstamped and undated summaries count as legacy: every stored pre-fix Codex run has a
-    registered_at, and every post-fix run is stamped with USAGE_CONVENTION.
+    Unstamped summaries with a missing or unparseable registered_at count as legacy: every
+    stored pre-fix Codex run has a valid one, and every post-fix run is stamped with
+    USAGE_CONVENTION. A timestamp without an offset is read as UTC.
     """
     if summary.get("usage_convention", 1) >= USAGE_CONVENTION:
         return False
-    if not registered_at:
+    try:
+        ts = datetime.fromisoformat(registered_at)
+    except (TypeError, ValueError):
         return True
-    return datetime.fromisoformat(registered_at) < CODEX_REASONING_FIX_AT
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    return ts < CODEX_REASONING_FIX_AT
 
 
 def corrected_per_model_usage(summary: dict, registered_at: str | None) -> dict:

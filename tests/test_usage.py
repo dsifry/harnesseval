@@ -118,6 +118,14 @@ class CorrectedUsageTests(unittest.TestCase):
         for ts in (self.PRE, "2026-10-27T00:45:26Z", "2026-10-26T20:45:26-04:00", None, ""):
             self.assertIs(needs_codex_correction({}, ts), True, ts)
 
+    def test_unparseable_registration_counts_as_undated(self):
+        for ts in ("yesterday", 1726000000, ["2026-11-01T00:00:00Z"]):
+            self.assertIs(needs_codex_correction({}, ts), True, ts)
+
+    def test_naive_timestamp_is_read_as_utc(self):
+        self.assertIs(needs_codex_correction({}, "2026-10-27T00:45:26"), True)
+        self.assertIs(needs_codex_correction({}, "2026-10-27T00:45:27"), False)
+
     def test_convention_stamp_overrides_date(self):
         s = dict(self._summary(), usage_convention=USAGE_CONVENTION)
         self.assertIs(needs_codex_correction(s, self.PRE), False)
@@ -189,6 +197,10 @@ class CorrectionReportTests(unittest.TestCase):
         (runs / "badmanifest").mkdir()
         (runs / "badmanifest" / "summary.json").write_text(json.dumps(self.CODEX))
         (runs / "badmanifest" / "manifest.json").write_text("{not json")
+        for name, manifest in (("listmanifest", [1]), ("intstamp", {"registered_at": 1726000000})):
+            (runs / name).mkdir()
+            (runs / name / "summary.json").write_text(json.dumps(self.CODEX))
+            (runs / name / "manifest.json").write_text(json.dumps(manifest))
         return runs
 
     def _run(self, root, *argv):
@@ -207,9 +219,10 @@ class CorrectionReportTests(unittest.TestCase):
             runs = self._tree(root)
             before = {p: p.read_bytes() for p in runs.rglob("*.json")}
             out = self._run(root)
-            # codex, codex_nomanifest, badmanifest (3 each), mixed (2), codex_noreason (0)
-            self.assertEqual(out, "5 legacy Codex summaries corrected at read time (4 with reasoning); "
-                                  "11 double-counted tokens removed from total_tokens\n")
+            # codex, codex_nomanifest, badmanifest, listmanifest, intstamp (3 each),
+            # mixed (2), codex_noreason (0)
+            self.assertEqual(out, "7 legacy Codex summaries corrected at read time (6 with reasoning); "
+                                  "17 double-counted tokens removed from total_tokens\n")
             self.assertEqual(self._run(root, "--runs", str(runs)), out)
             self.assertEqual(before, {p: p.read_bytes() for p in runs.rglob("*.json")})
 
